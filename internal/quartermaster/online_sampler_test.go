@@ -8,6 +8,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	_ "modernc.org/sqlite"
 )
 
@@ -81,25 +82,44 @@ func (r *samplerTestEmitter) Emit(_ context.Context, e journal.Entry) (string, e
 }
 func (r *samplerTestEmitter) Flush(context.Context) error { return nil }
 
-// flakeSafeNow returns "now minus two seconds" for seeding rows that must
-// land INSIDE the sampler's scan window. Seeding with bare time.Now() put
-// the row in the SAME second as runOnce's scanEnd, where RFC3339Nano's
-// trailing-zero truncation breaks lexicographic ordering in SQL: a row
-// stamped "…02.5Z" compares GREATER than a bound "…02.500123456Z"
-// ('Z' > '0'), so the row fell outside the window ~1 run in 40 — the
-// macos/arm CI matrix surfaced it. Two seconds back guarantees the second
-// prefix differs, where string order equals chronological order regardless
-// of fractional-digit count. The underlying string-comparison fragility is
-// tracked separately (timestamp-format follow-up).
+// flakeSafeNow returns "now minus two seconds" for seeding rows that must land
+// INSIDE the sampler's scan window.
+//
+// It began as a workaround: seeding with bare time.Now() put the row in the
+// same second as runOnce's scanEnd, where RFC3339Nano's trailing-zero
+// truncation broke lexicographic ordering in SQL and the row fell outside the
+// window ~1 run in 40. That root cause is now FIXED — seedRun writes through
+// tsformat.Format, so seed and bound share a fixed-width format and string
+// order equals chronological order at any boundary.
+//
+// Kept as margin, not as a workaround: two seconds back also absorbs ordinary
+// clock jitter between the seed and the tick, which is cheap insurance in a
+// test that is otherwise timing-adjacent. A test seeding at bare time.Now()
+// is no longer expected to flake.
 func flakeSafeNow() time.Time {
 	return time.Now().UTC().Add(-2 * time.Second)
 }
 
+// seedRun writes a completed pipeline_run. ended_at goes through
+// tsformat.Format, NOT time.RFC3339Nano — this is the fix the flakeSafeNow
+// comment above defers to.
+//
+// RFC3339Nano truncates trailing zeros in the fractional seconds, so a row
+// stamped "…02.5Z" string-compares GREATER than a scan bound "…02.500123456Z"
+// ('Z' 0x5A > '0' 0x30) and falls outside the window. Production already
+// writes and compares through tsformat (online_sampler.go:306); the test
+// helper did not, so the test data itself carried the fragility the code under
+// test had already fixed. On macos/arm the coarser clock produces
+// trailing-zero nanos far more often, which is why the matrix surfaced it
+// there (#1464) while linux stayed green.
+//
+// With the seed and the bound in the same fixed-width format, string order
+// equals chronological order and no test needs to dodge the boundary.
 func seedRun(t *testing.T, db *sql.DB, id, pipelineID, slug string, endedAt time.Time) {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, ended_at)
         VALUES (?, 'ws1', ?, ?, 'completed', ?)`,
-		id, pipelineID, slug, endedAt.Format(time.RFC3339Nano)); err != nil {
+		id, pipelineID, slug, tsformat.Format(endedAt)); err != nil {
 		t.Fatalf("seed run %s: %v", id, err)
 	}
 }

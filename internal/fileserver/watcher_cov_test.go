@@ -18,11 +18,22 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// eventDeadline bounds how long a test waits for a filesystem event.
+//
+// This is a HANG guard, not a latency assertion: nothing here measures how
+// fast the watcher is, so the budget only has to be larger than the worst
+// plausible fsnotify delivery on a contended machine. The old 3s was not —
+// on a loaded macos-arm64 runner it fired as a false negative and reddened
+// unrelated PRs (#1464). A generous value costs nothing on a healthy run
+// (the event arrives in milliseconds and the select returns immediately)
+// and only ever delays a genuine failure.
+const eventDeadline = 60 * time.Second
+
 // collectEvent waits (bounded) for the next FileEvent matching the given
 // event name and relative path.
 func waitForEvent(t *testing.T, ch <-chan FileEvent, event, relPath string) FileEvent {
 	t.Helper()
-	deadline := time.After(3 * time.Second)
+	deadline := time.After(eventDeadline)
 	for {
 		select {
 		case fe := <-ch:
@@ -79,7 +90,7 @@ func TestWatch_EmitsLifecycleEvents(t *testing.T) {
 	// Drain file_modified events until one reports the new size.
 	wantSize := int64(len("v2-longer"))
 	var modified FileEvent
-	mdeadline := time.After(3 * time.Second)
+	mdeadline := time.After(eventDeadline)
 	for modified.Size != wantSize {
 		select {
 		case fe := <-events:
