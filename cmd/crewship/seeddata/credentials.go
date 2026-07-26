@@ -125,3 +125,21 @@ func marshalJSON(v any) string {
 	}
 	return string(b)
 }
+
+// AnthropicCredentialType is the credential TYPE the seed will actually create
+// for Anthropic, resolved the same way ResolveAnthropicCredential resolves it.
+//
+// Seeded routines declare `credentials_required` by type, and the resolver
+// matches it EXACTLY (`AND UPPER(type) = UPPER(?)`). The Anthropic type is not
+// fixed — it is AI_CLI_TOKEN for an OAuth token (sk-ant-oat…) and API_KEY for
+// everything else, including the demo placeholder. So a hardcoded literal is
+// right in one seeding mode and 422s in the other.
+//
+// #1460 shipped with "anthropic" hardcoded — a PROVIDER name, which is not a
+// type at all, so it never matched in either mode and 35 demo routines/eval
+// scenarios could never run. Deriving the requirement from the same function
+// that creates the credential makes the dataset self-consistent by
+// construction rather than by remembering to update two places.
+func AnthropicCredentialType() string {
+	return ResolveAnthropicCredential().Type
+}
