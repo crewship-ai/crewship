@@ -211,6 +211,49 @@ func openLocalDB(ctx context.Context) (*database.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	// Initialize a fresh database, but REFUSE to upgrade an existing one.
+	//
+	// The original code called Migrate unconditionally with a discarded
+	// logger. On a warm database that is the harmless no-op the comment
+	// describes. On a COLD one — an operator who swapped in a new binary and
+	// ran `crewship doctor` before `crewship start`, which is the natural
+	// order — it silently applied every pending migration while missing both
+	// halves of what makes an upgrade safe:
+	//
+	//   - No SnapshotBeforeMigrate. `crewship start` takes a pre-migrate
+	//     backup that `restore-snapshot` depends on; this path took none, so
+	//     the upgrade had no rollback point and the operator was never told.
+	//   - No secrets.LoadOrGenerate. That bootstrap is called only from
+	//     cmd_start.go, so ENCRYPTION_KEY is unset here. v140 then takes its
+	//     fail-open branch and leaves webhook secrets in plaintext; worse,
+	//     v152 backfills the journal hash-chain via journal.ChainKeyFromEnv(),
+	//     which does not error on a missing key — it derives from "". The
+	//     whole historical chain gets committed under a null-seed key, and
+	//     once the server later starts with the real one, every pre-migration
+	//     entry fails verification permanently. The _migrations row blocks a
+	//     re-run, so repair needs a new migration.
+	//
+	// Both hazards came with a discarded logger, so nothing was printed.
+	//
+	// A diagnostic command has no business performing a schema upgrade. It
+	// still initializes an empty database, because that is the bootstrap the
+	// original comment was actually about ("no such table: app_settings").
+	from, _, pending, err := database.PendingMigrations(ctx, db.DB)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("check pending migrations: %w", err)
+	}
+	if pending > 0 && from > 0 {
+		db.Close()
+		return nil, fmt.Errorf(
+			"database schema is out of date and this command will not upgrade it: %d migration(s) pending. "+
+				"Run `crewship start` once — it snapshots the database before migrating and loads the encryption key "+
+				"the data migrations need — then re-run this command",
+			pending)
+	}
+	// Fresh install (from == 0): bring the schema up so the sub-command has
+	// tables to read. There is no data to lose and no chain to poison.
+	//
 	// silentLogger: the sub-command's user surface is the success/failure
 	// message we print ourselves; the per-migration INFO lines from
 	// Migrate would just be noise on a no-op call.
