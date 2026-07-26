@@ -216,3 +216,113 @@ func TestReapOrphan_EmptyMasterNeverReaps(t *testing.T) {
 		t.Errorf("empty master must reap nothing; count=%d removed=%v", resp.Count, p.removed)
 	}
 }
+
+// ---------------------------------------------------------------------
+// #1390: the sweep must report its own coverage
+//
+// SidecarTokenOrphaned fails SAFE on an empty fingerprint, which is right —
+// but it made "no orphans" ambiguous: a slot whose sidecar binary was never
+// re-pointed on reconcile advertises no token_fp at all, so the detector is
+// INERT and still reports a clean sweep. These pin the distinction.
+// ---------------------------------------------------------------------
+
+func TestReapOrphan_HealthySweepReportsCoverage(t *testing.T) {
+	h, _, userID, wsID := reapRig(t)
+
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/admin/reap-orphan-containers", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Reap(rr, req)
+
+	var resp reapOrphanResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Both containers were reached AND both advertised a fingerprint, so the
+	// verdict (1 orphan) is trustworthy.
+	if resp.Inspected != 2 {
+		t.Errorf("inspected = %d, want 2", resp.Inspected)
+	}
+	if resp.Identified != 2 {
+		t.Errorf("identified = %d, want 2", resp.Identified)
+	}
+	if resp.DetectorInert {
+		t.Error("detector must not be flagged inert when every sidecar answered")
+	}
+}
+
+func TestReapOrphan_InertWhenNoSidecarAdvertisesAFingerprint(t *testing.T) {
+	// The #1390 scenario: every container runs a pre-#1385 sidecar, so /health
+	// carries no token_fp. Zero orphans here means "could not tell", and the
+	// response has to say so — otherwise an operator reads a clean bill of
+	// health off a detector that is structurally unable to find anything.
+	h, _, userID, wsID := reapRig(t)
+	h.ctr.(*reapFakeProvider).healthFP = map[string]string{} // no sidecar answers
+
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/admin/reap-orphan-containers", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Reap(rr, req)
+
+	var resp reapOrphanResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Count != 0 {
+		t.Fatalf("an unclassifiable container must never be reported as an orphan; got %+v", resp.Orphans)
+	}
+	if resp.Inspected != 2 {
+		t.Errorf("inspected = %d, want 2 — the sweep still reached both", resp.Inspected)
+	}
+	if resp.Identified != 0 {
+		t.Errorf("identified = %d, want 0", resp.Identified)
+	}
+	if !resp.DetectorInert {
+		t.Error("DetectorInert must be true — this is the vacuous 'no orphans' #1390 is about")
+	}
+}
+
+func TestReapOrphan_PartialCoverageIsVisibleButNotInert(t *testing.T) {
+	// One sidecar answers, one doesn't. The detector still works (it can
+	// classify what it saw), so it is NOT inert — but the gap must show in the
+	// counts rather than be rounded away into "all clear".
+	h, _, userID, wsID := reapRig(t)
+	p := h.ctr.(*reapFakeProvider)
+	healthyFP := internaltoken.Fingerprint(internaltoken.DeriveCrewToken(reapNewMaster, wsID, "c-eng"))
+	p.healthFP = map[string]string{"ctr-eng": healthyFP} // ctr-qua stays silent
+
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/admin/reap-orphan-containers", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Reap(rr, req)
+
+	var resp reapOrphanResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Inspected != 2 || resp.Identified != 1 {
+		t.Errorf("inspected/identified = %d/%d, want 2/1", resp.Inspected, resp.Identified)
+	}
+	if resp.DetectorInert {
+		t.Error("partial coverage is not inert — one sidecar did answer")
+	}
+	// The silent one is unknown, never an orphan.
+	if resp.Count != 0 {
+		t.Errorf("silent sidecar must not be classified; got %+v", resp.Orphans)
+	}
+}
+
+func TestReapOrphan_NoRunningContainersIsNotInert(t *testing.T) {
+	// Nothing to inspect is a legitimately empty sweep, not a broken detector.
+	h, _, userID, wsID := reapRig(t)
+	h.ctr.(*reapFakeProvider).running = map[string]string{}
+
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/admin/reap-orphan-containers", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Reap(rr, req)
+
+	var resp reapOrphanResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Inspected != 0 || resp.DetectorInert {
+		t.Errorf("inspected=%d inert=%v; an empty fleet must not read as inert", resp.Inspected, resp.DetectorInert)
+	}
+}

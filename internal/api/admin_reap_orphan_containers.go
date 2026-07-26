@@ -74,6 +74,22 @@ type reapOrphanResponse struct {
 	// Applied echoes whether this call actually reaped (apply=true) or only
 	// reported (dry-run), so the CLI can phrase its output correctly.
 	Applied bool `json:"applied"`
+
+	// Coverage answers "was the detector even able to look?" — the #1390
+	// acceptance bullet. SidecarTokenOrphaned fails SAFE on an empty
+	// fingerprint, which is correct, but it makes an INERT detector (every
+	// sidecar too old to advertise token_fp, as on a slot whose reconcile
+	// never re-pointed the binary) indistinguishable from a HEALTHY sweep:
+	// both report zero orphans. These counts separate the two.
+	Inspected int `json:"inspected"`
+	// Identified is how many of Inspected actually advertised a token
+	// fingerprint on /health, i.e. how many the detector could classify.
+	Identified int `json:"identified"`
+	// DetectorInert is true when there were containers to inspect but NONE
+	// advertised a fingerprint — "no orphans found" is then vacuous, not
+	// reassuring. A partial miss (Identified < Inspected but > 0) is visible
+	// in the counts without tripping this flag.
+	DetectorInert bool `json:"detector_inert"`
 }
 
 // crewRefsWithWorkspace enumerates the workspace's live crews. workspaceID is
@@ -137,6 +153,9 @@ func (h *OrphanContainerHandler) Reap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orphans := make([]orphanContainer, 0)
+	// inspected = running crew containers the sweep reached; identified = those
+	// that advertised a token fingerprint (so could be classified at all).
+	var inspected, identified int
 	for _, c := range crews {
 		containerID, running, err := h.lookup.FindCrewContainer(ctx, c.ID, c.Slug)
 		if err != nil {
@@ -150,8 +169,17 @@ func (h *OrphanContainerHandler) Reap(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		inspected++
+
 		reportedFP := orchestrator.SidecarTokenFP(ctx, h.ctr, containerID)
 		expectedFP := internaltoken.Fingerprint(internaltoken.DeriveCrewToken(h.master, c.WorkspaceID, c.ID))
+		// Track classifiability separately from the verdict: a container whose
+		// sidecar advertises nothing is not "clean", it is UNKNOWN, and lumping
+		// the two together is exactly what made a stale-sidecar slot look
+		// healthy (#1390).
+		if reportedFP != "" {
+			identified++
+		}
 		if !orchestrator.SidecarTokenOrphaned(reportedFP, expectedFP) {
 			continue
 		}
@@ -176,8 +204,25 @@ func (h *OrphanContainerHandler) Reap(w http.ResponseWriter, r *http.Request) {
 		orphans = append(orphans, entry)
 	}
 
-	if apply {
-		h.logger.Info("reap orphan: sweep complete", "workspace", workspaceID, "orphans", len(orphans))
+	inert := inspected > 0 && identified == 0
+	if inert {
+		// Loud on the server side too: this is a deploy defect (the slot's
+		// sidecar binary was never re-pointed), not a workspace condition, and
+		// it silently disarms the whole detector.
+		h.logger.Warn("reap orphan: detector inert — no inspected container advertised a token fingerprint; "+
+			"the sidecar binary is likely stale (see #1390)",
+			"workspace", workspaceID, "inspected", inspected)
 	}
-	writeJSON(w, http.StatusOK, reapOrphanResponse{Orphans: orphans, Count: len(orphans), Applied: apply})
+	if apply {
+		h.logger.Info("reap orphan: sweep complete", "workspace", workspaceID,
+			"orphans", len(orphans), "inspected", inspected, "identified", identified)
+	}
+	writeJSON(w, http.StatusOK, reapOrphanResponse{
+		Orphans:       orphans,
+		Count:         len(orphans),
+		Applied:       apply,
+		Inspected:     inspected,
+		Identified:    identified,
+		DetectorInert: inert,
+	})
 }

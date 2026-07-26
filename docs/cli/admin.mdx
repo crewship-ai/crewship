@@ -236,6 +236,35 @@ crewship admin reap-orphan-containers --apply     # stop + remove the orphans
   pass `--apply`.
 </Warning>
 
+### Reading the result: "none found" vs "could not tell"
+
+The detector compares the token fingerprint a container's sidecar advertises on
+`/health` against the one the server would mint for that crew today. It **fails
+safe**: a container that advertises *no* fingerprint is never classified as an
+orphan, so a reap only ever removes something positively proven stale.
+
+That safety has a corollary — a sidecar too old to advertise `token_fp` at all
+makes the detector **structurally unable to find anything**, while still
+reporting zero orphans. So the sweep also reports its own coverage:
+
+```console
+# Detector worked, genuinely nothing stale
+No orphaned crew containers found — 2 of 2 inspected container(s) reported a token fingerprint and matched.
+
+# Detector could not look — "no orphans" here means "could not tell"
+DETECTOR INERT — inspected 3 running crew container(s), but NONE advertised a token fingerprint.
+```
+
+An inert detector is a **deploy defect, not a workspace condition**: the slot's
+sidecar binary was never re-pointed to the freshly built artifact on reconcile
+([#1390](https://github.com/crewship-ai/crewship/issues/1390)). Fix the slot's
+sidecar, then re-run. Partial coverage (some sidecars silent) is reported as a
+count rather than rounded away.
+
+`--format json` carries `inspected`, `identified` and `detector_inert`. A server
+predating these fields omits them, and the CLI then falls back to the older,
+non-committal wording rather than inferring a coverage figure it wasn't given.
+
 ### One-time step after upgrading to the stable-master build
 
 The [stable internal-token master](/api-reference/internal#internal-token-authentication)
