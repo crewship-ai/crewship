@@ -36,6 +36,7 @@ crewship admin <subcommand> [flags]
 | `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
+| `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
 
 ---
 
@@ -370,3 +371,47 @@ Beyond the raw state, the report derives warnings that name the **consequence**:
 - `private_endpoints_ceiling_open` (**info**) — crews that also opt in can reach RFC1918/loopback. Link-local and cloud-metadata stay blocked regardless.
 
 The same data backs the **Admin → Runtime → Security posture** card in the dashboard.
+
+
+---
+
+## `crewship admin memory-config`
+
+Read or adjust `workspaces.memory_config` — currently the retention window for `memory_versions` rows, consumed by the per-workspace retention sweep.
+
+```bash
+crewship admin memory-config get
+crewship admin memory-config get --format json
+crewship admin memory-config set --retention-days 30
+```
+
+The endpoint (`GET/PATCH /api/v1/admin/memory/config`) exists so retention can be changed **without editing SQLite by hand**. Until this command there was no client for it, so the hand-edit stayed the only route — which is what the endpoint was built to avoid.
+
+### `memory-config get`
+
+Prints the **resolved** value and, importantly, whether it was chosen:
+
+```console
+SETTING                    VALUE     SOURCE
+Memory versions retention  30 days   default (not set for this workspace)
+```
+
+`30 days` on its own doesn't tell you whether anyone picked it. That matters before changing it: overriding a built-in default is routine, overriding somebody's deliberate policy is not.
+
+When the stored document carries keys this CLI version doesn't model, they are printed verbatim underneath rather than hidden — otherwise `get` would look authoritative when it isn't.
+
+### `memory-config set --retention-days N`
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--retention-days` | ✓ | Days to keep `memory_versions` rows. Server-validated to `1..3650` (10 years); longer windows require a deliberate SQL edit. |
+
+Writes are **manage-tier** and emit `memory.config_updated` to the journal, so a compliance audit can trace when retention policy changed and who changed it.
+
+<Warning>
+Rows already older than the new window become **eligible for deletion** on the retention sweep's next pass. Shortening the window is not a preview — it schedules data loss.
+</Warning>
+
+Sent as a **partial `PATCH`** carrying only the key being changed. The server merges it into the stored document and preserves settings this CLI doesn't know about, so an older binary can't silently drop a newer knob by writing a whole document back.
+
+The same data backs the **Admin → Runtime → Memory configuration** card in the dashboard.
