@@ -24,24 +24,27 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // instanceAllowsPrivateEndpoints reports whether the operator enabled private-
-// network model endpoints instance-wide (#974 S5 / #988). Mirrors the
-// orchestrator-side helper; kept local to avoid an api→orchestrator import.
+// network model endpoints instance-wide (#974 S5 / #988).
+//
+// Delegates to the orchestrator accessor rather than re-parsing the env var.
+// It used to duplicate the parse "to avoid an api→orchestrator import" — that
+// reason is stale (this package already imports orchestrator in several
+// files), and the duplicate was a second source of truth for a SECURITY flag:
+// two independently-maintained truthiness tables that could drift, with the
+// half that gates traffic and the half that gates discovery disagreeing about
+// whether private egress is open. One accessor, one answer.
 func instanceAllowsPrivateEndpoints() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_ALLOW_PRIVATE_ENDPOINTS"))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
+	return orchestrator.InstanceAllowsPrivateEndpoints()
 }
 
 // ollamaDiscoveryClient returns an http.Client whose dialer refuses a resolved
