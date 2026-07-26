@@ -48,6 +48,13 @@ lib/generated/
 /crewship
 /crewshipd
 /crewship-sidecar
+# `go build ./scripts/<tool>` with no -o drops the binary in the repo root
+# named after its directory. That is how a 3.2 MB Mach-O arm64 executable
+# reached main in #1480 — an enumerated list only covers the binaries someone
+# remembered. Ignore every root-level build output for the tools under
+# scripts/ instead.
+/lint-migrations
+/gen-openapi
 *.exe
 *.dll
 *.so
