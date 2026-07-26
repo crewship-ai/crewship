@@ -17,12 +17,17 @@ import { cn } from "@/lib/utils"
 // The API returns booleans only, never a secret value, so there is nothing
 // here to redact.
 
+/** A derived risk note from the posture endpoint. The raw booleans say what is
+ *  set; a warning says why it matters, which is the part that gets acted on. */
 interface PostureWarning {
   key: string
   severity: "high" | "medium" | "info" | string
   message: string
 }
 
+/** Wire shape of GET /api/v1/admin/security-posture. Booleans and enum-ish
+ *  state only — the endpoint never returns a secret value, so there is nothing
+ *  here to redact before rendering. */
 interface Posture {
   environment: string
   encryption_key_configured: boolean
@@ -60,6 +65,17 @@ const SEVERITY_STYLE: Record<string, { icon: typeof AlertTriangle; cls: string }
   info: { icon: Info, cls: "text-muted-foreground" },
 }
 
+/**
+ * Read-only card showing how the instance is postured: encryption at rest, the
+ * private-egress ceiling, signup policy, rate limiting, and whether email/OAuth
+ * are configured.
+ *
+ * Read-only on purpose. These are env-driven deploy decisions and must not be
+ * flippable from the app — the gap this closes is that their STATE was
+ * invisible without shell access to the box, which the person triaging an
+ * incident often doesn't have. Admin-gated server-side; a non-admin gets an
+ * explanation rather than an empty card.
+ */
 export function SecurityPostureCard() {
   const [posture, setPosture] = useState<Posture | null>(null)
   const [loading, setLoading] = useState(true)
