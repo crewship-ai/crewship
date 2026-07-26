@@ -737,6 +737,21 @@ An unknown extension with no explicit `interpreter` is an author-time error. The
 
 **Inputs** flow two ways, exactly like `code` steps: every declared routine input is exposed as `CREWSHIP_INPUT_<NAME_UPPER>` in the script's environment, and `script.args` / `script.env` values are template-substituted (`{{ inputs.x }}` / `{{ steps.y.output }}`) before the run. A default 300 s timeout applies (override with the step's `timeout_sec`); stdout is capped at 1 MB.
 
+**Egress.** A script step runs with `HTTP_PROXY`/`HTTPS_PROXY` pointing at the crew sidecar (`127.0.0.1:9119`), so outbound HTTP from a script obeys the **crew network policy** — a `restricted` crew's script can only reach hosts on its `allowed_domains`. `NO_PROXY` keeps loopback direct.
+
+<Warning>
+  Proxy variables are **reserved**. Any `script.env` key ending in `_proxy`
+  (any case) plus `no_proxy` is dropped and logged — a routine cannot switch
+  off the egress fence that constrains it. The match is on the shape rather
+  than an exact list because CPython lowercases every environment name before
+  looking for a `_proxy` suffix, so `HtTp_PrOxY` would otherwise reach a Python
+  script's proxy configuration. Before this was enforced, script steps ran with
+  no proxy at all and the crew allowlist did not apply to them
+  ([#1473](https://github.com/crewship-ai/crewship/issues/1473)).
+</Warning>
+
+Note this is the **application-layer** fence: a script that deliberately ignores the proxy (`curl --noproxy '*'`, a raw socket) still reaches the network until the L3 fence in [#1368](https://github.com/crewship-ai/crewship/issues/1368) lands. Treat the allowlist as a guardrail for well-behaved tooling, not as containment for hostile code.
+
 #### Deliver the script into the crew
 
 A `script` step points at a file that must already live in the crew's shared dir. **Don't** hand-copy it or bake a base64 blob into the manifest — declare it on the crew and let `crewship apply` deliver it. Add a `files:` block to the crew manifest:
