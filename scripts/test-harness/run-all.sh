@@ -37,6 +37,19 @@ tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestratio
 # the fake webhook receiver — see the script header for the network-
 # reachability note when SERVER is a remote devN.
 [[ "${WITH_NOTIFICATIONS_SHOUTRRR:-0}" == "1" ]] && tests+=(test-notifications-shoutrrr.sh)
+# Adversarial suites — opt-in, and deliberately NOT in the default set.
+#
+# test-attack-surface.sh (Tier A) is read-only and creates nothing, but it is
+# raw-curl probing of the auth fence: it belongs to a security sweep, not to
+# every harness run.
+#
+# test-redteam-insider.sh actually attacks the instance from inside a crew
+# container. It is opt-in for two reasons: it saves + runs a routine (soft-
+# deleted on exit) on a shared dev slot, and it carries xfail assertions for
+# open issues (#1368, #1473) that must stay visible rather than become
+# background noise in an unrelated run. Dev slots only — never point it at prod.
+[[ "${WITH_ATTACK_SURFACE:-0}" == "1" ]] && tests+=(test-attack-surface.sh)
+[[ "${WITH_REDTEAM_INSIDER:-0}" == "1" ]] && tests+=(test-redteam-insider.sh)
 
 declare -a results=()
 overall=0
