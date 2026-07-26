@@ -580,6 +580,14 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 	}))
 	defer tsPass.Close()
 
+	// Pin CreatedAt explicitly so "A comes first" is a fact, not a race.
+	// Dispatch orders by `created_at ASC, id ASC` (store.go), and Register
+	// stamps time.Now() only when CreatedAt is zero. Two back-to-back
+	// registrations can land on the SAME timestamp on a coarse clock (seen on
+	// macos-arm64), and the tiebreak is then `id` — which is crypto/rand hex,
+	// not monotonic. That made this a coin flip on whether B ran before A,
+	// failing the short-circuit assertion below (#1454).
+	orderAnchor := time.Now().UTC()
 	aID, err := Register(ctx, db, Hook{
 		WorkspaceID:   "ws_test",
 		Event:         EventPreToolCall,
@@ -587,6 +595,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 		HandlerConfig: map[string]any{"url": tsBlock.URL},
 		Blocking:      true,
 		Enabled:       true,
+		CreatedAt:     orderAnchor,
 	}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -598,6 +607,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 		HandlerConfig: map[string]any{"url": tsPass.URL},
 		Blocking:      true,
 		Enabled:       true,
+		CreatedAt:     orderAnchor.Add(time.Second),
 	}, false)
 	if err != nil {
 		t.Fatal(err)
