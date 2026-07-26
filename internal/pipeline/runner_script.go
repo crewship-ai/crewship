@@ -328,7 +328,10 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 			reserved[kv[:eq]] = true
 		}
 	}
-	env := make([]string, 0, len(req.Env)+len(proxyEnv))
+	// Capacity hinted from the caller's map alone. Adding len(proxyEnv) trips
+	// CodeQL's allocation-size-overflow rule, and the six extra elements are
+	// not worth a suppression comment for a growth the runtime handles.
+	env := make([]string, 0, len(req.Env))
 	for k, v := range req.Env {
 		if reserved[k] {
 			r.logger.Warn("script step declared a reserved proxy env var — ignoring, the crew egress fence is not step-configurable",
