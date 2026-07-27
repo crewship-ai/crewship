@@ -167,6 +167,42 @@ describe("DeviceSessions", () => {
     void container
   })
 
+  it("calls the throttle a throttle rather than a load failure", async () => {
+    apiFetch.mockResolvedValue({ ok: false, status: 429, json: async () => ({ error: "Too many requests" }) })
+    render(<DeviceSessions onSignOut={vi.fn()} />)
+    // "Couldn't load your sessions" sends someone hunting a broken endpoint.
+    // The endpoint is fine; they went too fast.
+    expect(await screen.findByText(/too fast|slow down|too many/i)).toBeTruthy()
+  })
+
+  it("revokes one at a time so a bulk sign-out cannot rate-limit itself", async () => {
+    const inFlight = { n: 0, max: 0 }
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/revoke")) {
+        inFlight.n++
+        inFlight.max = Math.max(inFlight.max, inFlight.n)
+        await new Promise((r) => setTimeout(r, 1))
+        inFlight.n--
+        return ok({})
+      }
+      return ok([
+        sessionRow(),
+        sessionRow({ id: "s2", user_agent: SAFARI_IPHONE, is_current: false }),
+        sessionRow({ id: "s3", user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0", is_current: false }),
+      ])
+    })
+    render(<DeviceSessions onSignOut={vi.fn()} />)
+    await screen.findByText("Safari on iPhone")
+
+    fireEvent.click(screen.getByRole("button", { name: /everywhere else/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /sign out 2 devices/i }))
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    // Firing N writes at once against a per-IP bucket throttles the very
+    // action the user just confirmed.
+    expect(inFlight.max).toBe(1)
+  })
+
   it("surfaces a failed load instead of rendering an empty device list", async () => {
     apiFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     render(<DeviceSessions onSignOut={vi.fn()} />)

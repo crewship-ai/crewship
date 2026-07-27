@@ -76,6 +76,12 @@ export function DeviceSessions({
         setSignedOut(true)
         return
       }
+      if (res.status === 429) {
+        // The endpoint is fine; the caller went too fast. Saying "couldn't
+        // load" sends someone hunting a breakage that isn't there.
+        setError("Too many requests — wait a moment, then retry.")
+        return
+      }
       if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setSessions(Array.isArray(data) ? data : (data?.data ?? []))
@@ -111,14 +117,18 @@ export function DeviceSessions({
     // No bulk endpoint exists; this is a loop. Partial failure is therefore
     // a real outcome and gets reported as one — a single silent "done" would
     // leave a live session the user believes they killed.
-    const results = await Promise.all(others.map(async (s) => {
+    // Sequential, not Promise.all: these share one per-IP bucket, so
+    // firing them together throttles the very action just confirmed and
+    // reports it back as a partial failure the user did nothing to cause.
+    const results: boolean[] = []
+    for (const s of others) {
       try {
         const res = await apiFetch(`/api/v1/auth/sessions/${s.id}/revoke`, { method: "POST" })
-        return res.ok
+        results.push(res.ok)
       } catch {
-        return false
+        results.push(false)
       }
-    }))
+    }
     const failed = results.filter((ok) => !ok).length
     if (failed === 0) {
       toast.success(`Signed out ${results.length} device${results.length === 1 ? "" : "s"}`)

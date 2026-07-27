@@ -546,6 +546,22 @@ func (r *Router) Shutdown() {
 // the tighter rate limiter as a forward-compat snag.
 var credTestStoredPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/test$`)
 
+// isSelfServiceAuthPath reports whether path is an authenticated caller
+// listing or revoking their OWN sessions / CLI tokens, as opposed to the
+// credential-guessing surface (login, bootstrap, minting) the strict
+// per-IP bucket exists to protect.
+//
+// Matching is exact-or-subpath, never a bare prefix: "/api/v1/auth/cli-token"
+// (mint) and "/api/v1/auth/cli-tokens" (list) differ by one character.
+func isSelfServiceAuthPath(path string) bool {
+	switch path {
+	case "/api/v1/auth/sessions", "/api/v1/auth/cli-tokens":
+		return true
+	}
+	return strings.HasPrefix(path, "/api/v1/auth/sessions/") ||
+		strings.HasPrefix(path, "/api/v1/auth/cli-tokens/")
+}
+
 // routeWithRateLimiting applies per-IP rate limiting based on the request path.
 
 func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
@@ -554,6 +570,25 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
 	if strings.HasPrefix(path, "/api/v1/internal/") {
 		r.mux.ServeHTTP(w, req)
+		return
+	}
+
+	// Managing your OWN sessions and CLI tokens lives under /api/v1/auth/
+	// but is not a credential-guessing surface, so it does not belong in
+	// the strict bucket below. Revoking costs two requests (the write plus
+	// the list refresh), so tidying up four stale tokens exceeded 10/min
+	// and 429'd — and the Settings screen listing sessions 429'd with it,
+	// reporting "couldn't load" for what was really a throttle.
+	//
+	// Everything here requires a valid session downstream and can only
+	// REMOVE the caller's own access. Spamming it costs an attacker
+	// nothing they could not achieve with one request.
+	//
+	// Note the exact matches: /api/v1/auth/cli-token (singular) MINTS a
+	// credential and deliberately stays strict, so a prefix test on
+	// "cli-token" would widen exactly the route we mean to keep narrow.
+	if isSelfServiceAuthPath(path) {
+		r.apiRateLimitedMux.ServeHTTP(w, req)
 		return
 	}
 
