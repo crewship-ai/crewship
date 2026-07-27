@@ -65,6 +65,8 @@ export interface ExplorerItem {
   sublabel?: string
   /** Provider key — renders that service's brand mark. */
   mark?: string
+  /** Remote logo, preferred over the vendored marks (Composio toolkits). */
+  logoUrl?: string
   /** Tailwind background class for a status dot. */
   dot?: string
 }
@@ -161,8 +163,11 @@ export function IntegrationsExplorer<K extends string>({
                   <motion.div
                     {...POPOVER_ANIM}
                     className={cn(
-                      "absolute right-0 top-9 z-50 max-h-[340px] min-w-[210px] overflow-y-auto",
-                      "rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
+                      // max-w matters as much as min-w: a Composio user id is
+                      // ~40 characters, and without a ceiling the popover grew
+                      // leftward past the panel and got sliced off at its edge.
+                      "absolute right-0 top-9 z-50 max-h-[340px] min-w-[210px] max-w-[248px]",
+                      "overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
                     )}
                   >
                     {activeCount > 0 && (
@@ -209,7 +214,9 @@ export function IntegrationsExplorer<K extends string>({
                                 aria-hidden="true"
                               />
                             ) : null}
-                            <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                            <span className="min-w-0 flex-1 truncate" title={opt.label}>
+                              {opt.label}
+                            </span>
                             <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/50">
                               {opt.count}
                             </span>
@@ -275,6 +282,7 @@ export function IntegrationsExplorer<K extends string>({
                     <ProviderMark
                       provider={item.mark}
                       label={item.label}
+                      logoUrl={item.logoUrl}
                       className="h-4 w-4 rounded-[4px]"
                     />
                   ) : item.dot ? (

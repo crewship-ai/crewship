@@ -4,6 +4,7 @@ import { Bot, ChevronLeft, User } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { ProviderMark } from "../provider-marks"
+import { brandLogo } from "../composio/shared"
 import type { AgentBindingsMap, AgentLite, ConnectedAccount } from "../composio/types"
 
 /**
@@ -57,7 +58,12 @@ export function ToolAccountDetail({
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
         <div className="flex flex-wrap items-start gap-3 rounded-xl border border-white/[0.08] bg-card px-4 py-3.5">
-          <ProviderMark provider={slug} label={slug} className="h-9 w-9" />
+          <ProviderMark
+            provider={slug}
+            label={slug}
+            logoUrl={account.toolkit.logo || brandLogo(slug)}
+            className="h-9 w-9"
+          />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium capitalize text-foreground/90">{slug}</div>
             <div className="flex items-center gap-1.5 truncate font-mono text-[11px] text-muted-foreground">

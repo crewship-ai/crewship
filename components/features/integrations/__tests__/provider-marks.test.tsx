@@ -81,6 +81,26 @@ describe("ProviderMark", () => {
     expect(container.textContent).toBe("BN")
   })
 
+  it("prefers a remote logo over the vendored marks", () => {
+    // Composio's catalog is 1000+ apps; gmail and googledrive cannot come from
+    // the eleven marks bundled here. Without this the panel showed two-letter
+    // tiles while the column beside it showed the real icon for the same row.
+    const { container } = render(
+      <ProviderMark provider="gmail" label="gmail" logoUrl="https://logos.example/gmail" />,
+    )
+    const img = container.querySelector("img")
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute("src")).toBe("https://logos.example/gmail")
+  })
+
+  it("still uses the vendored mark when a brand has one and no logo is passed", () => {
+    // The remote logo is an addition, not a replacement: Discord's vendored
+    // full-colour mark must not start depending on a network fetch.
+    const { container } = render(<ProviderMark provider="discord" />)
+    expect(container.querySelector("img")).toBeNull()
+    expect(container.querySelector("svg")).not.toBeNull()
+  })
+
   it("renders the bare glyph without a tile when asked", () => {
     const { container } = render(<ProviderMark provider="discord" bare />)
     // The tile is the wrapping <span>; bare mode must not emit one.

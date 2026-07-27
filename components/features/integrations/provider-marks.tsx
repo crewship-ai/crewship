@@ -248,6 +248,16 @@ export interface ProviderMarkProps {
   provider: string
   /** Fallback label for the lettermark when the provider is unknown. */
   label?: string
+  /**
+   * A remote logo to prefer over everything vendored here.
+   *
+   * Composio's catalog is 1000+ apps and it serves artwork for all of them, so
+   * gmail, googledrive and youtube cannot come from the eleven marks bundled in
+   * this file. Passing the toolkit's logo is what stops those rows falling back
+   * to two-letter tiles while the main column beside them shows real icons.
+   * A 404 degrades to the vendored mark, then to a lettermark.
+   */
+  logoUrl?: string
   /** Tailwind size classes for the tile. */
   className?: string
   /** Skip the tile and render the bare glyph (table rows, dense lists). */
@@ -261,11 +271,48 @@ export interface ProviderMarkProps {
  * Discord's blurple sit on comparable surfaces instead of one vanishing into
  * the page background. Monochrome brands are tinted with their own hex.
  */
-export function ProviderMark({ provider, label, className, bare }: ProviderMarkProps) {
+export function ProviderMark({
+  provider,
+  label,
+  logoUrl,
+  className,
+  bare,
+}: ProviderMarkProps) {
   const key = provider.toLowerCase()
   const brand = BRANDS[key]
   const builtin = BUILTIN[key]
   const letter = LETTERMARKS[key]
+
+  // Reset when the source changes, or a re-used instance keeps showing the
+  // fallback it fell back to for a *different* logo.
+  const [remoteFailed, setRemoteFailed] = React.useState(false)
+  React.useEffect(() => setRemoteFailed(false), [logoUrl])
+
+  if (logoUrl && !remoteFailed) {
+    // A plain <img>, not next/image: next/image chokes on remote SVGs under
+    // static export, and the rest of the Composio surface renders toolkit
+    // logos the same way for the same reason.
+    const img = (
+      <img
+        src={logoUrl}
+        alt=""
+        className={cn("object-contain", bare ? "h-full w-full" : "h-[62%] w-[62%] rounded-sm")}
+        onError={() => setRemoteFailed(true)}
+      />
+    )
+    if (bare) return img
+    return (
+      <span
+        className={cn(
+          "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+          "bg-white/[0.06] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]",
+          className,
+        )}
+      >
+        {img}
+      </span>
+    )
+  }
 
   if (brand) {
     const glyph = (

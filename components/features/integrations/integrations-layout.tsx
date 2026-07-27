@@ -33,6 +33,7 @@ import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { NotificationPrefsSection } from "@/components/features/settings/sections/notification-prefs-section"
 import { ComposioIntegrations, type ComposioStatus } from "./composio-integrations"
+import { brandLogo } from "./composio/shared"
 import type { TabKey } from "./composio/types"
 
 import {
@@ -452,6 +453,10 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         label: a.toolkit.slug,
         sublabel: a.user_id,
         mark: a.toolkit.slug,
+        // Composio serves artwork for its whole catalog; without it these rows
+        // fall back to two-letter tiles while the column beside them shows the
+        // real icon for the same account.
+        logoUrl: a.toolkit.logo || brandLogo(a.toolkit.slug),
         dot: a.status.toUpperCase() === "ACTIVE" ? "bg-emerald-400" : "bg-amber-400",
       }))
   }, [composioStatus.accounts, mcpFilters, search])
@@ -547,8 +552,13 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       <div className="flex flex-1 overflow-hidden">
         <aside
           className={cn(
-            "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all",
-            collapsed ? "w-9" : "w-[280px]",
+            "shrink-0 border-r border-white/[0.06] bg-card transition-all",
+            // `overflow-hidden` only while collapsing, where it is what keeps
+            // the content from spilling out of a 36px rail. Leaving it on when
+            // expanded clipped the Filter popover at the panel's edge — the
+            // menu opened and was sliced off, which reads as a broken control.
+            // The inner list keeps its own scroller, so nothing else needs it.
+            collapsed ? "w-9 overflow-hidden" : "w-[280px] overflow-visible",
           )}
         >
           {collapsed ? (
