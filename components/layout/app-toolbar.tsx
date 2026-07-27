@@ -79,14 +79,21 @@ const mobileNavSections = [
 ]
 
 
-const pageConfig: Record<string, { title: string }> = {
-  "/": { title: "Dashboard" },
-  "/crews/agents": { title: "Agents" },
-  "/crews": { title: "Crews" },
-  "/credentials": { title: "Credentials" },
-  "/skills": { title: "Skills" },
-  "/settings": { title: "Settings" },
-}
+// The top bar is the product's identity strip, not a page label — it says
+// "Crewship" and nothing else. There used to be a route -> title map here
+// ("/crews" -> "Crews & Agents", "/skills" -> "Skills", ...), which printed
+// the page name directly above the SubBar that already carries it, stacked
+// one row apart: "Crews & Agents" over "Crews & Agents · 3 crews". Only the
+// mapped routes did that; every other page (inbox, issues, routines,
+// integrations, admin) fell through to the "Crewship" default and read
+// correctly, which is the behaviour the map is removed in favour of.
+//
+// "/" is the one route that had no SubBar underneath, so it loses its only
+// on-screen name here. The fix for that belongs on the dashboard page —
+// give it the SubBar every other page has — not in a map of exceptions.
+//
+// Deep pages keep their breadcrumb (agent detail, chat, settings tab) — that
+// is a click-path back out of a detail view, not a restatement of the SubBar.
 
 const settingsTabTitles: Record<string, string> = {
   profile: "Profile",
@@ -165,7 +172,6 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
 
 export function AppToolbar() {
   const pathname = usePathname()
-  const config = pageConfig[pathname] ?? null
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
@@ -209,7 +215,6 @@ export function AppToolbar() {
   const userInitials = getInitials(userName)
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
-  const isCrewsPage = pathname === "/crews"
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
@@ -254,14 +259,6 @@ export function AppToolbar() {
       )
     }
 
-    // Crews page: just the section title (subbar already shows
-    // breadcrumb + stats — no point duplicating "Crews / Crews & Agents").
-    if (isCrewsPage) {
-      return (
-        <span className="text-sm font-semibold">Crews &amp; Agents</span>
-      )
-    }
-
     // Chat page: link back to /crews?agent=<slug> so the toolbar back-action
     // restores agent selection in the canvas (instead of dumping the user
     // on an empty roster).
@@ -303,10 +300,9 @@ export function AppToolbar() {
       )
     }
 
-    const title = config?.title ?? "Crewship"
     return (
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-sm font-semibold truncate">{title}</span>
+        <span className="text-sm font-semibold truncate">Crewship</span>
         {breadcrumbs.length > 0 && breadcrumbs.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5 min-w-0">
             <span className="text-muted-foreground/30 text-xs">/</span>
