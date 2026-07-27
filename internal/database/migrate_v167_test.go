@@ -118,10 +118,8 @@ func TestV167_UpgradeRebuildsAndRepairsDamagedJournal(t *testing.T) {
 
 	// The schema can no longer rewrite or delete an audit row.
 	ddl := scanString(t, db, `SELECT sql FROM sqlite_master WHERE type='table' AND name='journal_entries'`)
-	for _, clause := range journalDestructiveFKs {
-		if strings.Contains(ddl, clause) {
-			t.Errorf("journal_entries still declares %q", clause)
-		}
+	if journalDDLNeedsRebuild(ddl) {
+		t.Errorf("journal_entries still declares a destructive FK action:\n%s", ddl)
 	}
 	if !strings.Contains(ddl, "REFERENCES workspaces(id) ON DELETE CASCADE") {
 		t.Error("workspace_id lost its cascade — a deleted workspace must still take its own journal with it")
@@ -313,10 +311,8 @@ func TestV167_RewriteJournalDDL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
-	for _, clause := range journalDestructiveFKs {
-		if strings.Contains(got, clause) {
-			t.Errorf("rewritten DDL still carries %q", clause)
-		}
+	if journalDDLNeedsRebuild(got) {
+		t.Errorf("rewritten DDL still carries a destructive FK action:\n%s", got)
 	}
 	if !strings.Contains(got, "REFERENCES workspaces(id) ON DELETE CASCADE") {
 		t.Error("rewrite dropped the workspace cascade, which is deliberately kept")
@@ -340,6 +336,53 @@ func TestV167_RewriteJournalDDL(t *testing.T) {
 
 	if _, err := rewriteJournalDDL("CREATE TABLE journal_entries"); err == nil {
 		t.Error("a definition with no column list must be rejected, not rebuilt")
+	}
+}
+
+// The clause matcher doubles as the migration's "already done?" probe, so a
+// definition it fails to recognise is not a cosmetic miss: the rebuild would be
+// skipped and the migration would record SUCCESS with the destructive
+// constraint still in place. SQLite rewrites this stored text on
+// ALTER TABLE DROP COLUMN (v121 does exactly that to journal_entries), so the
+// exact spacing is not something to bet the audit log on.
+func TestV167_ClauseMatchingToleratesFormatting(t *testing.T) {
+	spaced := `CREATE TABLE journal_entries (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    crew_id TEXT REFERENCES  crews( id )   ON DELETE   CASCADE,
+    agent_id TEXT
+        REFERENCES "agents" ("id")
+        ON DELETE CASCADE,
+    mission_id TEXT references missions(id) on delete set  null,
+    ts TEXT NOT NULL)`
+
+	if !journalDDLNeedsRebuild(spaced) {
+		t.Fatal("a differently-formatted definition read as already-rebuilt — the migration would silently no-op on a still-destructive schema")
+	}
+	got, err := rewriteJournalDDL(spaced)
+	if err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if journalDDLNeedsRebuild(got) {
+		t.Errorf("rewritten DDL still carries a destructive FK action:\n%s", got)
+	}
+	for _, keep := range []string{"crew_id TEXT", "agent_id TEXT", "mission_id TEXT", "ts TEXT NOT NULL"} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("rewritten DDL lost %q", keep)
+		}
+	}
+
+	// The workspace cascade must never look like a match.
+	if journalDDLNeedsRebuild(`CREATE TABLE journal_entries (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, ts TEXT)`) {
+		t.Error("the deliberately-kept workspace cascade was matched as destructive")
+	}
+
+	// Fail loud, not quiet: a definition that is not the one this migration was
+	// written against must be rejected rather than half-rebuilt.
+	if _, err := rewriteJournalDDL(`CREATE TABLE journal_entries (
+    crew_id TEXT REFERENCES crews(id) ON DELETE CASCADE, ts TEXT)`); err == nil {
+		t.Error("a definition with only one destructive clause must be rejected")
 	}
 }
 

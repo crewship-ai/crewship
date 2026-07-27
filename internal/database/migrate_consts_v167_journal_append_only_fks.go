@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -113,15 +115,27 @@ func migrationJournalAppendOnlyFKs(ctx context.Context, db *sql.DB, logger *slog
 	return nil
 }
 
-// journalDestructiveFKs are the exact column-level clauses v52 shipped. They
-// are matched (and required) literally rather than parsed: a rebuild that
-// guessed at the schema is how a column gets silently dropped, and a literal
-// match that stops finding its target fails loudly instead.
-var journalDestructiveFKs = []string{
-	" REFERENCES crews(id) ON DELETE CASCADE",
-	" REFERENCES agents(id) ON DELETE CASCADE",
-	" REFERENCES missions(id) ON DELETE SET NULL",
-}
+// journalDestructiveFKRe matches a column-level foreign key from
+// journal_entries into an OPERATIONAL table — the shape that lets deleting a
+// crew, agent or mission reach into the audit log. The three parent tables are
+// named explicitly so `workspace_id ... REFERENCES workspaces(id) ON DELETE
+// CASCADE`, which is deliberately kept, can never match.
+//
+// A regexp rather than literal strings, because this same expression is the
+// migration's "already done?" probe. Matching exact spacing would make that
+// probe silently PERMISSIVE: a stored definition that differed by one space
+// (SQLite rewrites this text on ALTER TABLE DROP COLUMN, which v121 does) would
+// read as "already rebuilt", and the migration would record success with the
+// destructive constraint still in place. Everywhere else this file fails loudly
+// on shape drift; the probe must not be the one path that fails quietly.
+var journalDestructiveFKRe = regexp.MustCompile(
+	`(?i)\s*REFERENCES\s+"?(?:crews|agents|missions)"?\s*\(\s*"?id"?\s*\)\s+ON\s+DELETE\s+(?:CASCADE|SET\s+NULL)`)
+
+// journalDestructiveFKCount is how many such clauses v52 shipped: crew_id,
+// agent_id, mission_id. Every database that reaches v167 came through v52, so
+// finding a different number means the definition is not the one this migration
+// was written against.
+const journalDestructiveFKCount = 3
 
 // journalRebuildTable is the staging name for the rebuilt table. It exists
 // only between CREATE and RENAME inside one transaction.
@@ -130,12 +144,7 @@ const journalRebuildTable = "journal_entries_v167_rebuild"
 // journalDDLNeedsRebuild reports whether the live definition still lets the
 // database rewrite or delete audit rows.
 func journalDDLNeedsRebuild(ddl string) bool {
-	for _, clause := range journalDestructiveFKs {
-		if strings.Contains(ddl, clause) {
-			return true
-		}
-	}
-	return false
+	return journalDestructiveFKRe.MatchString(ddl)
 }
 
 // journalEntriesDDL reads the live CREATE TABLE text from sqlite_master.
@@ -159,15 +168,19 @@ func journalEntriesDDL(ctx context.Context, conn *sql.Conn) (string, error) {
 // definition: same columns, same defaults, same CHECKs, minus the three
 // destructive FK actions.
 func rewriteJournalDDL(ddl string) (string, error) {
-	out := ddl
-	for _, clause := range journalDestructiveFKs {
-		if !strings.Contains(out, clause) {
-			continue // already stripped (partial re-run)
-		}
-		if n := strings.Count(out, clause); n != 1 {
-			return "", fmt.Errorf("v167: expected exactly one %q in journal_entries definition, found %d", clause, n)
-		}
-		out = strings.Replace(out, clause, "", 1)
+	found := journalDestructiveFKRe.FindAllString(ddl, -1)
+	if len(found) != journalDestructiveFKCount {
+		return "", fmt.Errorf(
+			"v167: expected %d destructive FK clauses in the journal_entries definition, found %d (%q) — "+
+				"the live schema is not the one this migration was written against",
+			journalDestructiveFKCount, len(found), found)
+	}
+	out := journalDestructiveFKRe.ReplaceAllString(ddl, "")
+	// The strip has to be verified, not assumed: a clause left behind would
+	// produce a "rebuilt" table that still lets the database edit the audit log,
+	// and every later check (column parity, row counts) would pass anyway.
+	if journalDDLNeedsRebuild(out) {
+		return "", fmt.Errorf("v167: a destructive FK clause survived the rewrite: %.200q", out)
 	}
 	// Retarget the statement at the staging table. Everything before the first
 	// "(" is `CREATE TABLE [IF NOT EXISTS] <name>`, so the table name is the
@@ -277,7 +290,7 @@ func countFKViolations(ctx context.Context, conn *sql.Conn) (int, error) {
 // rebuildJournalEntries performs SQLite's documented table-rebuild procedure
 // with foreign-key enforcement suspended, then verifies it introduced no new
 // referential violation before committing.
-func rebuildJournalEntries(ctx context.Context, conn *sql.Conn, ddl string, logger *slog.Logger) error {
+func rebuildJournalEntries(ctx context.Context, conn *sql.Conn, ddl string, logger *slog.Logger) (err error) {
 	newDDL, err := rewriteJournalDDL(ddl)
 	if err != nil {
 		return err
@@ -310,11 +323,34 @@ func rebuildJournalEntries(ctx context.Context, conn *sql.Conn, ddl string, logg
 	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		return fmt.Errorf("v167: disable foreign_keys: %w", err)
 	}
+	// Restoring these pragmas is not best-effort. The connection goes straight
+	// back into *sql.DB's pool on Close(), so a failed restore would hand the
+	// next borrower — any query for the rest of the process lifetime — a
+	// connection that silently skips referential integrity, with no further
+	// signal. Two things prevent that: the connection is POISONED so the pool
+	// discards it instead of reusing it, and the failure is promoted to the
+	// migration's error so boot stops rather than continuing half-enforced.
+	//
+	// This defer is registered FIRST so it runs LAST (defers are LIFO): the
+	// legacy_alter_table restore below still gets a usable connection, and the
+	// poisoning happens once, at the very end.
+	poisonConn := false
 	defer func() {
 		if fkWas != 0 {
-			if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil && logger != nil {
-				logger.Error("v167: failed to re-enable foreign_keys on the migration connection", "error", err)
+			if _, rerr := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); rerr != nil {
+				poisonConn = true
+				if logger != nil {
+					logger.Error("v167: failed to re-enable foreign_keys on the migration connection", "error", rerr)
+				}
+				if err == nil {
+					err = fmt.Errorf("v167: re-enable foreign_keys after rebuild: %w", rerr)
+				}
 			}
+		}
+		if poisonConn {
+			// A non-nil error out of Raw marks the driver connection bad, so
+			// database/sql throws it away rather than returning it to the pool.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		}
 	}()
 	// legacy_alter_table keeps ALTER TABLE RENAME to renaming the table and
@@ -326,8 +362,18 @@ func rebuildJournalEntries(ctx context.Context, conn *sql.Conn, ddl string, logg
 		return fmt.Errorf("v167: enable legacy_alter_table: %w", err)
 	}
 	defer func() {
-		if _, err := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = OFF`); err != nil && logger != nil {
-			logger.Warn("v167: failed to restore legacy_alter_table", "error", err)
+		if _, rerr := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = OFF`); rerr != nil {
+			// Same reasoning as above, one notch less severe: a leaked
+			// legacy_alter_table only changes ALTER TABLE RENAME semantics for
+			// whoever borrows this connection next. Still connection state that
+			// must not escape, so the connection is discarded too.
+			poisonConn = true
+			if logger != nil {
+				logger.Error("v167: failed to restore legacy_alter_table on the migration connection", "error", rerr)
+			}
+			if err == nil {
+				err = fmt.Errorf("v167: restore legacy_alter_table after rebuild: %w", rerr)
+			}
 		}
 	}()
 
@@ -353,7 +399,7 @@ func rebuildJournalEntries(ctx context.Context, conn *sql.Conn, ddl string, logg
 	// rebuild that quietly loses a column. The staging table is derived from
 	// the live text, so this should be impossible — which is precisely why a
 	// mismatch means the rewrite mangled something and must not proceed.
-	newCols, err := journalColumnsTx(ctx, tx, journalRebuildTable)
+	newCols, err := journalColumns(ctx, tx, journalRebuildTable)
 	if err != nil {
 		return err
 	}
@@ -440,19 +486,11 @@ func rebuildJournalEntries(ctx context.Context, conn *sql.Conn, ddl string, logg
 	return nil
 }
 
-// journalColumns lists a table's columns in declaration order.
-func journalColumns(ctx context.Context, conn *sql.Conn, table string) ([]string, error) {
-	rows, err := conn.QueryContext(ctx, `SELECT name FROM pragma_table_info(?) ORDER BY cid`, table)
-	if err != nil {
-		return nil, fmt.Errorf("v167: read %s columns: %w", table, err)
-	}
-	defer func() { _ = rows.Close() }()
-	return scanNames(rows, table)
-}
-
-// journalColumnsTx is journalColumns against an open transaction.
-func journalColumnsTx(ctx context.Context, tx *sql.Tx, table string) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM pragma_table_info(?) ORDER BY cid`, table)
+// journalColumns lists a table's columns in declaration order, from either the
+// pinned connection (before the rebuild transaction opens) or that transaction
+// itself — both satisfy journalRepairQuerier.
+func journalColumns(ctx context.Context, q journalRepairQuerier, table string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info(?) ORDER BY cid`, table)
 	if err != nil {
 		return nil, fmt.Errorf("v167: read %s columns: %w", table, err)
 	}
