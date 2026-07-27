@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
+import { ProviderMark } from "../provider-marks"
 import {
   STATUS_LABEL,
   type ConnectionKind,
@@ -173,7 +174,7 @@ export function ConnectionsView({
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const Icon = KIND_ICON[row.kind]
+                  const KindIcon = KIND_ICON[row.kind]
                   const busy = busyId === row.id
                   return (
                     <tr
@@ -182,7 +183,14 @@ export function ConnectionsView({
                     >
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2.5">
-                          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                          {/* The service's own mark, not the KIND icon: you
+                              recognise Slack by its colour long before you
+                              read the row. The kind stays its own column. */}
+                          <ProviderMark
+                            provider={row.provider}
+                            label={row.providerLabel}
+                            className="h-6 w-6"
+                          />
                           <div className="min-w-0">
                             <div className="truncate font-medium text-foreground/90">{row.name}</div>
                             <div className="truncate font-mono text-[10px] text-muted-foreground/70">
@@ -191,8 +199,11 @@ export function ConnectionsView({
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 font-mono text-[11px] text-muted-foreground">
-                        {row.kind}
+                      <td className="px-4 py-2.5 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1.5">
+                          <KindIcon className="h-3 w-3 shrink-0 opacity-70" />
+                          <span className="font-mono">{row.kind}</span>
+                        </span>
                       </td>
                       <td className="px-4 py-2.5 text-[11px] text-muted-foreground">{row.scope}</td>
                       <td className="max-w-[16rem] px-4 py-2.5 font-mono text-[10px] text-muted-foreground">

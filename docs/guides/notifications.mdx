@@ -12,8 +12,11 @@ icon: "bell"
 | --- | --- |
 | **Connections** | What is hooked up, and is it working? |
 | **Catalog** | What *could* I hook up? |
+| **Tools (MCP)** | Which managed tool accounts can agents call? |
 | **Notifications** | Which categories reach me, on which connection? |
 | **Deliveries** | Why didn't that notification arrive? |
+
+Notifications and managed tools are two different kinds of integration — one is where Crewship reaches a *human*, the other is what an *agent* may call — so they keep separate tabs rather than being interleaved. What they share is the page: "what is this instance wired into" has one answer, not two screens that drift apart. Connected tool accounts still appear in the **Connections** list under the `tools` kind, read-only, because that list is the one place that question gets asked; their lifecycle stays on the Tools tab that owns it.
 
 It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart.
 
@@ -23,7 +26,9 @@ The sidebar's search and its **Kind / Status / Scope / Service** facets apply to
 
 Search on **Connections** only searches what exists. When it comes back empty but the catalog has matches, the empty state says so and links straight there — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
 
-**Catalog** is the full list, grouped into **Chat**, **Push**, **Incident** and **E-mail & webhook**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out with an `off` badge — visible, and visibly unavailable, rather than missing.
+**Catalog** is the full list, grouped into **Chat**, **Push**, **Incident**, **E-mail & webhook** and **Tools (MCP)**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out with an `off` badge — visible, and visibly unavailable, rather than missing. Picking the Composio card opens the Tools tab, which owns that connect flow.
+
+Each service carries its own brand mark in its own colour: you recognise Slack by its aubergine long before you read the label, and eleven identical grey glyphs are not a catalog you can scan. The artwork is vendored from permissively-licensed sources (CC0 SVG Logos, CC0 Simple Icons, MIT Tabler). Gotify is the one exception — no permissively-licensed mark exists for it, so it gets a lettermark in its real brand colour rather than an invented logo.
 
 ### Seeing everyone's connections (admins)
 

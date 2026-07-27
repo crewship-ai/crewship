@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { Bell, Blocks, Clock, Link2, Plug, RefreshCw } from "lucide-react"
+import { Bell, Blocks, Clock, Link2, Plug, RefreshCw, Wrench } from "lucide-react"
 import { toast } from "sonner"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -16,6 +16,7 @@ import { useNotificationChannels } from "@/hooks/use-notification-channels"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
 import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
 import { NotificationPrefsSection } from "@/components/features/settings/sections/notification-prefs-section"
+import { ComposioIntegrations } from "./composio-integrations"
 import type { Inventory } from "./composio/types"
 
 import {
@@ -49,9 +50,15 @@ import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
  *   Deliveries    — why didn't that notification arrive?
  */
 
+// Notifications and managed tools are two different KINDS of integration —
+// one is where Crewship reaches a human, the other is what an agent may call —
+// so they get their own tabs rather than being interleaved. What they share is
+// this page: "what is this instance wired into" has one answer, not two
+// screens that drift apart.
 const TABS = [
   { id: "connections" as const, label: "Connections", icon: Link2 },
   { id: "catalog" as const, label: "Catalog", icon: Blocks },
+  { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
   { id: "notifications" as const, label: "Notifications", icon: Bell },
   { id: "deliveries" as const, label: "Deliveries", icon: Clock },
 ] as const
@@ -271,11 +278,10 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
 
   const handlePick = (entry: { key: string; section: string; label: string }) => {
     if (entry.section === TOOLS_SECTION) {
-      // Composio owns its own connect flow (OAuth per toolkit); sending the
-      // user through a notification-channel form would be a dead end.
-      toast.info("Managed tools are connected from the Tools surface", {
-        description: "Agent access, tools and triggers all live there.",
-      })
+      // Composio owns its own connect flow (OAuth per toolkit), so the card is
+      // a doorway to that surface rather than a dead end — which is what it
+      // was when this tab did not exist.
+      setTab("tools")
       return
     }
     setAddTarget(
@@ -291,6 +297,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const failing = rows.filter((r) => r.status === "failing").length
   // Same number the Catalog tab renders — see catalogSize's comment.
   const serviceCount = providers.length > 0 ? catalogSize(providers.length) : 0
+  const toolCount = rows.filter((r) => r.kind === "tools").length
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -314,7 +321,9 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               ? rows.length || undefined
               : t.id === "catalog"
                 ? serviceCount || undefined
-                : undefined,
+                : t.id === "tools"
+                  ? toolCount || undefined
+                  : undefined,
         }))}
         activeTab={tab}
         onTabChange={setTab}
@@ -407,6 +416,10 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   onPick={handlePick}
                   composioConfigured={composio.inventory?.enabled ?? false}
                 />
+              )}
+
+              {tab === "tools" && (
+                <ComposioIntegrations />
               )}
 
               {tab === "notifications" && (

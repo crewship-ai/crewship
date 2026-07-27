@@ -22,6 +22,7 @@ import {
   type ConnectionRow,
   type ConnectionStatus,
 } from "./connection-model"
+import { ProviderMark } from "./provider-marks"
 
 /**
  * The Integrations sidebar — the same explorer shape every other faceted page
@@ -216,6 +217,7 @@ export function IntegrationsExplorer({
             {providers.map((p) => (
               <FacetRow
                 key={p}
+                mark={p}
                 label={providerLabels.get(p) ?? p}
                 count={providerCounts[p] ?? 0}
                 selected={filters.provider === p}
@@ -239,6 +241,7 @@ export function IntegrationsExplorer({
 function FacetRow({
   icon: Icon,
   dot,
+  mark,
   label,
   hint,
   count,
@@ -247,6 +250,8 @@ function FacetRow({
 }: {
   icon?: LucideIcon
   dot?: string
+  /** Provider key — renders that service's own brand mark. */
+  mark?: string
   label: string
   hint?: string
   count: number
@@ -255,7 +260,9 @@ function FacetRow({
 }) {
   return (
     <SidebarRow selected={selected} onSelect={onSelect}>
-      {dot ? (
+      {mark ? (
+        <ProviderMark provider={mark} label={label} className="h-4 w-4 rounded-[4px]" />
+      ) : dot ? (
         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dot)} aria-hidden="true" />
       ) : Icon ? (
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />

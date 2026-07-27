@@ -1,10 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Bot, Check, Globe, Mail, Search } from "lucide-react"
+import { Check, Search } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { ProviderMark } from "../provider-marks"
 import type {
   NotificationProvider,
   NotificationProviderCategory,
@@ -34,8 +35,6 @@ export interface CatalogEntry {
   available: boolean
   /** How many connections already use it. */
   used: number
-  /** Rendered when the entry is not a chat provider (email, webhook, MCP). */
-  icon?: typeof Mail
 }
 
 /** Sections for the things that are not shoutrrr providers. */
@@ -115,7 +114,6 @@ export function CatalogView({
         section: BUILTIN_SECTION,
         available: true,
         used: usage.email ?? 0,
-        icon: Mail,
       },
       {
         key: "webhook",
@@ -124,7 +122,6 @@ export function CatalogView({
         section: BUILTIN_SECTION,
         available: true,
         used: usage.webhook ?? 0,
-        icon: Globe,
       },
       {
         key: "composio",
@@ -135,7 +132,6 @@ export function CatalogView({
         section: TOOLS_SECTION,
         available: composioConfigured,
         used: usage.composio ?? 0,
-        icon: Bot,
       },
     ]
   }, [providers, usage, composioConfigured])
@@ -231,7 +227,6 @@ export function CatalogView({
 }
 
 function CatalogCard({ entry, onPick }: { entry: CatalogEntry; onPick: () => void }) {
-  const Icon = entry.icon
   return (
     <button
       type="button"
@@ -249,15 +244,7 @@ function CatalogCard({ entry, onPick }: { entry: CatalogEntry; onPick: () => voi
           : "cursor-not-allowed border-white/[0.05] opacity-45",
       )}
     >
-      <span
-        className={cn(
-          "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold",
-          "bg-white/[0.06] text-foreground/80",
-        )}
-        aria-hidden="true"
-      >
-        {Icon ? <Icon className="h-3.5 w-3.5" /> : initials(entry.label)}
-      </span>
+      <ProviderMark provider={entry.key} label={entry.label} className="mt-0.5" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium text-foreground/90">{entry.label}</span>
         <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
@@ -278,12 +265,4 @@ function CatalogCard({ entry, onPick }: { entry: CatalogEntry; onPick: () => voi
       </span>
     </button>
   )
-}
-
-/** Two-letter mark for providers we have no logo for. */
-function initials(label: string): string {
-  const cleaned = label.replace(/[^A-Za-z0-9 ]/g, "").trim()
-  const words = cleaned.split(/\s+/).filter(Boolean)
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase()
-  return cleaned.slice(0, 2) || "?"
 }
