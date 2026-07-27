@@ -18,6 +18,7 @@ import {
   useCancelRoutineRun,
 } from "@/components/features/routines/live-run-row"
 import { formatStepCost } from "@/components/features/routines/routine-cost-format"
+import { SourcePill } from "@/components/features/activity/source-pill"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { useActiveRuns, type ActiveRunItem } from "@/hooks/use-active-runs"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -292,6 +293,7 @@ function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void 
       <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
         {run.pipeline_name || run.pipeline_slug}
       </span>
+      <SourcePill run={run} />
       <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {run.status} · {relTime(run.ended_at || run.started_at)}
         {run.cost_usd > 0 ? ` · ${formatStepCost(run.cost_usd)}` : ""}

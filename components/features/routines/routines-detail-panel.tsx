@@ -23,6 +23,8 @@ import {
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { usePipelineRunRecords, isActiveRunStatus } from "@/hooks/use-pipeline-run-records"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
+import { credentialTypeLabel, extractMissingCredentials } from "@/lib/credential-labels"
+import { extractProblemDetail } from "@/lib/problem-details"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
@@ -203,13 +205,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           } catch {
             parsed = null
           }
+          const detail = extractProblemDetail(parsed)
           const missing = extractMissingIntegrations(parsed)
           if (missing.length > 0) {
             const labels = missing.map(integrationLabel)
-            const detail =
-              parsed && typeof parsed === "object" && typeof (parsed as Record<string, unknown>).detail === "string"
-                ? String((parsed as Record<string, unknown>).detail)
-                : undefined
             toast.error(
               `This routine needs the ${labels.join(", ")} integration${labels.length > 1 ? "s" : ""} — not connected for this crew`,
               {
@@ -218,6 +217,26 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 action: {
                   label: "Manage integrations",
                   onClick: () => router.push("/integrations"),
+                },
+                duration: 10000,
+              },
+            )
+            return
+          }
+          // Same actionable UX for a missing vault credential (422 carries
+          // `missing_credentials` instead) — name the credential type and
+          // point at the vault, never a raw JSON toast.
+          const missingCreds = extractMissingCredentials(parsed)
+          if (missingCreds.length > 0) {
+            const labels = missingCreds.map(credentialTypeLabel)
+            toast.error(
+              `This routine needs ${labels.length > 1 ? "" : "a "}${labels.join(", ")} credential${labels.length > 1 ? "s" : ""} — not in this crew's vault`,
+              {
+                description:
+                  detail ?? "Add the missing credential to the crew that runs this routine, then run it again.",
+                action: {
+                  label: "Manage credentials",
+                  onClick: () => router.push("/credentials"),
                 },
                 duration: 10000,
               },
