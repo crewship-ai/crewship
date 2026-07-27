@@ -84,7 +84,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -132,7 +132,7 @@ var Routines = []RoutineDef{
 			// double as an SSRF lab. Workspace admins broaden via the editor.
 			"egress_targets": []string{"httpbin.org"},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -190,7 +190,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -246,7 +246,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -306,7 +306,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.002,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -369,7 +369,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.004,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -417,7 +417,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -464,7 +464,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -512,7 +512,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -569,7 +569,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.005,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -639,7 +639,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -702,7 +702,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -759,7 +759,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -816,7 +816,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.002,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -965,7 +965,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.003,
 			"egress_targets":     []string{"httpbin.org"},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{
@@ -1040,7 +1040,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
 				{"name": "action", "type": "string", "required": false, "default": "Restart the auth-svc pods in production"},
@@ -1143,7 +1143,7 @@ var Routines = []RoutineDef{
 			"estimated_cost_usd": 0.006,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
-				{"type": AnthropicCredentialType(), "scope": "any"},
+				AnthropicCredentialRequirement(),
 			},
 			"inputs":  []map[string]interface{}{},
 			"outputs": []map[string]interface{}{{"name": "swept", "type": "string"}},
