@@ -70,7 +70,9 @@ Without these, the mailer falls back to `mailer.Disabled` — installs without e
 Google OAuth is **switched off**. `/api/v1/auth/google/redirect` and `/callback` are no longer registered, so setting `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` does nothing. `/api/v1/auth/google/status` still answers `{"enabled": false}` so an older frontend build gets a definite answer rather than an error.
 
 <Warning>
-Accounts created by the old flow have no password — Google was their only credential. They cannot sign in until an admin adds them again (Settings → Members → Add member) with an email that has no account yet, or until they use **Forgot password**, which works because the address is on file.
+Accounts created by the old flow have no password — Google was their only credential. Their route back in is **Forgot password**, which works because the address is on file.
+
+Re-adding them through Settings → Members does *not* help: the linked provider row makes the account count as claimed, so no setup link is issued. That is deliberate. Such an account is genuinely in use by somebody, and minting a password-setting link for it would be a takeover, not a recovery.
 </Warning>
 
 ### 4. Bootstrap the first admin
@@ -97,7 +99,7 @@ Adding someone needs no mail server. The workspace admin creates the account and
   <Tab title="UI">
     **Settings → Members → Add member.** Enter their email and role. Crewship creates the account if the email is new, adds it to the workspace, and shows a setup link. Copy it and send it however you like — Slack, SMS, in person.
 
-    The link is shown **once**. The token is stored hashed, so it cannot be displayed again; if it goes astray, add the person again to issue a fresh one (which invalidates the old).
+    The link is shown **once**. The token is stored hashed, so it cannot be displayed again; if it goes astray before it is used, add the person again to issue a fresh one (which invalidates the old). Once they have set a password the account is claimed, and re-adding stops issuing links — see below.
   </Tab>
   <Tab title="CLI">
     ```bash
@@ -110,9 +112,25 @@ Adding someone needs no mail server. The workspace admin creates the account and
 
 The link lands on `/reset-password`, the same page a forgotten-password flow uses, and expires after **7 days** — long enough to send on a Friday and be opened on Monday. (An ordinary password-reset link is 30 minutes, because the person requesting it is waiting at the screen.)
 
-If the email already belongs to an account, that person is added to the workspace and **no setup link is issued** — they sign in with the password they already have. Issuing one would hand whoever holds the link the ability to change that password, and creating a workspace is self-serve.
+If the email already belongs to a **claimed** account, that person is added to the workspace and **no setup link is issued** — they sign in with the credential they already have. Issuing one would hand whoever holds the link the ability to change that credential, and creating a workspace is self-serve.
 
-Requires **ADMIN** or **OWNER**. `CREWSHIP_PUBLIC_URL` must be set — without it there is no link to build, and Crewship refuses rather than creating an account nobody can reach.
+An account counts as claimed if any one of these is true:
+
+| Signal | Meaning |
+|---|---|
+| A password is set | Ordinary credential login |
+| A linked OAuth row exists | Somebody signs in through a provider — this is what covers legacy Google-only accounts, which never had a password |
+| The email address is verified | The address was proven at some point |
+
+An account with **none** of them is unclaimed — that is exactly what this endpoint creates. Re-adding an unclaimed person issues a fresh link and invalidates the previous one, which is the supported way to recover a link that went astray before it was used.
+
+Requires **ADMIN** or **OWNER**. The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
+
+<Note>
+This is the one place the origin is *not* taken from `CREWSHIP_PUBLIC_URL` first, which is worth explaining because [the rule stated in the overview](#overview) is otherwise absolute.
+
+A `/forgot` reset link is built for an **unauthenticated** request and then **mailed to somebody else**, so trusting the `Host` header would let an attacker POST `/forgot` and have Crewship mail the victim a working link pointing at an attacker-controlled domain. Setup links have neither property: the request is ADMIN-authenticated, and the link is returned in the response to that same admin's own browser. A forged `Host` there only corrupts the link the forger receives — there is nobody else to mislead and nothing to escalate. Requiring an env var for it would mean a self-hosted install could not add a user without editing the environment first, which is the whole point of this flow.
+</Note>
 
 <Note>
 Once a mailer is configured, the same action can also email the link. The copyable link stays as the fallback that works on an air-gapped or mail-less instance.
