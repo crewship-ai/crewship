@@ -122,7 +122,21 @@ An account counts as claimed if any one of these is true:
 | A linked OAuth row exists | Somebody signs in through a provider — this is what covers legacy Google-only accounts, which never had a password |
 | The email address is verified | The address was proven at some point |
 
-An account with **none** of them is unclaimed — that is exactly what this endpoint creates. Re-adding an unclaimed person issues a fresh link and invalidates the previous one, which is the supported way to recover a link that went astray before it was used.
+An account with **none** of them is unclaimed — that is exactly what this endpoint creates. Adding an unclaimed person issues a fresh link and invalidates the previous one, which is how you recover a link that went astray before it was used.
+
+<Warning>
+Recovering a link takes two steps, because membership is checked before any of this: adding someone who is **already a member** returns `409` and issues nothing, whatever their account looks like.
+
+So remove them from the workspace first, then add them again:
+
+```bash
+crewship workspace member list                  # find their member id
+crewship workspace member remove <member-id>
+crewship workspace member invite them@example.com --role MEMBER
+```
+
+They keep the same user account throughout — only the membership row is recreated.
+</Warning>
 
 Requires **ADMIN** or **OWNER**. The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
 

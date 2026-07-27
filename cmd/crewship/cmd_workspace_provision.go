@@ -60,13 +60,24 @@ var workspaceMemberInviteCmd = &cobra.Command{
 			return err
 		}
 
-		if out.CreatedUser {
+		// Two independent facts come back, and this used to conflate them.
+		// `created_user` says whether a row had to be made; `setup_url` says
+		// whether there is a link to hand over. An account that EXISTS but is
+		// unclaimed — no password, no linked provider, no verified address,
+		// the exact shape this endpoint creates — answers false and a fresh
+		// link, because re-issuing is how you recover a link that went astray
+		// before it was used. Branching on `created_user` dropped that link on
+		// the floor and told the operator the person signs in with a password
+		// they do not have. See ProvisionMember for the claimed predicate.
+		switch {
+		case out.CreatedUser:
 			cli.PrintSuccess(fmt.Sprintf("Created %s as %s.", out.Email, out.Role))
-		} else {
-			// No link for an account somebody already controls — one would
-			// reset their password, and this command prints it to whoever
-			// ran it. See ProvisionMember.
-			cli.PrintSuccess(fmt.Sprintf("Added existing account %s as %s. They sign in with their existing password.", out.Email, out.Role))
+		case out.SetupURL != "":
+			cli.PrintSuccess(fmt.Sprintf("Added %s as %s — the account existed but had never been set up, so here is a fresh link.", out.Email, out.Role))
+		default:
+			// Genuinely claimed: no link, and one would reset the credential
+			// of somebody who is already using this account.
+			cli.PrintSuccess(fmt.Sprintf("Added existing account %s as %s. They sign in with the credential they already have.", out.Email, out.Role))
 			return nil
 		}
 		// Printed on its own line, unadorned, so it survives a copy-paste and
