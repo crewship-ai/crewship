@@ -43,12 +43,12 @@ export interface EmptyRosterProps {
 }
 
 const STATUS_COLORS: Record<string, { label: string; dot: string; text: string; pulse?: boolean }> = {
-  RUNNING: { label: "Running", dot: "bg-emerald-400", text: "text-emerald-400", pulse: true },
-  IDLE: { label: "Idle", dot: "bg-zinc-500", text: "text-muted-foreground" },
-  ERROR: { label: "Error", dot: "bg-red-500", text: "text-red-400" },
-  STOPPED: { label: "Stopped", dot: "bg-amber-500", text: "text-amber-400" },
-  PENDING_REVIEW: { label: "Pending review", dot: "bg-amber-400", text: "text-amber-300" },
-  EXPIRED: { label: "Expired", dot: "bg-slate-500", text: "text-slate-400" },
+  RUNNING: { label: "Running", dot: "bg-success", text: "text-success", pulse: true },
+  IDLE: { label: "Idle", dot: "bg-muted-foreground", text: "text-muted-foreground" },
+  ERROR: { label: "Error", dot: "bg-destructive", text: "text-destructive" },
+  STOPPED: { label: "Stopped", dot: "bg-warn", text: "text-warn" },
+  PENDING_REVIEW: { label: "Pending review", dot: "bg-warn", text: "text-warn" },
+  EXPIRED: { label: "Expired", dot: "bg-muted-foreground", text: "text-muted-foreground" },
 }
 
 function timeSince(iso: string | null | undefined): string {

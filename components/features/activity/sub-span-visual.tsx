@@ -67,9 +67,9 @@ export function SubSpanIcon({
 }
 
 export const SUB_SPAN_STATUS_COLOR: Record<SubSpanStatus, string> = {
-  ok: "text-emerald-300",
-  error: "text-rose-300",
-  running: "text-amber-300",
+  ok: "text-success",
+  error: "text-destructive",
+  running: "text-warn",
 }
 
 // Waterfall bar gradient per kind — mirrors the mockup's lane colors.

@@ -110,9 +110,9 @@ const STATUS_DOT_COLOR: Record<DerivedStatus, string> = {
   // #1162: migrated to the #749 semantic palette (bg-info/bg-success/bg-warn).
   Detected: "bg-info",
   Connected: "bg-success",
-  Error: "bg-red-500",
+  Error: "bg-destructive",
   Stale: "bg-warn",
-  Pending: "bg-amber-400",
+  Pending: "bg-warn",
 }
 
 

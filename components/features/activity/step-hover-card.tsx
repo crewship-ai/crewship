@@ -69,10 +69,10 @@ function Header({ status, step }: { status: StepStatus; step: TraceStep }) {
 
 const STATUS_COLOR: Record<StepStatus, string> = {
   pending: "text-muted-foreground/60",
-  running: "text-blue-300",
-  waiting: "text-amber-300",
-  success: "text-emerald-300",
-  failed: "text-rose-300",
+  running: "text-primary",
+  waiting: "text-warn",
+  success: "text-success",
+  failed: "text-destructive",
   skipped: "text-muted-foreground/40",
 }
 
