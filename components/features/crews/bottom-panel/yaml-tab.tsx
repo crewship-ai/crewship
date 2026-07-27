@@ -152,10 +152,10 @@ function HighlightedYaml({ yaml }: { yaml: string }) {
     }
 
     if (rest.startsWith("- ")) {
-      tokens.push(<span key="bullet" className="text-zinc-500">- </span>)
+      tokens.push(<span key="bullet" className="text-muted-foreground">- </span>)
       rest = rest.slice(2)
     } else if (rest === "-") {
-      tokens.push(<span key="bullet" className="text-zinc-500">-</span>)
+      tokens.push(<span key="bullet" className="text-muted-foreground">-</span>)
       rest = ""
     }
 
@@ -163,7 +163,7 @@ function HighlightedYaml({ yaml }: { yaml: string }) {
     if (kv) {
       const [, key, sp, value] = kv
       tokens.push(<span key="key" className="text-sky-300">{key}</span>)
-      tokens.push(<span key="colon" className="text-zinc-500">:</span>)
+      tokens.push(<span key="colon" className="text-muted-foreground">:</span>)
       if (sp) tokens.push(<span key="sp">{sp}</span>)
       if (value.length > 0) {
         tokens.push(...renderYamlValue(value, () => { inString = true }, findUnescapedQuote))

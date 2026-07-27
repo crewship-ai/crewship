@@ -96,7 +96,7 @@ const statusConfig: Record<string, { label: string; className: string; icon?: Re
   // pill stay in lockstep without two different code paths.
   EXPIRED: {
     label: "Expired",
-    className: "bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400",
+    className: "bg-muted text-muted-foreground dark:bg-muted dark:text-muted-foreground",
     icon: Ghost,
   },
 }

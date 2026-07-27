@@ -65,7 +65,7 @@ export function getChatFileIcon(name: string, isDir: boolean, isOpen?: boolean) 
     case "md": return <FileText className="h-3.5 w-3.5 text-blue-300" />
     case "sh": case "bash": return <Terminal className="h-3.5 w-3.5 text-success" />
     case "zip": case "tar": case "gz": return <Box className="h-3.5 w-3.5 text-purple" />
-    default: return <FileIcon className="h-3.5 w-3.5 text-gray-400" />
+    default: return <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />
   }
 }
 

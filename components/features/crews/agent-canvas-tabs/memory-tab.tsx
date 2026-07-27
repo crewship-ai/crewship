@@ -241,7 +241,7 @@ function MemoryTierEditor({
               ariaLabel={`${title} (read-only)`}
             />
           ) : (
-            <pre className="rounded border border-white/10 bg-zinc-900/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
+            <pre className="rounded border border-white/10 bg-muted/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
               (empty)
             </pre>
           )
@@ -293,7 +293,7 @@ function MemoryTierEditor({
                     setEditing(null)
                   }}
                   disabled={saving || editing.length === 0 || over}
-                  className="rounded bg-success px-3 py-1.5 text-sm text-zinc-950 hover:bg-success disabled:opacity-50"
+                  className="rounded bg-success px-3 py-1.5 text-sm text-muted-foreground hover:bg-success disabled:opacity-50"
                 >
                   {saving ? "Saving..." : "Save"}
                 </button>
@@ -574,7 +574,7 @@ function PersonaPanel({
               {crewPersona.bytes}/{PERSONA_CAP_BYTES} B
             </span>
           </header>
-          <pre className="rounded border border-white/10 bg-zinc-900/40 p-3 text-sm whitespace-pre-wrap min-h-[4rem]">
+          <pre className="rounded border border-white/10 bg-muted/40 p-3 text-sm whitespace-pre-wrap min-h-[4rem]">
             {crewPersona.content || "(no crew persona configured)"}
           </pre>
           <p className="text-xs text-muted-foreground">

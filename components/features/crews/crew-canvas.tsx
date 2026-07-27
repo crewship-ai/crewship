@@ -255,7 +255,7 @@ export function CrewCanvas({
             <h1 className="text-2xl font-semibold">
               <EditableField value={crew.name} onSave={(v) => patch({ name: v })} ariaLabel="Crew name" />
             </h1>
-            <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-800 text-foreground/80 border border-white/10">
+            <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted text-foreground/80 border border-white/10">
               Crew
             </span>
             {/* #1380 — surface the effective isolation posture on the surface
@@ -263,13 +263,13 @@ export function CrewCanvas({
             <CrewPrivilegedBadge devcontainerConfig={crew.devcontainer_config} />
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-zinc-900 border border-white/8">
+            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-muted border border-white/8">
               {crew.slug}
             </code>
             {crew.issue_prefix && (
               <>
                 <span className="text-muted-foreground-soft">·</span>
-                <span className="text-xs">prefix <code className="font-mono uppercase text-foreground/80 px-1 py-0.5 rounded bg-zinc-900 border border-white/8">{crew.issue_prefix}</code></span>
+                <span className="text-xs">prefix <code className="font-mono uppercase text-foreground/80 px-1 py-0.5 rounded bg-muted border border-white/8">{crew.issue_prefix}</code></span>
               </>
             )}
             <span className="text-muted-foreground-soft">·</span>

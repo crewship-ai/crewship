@@ -110,7 +110,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
         ) : (
           assigned.map((row) => (
             <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
-              <div className="w-8 h-8 rounded-lg bg-zinc-800 grid place-items-center text-foreground/60 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-muted grid place-items-center text-foreground/60 shrink-0">
                 <span className="text-xs">{(row.skill.display_name ?? row.skill.name).slice(0, 2).toUpperCase()}</span>
               </div>
               <div className="flex-1 min-w-0">

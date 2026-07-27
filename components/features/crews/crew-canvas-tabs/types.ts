@@ -102,6 +102,6 @@ export function issueStatusColor(status: string | undefined): string {
   if (s.includes("review")) return "bg-warn"
   if (s.includes("done") || s.includes("closed") || s.includes("complete")) return "bg-success"
   if (s.includes("blocked") || s.includes("error") || s.includes("cancel")) return "bg-destructive"
-  if (s.includes("todo")) return "bg-zinc-400"
-  return "bg-zinc-600"
+  if (s.includes("todo")) return "bg-muted-foreground"
+  return "bg-muted-foreground"
 }

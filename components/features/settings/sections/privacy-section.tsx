@@ -191,7 +191,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
                   </span>
                 </div>
                 {c.content && (
-                  <pre className="mt-2 whitespace-pre-wrap text-sm bg-zinc-900/40 p-2 rounded">
+                  <pre className="mt-2 whitespace-pre-wrap text-sm bg-muted/40 p-2 rounded">
                     {c.content}
                   </pre>
                 )}

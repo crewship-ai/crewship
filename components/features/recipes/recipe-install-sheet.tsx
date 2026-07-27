@@ -215,7 +215,7 @@ function PreviewStep({ preview }: { preview: PreviewResp }) {
   const r = preview.recipe
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-white/10 bg-zinc-950 p-4">
+      <div className="rounded-md border border-white/10 bg-background p-4">
         <div className="text-sm font-medium">{r.name}</div>
         <div className="text-xs text-muted-foreground mt-1">{r.description}</div>
       </div>
@@ -287,7 +287,7 @@ function CredentialsStep({
   return (
     <div className="space-y-4">
       {needed.map((c) => (
-        <div key={c.env_var_name} className="space-y-2 rounded-md border border-white/10 bg-zinc-950 p-3">
+        <div key={c.env_var_name} className="space-y-2 rounded-md border border-white/10 bg-background p-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium font-mono">{c.env_var_name}</span>
             <Badge variant="outline" className="text-[10px]">{c.label}</Badge>

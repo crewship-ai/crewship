@@ -26,7 +26,7 @@ const statusConfig: Record<string, { color: string; label: string; icon: React.E
   REVIEW: { color: "text-warn bg-warn/10 border-warn/30", label: "In Review", icon: ChevronRight },
   COMPLETED: { color: "text-success bg-success/10 border-success/30", label: "Completed", icon: CheckCircle2 },
   FAILED: { color: "text-destructive bg-destructive/10 border-destructive/30", label: "Failed", icon: AlertTriangle },
-  CANCELLED: { color: "text-gray-400 bg-gray-500/10 border-gray-500/30", label: "Cancelled", icon: Square },
+  CANCELLED: { color: "text-muted-foreground bg-muted-foreground/10 border-border/30", label: "Cancelled", icon: Square },
 }
 
 function LiveDuration({ startedAt }: { startedAt: string }) {

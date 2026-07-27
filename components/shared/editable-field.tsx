@@ -103,7 +103,7 @@ export function EditableField({
               className="appearance-none bg-transparent border border-transparent hover:border-white/10 rounded px-2 pr-6 py-0.5 text-sm text-foreground/90 cursor-pointer focus:outline-none focus:border-white/15"
             >
               {options.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-zinc-900">
+                <option key={opt.value} value={opt.value} className="bg-muted">
                   {opt.label}
                 </option>
               ))}

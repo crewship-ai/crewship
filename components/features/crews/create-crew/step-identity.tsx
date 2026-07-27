@@ -67,7 +67,7 @@ export function StepIdentity({ state, setState }: Props) {
                 onChange={(e) => onNameChange(e.target.value)}
                 autoFocus
                 placeholder="Engineering"
-                className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
+                className="mt-1.5 w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
               />
             </div>
             <div>
@@ -77,7 +77,7 @@ export function StepIdentity({ state, setState }: Props) {
                 value={state.slug}
                 onChange={(e) => setState({ slug: e.target.value, slugTouched: true })}
                 placeholder="engineering"
-                className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
+                className="mt-1.5 w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
               />
             </div>
           </div>
@@ -94,7 +94,7 @@ export function StepIdentity({ state, setState }: Props) {
               value={state.description}
               onChange={(e) => setState({ description: e.target.value })}
               placeholder="What does this crew do, in one line?"
-              className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
+              className="mt-1.5 w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
             />
           </div>
 

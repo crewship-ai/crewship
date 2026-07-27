@@ -128,7 +128,7 @@ export function RotationDialog({
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="Paste the new token..."
-                className="w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 pr-10 text-sm font-mono outline-none focus:border-primary"
+                className="w-full bg-background border border-white/15 rounded-md px-3 py-2 pr-10 text-sm font-mono outline-none focus:border-primary"
               />
               <button
                 type="button"
@@ -171,7 +171,7 @@ export function RotationDialog({
                   type="button"
                   onClick={() => setGrace(m)}
                   className={cn(
-                    "rounded-md border bg-zinc-950 p-2.5 text-left text-xs transition-all",
+                    "rounded-md border bg-background p-2.5 text-left text-xs transition-all",
                     grace === m
                       ? "border-primary ring-2 ring-primary/20"
                       : "border-white/10 hover:border-white/25",
@@ -199,7 +199,7 @@ export function RotationDialog({
                   aria-label="Grace period in hours"
                   value={customHours}
                   onChange={(e) => setCustomHours(Number(e.target.value))}
-                  className="w-24 bg-zinc-950 border border-white/15 rounded-md px-2 py-1 text-sm outline-none focus:border-primary"
+                  className="w-24 bg-background border border-white/15 rounded-md px-2 py-1 text-sm outline-none focus:border-primary"
                 />
                 <span className="text-xs text-muted-foreground">hours (max 168 = 7 days)</span>
               </div>

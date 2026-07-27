@@ -71,11 +71,11 @@ export interface AgentCanvasProps {
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
   RUNNING: { label: "running", className: "bg-success/15 text-success border-success/30", pulse: true },
-  IDLE: { label: "idle", className: "bg-zinc-700/40 text-muted-foreground border-white/10" },
+  IDLE: { label: "idle", className: "bg-muted/40 text-muted-foreground border-white/10" },
   ERROR: { label: "error", className: "bg-destructive/15 text-destructive border-destructive/30" },
   STOPPED: { label: "stopped", className: "bg-warn/15 text-warn border-warn/30" },
   PENDING_REVIEW: { label: "pending review", className: "bg-warn/15 text-warn border-warn/30" },
-  EXPIRED: { label: "expired", className: "bg-slate-500/15 text-slate-400 border-slate-500/30" },
+  EXPIRED: { label: "expired", className: "bg-muted-foreground/15 text-muted-foreground border-border/30" },
 }
 
 /**
@@ -343,7 +343,7 @@ export function AgentCanvas({
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap mb-3">
-            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-zinc-900 border border-white/8">
+            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-muted border border-white/8">
               {agent.slug}
             </code>
             {agent.role_title && (

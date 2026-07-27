@@ -55,7 +55,7 @@ export interface CreateAgentDialogProps {
  *  Crews dialogs use; small enough to inline rather than carve out a
  *  separate component. */
 const INPUT_CLASS =
-  "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15"
+  "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
@@ -365,7 +365,7 @@ export function CreateAgentDialog({
                   aria-label="Customize avatar"
                   aria-haspopup="dialog"
                   aria-expanded={pickerOpen}
-                  className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 hover:border-primary/50 transition-colors"
+                  className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-muted hover:border-primary/50 transition-colors"
                 >
                   <img src={avatarUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
                   <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
@@ -491,7 +491,7 @@ PERSONALITY: …
 RESPONSIBILITIES: …
 WORK STYLE: …`}
                 spellCheck={false}
-                className="w-full min-h-[140px] max-h-[260px] resize-y bg-zinc-950 border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                className="w-full min-h-[140px] max-h-[260px] resize-y bg-background border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
               <p className="text-[10.5px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
                 {isPromptFromTemplate && draft.selectedPersona ? (

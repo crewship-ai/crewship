@@ -78,7 +78,7 @@ export const MessageContent = ({
       "group-[.is-user]:shadow-sm",
       // Assistant bubble — anchored left with bottom-left tail.
       "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-bl-sm",
-      "group-[.is-assistant]:bg-zinc-800/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
+      "group-[.is-assistant]:bg-muted/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
       "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3 group-[.is-assistant]:text-foreground",
       "group-[.is-assistant]:shadow-sm",
       className

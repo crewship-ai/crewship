@@ -71,7 +71,7 @@ export function AdvancedSection({
             <div className="flex flex-wrap items-center gap-1">
               {(agent.cli_tools && agent.cli_tools.length > 0) ? (
                 agent.cli_tools.slice(0, 6).map((t) => (
-                  <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-foreground/80">
+                  <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-muted border border-white/10 text-foreground/80">
                     {t}
                   </span>
                 ))
@@ -91,7 +91,7 @@ export function AdvancedSection({
               }}
               className={cn(
                 "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
-                agent.memory_enabled ? "bg-success" : "bg-zinc-700",
+                agent.memory_enabled ? "bg-success" : "bg-muted",
               )}
               role="switch"
               aria-checked={agent.memory_enabled}

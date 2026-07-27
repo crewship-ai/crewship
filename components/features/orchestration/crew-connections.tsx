@@ -216,7 +216,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                   <Badge
                     variant="outline"
                     className={cn("text-[10px]",
-                      conn.status === "active" ? "border-success/30 text-success" : "border-gray-500/30 text-gray-400"
+                      conn.status === "active" ? "border-success/30 text-success" : "border-border/30 text-muted-foreground"
                     )}
                   >
                     {conn.status}

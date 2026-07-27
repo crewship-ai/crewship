@@ -83,8 +83,8 @@ const statusConfig = {
   },
   queued: {
     icon: Loader2,
-    iconClass: "text-slate-400",
-    dot: "bg-slate-400",
+    iconClass: "text-muted-foreground",
+    dot: "bg-muted-foreground",
     pulse: false,
     border: "border-border",
     bg: "bg-[#0f1115]/70",

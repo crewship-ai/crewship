@@ -83,7 +83,7 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
               markerHeight="6"
               orient="auto"
             >
-              <path d="M0,-5L10,0L0,5" className="fill-gray-400" />
+              <path d="M0,-5L10,0L0,5" className="fill-muted-foreground" />
             </marker>
           </defs>
           {layout.edges.map((e, i) => (
@@ -95,7 +95,7 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
               y2={e.y2}
               className={cn(
                 "stroke-2",
-                e.upstreamRunning ? "stroke-primary" : "stroke-gray-400",
+                e.upstreamRunning ? "stroke-primary" : "stroke-muted-foreground",
               )}
               strokeDasharray={e.upstreamRunning ? undefined : "4 4"}
               markerEnd={`url(#${e.upstreamRunning ? blueMarkerId : grayMarkerId})`}

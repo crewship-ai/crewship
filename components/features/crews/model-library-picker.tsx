@@ -274,7 +274,7 @@ function BadgeChip({ badge, legacy }: { badge: string; legacy?: boolean }) {
       className={cn(
         "rounded px-1.5 py-px text-[10px] font-medium shrink-0",
         legacy
-          ? "bg-zinc-700/40 text-zinc-400"
+          ? "bg-muted/40 text-muted-foreground"
           : badge === "Latest" || badge === "Default"
             ? "bg-blue-500/15 text-blue-300"
             : badge === "Reasoning"
@@ -285,7 +285,7 @@ function BadgeChip({ badge, legacy }: { badge: string; legacy?: boolean }) {
                   ? "bg-success/15 text-success"
                   : badge === "Custom"
                     ? "bg-warn/15 text-warn"
-                    : "bg-zinc-500/15 text-zinc-300",
+                    : "bg-muted-foreground/15 text-muted-foreground",
       )}
     >
       {badge}

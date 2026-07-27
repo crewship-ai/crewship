@@ -57,7 +57,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 </div>
                 <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
                   {a.llm_model && (
-                    <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 truncate">
+                    <span className="px-1.5 py-0.5 rounded bg-muted border border-white/10 truncate">
                       {a.llm_model}
                     </span>
                   )}

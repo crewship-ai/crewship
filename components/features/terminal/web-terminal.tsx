@@ -38,7 +38,7 @@ function StatusIndicator({ status }: { status: TerminalStatus }) {
     case "error":
       return <WifiOff className="h-3.5 w-3.5 text-destructive" />
     default:
-      return <span className="h-2 w-2 rounded-full bg-neutral-500 inline-block" />
+      return <span className="h-2 w-2 rounded-full bg-muted-foreground inline-block" />
   }
 }
 
@@ -85,22 +85,22 @@ export function WebTerminal({
 
   return (
     <div
-      className={`flex flex-col bg-[#0a0a0a] border border-neutral-800 rounded-lg overflow-hidden ${
+      className={`flex flex-col bg-[#0a0a0a] border border-border rounded-lg overflow-hidden ${
         isFullscreen ? "fixed inset-0 z-50" : "h-[400px]"
       }`}
     >
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-neutral-900 border-b border-neutral-800 shrink-0">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted border-b border-border shrink-0">
         <div className="flex items-center gap-2">
-          <TerminalSquare className="h-4 w-4 text-neutral-400" />
+          <TerminalSquare className="h-4 w-4 text-muted-foreground" />
           <StatusIndicator status={status} />
-          <span className="text-xs text-neutral-400">{targetLabel}</span>
+          <span className="text-xs text-muted-foreground">{targetLabel}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
           {/* Agent selector */}
           <Select value={agentSlug} onValueChange={(val) => { setAgentSlug(val); handleReconnect() }}>
-            <SelectTrigger aria-label="Terminal target" className="h-6 w-[140px] text-xs bg-neutral-800 border-neutral-700">
+            <SelectTrigger aria-label="Terminal target" className="h-6 w-[140px] text-xs bg-muted border-border">
               <SelectValue placeholder="Crew Shared" />
             </SelectTrigger>
             <SelectContent>
@@ -115,7 +115,7 @@ export function WebTerminal({
 
           {(status === "disconnected" || status === "error") && (
             <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Reconnect terminal" onClick={handleReconnect}>
-              <TerminalSquare className="h-3.5 w-3.5 text-neutral-400" />
+              <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
           )}
 
@@ -127,15 +127,15 @@ export function WebTerminal({
             onClick={() => setIsFullscreen(!isFullscreen)}
           >
             {isFullscreen ? (
-              <Minimize2 className="h-3.5 w-3.5 text-neutral-400" />
+              <Minimize2 className="h-3.5 w-3.5 text-muted-foreground" />
             ) : (
-              <Maximize2 className="h-3.5 w-3.5 text-neutral-400" />
+              <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
             )}
           </Button>
 
           {onClose && (
             <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Close terminal" onClick={handleClose}>
-              <X className="h-3.5 w-3.5 text-neutral-400" />
+              <X className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
           )}
         </div>

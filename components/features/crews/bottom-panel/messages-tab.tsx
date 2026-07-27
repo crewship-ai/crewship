@@ -84,7 +84,7 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
     ? (m.to_agent_name ?? "unknown")
     : m.from_agent_name
   return (
-    <div className="rounded border border-white/10 bg-zinc-900/40 px-3 py-2 space-y-1.5">
+    <div className="rounded border border-white/10 bg-muted/40 px-3 py-2 space-y-1.5">
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className={cn("text-[10px] px-1.5 py-px rounded inline-flex items-center gap-0.5", directionChip.cls)}>
           <span className="font-mono">{directionChip.icon}</span>
@@ -98,7 +98,7 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
             ⚠ Escalation
           </span>
         )}
-        <span className="text-[10px] px-1.5 py-px rounded bg-zinc-800 text-muted-foreground">
+        <span className="text-[10px] px-1.5 py-px rounded bg-muted text-muted-foreground">
           Peer query
         </span>
         <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">

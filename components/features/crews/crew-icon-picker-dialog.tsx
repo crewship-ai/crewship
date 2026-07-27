@@ -118,10 +118,10 @@ export function CrewIconPickerDialog({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search icons…"
-              className="w-full bg-zinc-950 border border-white/15 rounded pl-7 pr-2 py-1.5 text-xs outline-none focus:border-primary"
+              className="w-full bg-background border border-white/15 rounded pl-7 pr-2 py-1.5 text-xs outline-none focus:border-primary"
             />
           </div>
-          <div className="grid grid-cols-10 gap-1 max-h-[260px] overflow-y-auto p-1 rounded bg-zinc-950/30 border border-white/5">
+          <div className="grid grid-cols-10 gap-1 max-h-[260px] overflow-y-auto p-1 rounded bg-background/30 border border-white/5">
             {filteredIcons.map((i) => {
               const Icon = i.icon
               const active = draftIcon === i.name

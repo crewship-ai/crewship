@@ -54,7 +54,7 @@ export function DockerTab() {
               <span
                 className={cn(
                   "w-1.5 h-1.5 rounded-full",
-                  c.status?.toLowerCase().includes("running") ? "bg-success" : "bg-zinc-500",
+                  c.status?.toLowerCase().includes("running") ? "bg-success" : "bg-muted-foreground",
                 )}
               />
               <code className="text-xs">{c.name}</code>

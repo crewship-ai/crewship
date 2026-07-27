@@ -327,7 +327,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                           "flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors",
                           dirty && !saving
                             ? "bg-primary hover:bg-primary text-white border-primary"
-                            : "bg-zinc-800 text-muted-foreground border-white/10 cursor-default",
+                            : "bg-muted text-muted-foreground border-white/10 cursor-default",
                         )}
                       >
                         {saving

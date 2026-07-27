@@ -25,7 +25,7 @@ const META: Record<TrustTier, { label: string; tooltip: string; icon: React.Comp
     label: "Community",
     tooltip: "Not verified by Anthropic or Crewship. Review the source before installing.",
     icon: Globe2,
-    cls: "border-white/15 text-muted-foreground bg-zinc-950",
+    cls: "border-white/15 text-muted-foreground bg-background",
   },
 }
 

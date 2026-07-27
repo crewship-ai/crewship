@@ -330,7 +330,7 @@ export function CredentialDetailSheet({
                 {credential.agent_names.length > 0 ? (
                   <ul className="space-y-1.5">
                     {credential.agent_names.map((name) => (
-                      <li key={name} className="rounded-md border border-white/10 bg-zinc-950 px-3 py-2 text-sm flex items-center gap-2">
+                      <li key={name} className="rounded-md border border-white/10 bg-background px-3 py-2 text-sm flex items-center gap-2">
                         <Users className="h-3.5 w-3.5 text-muted-foreground" />
                         {name}
                       </li>
@@ -361,7 +361,7 @@ export function CredentialDetailSheet({
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.12, delay: idx * 0.015 }}
-                        className="rounded-md border border-white/10 bg-zinc-950 px-3 py-2 text-xs"
+                        className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <Badge variant="outline" className="text-[10px] px-1.5 font-mono">{e.event_type}</Badge>
@@ -503,7 +503,7 @@ export function CredentialDetailSheet({
                     </div>
                     <ul className="space-y-1">
                       {rotations.slice(0, 5).map((r) => (
-                        <li key={r.id} className="text-xs flex items-center gap-2 px-2 py-1 rounded border border-white/10 bg-zinc-950">
+                        <li key={r.id} className="text-xs flex items-center gap-2 px-2 py-1 rounded border border-white/10 bg-background">
                           <Badge
                             variant="outline"
                             className={cn(

@@ -64,7 +64,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
             onChange={(e) => setSearch(e.target.value)}
             placeholder='Search personas… (e.g. "data analyst", "test", "research")'
             aria-label="Search personas by name, role, or category"
-            className="w-full pl-8 pr-3 py-1.5 bg-zinc-950 border border-white/[0.15] rounded-md text-[12.5px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+            className="w-full pl-8 pr-3 py-1.5 bg-background border border-white/[0.15] rounded-md text-[12.5px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
         </div>
       </div>
@@ -201,7 +201,7 @@ function PersonaRow({
           : "border-white/[0.08] bg-card hover:border-white/[0.15] hover:bg-white/[0.03]",
       )}
     >
-      <span className="w-9 h-9 rounded-lg overflow-hidden border border-white/[0.08] bg-zinc-900 shrink-0">
+      <span className="w-9 h-9 rounded-lg overflow-hidden border border-white/[0.08] bg-muted shrink-0">
         <img
           src={getAgentAvatarUrl(persona.suggestedSlug, persona.avatarStyle)}
           alt=""

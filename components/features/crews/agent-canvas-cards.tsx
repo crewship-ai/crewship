@@ -100,7 +100,7 @@ function PeersCard({ messages }: { messages: PeerMessageRow[] }) {
       <div className="divide-y divide-white/5">
         {messages.slice(0, 4).map((m, i) => (
           <div key={m.id ?? i} className="px-4 py-2.5 flex items-center gap-3">
-            <div className="w-7 h-7 rounded-full bg-zinc-700 grid place-items-center text-[10px] shrink-0">
+            <div className="w-7 h-7 rounded-full bg-muted grid place-items-center text-[10px] shrink-0">
               {m.from_agent_name?.[0] ?? "?"}
             </div>
             <div className="flex-1 min-w-0">

@@ -121,7 +121,7 @@ export function SessionsSidebar({
   return (
     <aside className="border-r border-white/8 bg-card flex flex-col min-h-0">
       <div className="px-3 py-2 border-b border-white/8 flex items-center gap-2">
-        <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-900 border border-white/10">
+        <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-muted border border-white/10">
           <Search className="h-3 w-3 text-muted-foreground" />
           <input
             type="search"
@@ -205,7 +205,7 @@ export function SessionsSidebar({
                         "px-1 py-0.5 rounded",
                         s.status === "ACTIVE"
                           ? "bg-success/15 text-success"
-                          : "bg-zinc-800 text-muted-foreground",
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       {s.status?.toLowerCase() || "active"}

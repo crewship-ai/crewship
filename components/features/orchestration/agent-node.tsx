@@ -67,8 +67,8 @@ const statusConfig: Record<string, {
   PENDING: {
     accent: STATUS_COLORS.PENDING,
     bg: STATUS_BG.PENDING,
-    headerBg: "bg-gradient-to-r from-slate-600/20 to-slate-500/5",
-    dot: "bg-slate-400",
+    headerBg: "bg-gradient-to-r from-muted/20 to-muted/5",
+    dot: "bg-muted-foreground",
     glow: "",
     label: "Pending",
   },
@@ -83,8 +83,8 @@ const statusConfig: Record<string, {
   SKIPPED: {
     accent: STATUS_COLORS.SKIPPED,
     bg: STATUS_BG.SKIPPED,
-    headerBg: "bg-gradient-to-r from-gray-600/20 to-gray-500/5",
-    dot: "bg-gray-400",
+    headerBg: "bg-gradient-to-r from-muted/20 to-muted/5",
+    dot: "bg-muted-foreground",
     glow: "",
     label: "Skipped",
   },

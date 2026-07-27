@@ -93,7 +93,7 @@ describe("StatusDot", () => {
 
   it("falls back to slate for an unknown status", () => {
     const { container } = render(<StatusDot status="NOT_A_STATUS" />)
-    expect(container.querySelector("span")!.classList.contains("bg-slate-400")).toBe(true)
+    expect(container.querySelector("span")!.classList.contains("bg-muted-foreground")).toBe(true)
   })
 
   it("adds the pulse class only when live", () => {

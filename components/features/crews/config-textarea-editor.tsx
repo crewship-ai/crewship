@@ -91,7 +91,7 @@ export function ConfigTextareaEditor({
   }
 
   return (
-    <div className="rounded border border-white/8 bg-zinc-950/30">
+    <div className="rounded border border-white/8 bg-background/30">
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <FileCode2 className="h-3 w-3" />

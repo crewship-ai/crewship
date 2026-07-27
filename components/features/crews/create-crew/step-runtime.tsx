@@ -409,7 +409,7 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 border border-white/15 rounded-md min-h-[40px] focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-shadow">
+    <div className="flex flex-wrap gap-1.5 p-2 bg-background border border-white/15 rounded-md min-h-[40px] focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-shadow">
       {value.map((d) => (
         <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-warn/10 border border-warn/30 font-mono text-[11px] text-warn/90">
           {d}

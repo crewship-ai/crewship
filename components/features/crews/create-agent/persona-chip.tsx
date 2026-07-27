@@ -31,7 +31,7 @@ export function PersonaChip({ persona, active, onClick }: PersonaChipProps) {
           : "bg-card-2 border-white/[0.08] text-foreground/85 hover:border-white/[0.15] hover:bg-white/[0.03]",
       )}
     >
-      <span className="w-[22px] h-[22px] rounded-full overflow-hidden border border-white/[0.10] bg-zinc-900 shrink-0">
+      <span className="w-[22px] h-[22px] rounded-full overflow-hidden border border-white/[0.10] bg-muted shrink-0">
         <img
           src={getAgentAvatarUrl(persona.suggestedSlug, persona.avatarStyle)}
           alt=""

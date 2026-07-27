@@ -387,7 +387,7 @@ export function CredentialForm({
           primary organisation tool now that grouping is gone. */}
       <div className="space-y-1.5">
         <Label className="text-xs">Tags</Label>
-        <div className="flex items-center flex-wrap gap-1.5 rounded-md border border-white/10 bg-zinc-950 px-2 py-1.5 min-h-[34px]">
+        <div className="flex items-center flex-wrap gap-1.5 rounded-md border border-white/10 bg-background px-2 py-1.5 min-h-[34px]">
           {values.tags.map((t) => (
             <Badge
               key={t}

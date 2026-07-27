@@ -97,7 +97,7 @@ export function AvatarPickerDialog({
           <img
             src={previewUrl}
             alt=""
-            className="w-24 h-24 rounded-2xl border border-white/10 bg-zinc-900"
+            className="w-24 h-24 rounded-2xl border border-white/10 bg-muted"
           />
         </div>
 
@@ -185,7 +185,7 @@ export function AvatarPickerDialog({
             value={draftSeed}
             onChange={(e) => setDraftSeed(e.target.value)}
             aria-label="Avatar seed"
-            className="w-full bg-zinc-950 border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-primary"
+            className="w-full bg-background border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-primary"
           />
           <div className="text-[11px] text-muted-foreground mt-1">
             Identical seeds across agents produce identical faces. Leave the agent name as the

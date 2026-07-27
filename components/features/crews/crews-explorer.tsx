@@ -16,7 +16,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: b
   ERROR: { label: "Error", className: "text-destructive" },
   STOPPED: { label: "Stopped", className: "text-warn" },
   PENDING_REVIEW: { label: "Pending", className: "text-warn" },
-  EXPIRED: { label: "Expired", className: "text-slate-400" },
+  EXPIRED: { label: "Expired", className: "text-muted-foreground" },
 }
 
 interface CrewData {
@@ -219,7 +219,7 @@ export function CrewsExplorer({
                         <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-destructive" />
                       ))}
                       {Array.from({ length: Math.min(dots.idle, 3) }).map((_, i) => (
-                        <span key={`i${i}`} className="h-1.5 w-1.5 rounded-full bg-gray-500/50" />
+                        <span key={`i${i}`} className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
                       ))}
                     </div>
                   </SidebarRow>

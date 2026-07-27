@@ -99,7 +99,7 @@ export function RuntimeSection({
               value={customModelDraft}
               onChange={(e) => setCustomModelDraft(e.target.value)}
               placeholder="e.g. claude-3-7-sonnet or my-fine-tuned-llama"
-              className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-primary"
+              className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-muted text-sm font-mono outline-none focus:border-primary"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && customModelDraft.trim()) {
                   safePatch({ llm_model: customModelDraft.trim() })

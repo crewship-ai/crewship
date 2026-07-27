@@ -17,7 +17,7 @@ const STATUS_CLASS: Record<string, string> = {
   pending: "bg-warn/15 text-warn border-warn/40",
   approved: "bg-success/15 text-success border-success/40",
   denied: "bg-destructive/15 text-destructive border-destructive/40",
-  timeout: "bg-slate-500/15 text-slate-300 border-slate-500/40",
+  timeout: "bg-muted-foreground/15 text-muted-foreground border-border/40",
 }
 
 /**

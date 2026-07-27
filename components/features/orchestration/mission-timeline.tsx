@@ -25,16 +25,16 @@ const AGENT_W = 160
 const TICK_COUNT = 8
 
 const statusBadge: Record<MissionStatus, string> = {
-  BACKLOG: "border-slate-400 text-slate-400",
-  TODO: "border-slate-400 text-slate-400",
+  BACKLOG: "border-border text-muted-foreground",
+  TODO: "border-border text-muted-foreground",
   IN_PROGRESS: "border-primary text-primary",
   COMPLETED: "border-success text-success",
   DONE: "border-success text-success",
   FAILED: "border-destructive text-destructive",
-  PLANNING: "border-slate-400 text-slate-400",
+  PLANNING: "border-border text-muted-foreground",
   REVIEW: "border-purple text-purple",
-  CANCELLED: "border-gray-500 text-gray-400",
-  DUPLICATE: "border-gray-500 text-gray-400",
+  CANCELLED: "border-border text-muted-foreground",
+  DUPLICATE: "border-border text-muted-foreground",
 }
 
 function getTimeRange(missions: Mission[]): { start: number; end: number } {

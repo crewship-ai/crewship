@@ -107,10 +107,10 @@ const statusColors: Record<string, { dot: string; pulse?: string; pill: string }
   IN_PROGRESS: { dot: "bg-primary", pulse: "bg-primary", pill: "bg-primary/15 text-primary border-primary/20" },
   FAILED:      { dot: "bg-destructive", pill: "bg-destructive/15 text-destructive border-destructive/20" },
   BLOCKED:     { dot: "bg-warn", pill: "bg-warn/15 text-warn border-warn/20" },
-  CANCELLED:   { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },
+  CANCELLED:   { dot: "bg-muted-foreground", pill: "bg-muted-foreground/15 text-muted-foreground border-border/20" },
   PLANNING:    { dot: "bg-purple", pill: "bg-purple/15 text-purple border-purple/20" },
   REVIEW:      { dot: "bg-notice", pill: "bg-notice/15 text-notice border-notice/20" },
-  SKIPPED:     { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },
+  SKIPPED:     { dot: "bg-muted-foreground", pill: "bg-muted-foreground/15 text-muted-foreground border-border/20" },
 }
 
 const filterLabels: Record<StatusFilter, string> = {

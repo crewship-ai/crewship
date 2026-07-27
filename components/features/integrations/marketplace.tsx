@@ -213,7 +213,7 @@ export function Marketplace({ onAdd, recipeEmptyState }: MarketplaceProps) {
             </div>
           ) : filtered.length === 0 ? (
             recipeEmptyState ?? (
-              <div className="rounded-md border border-white/10 bg-zinc-950 p-12 text-center text-sm text-muted-foreground">
+              <div className="rounded-md border border-white/10 bg-background p-12 text-center text-sm text-muted-foreground">
                 {debouncedQuery ? "No servers match your search." : "Registry empty — wait for first sync."}
               </div>
             )
@@ -268,7 +268,7 @@ function FeaturedCard({ entry, onAdd, installing }: { entry: RegistryEntry; onAd
 
 function Card({ entry, onAdd, installing }: { entry: RegistryEntry; onAdd: () => void; installing: boolean }) {
   return (
-    <div className="rounded-md border border-white/10 bg-zinc-950 p-3 hover:border-white/20 transition-colors">
+    <div className="rounded-md border border-white/10 bg-background p-3 hover:border-white/20 transition-colors">
       <div className="flex items-start gap-2.5">
         <MCPLogo name={entry.icon || entry.name} transport={entry.transport} className="h-6 w-6 shrink-0 mt-0.5 opacity-85" />
         <div className="flex-1 min-w-0 space-y-1">

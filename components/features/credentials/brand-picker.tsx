@@ -188,7 +188,7 @@ function BrandTile({
         "relative aspect-square rounded-md border flex flex-col items-center justify-center gap-1 p-1 transition-all hover:scale-105",
         selected
           ? "border-primary/60 bg-primary/10 ring-2 ring-primary/30"
-          : "border-white/10 bg-zinc-950 hover:border-white/30",
+          : "border-white/10 bg-background hover:border-white/30",
       )}
     >
       {selected && (

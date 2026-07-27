@@ -32,7 +32,7 @@ const statusConfig = {
     bg: "bg-[#0a1f0f]/60",
   },
   idle: {
-    dot: "bg-slate-400",
+    dot: "bg-muted-foreground",
     pulse: false,
     border: "border-border",
     bg: "bg-[#0f1115]/60",
