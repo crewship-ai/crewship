@@ -349,7 +349,14 @@ export function AppToolbar() {
         {/* Status indicators: System + Crews + Escalations */}
         {(() => {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
-          const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
+          // "degraded" (hooks/use-engine-status.ts) covers a single failed
+          // poll or a 429 throttle — neither means the engine is gone, so
+          // it renders with the same amber "not fully confirmed yet"
+          // treatment as "checking" rather than falling through to red
+          // "Offline". The pill/tooltip text below still tells the two
+          // apart ("Connecting" vs "Reconnecting") so an operator can see
+          // a mid-deploy restart for what it is.
+          const systemChecking = engineStatus === "checking" || engineStatus === "degraded" || wsStatus === "connecting"
 
           // QUEUED counts assignments parked in the per-crew admission
           // queue (PR #396). Before the backend reported this number,
@@ -419,15 +426,19 @@ export function AppToolbar() {
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
+                  <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : engineStatus === "degraded" ? "reconnecting" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
                     <AnimatedWifi ref={wifiRef} size={12} className={sysColors.icon} />
                     <span className={`text-micro font-medium ${sysColors.text}`}>
-                      {systemOnline ? "Online" : systemChecking ? "Connecting" : "Offline"}
+                      {systemOnline ? "Online" : engineStatus === "degraded" ? "Reconnecting" : systemChecking ? "Connecting" : "Offline"}
                     </span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  Engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : "Offline"} / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
+                  {/* "degraded" reads as "Reconnecting..." here — distinct from
+                      "Connecting..." (never-yet-connected) and "Offline" (two
+                      confirmed failures) so a mid-deploy restart or a 429
+                      throttle doesn't look identical to a dead engine. */}
+                  Engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : engineStatus === "degraded" ? "Reconnecting..." : "Offline"} / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
                 </TooltipContent>
               </Tooltip>
 

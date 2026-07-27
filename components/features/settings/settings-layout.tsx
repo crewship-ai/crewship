@@ -21,7 +21,6 @@ import { MembersSection } from "./sections/members-section"
 import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
-import { AuxStatusSection } from "./sections/aux-status-section"
 import { NotificationChannelsSection } from "./sections/notification-channels-section"
 import { NotificationPrefsSection } from "./sections/notification-prefs-section"
 
@@ -46,7 +45,6 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
   crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
-  "aux-models": { title: "Auxiliary Models", description: "Cheap fast models that power keeper evaluators (PRD §6 F3)" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
   notifications: { title: "Notifications", description: "Outbound email / webhook / Slack / Discord / Telegram delivery targets" },
   "notification-prefs": { title: "Notification Prefs", description: "Your own category x channel preference matrix" },
@@ -184,18 +182,6 @@ export function SettingsLayout() {
     }
     if (activeTab === "crews" && workspaceId) {
       return <CrewsContainersSection workspaceId={workspaceId} />
-    }
-    if (activeTab === "aux-models") {
-      // Deep-link guard: a non-admin hitting ?tab=aux-models would only 403
-      // the ADMIN+ endpoint, so don't render the tab for them.
-      if (!isAdmin) {
-        return (
-          <div className="bg-card border border-border rounded-lg p-6">
-            <p className="text-body text-muted-foreground">Auxiliary models are visible to workspace admins only.</p>
-          </div>
-        )
-      }
-      return <AuxStatusSection />
     }
     if (activeTab === "connections" && workspaceId) {
       return <ConnectionsSection workspaceId={workspaceId} />

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import {
   User, Building, Users,
   Box, Link2, Activity,
-  Shield, Cpu, Bell, BellRing,
+  Shield, Bell, BellRing,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
@@ -74,8 +74,10 @@ const sections: NavSection[] = [
       // go read-only for non-admins.
       { key: "general", label: "General", icon: Building },
       { key: "crews", label: "Crews & Containers", icon: Box },
-      // Aux-status reads an ADMIN+ endpoint (#868) — a MEMBER would only 403.
-      { key: "aux-models", label: "Auxiliary Models", icon: Cpu, visibleTo: isAdminTier },
+      // Auxiliary Models moved to Admin → Keeper. It showed process-wide
+      // config from a workspace-scoped screen, so a new workspace never
+      // changed it, and it belongs beside the governance panel that
+      // actually overrides those judges.
       // Cross-crew links are a roleCreate mutation with nothing useful to read
       // underneath for a MEMBER.
       { key: "connections", label: "Connections", icon: Link2, visibleTo: isManagerTier },

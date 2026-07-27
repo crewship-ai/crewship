@@ -17,7 +17,6 @@ const ACCOUNT_ITEMS = ["Profile", "Notification Prefs"]
 const WORKSPACE_ITEMS = [
   "General",
   "Crews & Containers",
-  "Auxiliary Models",
   "Connections",
   "Notifications",
   "Members",
@@ -49,7 +48,6 @@ describe("SettingsNav visibility by role", () => {
     // readable at all below MANAGER, so its pane would render empty.
     expect(row("Connections")).toBeNull()
     expect(row("Audit Log")).toBeNull()
-    expect(row("Auxiliary Models")).toBeNull()
   })
 
   it("keeps General, Crews, Members and Notifications visible to a MEMBER", () => {
@@ -62,12 +60,21 @@ describe("SettingsNav visibility by role", () => {
     }
   })
 
-  it("gives a MANAGER Connections and Audit Log but not Auxiliary Models", () => {
+  it("gives a MANAGER Connections and Audit Log", () => {
     renderNav("MANAGER")
     expect(row("Connections")).toBeTruthy()
     expect(row("Audit Log")).toBeTruthy()
-    // Aux-model status is an ADMIN+ endpoint (#868).
-    expect(row("Auxiliary Models")).toBeNull()
+  })
+
+  it("no longer offers Auxiliary Models at any role — it lives in Admin now", () => {
+    // It reported process-wide config from a workspace-scoped screen, so a
+    // new workspace never changed it. Admin → Keeper is where the governance
+    // panel that overrides those judges already lives.
+    for (const role of ["OWNER", "ADMIN", "MANAGER", "MEMBER"]) {
+      cleanup()
+      renderNav(role)
+      expect(row("Auxiliary Models"), `${role} should not see it`).toBeNull()
+    }
   })
 
   it("treats a VIEWER like a MEMBER for the manager-tier sections", () => {
@@ -99,8 +106,6 @@ describe("isSettingsSectionVisible", () => {
     expect(isSettingsSectionVisible("audit", "MEMBER")).toBe(false)
     expect(isSettingsSectionVisible("audit", "MANAGER")).toBe(true)
     expect(isSettingsSectionVisible("connections", "MEMBER")).toBe(false)
-    expect(isSettingsSectionVisible("aux-models", "MANAGER")).toBe(false)
-    expect(isSettingsSectionVisible("aux-models", "ADMIN")).toBe(true)
     expect(isSettingsSectionVisible("general", "MEMBER")).toBe(true)
     expect(isSettingsSectionVisible("members", "VIEWER")).toBe(true)
     expect(isSettingsSectionVisible("notifications", "MEMBER")).toBe(true)

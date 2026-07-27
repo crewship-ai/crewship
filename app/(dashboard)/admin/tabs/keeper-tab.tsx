@@ -9,6 +9,7 @@ import {
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
+import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
 import { cn } from "@/lib/utils"
 import { redactSecrets, redactUrl } from "../utils"
 import type { KeeperStatus, KeeperLogEntry } from "../types"
@@ -70,6 +71,14 @@ export const KeeperTab = React.memo(function KeeperTab({
             workspaceId={workspaceId}
             serverEnabled={keeperStatus.enabled}
           />
+
+          {/* Which model each judge actually uses, and whether it can run.
+              Directly under the governance panel because that panel is what
+              overrides these per workspace — the reader needs both to answer
+              "what will judge my next request?". Moved here from workspace
+              Settings, where it sat among per-workspace cards while showing
+              process-wide config. */}
+          <JudgeModelsCard workspaceId={workspaceId} />
 
           {/* ── System status card ── */}
           <SettingsCard
