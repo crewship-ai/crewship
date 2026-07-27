@@ -97,12 +97,20 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	base, err := publicBaseURL()
-	if err != nil {
-		// Without a public URL there is no link to hand over, and a
-		// provisioned account nobody can reach is worse than a refusal.
+	// Config wins, else derive from the host the admin is already browsing.
+	// Requiring an env var to add a colleague is friction a self-hosted
+	// product should not impose — and unlike /forgot, which MAILS its link
+	// to a third party and therefore must never trust a Host header, this
+	// link is returned in the response to the authenticated caller who asked
+	// for it. A forged Host here misleads nobody but the forger.
+	//
+	// InstanceURLFromRequest is the house helper for exactly this and
+	// deliberately ignores X-Forwarded-* (attacker-controlled on a directly
+	// exposed instance); operators behind a proxy pin CREWSHIP_PUBLIC_URL.
+	origin := InstanceURLFromRequest(r, strings.TrimSpace(os.Getenv("CREWSHIP_PUBLIC_URL")))
+	if origin == "" {
 		replyError(w, http.StatusServiceUnavailable,
-			"CREWSHIP_PUBLIC_URL is not configured, so no setup link can be produced")
+			"cannot determine this instance's URL; set CREWSHIP_PUBLIC_URL")
 		return
 	}
 
@@ -192,34 +200,14 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		"workspace_id", workspaceID, "email", email, "role", role,
 		"created_user", createdUser, "by_user_id", UserFromContext(r.Context()).ID)
 
-	u := *base
-	u.Path = "/reset-password"
-	q := u.Query()
-	q.Set("token", rawToken)
-	u.RawQuery = q.Encode()
+	setupURL := origin + "/reset-password?token=" + url.QueryEscape(rawToken)
 
 	writeJSON(w, http.StatusCreated, provisionResponse{
 		UserID:      userID,
 		Email:       email,
 		Role:        role,
 		CreatedUser: createdUser,
-		SetupURL:    u.String(),
+		SetupURL:    setupURL,
 		ExpiresAt:   expires.Format(time.RFC3339),
 	})
-}
-
-// publicBaseURL parses CREWSHIP_PUBLIC_URL, the same origin the recovery
-// handler builds reset links from. Kept as a function rather than reusing
-// RecoveryHandler.publicBase so provisioning does not have to hold a
-// reference to an unrelated handler.
-func publicBaseURL() (*url.URL, error) {
-	raw := strings.TrimSpace(os.Getenv("CREWSHIP_PUBLIC_URL"))
-	if raw == "" {
-		return nil, errors.New("CREWSHIP_PUBLIC_URL not set")
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return nil, errors.New("CREWSHIP_PUBLIC_URL is not an absolute URL")
-	}
-	return u, nil
 }

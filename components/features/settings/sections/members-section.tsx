@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { CapabilityGrid } from "@/components/admin/capability-grid"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
@@ -104,14 +105,6 @@ function relativeTime(dateStr: string): string {
   return `${diffYr}y ago`
 }
 
-function initials(name: string | null, email: string): string {
-  if (name) {
-    const parts = name.trim().split(/\s+/)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-    return name.slice(0, 2).toUpperCase()
-  }
-  return email.slice(0, 2).toUpperCase()
-}
 
 /**
  * The role legend, as help rather than furniture.
@@ -343,11 +336,13 @@ export function MembersSection({
             >
               {/* Left: avatar + name + email */}
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary">
-                  <span className="text-[10px] font-semibold text-primary-foreground leading-none">
-                    {initials(member.user.full_name, member.user.email)}
-                  </span>
-                </div>
+                <UserAvatar
+                  name={member.user.full_name}
+                  email={member.user.email}
+                  src={member.user.avatar_url}
+                  className="h-7 w-7"
+                  textClassName="text-[10px]"
+                />
                 <div className="min-w-0">
                   <div className="text-xs text-foreground truncate">
                     {member.user.full_name ?? member.user.email}

@@ -7,6 +7,7 @@ import { Check, Lock, ArrowRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import {
   Dialog,
   DialogContent,
@@ -245,11 +246,11 @@ function CapabilityRow({
     <tr className="border-b border-border/40 hover:bg-muted/30">
       <td className="pl-3 py-2 sticky left-0 bg-background z-10">
         <div className="flex items-center gap-2">
-          <div className="h-6 w-6 shrink-0 rounded-full bg-primary flex items-center justify-center">
-            <span className="text-[10px] font-semibold text-primary-foreground">
-              {initials(member.user.full_name, member.user.email)}
-            </span>
-          </div>
+          <UserAvatar
+            name={member.user.full_name}
+            email={member.user.email}
+            src={member.user.avatar_url}
+          />
           <div className="min-w-0">
             <div className="text-xs truncate">
               {member.user.full_name ?? member.user.email}
@@ -624,13 +625,4 @@ function humanizePatchError(status: number): string {
     default:
       return `Request failed (HTTP ${status}).`
   }
-}
-
-function initials(name: string | null, email: string): string {
-  const src = name?.trim() || email
-  const parts = src.split(/[\s@.]+/).filter(Boolean)
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return src.slice(0, 2).toUpperCase()
 }

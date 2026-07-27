@@ -173,22 +173,33 @@ func TestProvision_RejectsAMissingEmail(t *testing.T) {
 	}
 }
 
-func TestProvision_RefusesWithoutAPublicURL(t *testing.T) {
+func TestProvision_WorksWithNoConfiguredPublicURL(t *testing.T) {
 	t.Setenv("CREWSHIP_PUBLIC_URL", "")
 	h, userID, wsID := membershipRig(t)
 
 	rr := provisionReq(t, h, userID, wsID, "OWNER", `{"email":"new@example.com","role":"MEMBER"}`)
-	// Creating an account nobody can reach is worse than refusing: the row
-	// would exist, the person would never be told, and the admin would
-	// believe the job was done.
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503 when no link can be built", rr.Code)
+	// Requiring an env var to add a colleague is friction a self-hosted
+	// product should not impose. The link is returned to the admin who just
+	// made the request, so the host they are already browsing is the right
+	// origin — and the only person a forged Host could mislead is themselves.
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s", rr.Code, rr.Body.String())
 	}
-	var n int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = ?`, "new@example.com").Scan(&n); err != nil {
-		t.Fatalf("count: %v", err)
+	out := decodeProvision(t, rr)
+	if !strings.Contains(out.SetupURL, "example.com") {
+		t.Errorf("setup_url %q was not derived from the request host", out.SetupURL)
 	}
-	if n != 0 {
-		t.Error("a refused provision still created the account")
+}
+
+func TestProvision_ConfiguredPublicURLWins(t *testing.T) {
+	t.Setenv("CREWSHIP_PUBLIC_URL", "https://crewship.example.com")
+	h, userID, wsID := membershipRig(t)
+
+	rr := provisionReq(t, h, userID, wsID, "OWNER", `{"email":"new@example.com","role":"MEMBER"}`)
+	out := decodeProvision(t, rr)
+	// An operator behind a proxy whose Host differs from the public name
+	// must be able to pin it; config beats derivation, never the reverse.
+	if !strings.HasPrefix(out.SetupURL, "https://crewship.example.com/") {
+		t.Errorf("setup_url = %q, want the configured origin", out.SetupURL)
 	}
 }

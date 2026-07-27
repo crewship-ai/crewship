@@ -11,7 +11,7 @@ import {
 
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
 import { useRealtime } from "@/hooks/use-realtime"
-import { cn } from "@/lib/utils"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -102,48 +102,6 @@ const mobileNavSections = [
 // sub-bar (title + section, same shape as Admin) and the mirror is gone.
 
 
-/**
- * The signed-in user's face, wherever the toolbar shows it.
- *
- * A plain <img> rather than the Radix Avatar: that one only swaps the image
- * in after a load event, so every render starts on the fallback and the
- * initials visibly flash before the photo appears. Here the fallback is a
- * genuine fallback — no avatar_url, or the URL failed to load.
- *
- * The src is a same-origin authed endpoint, so the session cookie rides
- * along automatically, and it carries a ?v=<unix> stamp the upload handler
- * bumps, which is what makes a re-upload beat the browser cache.
- */
-function UserAvatar({
-  src, initials, name, className,
-}: { src: string; initials: string; name: string; className: string }) {
-  const [broken, setBroken] = useState(false)
-  if (!src || broken) {
-    return (
-      <div className={cn("flex items-center justify-center rounded-full bg-primary text-primary-foreground", className)}>
-        {initials}
-      </div>
-    )
-  }
-  return (
-    <img
-      src={src}
-      alt={name}
-      onError={() => setBroken(true)}
-      className={cn("rounded-full object-cover", className)}
-    />
-  )
-}
-
-function getInitials(name: string): string {
-  if (!name.trim()) return "?"
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
-}
 
 
 interface AgentBreadcrumb {
@@ -241,7 +199,6 @@ export function AppToolbar() {
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
-  const userInitials = getInitials(userName)
   const userAvatar = session?.user?.avatar_url ?? ""
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
@@ -511,7 +468,7 @@ export function AppToolbar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="hidden md:flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
-              <UserAvatar src={userAvatar} initials={userInitials} name={userName} className="h-7 w-7 text-micro font-semibold" />
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
               <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
             </button>
@@ -519,7 +476,7 @@ export function AppToolbar() {
           <DropdownMenuContent align="end" className="w-64">
             <div className="px-2 py-3">
               <div className="flex items-center gap-3">
-                <UserAvatar src={userAvatar} initials={userInitials} name={userName} className="h-10 w-10 text-sm font-semibold" />
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-10 w-10" textClassName="text-sm" />
                 <div>
                   <div className="text-sm font-medium">{userName}</div>
                   <div className="text-xs text-muted-foreground">{userEmail}</div>
@@ -619,7 +576,7 @@ export function AppToolbar() {
             </div>
             <div className="border-t p-4">
               <div className="flex items-center gap-3">
-                <UserAvatar src={userAvatar} initials={userInitials} name={userName} className="h-8 w-8 text-micro font-bold" />
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-8 w-8" textClassName="text-micro" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium">{userName}</div>
                   <div className="text-micro text-muted-foreground">{userEmail}</div>
