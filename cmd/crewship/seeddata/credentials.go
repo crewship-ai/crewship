@@ -143,3 +143,64 @@ func marshalJSON(v any) string {
 func AnthropicCredentialType() string {
 	return ResolveAnthropicCredential().Type
 }
+
+// anthropicProvider is the provider marker every seeded Anthropic
+// credentials_required entry carries (see AnthropicCredentialRequirement). It
+// is what ReresolveAnthropicRequirements keys on — a bare type string cannot
+// identify the Anthropic requirement, because a future non-Anthropic API_KEY
+// requirement would share it and get swept up.
+const anthropicProvider = "ANTHROPIC"
+
+// AnthropicCredentialRequirement returns the credentials_required entry for the
+// Anthropic credential the seed creates. Every seeded routine that needs the
+// agent's Anthropic key declares it via this helper so the requirement stays
+// defined in one place (the #1471 goal) and carries an explicit "provider" that
+// ReresolveAnthropicRequirements can scope its rewrite to.
+//
+// The "type" is filled from AnthropicCredentialType() for a
+// self-consistent-by-construction default; because that runs at PACKAGE INIT
+// the value may be stale (see ReresolveAnthropicRequirements), which the
+// re-resolve at seed time corrects. "provider" is not read by the runtime
+// resolver (it matches on type only) and is ignored by the server's CredReq
+// decode — it exists purely to tag the entry as the Anthropic one.
+func AnthropicCredentialRequirement() map[string]interface{} {
+	return map[string]interface{}{
+		"type":     AnthropicCredentialType(),
+		"provider": anthropicProvider,
+		"scope":    "any",
+	}
+}
+
+// ReresolveAnthropicRequirements rewrites the Anthropic credentials_required
+// type in every routine definition to the type the seed will actually create,
+// resolved from the CURRENT environment.
+//
+// It exists because AnthropicCredentialType() is baked into the Routines /
+// EvalScenarios package-level vars at PACKAGE INIT, before `crewship seed`
+// loads .env.local (that happens in runSeed → loadDotEnvLocal). At init
+// SEED_ANTHROPIC_API_KEY is unset, so every requirement is baked to the
+// placeholder path's API_KEY — a mismatch on any slot whose real key is an
+// OAuth token, where the credential the seed creates is AI_CLI_TOKEN and the
+// resolver matches type EXACTLY. Call this from the seed path AFTER
+// loadDotEnvLocal to re-derive the requirement from the loaded key. See #1485.
+//
+// The rewrite is scoped by the "provider" == ANTHROPIC marker, NOT by matching
+// a bare type string: a non-Anthropic requirement that happens to be an API_KEY
+// or AI_CLI_TOKEN must never be rewritten to the Anthropic type. The definition
+// maps are mutated in place — fine for the one-shot seed CLI that owns them.
+func ReresolveAnthropicRequirements(defs ...[]RoutineDef) {
+	want := AnthropicCredentialType()
+	for _, slice := range defs {
+		for _, d := range slice {
+			reqs, ok := d.Definition["credentials_required"].([]map[string]interface{})
+			if !ok {
+				continue
+			}
+			for _, r := range reqs {
+				if p, _ := r["provider"].(string); strings.EqualFold(p, anthropicProvider) {
+					r["type"] = want
+				}
+			}
+		}
+	}
+}
