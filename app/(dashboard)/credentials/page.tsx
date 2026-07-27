@@ -474,7 +474,7 @@ export default function CredentialsPage() {
         // empty state: red accent, explicit error copy, and a Retry
         // affordance. Never claims "no credentials yet".
         <Card className="p-12 text-center border-destructive/30 bg-destructive/[0.03]" role="alert">
-          <AlertTriangle className="mx-auto h-6 w-6 text-error" />
+          <AlertTriangle className="mx-auto h-6 w-6 text-destructive" />
           <h2 className="mt-3 text-sm font-medium text-foreground">Couldn&apos;t load credentials</h2>
           <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
           <Button size="sm" variant="outline" className="mt-4" onClick={loadData}>
@@ -739,7 +739,7 @@ export default function CredentialsPage() {
       {canDelete && selectedIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-border bg-popover/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
           <span className="font-medium">{selectedIds.size} selected</span>
-          <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-error hover:text-error/80">
+          <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-destructive hover:text-destructive/80">
             Delete
           </button>
           <button type="button" onClick={() => setSelectedIds(new Set())} className="text-muted-foreground hover:text-foreground">
