@@ -152,6 +152,21 @@ describe("DeviceSessions", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 
+  it("stays quiet on a 401 — the app is already signing you out", async () => {
+    // apiFetch retries a 401 through /auth/token/refresh and only lets it
+    // reach us when the refresh ALSO failed, i.e. the session is gone and
+    // AuthProvider is mid-redirect to /login. "Couldn't load your sessions"
+    // there is a lie dressed as an error: the endpoint is fine, the user is
+    // signed out. It also invites a Retry that cannot succeed.
+    apiFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: "no_credentials" }) })
+    const { container } = render(<DeviceSessions onSignOut={vi.fn()} />)
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled())
+    expect(screen.queryByText(/couldn't load/i)).toBeNull()
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
+    void container
+  })
+
   it("surfaces a failed load instead of rendering an empty device list", async () => {
     apiFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) })
     render(<DeviceSessions onSignOut={vi.fn()} />)

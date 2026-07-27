@@ -58,6 +58,7 @@ export function DeviceSessions({
 }) {
   const [sessions, setSessions] = useState<SessionDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [signedOut, setSignedOut] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmBulk, setConfirmBulk] = useState(false)
   const [bulkRunning, setBulkRunning] = useState(false)
@@ -65,6 +66,16 @@ export function DeviceSessions({
   const load = useCallback(async () => {
     try {
       const res = await apiFetch("/api/v1/auth/sessions")
+      if (res.status === 401) {
+        // apiFetch already retried through the refresh endpoint; a 401
+        // reaching here means refresh failed too, so AuthProvider is
+        // mid-redirect to /login. Claiming the sessions "couldn't load"
+        // would blame the endpoint for the user being signed out, and
+        // offer a Retry that cannot possibly work. Stay quiet and let the
+        // redirect happen.
+        setSignedOut(true)
+        return
+      }
       if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setSessions(Array.isArray(data) ? data : (data?.data ?? []))
@@ -120,6 +131,9 @@ export function DeviceSessions({
     setConfirmBulk(false)
     await load()
   }, [others, load])
+
+  // Nothing to say while the sign-out redirect is in flight.
+  if (signedOut) return null
 
   if (error) {
     return (

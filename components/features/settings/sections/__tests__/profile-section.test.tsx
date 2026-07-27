@@ -170,3 +170,62 @@ describe("ProfileSection", () => {
     expect(screen.getByLabelText("Full name")).toBeTruthy()
   })
 })
+
+// Revoking a CLI token used to be unable to fail: the handler awaited
+// apiFetch without checking res.ok and wrapped the whole thing in
+// `catch { /* ignore */ }`. apiFetch resolves on a 403/500 rather than
+// throwing, so a refused delete closed the dialog and re-fetched the list
+// exactly like a successful one — the token stayed, and nothing said why.
+describe("ProfileSection — revoking a CLI token", () => {
+  const TOKEN = {
+    id: "tok-1",
+    name: "ci-deploy",
+    created_at: "2026-07-20T10:00:00Z",
+    last_used_at: "2026-07-27T09:00:00Z",
+    tier: "STANDARD" as const,
+  }
+
+  function mockTokens(deleteStatus: number) {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/api/v1/auth/cli-tokens/")) {
+        return jsonResponse(deleteStatus >= 400 ? { error: "token is already revoked" } : {}, deleteStatus)
+      }
+      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: [TOKEN] })
+      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
+      return jsonResponse({})
+    })
+  }
+
+  async function openRevokeDialog() {
+    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+    await screen.findByText("ci-deploy")
+    fireEvent.click(screen.getByRole("button", { name: /revoke ci-deploy/i }))
+    return screen.findByRole("button", { name: /^revoke$/i })
+  }
+
+  it("confirms when the server accepts the revoke", async () => {
+    mockTokens(200)
+    fireEvent.click(await openRevokeDialog())
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  it("says so when the server refuses, instead of looking like it worked", async () => {
+    mockTokens(403)
+    fireEvent.click(await openRevokeDialog())
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastSuccess).not.toHaveBeenCalled()
+    // The token is still there — the list must not imply otherwise.
+    expect(screen.getByText("ci-deploy")).toBeTruthy()
+  })
+
+  it("reports a network failure rather than swallowing it", async () => {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/api/v1/auth/cli-tokens/")) throw new Error("offline")
+      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: [TOKEN] })
+      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
+      return jsonResponse({})
+    })
+    fireEvent.click(await openRevokeDialog())
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+  })
+})

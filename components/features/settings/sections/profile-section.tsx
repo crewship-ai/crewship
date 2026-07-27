@@ -427,12 +427,31 @@ export function ProfileSection({
 
   async function handleRevoke() {
     if (!revokeTarget) return
+    const name = revokeTarget.name
     setRevoking(true)
     try {
-      await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
+      // apiFetch RESOLVES on a 4xx/5xx — it does not throw. The previous
+      // version awaited it, ignored res.ok, and swallowed everything in
+      // `catch {}`, so a refused revoke closed the dialog and refreshed the
+      // list exactly like a successful one. The token stayed put and nothing
+      // said why, which reads as "delete is broken".
+      const res = await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        const detail = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
+        toast.error(`Couldn't revoke ${name}`, { description: detail })
+        return
+      }
+      toast.success(`Revoked ${name}`)
+      setRevokeTarget(null)
       fetchTokens()
-    } catch { /* ignore */ }
-    finally { setRevoking(false); setRevokeTarget(null) }
+    } catch (e) {
+      toast.error(`Couldn't revoke ${name}`, {
+        description: e instanceof Error ? e.message : undefined,
+      })
+    } finally {
+      setRevoking(false)
+    }
   }
 
   function handleCopyToken(text: string) {
@@ -978,7 +997,10 @@ function TokenListItem({
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke} aria-label="Revoke token">
+              {/* Named after the token, not "Revoke token": a screen-reader
+                  user tabbing a list of five identical buttons has no other
+                  way to tell which one they are on. */}
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke} aria-label={`Revoke ${token.name}`}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </TooltipTrigger>
