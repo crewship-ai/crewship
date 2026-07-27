@@ -107,13 +107,13 @@ export function ConfigTextareaEditor({
             {editing ? (
               <>
                 {validation.error && editing && (
-                  <span className="text-[10px] text-red-300 flex items-center gap-1">
+                  <span className="text-[10px] text-destructive flex items-center gap-1">
                     <X className="h-3 w-3" />
                     {validation.error}
                   </span>
                 )}
                 {!validation.error && dirty && (
-                  <span className="text-[10px] text-emerald-300 flex items-center gap-1">
+                  <span className="text-[10px] text-success flex items-center gap-1">
                     <Check className="h-3 w-3" />
                     valid
                   </span>
@@ -133,8 +133,8 @@ export function ConfigTextareaEditor({
                   className={cn(
                     "text-[11px] px-2 py-0.5 rounded text-white",
                     dirty && !saving && !validation.error
-                      ? "bg-emerald-600/80 hover:bg-emerald-500"
-                      : "bg-emerald-700/40 cursor-not-allowed",
+                      ? "bg-success/80 hover:bg-success"
+                      : "bg-success/40 cursor-not-allowed",
                   )}
                 >
                   {saving ? "Saving…" : "Save"}
@@ -172,7 +172,7 @@ export function ConfigTextareaEditor({
           className={cn(
             "w-full px-3 py-2 text-[11px] leading-relaxed font-mono bg-transparent outline-none resize-y min-h-[120px]",
             validation.error
-              ? "text-foreground border-l-2 border-red-400"
+              ? "text-foreground border-l-2 border-destructive"
               : "text-foreground",
           )}
         />
@@ -187,7 +187,7 @@ export function ConfigTextareaEditor({
       )}
 
       {error && (
-        <div className="px-3 py-1.5 border-t border-red-500/20 bg-red-500/5 text-[11px] text-red-300">
+        <div className="px-3 py-1.5 border-t border-destructive/20 bg-destructive/5 text-[11px] text-destructive">
           Save failed: {error}
         </div>
       )}

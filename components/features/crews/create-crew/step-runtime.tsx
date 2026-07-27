@@ -129,8 +129,8 @@ function SectionHeader({ title, badge, hint }: { title: string; badge?: string; 
 
 const TONE_STYLES = {
   blue: { ring: "border-blue-400/20", icon: "bg-blue-500/15 text-blue-300", value: "text-blue-300" },
-  violet: { ring: "border-violet-400/20", icon: "bg-violet-500/15 text-violet-300", value: "text-violet-300" },
-  amber: { ring: "border-amber-400/20", icon: "bg-amber-500/15 text-amber-300", value: "text-amber-300" },
+  violet: { ring: "border-purple/20", icon: "bg-purple/15 text-purple", value: "text-purple" },
+  amber: { ring: "border-warn/20", icon: "bg-warn/15 text-warn", value: "text-warn" },
 } as const
 
 function ResourceCell({
@@ -183,7 +183,7 @@ function NetworkCell({ state, setState }: Props) {
       <div className="flex items-start gap-3 flex-wrap">
         <div className={cn(
           "h-8 w-8 rounded-md flex items-center justify-center shrink-0",
-          restricted ? "bg-amber-500/15 text-amber-300" : "bg-emerald-500/15 text-emerald-300",
+          restricted ? "bg-warn/15 text-warn" : "bg-success/15 text-success",
         )}>
           <NetIcon className="h-4 w-4" />
         </div>
@@ -191,7 +191,7 @@ function NetworkCell({ state, setState }: Props) {
           <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">Mode</div>
           <div className={cn(
             "text-[15px] font-semibold leading-tight mt-0.5",
-            restricted ? "text-amber-300" : "text-emerald-300",
+            restricted ? "text-warn" : "text-success",
           )}>
             {restricted ? "Restricted" : "Free"}
             <span className="ml-2 text-[11px] text-muted-foreground font-normal">
@@ -246,7 +246,7 @@ function NetworkCell({ state, setState }: Props) {
             onChange={(v) => setState({ allowedDomains: v })}
           />
           {state.allowedDomains.length === 0 && (
-            <p className="text-[11px] text-amber-400/80 mt-1.5">
+            <p className="text-[11px] text-warn/80 mt-1.5">
               ⚠ Empty allowlist locks all egress. Add at least one domain unless that's intentional.
             </p>
           )}
@@ -264,8 +264,8 @@ function ModeCard({ active, onClick, icon: Icon, label, tone }: {
   tone: "emerald" | "amber"
 }) {
   const tones = {
-    emerald: { active: "border-emerald-400 bg-emerald-500/10 text-emerald-300", icon: "text-emerald-400" },
-    amber: { active: "border-amber-400 bg-amber-500/10 text-amber-300", icon: "text-amber-400" },
+    emerald: { active: "border-success bg-success/10 text-success", icon: "text-success" },
+    amber: { active: "border-warn bg-warn/10 text-warn", icon: "text-warn" },
   } as const
   return (
     <button
@@ -336,7 +336,7 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
         <div className={cn(
           "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]",
           error
-            ? "bg-red-500/10 border-red-400/60"
+            ? "bg-destructive/10 border-destructive/60"
             : active
               ? "bg-blue-500/20 border-blue-400"
               : "bg-card border-white/10",
@@ -371,13 +371,13 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
             }}
             className={cn(
               "w-12 bg-transparent outline-none text-right font-medium",
-              error ? "text-red-300" : "text-blue-300",
+              error ? "text-destructive" : "text-blue-300",
             )}
           />
           <span className="text-[9px] text-muted-foreground" aria-hidden="true">{suffix}</span>
         </div>
         {error && (
-          <span id={errorId} role="alert" className="text-[10px] text-red-300/90">
+          <span id={errorId} role="alert" className="text-[10px] text-destructive/90">
             {error}
           </span>
         )}
@@ -411,9 +411,9 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
   return (
     <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 border border-white/15 rounded-md min-h-[40px] focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 transition-shadow">
       {value.map((d) => (
-        <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-amber-500/10 border border-amber-400/30 font-mono text-[11px] text-amber-200/90">
+        <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-warn/10 border border-warn/30 font-mono text-[11px] text-warn/90">
           {d}
-          <button type="button" onClick={() => onChange(value.filter((x) => x !== d))} className="text-amber-400/60 hover:text-red-400 px-0.5" aria-label={`Remove ${d}`}>
+          <button type="button" onClick={() => onChange(value.filter((x) => x !== d))} className="text-warn/60 hover:text-destructive px-0.5" aria-label={`Remove ${d}`}>
             <X className="h-3 w-3" />
           </button>
         </span>

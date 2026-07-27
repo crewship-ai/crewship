@@ -26,9 +26,9 @@ interface BottomPanelTerminalProps {
 }
 
 function StatusDot({ status }: { status: TerminalStatus }) {
-  if (status === "connecting") return <Spinner className="h-3 w-3 text-amber-400" />
-  if (status === "connected") return <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 inline-block" />
-  if (status === "error") return <WifiOff className="h-3 w-3 text-red-400" />
+  if (status === "connecting") return <Spinner className="h-3 w-3 text-warn" />
+  if (status === "connected") return <span className="h-1.5 w-1.5 rounded-full bg-success inline-block" />
+  if (status === "error") return <WifiOff className="h-3 w-3 text-destructive" />
   return <span className="h-1.5 w-1.5 rounded-full bg-zinc-500 inline-block" />
 }
 

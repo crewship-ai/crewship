@@ -234,7 +234,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
               {issue.due_date && (
                 <div className="border-t border-border px-3 py-2">
                   <button
-                    className="text-[11px] text-red-400 hover:underline"
+                    className="text-[11px] text-destructive hover:underline"
                     onClick={() => { patchIssue({ due_date: null }); setDueDateOpen(false) }}
                   >
                     Remove date

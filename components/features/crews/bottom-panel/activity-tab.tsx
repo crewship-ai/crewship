@@ -23,8 +23,8 @@ interface ActivityEntry {
 // so a glance separates human / agent / system activity.
 function actorDot(actorType: string): string {
   switch (actorType) {
-    case "user": return "border-violet-400"
-    case "agent": return "border-emerald-400"
+    case "user": return "border-purple"
+    case "agent": return "border-success"
     case "system": return "border-blue-400"
     default: return "border-muted-foreground"
   }
@@ -62,7 +62,7 @@ export function ActivityTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select an issue to see its activity.</EmptyState>
   if (context.kind !== "mission") return <EmptyState>Activity is per-issue — select one.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (entries === null) return <EmptyState>Loading…</EmptyState>
   if (entries.length === 0) return <EmptyState>No activity recorded yet for {context.identifier}.</EmptyState>
 

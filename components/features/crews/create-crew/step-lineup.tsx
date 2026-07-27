@@ -299,7 +299,7 @@ function SourceMark({ builtin }: { builtin: boolean }) {
   return (
     <span className={cn(
       "text-[9px] px-1.5 py-0.5 rounded",
-      builtin ? "bg-white/5 text-muted-foreground" : "bg-emerald-500/15 text-emerald-300",
+      builtin ? "bg-white/5 text-muted-foreground" : "bg-success/15 text-success",
     )}>
       {builtin ? "built-in" : "workspace"}
     </span>
@@ -339,7 +339,7 @@ function PreviewPane({ template }: { template: CrewTemplate }) {
             >
               <div className={cn(
                 "h-6 w-6 rounded text-[11px] font-semibold flex items-center justify-center shrink-0",
-                agent.agent_role === "LEAD" ? "bg-amber-500/15 text-amber-300" : "bg-violet-500/15 text-violet-300",
+                agent.agent_role === "LEAD" ? "bg-warn/15 text-warn" : "bg-purple/15 text-purple",
               )}>
                 {agent.name.slice(0, 1).toUpperCase()}
               </div>
@@ -350,7 +350,7 @@ function PreviewPane({ template }: { template: CrewTemplate }) {
               <span className={cn(
                 "text-[9px] font-mono px-1.5 py-0.5 rounded",
                 agent.agent_role === "LEAD"
-                  ? "bg-amber-500/15 text-amber-300"
+                  ? "bg-warn/15 text-warn"
                   : "bg-white/5 text-muted-foreground",
               )}>
                 {agent.agent_role}

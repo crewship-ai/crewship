@@ -127,7 +127,7 @@ export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId:
                     <div
                       className={cn(
                         "h-full rounded-full transition-all",
-                        p.progress >= 100 ? "bg-green-500/70" : "bg-blue-500/60",
+                        p.progress >= 100 ? "bg-success/70" : "bg-blue-500/60",
                       )}
                       style={{ width: `${Math.min(p.progress, 100)}%` }}
                     />
@@ -524,7 +524,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                 </div>
                 <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
                   <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Completed</div>
-                  <div className="text-[18px] font-semibold text-green-400 tabular-nums">
+                  <div className="text-[18px] font-semibold text-success tabular-nums">
                     {stats?.completed_issues ?? project.done_count}
                   </div>
                 </div>

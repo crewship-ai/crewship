@@ -142,7 +142,7 @@ export function OAuthAutoConnect({
       className={cn(
         "p-4 space-y-3",
         isMissing && "border-destructive/50 bg-destructive/5",
-        isExpired && "border-amber-500/50 bg-amber-500/5",
+        isExpired && "border-warn/50 bg-warn/5",
       )}
     >
       <div className="flex items-center justify-between">

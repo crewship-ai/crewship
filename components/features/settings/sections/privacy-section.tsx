@@ -117,7 +117,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
   }, [load, workspaceId])
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading privacy state...</p>
-  if (err) return <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{err}</div>
+  if (err) return <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{err}</div>
 
   return (
     <div className="space-y-8">
@@ -146,7 +146,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
             <button
               onClick={() => flipConsent(!consent?.opted_out)}
               disabled={acting}
-              className="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-50"
+              className="rounded bg-success/20 px-3 py-1.5 text-sm text-success hover:bg-success/30 disabled:opacity-50"
             >
               {consent?.opted_out ? "Opt back in" : "Opt out"}
             </button>
@@ -172,7 +172,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
             <button
               onClick={deleteAll}
               disabled={acting}
-              className="rounded bg-red-500/15 px-3 py-1.5 text-sm text-red-300 hover:bg-red-500/25 disabled:opacity-50"
+              className="rounded bg-destructive/15 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/25 disabled:opacity-50"
             >
               Delete all
             </button>

@@ -14,9 +14,9 @@ interface ApprovalCardProps {
 }
 
 const STATUS_CLASS: Record<string, string> = {
-  pending: "bg-amber-500/15 text-amber-300 border-amber-500/40",
-  approved: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
-  denied: "bg-red-500/15 text-red-300 border-red-500/40",
+  pending: "bg-warn/15 text-warn border-warn/40",
+  approved: "bg-success/15 text-success border-success/40",
+  denied: "bg-destructive/15 text-destructive border-destructive/40",
   timeout: "bg-slate-500/15 text-slate-300 border-slate-500/40",
 }
 
@@ -94,7 +94,7 @@ function TimeoutCountdown({ iso }: { iso: string }) {
       className={cn(
         "text-[10px] font-mono border",
         expired
-          ? "bg-red-500/15 text-red-300 border-red-500/40"
+          ? "bg-destructive/15 text-destructive border-destructive/40"
           : "bg-muted/40 text-muted-foreground border-border/60",
       )}
     >

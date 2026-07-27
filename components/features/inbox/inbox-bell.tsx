@@ -123,11 +123,11 @@ function BellRow({ item, onClick }: { item: InboxItem; onClick: () => void }) {
           : Sparkles
   const accent =
     item.kind === "waitpoint"
-      ? "text-amber-300"
+      ? "text-warn"
       : item.kind === "escalation"
-        ? "text-rose-300"
+        ? "text-destructive"
         : item.kind === "failed_run"
-          ? "text-rose-400"
+          ? "text-destructive"
           : "text-blue-300"
 
   return (

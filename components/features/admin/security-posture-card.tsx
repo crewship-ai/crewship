@@ -61,7 +61,7 @@ function StateRow({ label, value, bad }: { label: string; value: string; bad?: b
 
 const SEVERITY_STYLE: Record<string, { icon: typeof AlertTriangle; cls: string }> = {
   high: { icon: ShieldAlert, cls: "text-destructive" },
-  medium: { icon: AlertTriangle, cls: "text-amber-500" },
+  medium: { icon: AlertTriangle, cls: "text-warn" },
   info: { icon: Info, cls: "text-muted-foreground" },
 }
 
@@ -170,7 +170,7 @@ export function SecurityPostureCard() {
           </div>
 
           {posture.warnings.length === 0 ? (
-            <p className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+            <p className="text-xs text-success flex items-center gap-1.5">
               <ShieldCheck className="h-3.5 w-3.5" />
               Nothing in this instance&apos;s posture stands out.
             </p>

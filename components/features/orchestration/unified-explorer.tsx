@@ -230,7 +230,7 @@ export function UnifiedExplorer({
               <div className="relative shrink-0">
                 <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
                 {issue.status === "IN_PROGRESS" && (
-                  <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-green-500 agent-active-dot" />
+                  <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-success agent-active-dot" />
                 )}
               </div>
               <span className="text-[10px] font-mono text-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>

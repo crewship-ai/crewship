@@ -36,11 +36,11 @@ import { brandIconForType, BrandGlyph } from "./brand-icons"
 
 const TONE: Record<ManifestChipTone, string> = {
   integ: "border-indigo-500/30 text-indigo-300",
-  store: "border-cyan-500/30 text-cyan-300",
-  tool: "border-violet-500/30 text-violet-300",
-  agent: "border-emerald-500/30 text-emerald-300",
+  store: "border-notice/30 text-notice",
+  tool: "border-purple/30 text-purple",
+  agent: "border-success/30 text-success",
   routine: "border-sky-500/30 text-sky-300",
-  risk: "border-amber-500/35 text-amber-400",
+  risk: "border-warn/35 text-warn",
 }
 
 const FALLBACK_ICON: Record<ManifestFallbackIcon, LucideIcon> = {

@@ -114,9 +114,9 @@ function RoutineRow({ routine, onOpen }: { routine: Pipeline; onOpen: () => void
   const status = routine.last_invocation_status?.toLowerCase()
   const dotColor =
     status === "completed"
-      ? "bg-emerald-500"
+      ? "bg-success"
       : status === "failed"
-        ? "bg-red-500"
+        ? "bg-destructive"
         : "bg-muted-foreground/40"
 
   return (

@@ -93,11 +93,11 @@ function ResetForm() {
           {done ? (
             <div className="space-y-4">
               <div
-                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm"
+                className="rounded-md border border-success/40 bg-success/10 p-4 text-sm"
                 role="status"
                 aria-live="polite"
               >
-                <p className="font-medium text-emerald-700 dark:text-emerald-400">Password updated.</p>
+                <p className="font-medium text-success">Password updated.</p>
                 <p className="mt-1 text-muted-foreground">
                   All existing sessions have been signed out. Redirecting to sign in…
                 </p>

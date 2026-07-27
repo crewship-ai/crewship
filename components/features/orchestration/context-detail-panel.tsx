@@ -18,8 +18,8 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { STATUS_BADGE_CLASSES, COMPLEXITY_BADGE_CLASSES } from "@/lib/colors"
 
 const crewBgClass: Record<string, string> = {
-  blue: "bg-blue-500", emerald: "bg-emerald-500", violet: "bg-violet-500", amber: "bg-amber-500",
-  rose: "bg-rose-500", cyan: "bg-cyan-500", lime: "bg-lime-500", fuchsia: "bg-fuchsia-500",
+  blue: "bg-blue-500", emerald: "bg-success", violet: "bg-purple", amber: "bg-warn",
+  rose: "bg-destructive", cyan: "bg-notice", lime: "bg-lime-500", fuchsia: "bg-purple",
 }
 
 export type DetailContext =
@@ -57,8 +57,8 @@ function parseDependsOn(raw: string): string[] {
 
 function EvalBadge({ status }: { status: EvaluationStatus | null }) {
   if (!status) return null
-  if (status === "PASSED") return <span className="inline-flex items-center gap-1 text-emerald-400 text-xs"><CheckCircle2 className="size-3" /> Passed</span>
-  if (status === "FAILED") return <span className="inline-flex items-center gap-1 text-red-400 text-xs"><XCircle className="size-3" /> Failed</span>
+  if (status === "PASSED") return <span className="inline-flex items-center gap-1 text-success text-xs"><CheckCircle2 className="size-3" /> Passed</span>
+  if (status === "FAILED") return <span className="inline-flex items-center gap-1 text-destructive text-xs"><XCircle className="size-3" /> Failed</span>
   return <span className="inline-flex items-center gap-1 text-muted-foreground text-xs"><Clock className="size-3" /> Pending</span>
 }
 
@@ -73,7 +73,7 @@ function CollapsibleSection({ title, children, defaultOpen = false, tinted }: {
         {title}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className={cn("mt-1 rounded-md p-2 text-xs font-mono whitespace-pre-wrap", tinted ? "bg-red-500/10 text-red-300" : "bg-accent/50 text-muted-foreground")}>
+        <div className={cn("mt-1 rounded-md p-2 text-xs font-mono whitespace-pre-wrap", tinted ? "bg-destructive/10 text-destructive" : "bg-accent/50 text-muted-foreground")}>
           {children}
         </div>
       </CollapsibleContent>
@@ -309,11 +309,11 @@ function TaskLogs({ task }: { task: MissionTask }) {
           </span>
           <span className={cn(
             "shrink-0 w-[38px] uppercase",
-            e.level === "error" ? "text-red-400" : e.level === "warn" ? "text-amber-400" : "text-muted-foreground/60",
+            e.level === "error" ? "text-destructive" : e.level === "warn" ? "text-warn" : "text-muted-foreground/60",
           )}>{e.level}</span>
           <span className={cn(
             "break-words whitespace-pre-wrap",
-            e.level === "error" ? "text-red-300" : "text-foreground/80",
+            e.level === "error" ? "text-destructive" : "text-foreground/80",
           )}>{e.message}</span>
         </div>
       ))}
@@ -353,11 +353,11 @@ function MissionLogs({ mission }: { mission: Mission }) {
           </span>
           <span className={cn(
             "shrink-0 w-[38px] uppercase",
-            e.level === "error" ? "text-red-400" : "text-muted-foreground/60",
+            e.level === "error" ? "text-destructive" : "text-muted-foreground/60",
           )}>{e.level}</span>
           <span className={cn(
             "break-words whitespace-pre-wrap",
-            e.level === "error" ? "text-red-300" : "text-foreground/80",
+            e.level === "error" ? "text-destructive" : "text-foreground/80",
           )}>{e.message}</span>
         </div>
       ))}
@@ -368,11 +368,11 @@ function MissionLogs({ mission }: { mission: Mission }) {
 // ── Trace Timeline ──
 
 const traceStatusIcon: Record<string, React.ReactNode> = {
-  COMPLETED: <CheckCircle2 className="size-3 text-emerald-500" />,
-  FAILED: <XCircle className="size-3 text-red-400" />,
+  COMPLETED: <CheckCircle2 className="size-3 text-success" />,
+  FAILED: <XCircle className="size-3 text-destructive" />,
   IN_PROGRESS: <Clock className="size-3 text-blue-400 animate-pulse" />,
   PENDING: <Clock className="size-3 text-muted-foreground/40" />,
-  BLOCKED: <AlertTriangle className="size-3 text-amber-400" />,
+  BLOCKED: <AlertTriangle className="size-3 text-warn" />,
   SKIPPED: <ArrowRight className="size-3 text-muted-foreground/40" />,
 }
 
@@ -402,7 +402,7 @@ function TraceTimeline({ tasks, missionStatus: _missionStatus }: { tasks: Missio
               <Badge className={cn("text-[9px] px-1 py-0", STATUS_BADGE_CLASSES[task.status as MissionTaskStatus])}>{task.status}</Badge>
             </div>
             {task.error_message && (
-              <p className="text-[10px] text-red-400 mt-0.5 line-clamp-2">{task.error_message}</p>
+              <p className="text-[10px] text-destructive mt-0.5 line-clamp-2">{task.error_message}</p>
             )}
           </div>
         </div>

@@ -300,7 +300,7 @@ export function ProjectSidebar({
                 />
                 {project.start_date && (
                   <div className="border-t border-border px-3 py-2">
-                    <button className="text-[11px] text-red-400 hover:underline" onClick={() => { patchProject({ start_date: null }); setStartDateOpen(false) }}>
+                    <button className="text-[11px] text-destructive hover:underline" onClick={() => { patchProject({ start_date: null }); setStartDateOpen(false) }}>
                       Remove date
                     </button>
                   </div>
@@ -335,7 +335,7 @@ export function ProjectSidebar({
                 />
                 {project.target_date && (
                   <div className="border-t border-border px-3 py-2">
-                    <button className="text-[11px] text-red-400 hover:underline" onClick={() => { patchProject({ target_date: null }); setTargetDateOpen(false) }}>
+                    <button className="text-[11px] text-destructive hover:underline" onClick={() => { patchProject({ target_date: null }); setTargetDateOpen(false) }}>
                       Remove date
                     </button>
                   </div>
@@ -462,7 +462,7 @@ export function ProjectSidebar({
                 {(m.issue_count ?? 0) > 0 && (
                   <div className="mt-1.5 h-1 bg-white/[0.06] rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-green-500/70 rounded-full transition-all"
+                      className="h-full bg-success/70 rounded-full transition-all"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
@@ -532,7 +532,7 @@ export function ProjectSidebar({
             </div>
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
               <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Completed</div>
-              <div className="text-[18px] font-semibold text-green-400 tabular-nums">
+              <div className="text-[18px] font-semibold text-success tabular-nums">
                 {stats?.completed_issues ?? project.done_count}
               </div>
             </div>

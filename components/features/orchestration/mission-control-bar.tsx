@@ -21,11 +21,11 @@ interface MissionControlBarProps {
 }
 
 const statusConfig: Record<string, { color: string; label: string; icon: React.ElementType }> = {
-  PLANNING: { color: "text-purple-400 bg-purple-500/10 border-purple-500/30", label: "Planning", icon: Clock },
+  PLANNING: { color: "text-purple bg-purple/10 border-purple/30", label: "Planning", icon: Clock },
   IN_PROGRESS: { color: "text-blue-400 bg-blue-500/10 border-blue-500/30", label: "Running", icon: Loader2 },
-  REVIEW: { color: "text-amber-400 bg-amber-500/10 border-amber-500/30", label: "In Review", icon: ChevronRight },
-  COMPLETED: { color: "text-green-400 bg-green-500/10 border-green-500/30", label: "Completed", icon: CheckCircle2 },
-  FAILED: { color: "text-red-400 bg-red-500/10 border-red-500/30", label: "Failed", icon: AlertTriangle },
+  REVIEW: { color: "text-warn bg-warn/10 border-warn/30", label: "In Review", icon: ChevronRight },
+  COMPLETED: { color: "text-success bg-success/10 border-success/30", label: "Completed", icon: CheckCircle2 },
+  FAILED: { color: "text-destructive bg-destructive/10 border-destructive/30", label: "Failed", icon: AlertTriangle },
   CANCELLED: { color: "text-gray-400 bg-gray-500/10 border-gray-500/30", label: "Cancelled", icon: Square },
 }
 
@@ -169,7 +169,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             </div>
             <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
               {completed}/{total}
-              {failed > 0 && <span className="text-red-400 ml-1">({failed} failed)</span>}
+              {failed > 0 && <span className="text-destructive ml-1">({failed} failed)</span>}
               {inProgress > 0 && <span className="text-blue-400 ml-1">({inProgress} running)</span>}
             </span>
           </div>
@@ -213,7 +213,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               variant="outline"
               onClick={() => handleAction("complete")}
               disabled={loading !== null}
-              className="gap-1.5 border-green-500/30 text-green-400 hover:bg-green-500/10"
+              className="gap-1.5 border-success/30 text-success hover:bg-success/10"
             >
               {loading === "complete" ? <Spinner className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
               Complete
@@ -225,7 +225,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               variant="outline"
               onClick={() => handleAction("cancel")}
               disabled={loading !== null}
-              className="gap-1.5 border-red-500/30 text-red-400 hover:bg-red-500/10"
+              className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
             >
               {loading === "cancel" ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
               Cancel
@@ -238,7 +238,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               variant="outline"
               onClick={handleRestart}
               disabled={loading !== null}
-              className="gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+              className="gap-1.5 border-warn/30 text-warn hover:bg-warn/10"
             >
               {loading === "restart" ? <Spinner className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
               Restart

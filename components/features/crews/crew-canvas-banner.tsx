@@ -79,10 +79,10 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
 
   if (crew.status === "failed") {
     return (
-      <div className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 flex items-start gap-3">
-        <AlertTriangle className="h-4 w-4 text-red-300 shrink-0 mt-0.5" />
+      <div className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 flex items-start gap-3">
+        <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-red-200">Last provision failed</div>
+          <div className="text-sm text-destructive">Last provision failed</div>
           <ProvisioningFailure crew={crew} />
           <div className="text-xs text-muted-foreground mt-1.5">
             Fix the runtime config (Settings → Container image &amp; features) and try again.
@@ -93,7 +93,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
             type="button"
             onClick={trigger}
             disabled={triggering}
-            className="text-xs px-2.5 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40"
+            className="text-xs px-2.5 py-1.5 rounded bg-destructive/20 hover:bg-destructive/30 text-destructive border border-destructive/40"
           >
             {triggering ? "Starting…" : "Retry"}
           </button>
@@ -111,10 +111,10 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
 
   if (recentCompleted && crew.recent) {
     return (
-      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
-        <Check className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+      <div className="rounded-xl border border-success/30 bg-success/5 px-4 py-3 flex items-start gap-3">
+        <Check className="h-4 w-4 text-success shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-emerald-200">
+          <div className="text-sm text-success">
             Container image built — {formatProvisionAgo(crew.recent.at)}
           </div>
           <RecentBuildSummary recent={crew.recent} />
@@ -134,10 +134,10 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
 
   // needs_provision (idle, hasConfig, no cached_image)
   return (
-    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
-      <AlertTriangle className="h-4 w-4 text-amber-300 shrink-0" />
+    <div className="rounded-xl border border-warn/40 bg-warn/5 px-4 py-3 flex items-center gap-3">
+      <AlertTriangle className="h-4 w-4 text-warn shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-amber-200">Container image needs rebuild</div>
+        <div className="text-sm text-warn">Container image needs rebuild</div>
         <div className="text-xs text-muted-foreground">
           Runtime config changed — agents in this crew can&apos;t start until the image is rebuilt. Use the toolbar Build button or rebuild here.
         </div>
@@ -146,7 +146,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
         type="button"
         onClick={trigger}
         disabled={triggering}
-        className="text-xs px-2.5 py-1.5 rounded bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 border border-amber-500/40 shrink-0"
+        className="text-xs px-2.5 py-1.5 rounded bg-warn/25 hover:bg-warn/35 text-warn border border-warn/40 shrink-0"
       >
         {triggering ? "Starting…" : "Build now"}
       </button>

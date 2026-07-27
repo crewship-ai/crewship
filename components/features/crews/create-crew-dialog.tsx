@@ -245,7 +245,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
               className={cn(
                 "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center transition-all shrink-0",
                 n < step
-                  ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300 hover:scale-110 cursor-pointer"
+                  ? "bg-success/20 border-success/50 text-success hover:scale-110 cursor-pointer"
                   : n === step
                     ? "bg-blue-500/20 border-blue-400 text-blue-300 ring-2 ring-blue-400/20"
                     : "bg-card border-white/10 text-muted-foreground cursor-default",
@@ -264,7 +264,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
               aria-hidden="true"
               className={cn(
                 "flex-1 h-px min-w-[16px] transition-colors",
-                n < step ? "bg-emerald-400/40" : "bg-white/10",
+                n < step ? "bg-success/40" : "bg-white/10",
               )}
             />
           )}

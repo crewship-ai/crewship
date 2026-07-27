@@ -179,7 +179,7 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
             <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
               {taskStats.completed > 0 && (
                 <div
-                  className="h-full bg-emerald-500 transition-all duration-700 ease-out"
+                  className="h-full bg-success transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.completed / taskStats.total) * 100}%` }}
                 />
               )}
@@ -191,19 +191,19 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
               )}
               {taskStats.failed > 0 && (
                 <div
-                  className="h-full bg-red-500 transition-all duration-700 ease-out"
+                  className="h-full bg-destructive transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.failed / taskStats.total) * 100}%` }}
                 />
               )}
               {taskStats.awaiting_approval > 0 && (
                 <div
-                  className="h-full bg-violet-500 transition-all duration-700 ease-out"
+                  className="h-full bg-purple transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.awaiting_approval / taskStats.total) * 100}%` }}
                 />
               )}
               {taskStats.blocked > 0 && (
                 <div
-                  className="h-full bg-orange-500 transition-all duration-700 ease-out"
+                  className="h-full bg-warn transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.blocked / taskStats.total) * 100}%` }}
                 />
               )}
@@ -221,13 +221,13 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
               </span>
             )}
             {taskStats.awaiting_approval > 0 && (
-              <span className="text-violet-600">{taskStats.awaiting_approval} awaiting approval</span>
+              <span className="text-purple">{taskStats.awaiting_approval} awaiting approval</span>
             )}
             {taskStats.blocked > 0 && (
-              <span className="text-orange-600">{taskStats.blocked} blocked</span>
+              <span className="text-warn">{taskStats.blocked} blocked</span>
             )}
             {taskStats.failed > 0 && (
-              <span className="text-red-600">{taskStats.failed} failed</span>
+              <span className="text-destructive">{taskStats.failed} failed</span>
             )}
           </div>
         </div>

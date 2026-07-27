@@ -281,9 +281,9 @@ function ContextLinks({
       {routineLink && (
         <Link
           href={routineLink}
-          className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/5"
+          className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-success/40 hover:bg-success/5"
         >
-          <Workflow className="h-3 w-3 shrink-0 text-emerald-300" />
+          <Workflow className="h-3 w-3 shrink-0 text-success" />
           <span className="truncate">
             Routine · {context.routineName || context.routineSlug}
           </span>
@@ -376,10 +376,10 @@ function LogsView({
     <div className="space-y-3">
       {errorMessage && (
         <div className="space-y-1.5">
-          <div className="text-[10px] uppercase tracking-wider text-rose-300/80">
+          <div className="text-[10px] uppercase tracking-wider text-destructive/80">
             Error
           </div>
-          <div className="rounded border border-rose-500/30 bg-rose-500/5 p-1.5">
+          <div className="rounded border border-destructive/30 bg-destructive/5 p-1.5">
             <OutputView value={errorMessage} emptyLabel="No error detail." />
           </div>
         </div>
@@ -562,7 +562,7 @@ function FileRow({
           <FileText
             className={cn(
               "h-3.5 w-3.5 shrink-0",
-              file.source === "action" ? "text-amber-300" : "text-muted-foreground/60",
+              file.source === "action" ? "text-warn" : "text-muted-foreground/60",
             )}
           />
           <span className="flex min-w-0 flex-col">
@@ -610,7 +610,7 @@ function FileProvenance({ file }: { file: StepFile }) {
       {shown.map((t: StepFileTouch, i: number) => (
         <span
           key={`${t.kind}:${t.name}:${i}`}
-          className="rounded border border-amber-500/30 px-1 text-[9px] text-amber-300"
+          className="rounded border border-warn/30 px-1 text-[9px] text-warn"
           title={`${t.name} (${t.kind})`}
         >
           {t.kind}
@@ -650,7 +650,7 @@ function FileViewerBody({
   // same agentId/workspaceId), so don't point users at a control they can't see.
   if (!canFetch) {
     return (
-      <div className="rounded border border-amber-500/20 bg-amber-500/5 px-2 py-3 text-center text-[11px] text-amber-200/80">
+      <div className="rounded border border-warn/20 bg-warn/5 px-2 py-3 text-center text-[11px] text-warn/80">
         Can&apos;t preview or download this file — the agent that wrote it
         isn&apos;t resolvable from this run.
       </div>
@@ -671,7 +671,7 @@ function FileViewerBody({
 
   if (error) {
     return (
-      <div className="rounded border border-rose-500/30 bg-rose-500/5 px-2 py-3 text-center text-[11px] text-rose-300/80">
+      <div className="rounded border border-destructive/30 bg-destructive/5 px-2 py-3 text-center text-[11px] text-destructive/80">
         Couldn&apos;t load {file.name}
         {error instanceof Error ? ` — ${error.message}` : ""}.
       </div>

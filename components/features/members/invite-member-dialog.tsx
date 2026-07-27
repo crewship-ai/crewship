@@ -119,7 +119,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
           </div>
 
           {status === "success" && (
-            <p className="text-body text-emerald-600">Invitation sent successfully.</p>
+            <p className="text-body text-success">Invitation sent successfully.</p>
           )}
           {status === "error" && error && (
             <p className="text-body text-destructive">{error}</p>

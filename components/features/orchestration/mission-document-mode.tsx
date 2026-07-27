@@ -103,8 +103,8 @@ function InlineTask({ task }: { task: MissionTask }) {
     <span
       className={cn(
         "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-sans align-baseline mx-0.5",
-        isDone && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-        isWaiting && "bg-amber-500/10 text-amber-600 dark:text-amber-500",
+        isDone && "bg-success/10 text-success dark:text-success",
+        isWaiting && "bg-warn/10 text-warn dark:text-warn",
         isRunning && "bg-blue-500/10 text-blue-600 dark:text-blue-400",
         !isDone && !isWaiting && !isRunning && "bg-muted text-muted-foreground",
       )}

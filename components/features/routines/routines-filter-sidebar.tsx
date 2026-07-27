@@ -316,8 +316,8 @@ function FacetRow({ label, count, active, onClick, dot, avatar }: FacetRowProps)
         <span
           className={cn(
             "h-1.5 w-1.5 shrink-0 rounded-full",
-            dot === "emerald" && "bg-emerald-500",
-            dot === "red" && "bg-red-500",
+            dot === "emerald" && "bg-success",
+            dot === "red" && "bg-destructive",
             dot === "muted" && "bg-muted-foreground/40",
           )}
         />

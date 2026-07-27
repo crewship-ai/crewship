@@ -111,8 +111,8 @@ export function EditableField({
             <ChevronDown className="absolute right-1 h-3 w-3 text-muted-foreground pointer-events-none" />
           </div>
         )}
-        {savedFlash && <Check className="h-3 w-3 text-emerald-400" />}
-        {error && <span className="text-[11px] text-red-400" title={error}>!</span>}
+        {savedFlash && <Check className="h-3 w-3 text-success" />}
+        {error && <span className="text-[11px] text-destructive" title={error}>!</span>}
       </div>
     )
   }
@@ -166,9 +166,9 @@ export function EditableField({
       {!editing && !readOnly && (
         <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
       )}
-      {savedFlash && <Check className="h-3 w-3 text-emerald-400" />}
+      {savedFlash && <Check className="h-3 w-3 text-success" />}
       {error && (
-        <span className="text-[11px] text-red-400" title={error}>
+        <span className="text-[11px] text-destructive" title={error}>
           !
         </span>
       )}

@@ -244,7 +244,7 @@ export function AccessEditor({
             <TableSkeleton rows={4} />
           </div>
         ) : loadErr ? (
-          <div className="mt-4 text-xs text-red-400">{loadErr}</div>
+          <div className="mt-4 text-xs text-destructive">{loadErr}</div>
         ) : (
           <div className="mt-4 space-y-4">
             {/* Acts-as user */}
@@ -353,7 +353,7 @@ export function AccessEditor({
           </div>
         )}
 
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex items-center gap-2">
           <Button size="sm" onClick={save} disabled={busy || loading || !!loadErr}>
@@ -545,7 +545,7 @@ function ToolPicker({
       </div>
 
       {err ? (
-        <div className="py-2 text-[11px] text-red-400">{err}</div>
+        <div className="py-2 text-[11px] text-destructive">{err}</div>
       ) : loading ? (
         <TableSkeleton rows={4} />
       ) : tools.length === 0 ? (
@@ -574,7 +574,7 @@ function ToolPicker({
                 <span
                   className={cn(
                     "shrink-0 rounded-full border border-white/10 px-1.5 py-px text-[9px]",
-                    read ? "text-muted-foreground" : "text-amber-300",
+                    read ? "text-muted-foreground" : "text-warn",
                   )}
                 >
                   {read ? "read" : "write"}

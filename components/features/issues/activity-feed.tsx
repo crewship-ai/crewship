@@ -19,15 +19,15 @@ export function ActivityIcon({ action }: { action: string }) {
   switch (action) {
     case "task_completed":
     case "review_approved":
-      return <Star className={cn(size, "text-green-500")} />
+      return <Star className={cn(size, "text-success")} />
     case "task_failed":
-      return <CircleX className={cn(size, "text-red-500")} />
+      return <CircleX className={cn(size, "text-destructive")} />
     case "status_changed":
-      return <PieChart className={cn(size, "text-amber-500")} />
+      return <PieChart className={cn(size, "text-warn")} />
     case "assignee_changed":
-      return <UserRoundCheck className={cn(size, "text-green-500")} />
+      return <UserRoundCheck className={cn(size, "text-success")} />
     case "review_changes_requested":
-      return <MessageSquareWarning className={cn(size, "text-red-500")} />
+      return <MessageSquareWarning className={cn(size, "text-destructive")} />
     case "priority_changed":
       return <ChartColumn className={cn(size, "text-blue-400")} />
     default:

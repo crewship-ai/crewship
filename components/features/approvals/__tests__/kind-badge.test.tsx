@@ -9,9 +9,9 @@ describe("KindBadge", () => {
   })
 
   it.each([
-    ["destructive_op", "destructive op", "text-red-300"],
-    ["cost_threshold", "cost threshold", "text-amber-300"],
-    ["target_environment", "target environment", "text-orange-300"],
+    ["destructive_op", "destructive op", "text-destructive"],
+    ["cost_threshold", "cost threshold", "text-warn"],
+    ["target_environment", "target environment", "text-warn"],
     ["tool_call", "tool call", "text-blue-300"],
     ["custom", "custom", "text-slate-300"],
   ])("kind=%s renders label %q with %s class", (kind, label, classFragment) => {

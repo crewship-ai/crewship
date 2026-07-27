@@ -66,15 +66,15 @@ function originTag(s: SessionRow): OriginTag | null {
   // we don't guess — we just don't show a tag.
   switch (s.origin) {
     case "CLI":
-      return { label: "CLI", icon: Terminal, className: "bg-violet-500/15 text-violet-300" }
+      return { label: "CLI", icon: Terminal, className: "bg-purple/15 text-purple" }
     case "UI":
       return { label: "UI", icon: MonitorSmartphone, className: "bg-blue-500/15 text-blue-300" }
     case "WEBHOOK":
-      return { label: "Hook", icon: Terminal, className: "bg-amber-500/15 text-amber-300" }
+      return { label: "Hook", icon: Terminal, className: "bg-warn/15 text-warn" }
     case "CRON":
-      return { label: "Cron", icon: Terminal, className: "bg-amber-500/15 text-amber-300" }
+      return { label: "Cron", icon: Terminal, className: "bg-warn/15 text-warn" }
     case "AGENT":
-      return { label: "Agent", icon: Terminal, className: "bg-fuchsia-500/15 text-fuchsia-300" }
+      return { label: "Agent", icon: Terminal, className: "bg-purple/15 text-purple" }
     default:
       return null
   }
@@ -204,7 +204,7 @@ export function SessionsSidebar({
                       className={cn(
                         "px-1 py-0.5 rounded",
                         s.status === "ACTIVE"
-                          ? "bg-emerald-500/15 text-emerald-300"
+                          ? "bg-success/15 text-success"
                           : "bg-zinc-800 text-muted-foreground",
                       )}
                     >
@@ -219,13 +219,13 @@ export function SessionsSidebar({
                     )}
                     {/* Error marker */}
                     {s.last_message_error && (
-                      <span className="px-1 py-0.5 rounded bg-red-500/15 text-red-300 inline-flex items-center gap-0.5">
+                      <span className="px-1 py-0.5 rounded bg-destructive/15 text-destructive inline-flex items-center gap-0.5">
                         <AlertTriangle className="h-2.5 w-2.5" />
                         Error
                       </span>
                     )}
                     {/* Message count — colored amber on 0 (visible only when override active) */}
-                    <span className={cn(s.message_count === 0 && "text-amber-400/70 italic")}>
+                    <span className={cn(s.message_count === 0 && "text-warn/70 italic")}>
                       {s.message_count} msg{s.message_count === 1 ? "" : "s"}
                     </span>
                   </div>

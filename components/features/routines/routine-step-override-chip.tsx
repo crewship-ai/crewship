@@ -17,7 +17,7 @@ export function StepOverrideChip({ override }: { override?: PipelineStepOverride
   return (
     <Badge
       variant="outline"
-      className="gap-1 border-amber-500/30 bg-amber-500/10 px-1.5 py-0 text-[9.5px] font-medium text-amber-400"
+      className="gap-1 border-warn/30 bg-warn/10 px-1.5 py-0 text-[9.5px] font-medium text-warn"
       title={`Step override — ${details.join(" · ")}. Applied at run start, over the versioned routine definition.`}
     >
       <SlidersHorizontal className="h-2.5 w-2.5" aria-hidden />

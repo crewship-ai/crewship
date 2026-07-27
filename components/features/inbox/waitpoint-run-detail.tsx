@@ -179,7 +179,7 @@ export function WaitpointRunDetail({
   }
   if (error) {
     return (
-      <div className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+      <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
         Could not load run: {error}
       </div>
     )
@@ -230,20 +230,20 @@ export function WaitpointRunDetail({
       <div
         className={cn(
           "flex items-center justify-between rounded-md border px-3 py-2",
-          isCompleted && "border-emerald-500/30 bg-emerald-500/5",
-          isFailed && "border-rose-500/30 bg-rose-500/5",
+          isCompleted && "border-success/30 bg-success/5",
+          isFailed && "border-destructive/30 bg-destructive/5",
           isLive && !isCompleted && !isFailed && "border-white/[0.06] bg-card/30",
         )}
       >
         <div className="flex items-center gap-2">
           {isCompleted ? (
-            <Check className="h-4 w-4 text-emerald-400" />
+            <Check className="h-4 w-4 text-success" />
           ) : isFailed ? (
-            <AlertCircle className="h-4 w-4 text-rose-400" />
+            <AlertCircle className="h-4 w-4 text-destructive" />
           ) : run.current_step_id && completedSteps.includes(run.current_step_id) ? (
             <Spinner className="h-4 w-4 text-blue-400" />
           ) : (
-            <PauseCircle className="h-4 w-4 text-amber-400" />
+            <PauseCircle className="h-4 w-4 text-warn" />
           )}
           <div>
             <div className="text-xs font-medium">{pipeline?.name || run.pipeline_slug}</div>
@@ -348,7 +348,7 @@ function StepRow({
         className={cn(
           "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
           hasOutput ? "hover:bg-white/[0.02]" : "cursor-default opacity-70",
-          status === "paused" && "bg-amber-500/5",
+          status === "paused" && "bg-warn/5",
         )}
       >
         <StatusBadge status={status} />
@@ -391,14 +391,14 @@ function StepRow({
 function StatusBadge({ status }: { status: "done" | "paused" | "pending" }) {
   if (status === "done") {
     return (
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">
         <Check className="h-2.5 w-2.5" />
       </span>
     )
   }
   if (status === "paused") {
     return (
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/30 text-amber-400">
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warn/30 text-warn">
         <Clock className="h-2.5 w-2.5 animate-pulse" />
       </span>
     )

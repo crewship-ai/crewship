@@ -269,7 +269,7 @@ export function CredentialForm({
             onBlur={() => setNameBlurred(true)}
             className={cn(
               "font-mono text-sm pr-9",
-              nameBlurred && nameInvalid && !nameIsLegacy && "border-red-500/50",
+              nameBlurred && nameInvalid && !nameIsLegacy && "border-destructive/50",
             )}
             aria-invalid={nameBlurred && nameInvalid && !nameIsLegacy}
             autoFocus={mode === "create"}
@@ -286,7 +286,7 @@ export function CredentialForm({
           )}
         </div>
         {nameBlurred && nameInvalid && !nameIsLegacy ? (
-          <div className="flex items-center gap-2 flex-wrap text-[11px] text-red-400">
+          <div className="flex items-center gap-2 flex-wrap text-[11px] text-destructive">
             <span>
               Must be a valid env var name — uppercase letters, digits and underscores,
               not starting with a digit.
@@ -295,17 +295,17 @@ export function CredentialForm({
               <button
                 type="button"
                 onClick={() => handleNameChange(nameSuggestion)}
-                className="font-mono rounded border border-red-400/40 px-1.5 py-0.5 hover:bg-red-500/10 transition-colors"
+                className="font-mono rounded border border-destructive/40 px-1.5 py-0.5 hover:bg-destructive/10 transition-colors"
               >
                 Use {nameSuggestion}
               </button>
             )}
           </div>
         ) : nameInvalid && nameIsLegacy ? (
-          <p className="text-[11px] text-amber-400">
+          <p className="text-[11px] text-warn">
             This name isn&apos;t a valid env var name; agents may not see it as an
             environment variable. You can keep it, or rename
-            {nameSuggestion ? <> to <button type="button" onClick={() => handleNameChange(nameSuggestion)} className="font-mono underline underline-offset-2 hover:text-amber-300">{nameSuggestion}</button></> : " it"}.
+            {nameSuggestion ? <> to <button type="button" onClick={() => handleNameChange(nameSuggestion)} className="font-mono underline underline-offset-2 hover:text-warn">{nameSuggestion}</button></> : " it"}.
           </p>
         ) : (
           <p className="text-[11px] text-muted-foreground">
@@ -370,7 +370,7 @@ export function CredentialForm({
               {testResult && (
                 <span className={cn(
                   "flex items-center gap-1 text-[11px]",
-                  testResult.valid ? "text-emerald-400" : "text-red-400",
+                  testResult.valid ? "text-success" : "text-destructive",
                 )}>
                   {testResult.valid
                     ? <CheckCircle2 className="h-3 w-3" />
@@ -398,7 +398,7 @@ export function CredentialForm({
               <button
                 type="button"
                 onClick={() => removeTag(t)}
-                className="hover:text-red-400"
+                className="hover:text-destructive"
                 aria-label={`Remove tag ${t}`}
               >
                 <X className="h-2.5 w-2.5" />
@@ -583,7 +583,7 @@ export function CredentialForm({
       )}
 
       {error && (
-        <div className="text-xs text-red-400 border border-red-500/30 bg-red-500/[0.05] rounded-md px-3 py-2">
+        <div className="text-xs text-destructive border border-destructive/30 bg-destructive/[0.05] rounded-md px-3 py-2">
           {error}
         </div>
       )}

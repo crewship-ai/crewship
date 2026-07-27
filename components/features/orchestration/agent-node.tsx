@@ -35,8 +35,8 @@ const statusConfig: Record<string, {
   COMPLETED: {
     accent: STATUS_COLORS.COMPLETED,
     bg: STATUS_BG.COMPLETED,
-    headerBg: "bg-gradient-to-r from-green-600/30 to-green-500/10",
-    dot: "bg-green-500",
+    headerBg: "bg-gradient-to-r from-success/30 to-success/10",
+    dot: "bg-success",
     glow: "",
     label: "Completed",
   },
@@ -51,16 +51,16 @@ const statusConfig: Record<string, {
   FAILED: {
     accent: STATUS_COLORS.FAILED,
     bg: STATUS_BG.FAILED,
-    headerBg: "bg-gradient-to-r from-red-600/30 to-red-500/10",
-    dot: "bg-red-500",
+    headerBg: "bg-gradient-to-r from-destructive/30 to-destructive/10",
+    dot: "bg-destructive",
     glow: "shadow-[0_0_15px_rgba(239,68,68,0.2)]",
     label: "Failed",
   },
   BLOCKED: {
     accent: STATUS_COLORS.BLOCKED,
     bg: STATUS_BG.BLOCKED,
-    headerBg: "bg-gradient-to-r from-amber-600/30 to-amber-500/10",
-    dot: "bg-amber-500",
+    headerBg: "bg-gradient-to-r from-warn/30 to-warn/10",
+    dot: "bg-warn",
     glow: "",
     label: "Blocked",
   },
@@ -75,8 +75,8 @@ const statusConfig: Record<string, {
   REVIEW: {
     accent: STATUS_COLORS.REVIEW,
     bg: STATUS_BG.REVIEW,
-    headerBg: "bg-gradient-to-r from-purple-600/30 to-purple-500/10",
-    dot: "bg-purple-500",
+    headerBg: "bg-gradient-to-r from-purple/30 to-purple/10",
+    dot: "bg-purple",
     glow: "shadow-[0_0_15px_rgba(168,85,247,0.2)]",
     label: "Review",
   },
@@ -91,8 +91,8 @@ const statusConfig: Record<string, {
   AWAITING_APPROVAL: {
     accent: STATUS_COLORS.AWAITING_APPROVAL,
     bg: STATUS_BG.AWAITING_APPROVAL,
-    headerBg: "bg-gradient-to-r from-violet-600/30 to-violet-500/10",
-    dot: "bg-violet-500 animate-pulse",
+    headerBg: "bg-gradient-to-r from-purple/30 to-purple/10",
+    dot: "bg-purple animate-pulse",
     glow: "shadow-[0_0_15px_rgba(139,92,246,0.2)]",
     label: "Awaiting Approval",
   },
@@ -179,11 +179,11 @@ function AgentNodeComponent({ data }: NodeProps) {
             </div>
             <div className="flex items-center gap-1 mt-0.5">
               {!d.agentSlug && (
-                <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+                <AlertTriangle className="h-3 w-3 text-warn shrink-0" />
               )}
               <span className={cn(
                 "text-[11px] truncate font-mono",
-                d.agentSlug ? "text-muted-foreground" : "text-amber-400/70"
+                d.agentSlug ? "text-muted-foreground" : "text-warn/70"
               )}>
                 {d.agentSlug ? `@${d.agentSlug}` : "unassigned"}
               </span>

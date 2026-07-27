@@ -146,7 +146,7 @@ export function RecipeInstallSheet({
         </div>
 
         {error && (
-          <div className="px-5 py-2 text-xs text-red-400 border-t border-white/10">{error}</div>
+          <div className="px-5 py-2 text-xs text-destructive border-t border-white/10">{error}</div>
         )}
 
         <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
@@ -196,7 +196,7 @@ function StepStrip({ step }: { step: 1 | 2 | 3 }) {
           <div className="flex items-center gap-2 text-[12px] shrink-0">
             <div className={cn(
               "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center",
-              n < step ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300"
+              n < step ? "bg-success/20 border-success/50 text-success"
                 : n === step ? "bg-blue-500/20 border-blue-400 text-blue-300 ring-2 ring-blue-400/20"
                 : "bg-card border-white/10 text-muted-foreground",
             )}>
@@ -204,7 +204,7 @@ function StepStrip({ step }: { step: 1 | 2 | 3 }) {
             </div>
             <span className={cn("font-medium", n !== step && "opacity-60")}>{labels[n - 1]}</span>
           </div>
-          {i < 2 && <div className={cn("flex-1 h-px", n < step ? "bg-emerald-400/40" : "bg-white/10")} />}
+          {i < 2 && <div className={cn("flex-1 h-px", n < step ? "bg-success/40" : "bg-white/10")} />}
         </React.Fragment>
       ))}
     </nav>
@@ -224,12 +224,12 @@ function PreviewStep({ preview }: { preview: PreviewResp }) {
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Will create</div>
         <ul className="space-y-1.5 text-xs">
           <li className="flex items-center gap-2">
-            <Check className="h-3 w-3 text-emerald-400" />
-            <span>1 crew &mdash; <span className="font-mono">{preview.resolved_crew_slug}</span>{!preview.crew_slug_available && <span className="text-amber-400 ml-1">(suffixed; original taken)</span>}</span>
+            <Check className="h-3 w-3 text-success" />
+            <span>1 crew &mdash; <span className="font-mono">{preview.resolved_crew_slug}</span>{!preview.crew_slug_available && <span className="text-warn ml-1">(suffixed; original taken)</span>}</span>
           </li>
           {r.mcp_servers.map((s) => (
             <li key={s.name} className="flex items-center gap-2">
-              <Check className="h-3 w-3 text-emerald-400" />
+              <Check className="h-3 w-3 text-success" />
               <span>1 MCP server &mdash; <span className="font-mono">{s.display_name}</span> ({s.transport})</span>
             </li>
           ))}
@@ -244,7 +244,7 @@ function PreviewStep({ preview }: { preview: PreviewResp }) {
                   </>
                 ) : (
                   <>
-                    <Check className="h-3 w-3 text-emerald-400" />
+                    <Check className="h-3 w-3 text-success" />
                     <span>1 credential &mdash; <span className="font-mono">{c.env_var_name}</span> ({c.label})</span>
                   </>
                 )}
@@ -278,7 +278,7 @@ function CredentialsStep({
   const needed = preview.recipe.credentials.filter((c) => !preview.existing_credentials[c.env_var_name])
   if (needed.length === 0) {
     return (
-      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.05] p-4 text-sm">
+      <div className="rounded-md border border-success/30 bg-success/[0.05] p-4 text-sm">
         All credentials this recipe needs are already in your workspace. Continue to confirm.
       </div>
     )
@@ -336,7 +336,7 @@ function ConfirmStep({ preview, credValues }: { preview: PreviewResp; credValues
   const willReuse = preview.recipe.credentials.length - willCreate
   return (
     <div className="space-y-3">
-      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.05] p-4 text-sm space-y-1">
+      <div className="rounded-md border border-success/30 bg-success/[0.05] p-4 text-sm space-y-1">
         <div className="font-medium">Ready to install</div>
         <ul className="text-xs text-foreground/80 list-disc list-inside space-y-0.5">
           <li>1 crew &mdash; <span className="font-mono">{preview.resolved_crew_slug}</span></li>
@@ -350,7 +350,7 @@ function ConfirmStep({ preview, credValues }: { preview: PreviewResp; credValues
       </div>
       {/* Sanity guard against accidentally posting empty values */}
       {Object.values(credValues).some((v) => !v.trim()) && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] p-2 text-xs text-amber-300">
+        <div className="rounded-md border border-warn/30 bg-warn/[0.05] p-2 text-xs text-warn">
           Some credential values are empty. Go back to fill them in.
         </div>
       )}

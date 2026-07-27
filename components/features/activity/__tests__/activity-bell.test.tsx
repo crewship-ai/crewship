@@ -154,7 +154,7 @@ describe("<ActivityBell> badge", () => {
     render(<ActivityBell />)
     const badge = screen.getByTestId("activity-live-badge")
     expect(badge).toHaveTextContent("2")
-    expect(badge.className).toContain("bg-amber-500")
+    expect(badge.className).toContain("bg-warn")
   })
 
   it("keeps the emerald badge semantics for agent-only activity", () => {
@@ -165,7 +165,7 @@ describe("<ActivityBell> badge", () => {
     render(<ActivityBell />)
     const badge = screen.getByTestId("activity-live-badge")
     expect(badge).toHaveTextContent("1")
-    expect(badge.className).toContain("bg-emerald-500")
+    expect(badge.className).toContain("bg-success")
   })
 })
 

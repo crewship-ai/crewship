@@ -325,7 +325,7 @@ function RunRow({
             <span className="font-mono text-[10px]">{shortId(run.id)}</span>
           )}
           {isWait && (
-            <span className="shrink-0 text-[10px] text-amber-300">awaiting approval</span>
+            <span className="shrink-0 text-[10px] text-warn">awaiting approval</span>
           )}
         </span>
         {/* Only fade the timestamp when there's a link to reveal in its
@@ -380,24 +380,24 @@ function tintFor(group: RunGroup) {
     case "running":
       return { dot: "bg-blue-400", icon: "animate-spin text-blue-400" }
     case "paused":
-      return { dot: "bg-amber-400 animate-pulse", icon: "text-amber-400" }
+      return { dot: "bg-warn animate-pulse", icon: "text-warn" }
     case "failed":
-      return { dot: "bg-rose-400", icon: "text-rose-400" }
+      return { dot: "bg-destructive", icon: "text-destructive" }
     case "completed":
-      return { dot: "bg-emerald-400", icon: "text-emerald-400" }
+      return { dot: "bg-success", icon: "text-success" }
     default:
       return { dot: "bg-white/30", icon: "text-muted-foreground" }
   }
 }
 
 const ACCENT_BY_KIND: Record<RunGroup["kind"], string> = {
-  cron: "border-violet-500/30",
+  cron: "border-purple/30",
   issue: "border-blue-500/30",
-  webhook: "border-amber-500/30",
+  webhook: "border-warn/30",
   manual: "border-white/[0.10]",
-  call_pipeline: "border-purple-500/30",
-  crew: "border-cyan-500/30",
-  routine: "border-violet-500/30",
+  call_pipeline: "border-purple/30",
+  crew: "border-notice/30",
+  routine: "border-purple/30",
   all: "border-white/[0.06]",
 }
 
@@ -406,13 +406,13 @@ const ACCENT_BY_KIND: Record<RunGroup["kind"], string> = {
 // each filter chip click, each routine in a 100-row workspace —
 // keeping this static keeps GC churn minimal under load.
 const KIND_BADGE_MAP: Record<RunGroup["kind"], { Icon: typeof Calendar; cls: string; text: string }> = {
-  cron: { Icon: Calendar, cls: "bg-violet-500/15 text-violet-300", text: "Cron" },
+  cron: { Icon: Calendar, cls: "bg-purple/15 text-purple", text: "Cron" },
   issue: { Icon: CircleDot, cls: "bg-blue-500/15 text-blue-300", text: "Issue" },
-  webhook: { Icon: Webhook, cls: "bg-amber-500/15 text-amber-300", text: "Webhook" },
+  webhook: { Icon: Webhook, cls: "bg-warn/15 text-warn", text: "Webhook" },
   manual: { Icon: Zap, cls: "bg-white/[0.06] text-muted-foreground", text: "Manual" },
-  call_pipeline: { Icon: CircleDot, cls: "bg-purple-500/15 text-purple-300", text: "Sub-routine" },
-  crew: { Icon: CircleDot, cls: "bg-cyan-500/15 text-cyan-300", text: "Crew" },
-  routine: { Icon: CircleDot, cls: "bg-violet-500/15 text-violet-300", text: "Routine" },
+  call_pipeline: { Icon: CircleDot, cls: "bg-purple/15 text-purple", text: "Sub-routine" },
+  crew: { Icon: CircleDot, cls: "bg-notice/15 text-notice", text: "Crew" },
+  routine: { Icon: CircleDot, cls: "bg-purple/15 text-purple", text: "Routine" },
   all: { Icon: CircleDot, cls: "bg-white/[0.06] text-muted-foreground", text: "All" },
 }
 

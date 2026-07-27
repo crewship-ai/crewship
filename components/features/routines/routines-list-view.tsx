@@ -104,7 +104,7 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
               {loading ? (
                 "Loading…"
               ) : error ? (
-                <span className="text-rose-400">Error: {error}</span>
+                <span className="text-destructive">Error: {error}</span>
               ) : (
                 <>
                   <span className="text-foreground/85 tabular-nums">{stats.total}</span> routines in this workspace
@@ -152,7 +152,7 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
 
         {/* ── Needs attention callout ────────────────────────────── */}
         {stats.failed.length > 0 && (
-          <Card tone="amber" title="Needs attention" icon={AlertTriangle} subtitle={`${stats.failed.length} failed`}>
+          <Card tone="warn" title="Needs attention" icon={AlertTriangle} subtitle={`${stats.failed.length} failed`}>
             <ul className="divide-y divide-border/40">
               {stats.failed.slice(0, 5).map((r) => (
                 <li key={r.id}>
@@ -160,7 +160,7 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
                     onClick={() => onSelect(r.slug)}
                     className="grid w-full grid-cols-[18px_1fr_auto] items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.025]"
                   >
-                    <XCircle className="h-4 w-4 text-rose-400" />
+                    <XCircle className="h-4 w-4 text-destructive" />
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{r.name || r.slug}</div>
                       <div className="font-mono text-[11px] text-muted-foreground">{r.slug}</div>
@@ -238,10 +238,10 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
 const KPI_TONE: Record<string, { bg: string; text: string; iconBg: string; Icon: typeof Activity }> = {
   default: { bg: "bg-muted", text: "text-muted-foreground", iconBg: "bg-muted text-muted-foreground", Icon: Activity },
   blue: { bg: "bg-blue-500/20", text: "text-blue-400", iconBg: "bg-blue-500/20 text-blue-400", Icon: Zap },
-  violet: { bg: "bg-violet-500/20", text: "text-violet-400", iconBg: "bg-violet-500/20 text-violet-400", Icon: Activity },
-  emerald: { bg: "bg-emerald-500/20", text: "text-emerald-400", iconBg: "bg-emerald-500/20 text-emerald-400", Icon: CheckCircle2 },
-  amber: { bg: "bg-amber-500/20", text: "text-amber-400", iconBg: "bg-amber-500/20 text-amber-400", Icon: AlertTriangle },
-  rose: { bg: "bg-rose-500/20", text: "text-rose-400", iconBg: "bg-rose-500/20 text-rose-400", Icon: XCircle },
+  violet: { bg: "bg-purple/20", text: "text-purple", iconBg: "bg-purple/20 text-purple", Icon: Activity },
+  emerald: { bg: "bg-success/20", text: "text-success", iconBg: "bg-success/20 text-success", Icon: CheckCircle2 },
+  amber: { bg: "bg-warn/20", text: "text-warn", iconBg: "bg-warn/20 text-warn", Icon: AlertTriangle },
+  rose: { bg: "bg-destructive/20", text: "text-destructive", iconBg: "bg-destructive/20 text-destructive", Icon: XCircle },
 }
 
 function KpiTile({
@@ -322,11 +322,11 @@ function RoutineRow({
   const liveAwaiting = liveRun ? isAwaitingApproval(liveRun.status) : false
   const statusPill = liveRun ? (
     <div className="flex min-w-0 flex-col gap-1">
-      <Pill tone={liveAwaiting ? "amber" : "blue"}>
+      <Pill tone={liveAwaiting ? "warn" : "blue"}>
         <span
           className={cn(
             "h-1.5 w-1.5 rounded-full animate-pulse",
-            liveAwaiting ? "bg-amber-400" : "bg-blue-400",
+            liveAwaiting ? "bg-warn" : "bg-blue-400",
           )}
         />
         {liveAwaiting ? "Awaiting approval" : "Running"}
@@ -344,9 +344,9 @@ function RoutineRow({
     <Pill
       tone={
         status === "completed" || status === "succeeded" || status === "success"
-          ? "emerald"
+          ? "success"
           : status === "failed" || status === "error"
-            ? "rose"
+            ? "destructive"
             : status === "running"
               ? "blue"
               : "default"
@@ -434,7 +434,7 @@ function LinkedIssuesChip({ count, identifiers }: { count: number; identifiers: 
   return (
     <Badge
       variant="outline"
-      className="border-blue-500/30 bg-blue-500/10 px-1.5 py-0 text-[10px] font-medium text-blue-400"
+      className="border-notice/30 bg-notice/10 px-1.5 py-0 text-[10px] font-medium text-notice"
       title={`Linked to ${count} issue${count === 1 ? "" : "s"}: ${identifiers.join(", ")}${extra > 0 ? "…" : ""}`}
     >
       {label || `${count} issue${count === 1 ? "" : "s"}`}
@@ -445,8 +445,8 @@ function LinkedIssuesChip({ count, identifiers }: { count: number; identifiers: 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-border/60 bg-card p-12">
-      <ScrollText className="mb-4 h-12 w-12 text-rose-400/40" />
-      <h3 className="mb-2 text-sm font-medium text-rose-400">Failed to load routines</h3>
+      <ScrollText className="mb-4 h-12 w-12 text-destructive/40" />
+      <h3 className="mb-2 text-sm font-medium text-destructive">Failed to load routines</h3>
       <p className="mb-4 max-w-xl break-all text-center text-[12px] text-muted-foreground">{message}</p>
       <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
         <RefreshCw className="h-3.5 w-3.5" />

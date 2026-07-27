@@ -19,7 +19,7 @@ const META: Record<TrustTier, { label: string; tooltip: string; icon: React.Comp
     label: "Verified by Crewship",
     tooltip: "Reviewed for compatibility and security by the crewship team.",
     icon: BadgeCheck,
-    cls: "border-emerald-400/40 text-emerald-300 bg-emerald-500/[0.05]",
+    cls: "border-success/40 text-success bg-success/[0.05]",
   },
   community: {
     label: "Community",

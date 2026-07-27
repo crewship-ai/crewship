@@ -103,13 +103,13 @@ const statusFilters = ["ALL", "IN_PROGRESS", "COMPLETED", "FAILED", "BLOCKED"] a
 type StatusFilter = (typeof statusFilters)[number]
 
 const statusColors: Record<string, { dot: string; pulse?: string; pill: string }> = {
-  COMPLETED:   { dot: "bg-emerald-500", pill: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" },
+  COMPLETED:   { dot: "bg-success", pill: "bg-success/15 text-success border-success/20" },
   IN_PROGRESS: { dot: "bg-blue-500", pulse: "bg-blue-400", pill: "bg-blue-500/15 text-blue-400 border-blue-500/20" },
-  FAILED:      { dot: "bg-red-500", pill: "bg-red-500/15 text-red-400 border-red-500/20" },
-  BLOCKED:     { dot: "bg-amber-500", pill: "bg-amber-500/15 text-amber-400 border-amber-500/20" },
+  FAILED:      { dot: "bg-destructive", pill: "bg-destructive/15 text-destructive border-destructive/20" },
+  BLOCKED:     { dot: "bg-warn", pill: "bg-warn/15 text-warn border-warn/20" },
   CANCELLED:   { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },
-  PLANNING:    { dot: "bg-violet-500", pill: "bg-violet-500/15 text-violet-400 border-violet-500/20" },
-  REVIEW:      { dot: "bg-cyan-500", pill: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20" },
+  PLANNING:    { dot: "bg-purple", pill: "bg-purple/15 text-purple border-purple/20" },
+  REVIEW:      { dot: "bg-notice", pill: "bg-notice/15 text-notice border-notice/20" },
   SKIPPED:     { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },
 }
 

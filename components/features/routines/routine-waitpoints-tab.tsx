@@ -106,8 +106,8 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
   return (
     <div className="space-y-4">
       {error && (
-        <Card tone="amber">
-          <div className="px-4 py-3 text-sm text-amber-300">{error}</div>
+        <Card tone="warn">
+          <div className="px-4 py-3 text-sm text-warn">{error}</div>
         </Card>
       )}
 
@@ -136,13 +136,13 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
                   className={cn("space-y-3 px-4 py-4", isDeciding && "opacity-50")}
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <Pill tone="amber" className="capitalize">
+                    <Pill tone="warn" className="capitalize">
                       <Clock className="h-3 w-3" />
                       {w.kind}
                     </Pill>
                     <span className="font-mono text-[12px] text-muted-foreground">step {w.step_id}</span>
                     <span className="ml-auto text-[11px] text-muted-foreground">
-                      Timeout in <span className={cn("text-foreground/85", isUrgent && "text-rose-400 font-semibold")}>{expiresHrs}h</span>
+                      Timeout in <span className={cn("text-foreground/85", isUrgent && "text-destructive font-semibold")}>{expiresHrs}h</span>
                     </span>
                   </div>
 

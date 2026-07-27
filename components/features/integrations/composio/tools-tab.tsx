@@ -106,7 +106,7 @@ export function ToolsTab({
         </div>
       )}
 
-      {err && <div className="text-[11px] text-red-400">{err}</div>}
+      {err && <div className="text-[11px] text-destructive">{err}</div>}
 
       {!toolkit.trim() ? (
         <EmptyHint text="Enter a toolkit slug (or pick a connected one) to list its tools." />

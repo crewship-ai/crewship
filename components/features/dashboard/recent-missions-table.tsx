@@ -12,23 +12,23 @@ interface RecentMissionsTableProps {
 
 const STATUS_STYLES: Record<string, string> = {
   BACKLOG: "text-muted-foreground border-border bg-muted/20",
-  TODO: "text-cyan-400 border-cyan-500/30 bg-cyan-500/10",
+  TODO: "text-notice border-notice/30 bg-notice/10",
   PLANNING: "text-muted-foreground border-border bg-muted/20",
   IN_PROGRESS: "text-blue-400 border-blue-500/30 bg-blue-500/10",
-  REVIEW: "text-amber-400 border-amber-500/30 bg-amber-500/10",
-  COMPLETED: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
-  DONE: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
-  FAILED: "text-red-400 border-red-500/30 bg-red-500/10",
+  REVIEW: "text-warn border-warn/30 bg-warn/10",
+  COMPLETED: "text-success border-success/30 bg-success/10",
+  DONE: "text-success border-success/30 bg-success/10",
+  FAILED: "text-destructive border-destructive/30 bg-destructive/10",
   CANCELLED: "text-muted-foreground border-border bg-muted/20",
 }
 
 // Indicator fill classes for the inline Progress bar, one per mission status.
 const PROGRESS_INDICATOR: Record<string, string> = {
-  COMPLETED: "bg-emerald-400",
-  DONE: "bg-emerald-400",
-  FAILED: "bg-red-400",
+  COMPLETED: "bg-success",
+  DONE: "bg-success",
+  FAILED: "bg-destructive",
   IN_PROGRESS: "bg-blue-400",
-  REVIEW: "bg-amber-400",
+  REVIEW: "bg-warn",
 }
 
 // Statuses that count as "work done" for the per-mission task progress ratio.

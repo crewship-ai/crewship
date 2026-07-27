@@ -54,12 +54,12 @@ const presetMeta: Record<
   },
   standard: {
     label: "Standard",
-    className: "border-emerald-500/40 text-emerald-500",
+    className: "border-success/40 text-success",
     title: "Quick + /home/agent + /opt/crew-tools",
   },
   full: {
     label: "Full",
-    className: "border-violet-500/40 text-violet-500",
+    className: "border-purple/40 text-purple",
     title: "Standard + /var/lib (in-container service data)",
   },
 }
@@ -206,12 +206,12 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                   <td className="px-3 py-2 font-mono">{formatBytes(row.size_bytes)}</td>
                   <td className="px-3 py-2">
                     {row.encrypted ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-500">
+                      <span className="inline-flex items-center gap-1 text-success">
                         <Lock className="h-3 w-3" />
                         <span>encrypted</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-amber-500">
+                      <span className="inline-flex items-center gap-1 text-warn">
                         <Unlock className="h-3 w-3" />
                         <span>plain</span>
                       </span>
@@ -260,7 +260,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                             return <Spinner className="h-3.5 w-3.5" />
                           }
                           if (ours && verify.data!.valid && !verify.data!.error) {
-                            return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                            return <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                           }
                           if (ours && (!verify.data!.valid || Boolean(verify.data!.error))) {
                             return <XCircle className="h-3.5 w-3.5 text-destructive" />

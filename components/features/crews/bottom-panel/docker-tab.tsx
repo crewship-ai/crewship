@@ -30,7 +30,7 @@ export function DockerTab() {
     return () => { cancelled = true }
   }, [])
 
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (containers === null) return <EmptyState>Loading container status…</EmptyState>
   if (containers.length === 0) return <EmptyState>No containers running.</EmptyState>
 
@@ -54,7 +54,7 @@ export function DockerTab() {
               <span
                 className={cn(
                   "w-1.5 h-1.5 rounded-full",
-                  c.status?.toLowerCase().includes("running") ? "bg-emerald-400" : "bg-zinc-500",
+                  c.status?.toLowerCase().includes("running") ? "bg-success" : "bg-zinc-500",
                 )}
               />
               <code className="text-xs">{c.name}</code>
@@ -63,7 +63,7 @@ export function DockerTab() {
             <span
               className={cn(
                 "text-xs",
-                c.status?.toLowerCase().includes("running") ? "text-emerald-400" : "text-muted-foreground",
+                c.status?.toLowerCase().includes("running") ? "text-success" : "text-muted-foreground",
               )}
             >
               {c.status}

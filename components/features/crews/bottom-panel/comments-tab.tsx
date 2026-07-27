@@ -80,7 +80,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select an issue to see its comments.</EmptyState>
   if (context.kind !== "mission") return <EmptyState>Comments are per-issue — select one.</EmptyState>
-  if (error && comments === null) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error && comments === null) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (comments === null) return <EmptyState>Loading…</EmptyState>
 
   return (
@@ -102,7 +102,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
               <div className="min-w-0">
                 <div className="text-muted-foreground text-[11px] mb-0.5">
                   <span className="text-foreground font-medium mr-1.5">{name}</span>
-                  {c.author_type === "agent" && <span className="mr-1.5 text-emerald-300/70">agent</span>}
+                  {c.author_type === "agent" && <span className="mr-1.5 text-success/70">agent</span>}
                   {formatRelative(c.created_at)}
                 </div>
                 <div className="text-foreground/85 whitespace-pre-wrap break-words">{c.body}</div>
@@ -116,7 +116,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
           above, so once the thread is shown this is the only place a
           failed POST can report itself. */}
       {error && comments !== null && (
-        <div className="shrink-0 px-3 py-1.5 text-[11px] text-red-300 border-t border-red-500/20 bg-red-500/5">
+        <div className="shrink-0 px-3 py-1.5 text-[11px] text-destructive border-t border-destructive/20 bg-destructive/5">
           Failed to send: {error}
         </div>
       )}

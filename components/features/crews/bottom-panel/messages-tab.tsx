@@ -40,7 +40,7 @@ export function MessagesTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select an agent to see its inbox messages.</EmptyState>
   if (context.kind !== "agent") return <EmptyState>Messages are per-agent — select one in the explorer.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (messages === null || counters === null) return <EmptyState>Loading…</EmptyState>
 
   const totalCounters = counters.escalations + counters.assignments + counters.approvals
@@ -51,11 +51,11 @@ export function MessagesTab({ workspaceId, context }: { workspaceId: string; con
   return (
     <div className="h-full overflow-y-auto p-3 space-y-1.5 text-xs">
       {totalCounters > 0 && (
-        <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center gap-2">
-          <span className="text-amber-300 font-medium">Pending:</span>
-          {counters.escalations > 0 && <span className="text-amber-200">{counters.escalations} escalation{counters.escalations === 1 ? "" : "s"}</span>}
-          {counters.assignments > 0 && <span className="text-amber-200">{counters.assignments} assignment{counters.assignments === 1 ? "" : "s"}</span>}
-          {counters.approvals > 0 && <span className="text-amber-200">{counters.approvals} approval{counters.approvals === 1 ? "" : "s"}</span>}
+        <div className="rounded border border-warn/30 bg-warn/5 px-3 py-2 flex items-center gap-2">
+          <span className="text-warn font-medium">Pending:</span>
+          {counters.escalations > 0 && <span className="text-warn">{counters.escalations} escalation{counters.escalations === 1 ? "" : "s"}</span>}
+          {counters.assignments > 0 && <span className="text-warn">{counters.assignments} assignment{counters.assignments === 1 ? "" : "s"}</span>}
+          {counters.approvals > 0 && <span className="text-warn">{counters.approvals} approval{counters.approvals === 1 ? "" : "s"}</span>}
         </div>
       )}
       {messages.map((m) => <PeerMessageCard key={m.id} m={m} />)}
@@ -70,15 +70,15 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
   const status = (m.status ?? "").toUpperCase()
   const statusChip =
     status === "COMPLETED"
-      ? { label: "Completed", cls: "bg-emerald-500/15 text-emerald-300" }
+      ? { label: "Completed", cls: "bg-success/15 text-success" }
       : status === "RUNNING"
         ? { label: "Running", cls: "bg-blue-500/15 text-blue-300" }
         : status === "FAILED"
-          ? { label: "Failed", cls: "bg-red-500/15 text-red-300" }
-          : { label: "Pending", cls: "bg-amber-500/15 text-amber-300" }
+          ? { label: "Failed", cls: "bg-destructive/15 text-destructive" }
+          : { label: "Pending", cls: "bg-warn/15 text-warn" }
   const directionChip =
     m.direction === "outgoing"
-      ? { label: "Sent", cls: "bg-violet-500/15 text-violet-300", icon: "→" }
+      ? { label: "Sent", cls: "bg-purple/15 text-purple", icon: "→" }
       : { label: "Received", cls: "bg-blue-500/15 text-blue-300", icon: "←" }
   const peer = m.direction === "outgoing"
     ? (m.to_agent_name ?? "unknown")
@@ -94,7 +94,7 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
           {statusChip.label}
         </span>
         {m.escalated && (
-          <span className="text-[10px] px-1.5 py-px rounded bg-amber-500/15 text-amber-300 inline-flex items-center gap-0.5">
+          <span className="text-[10px] px-1.5 py-px rounded bg-warn/15 text-warn inline-flex items-center gap-0.5">
             ⚠ Escalation
           </span>
         )}

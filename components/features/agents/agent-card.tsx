@@ -78,16 +78,16 @@ const statusConfig: Record<string, { label: string; className: string; icon?: Re
   },
   RUNNING: {
     label: "Running",
-    className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
+    className: "bg-success/10 text-success dark:text-success",
   },
   ERROR: {
     label: "Error",
-    className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400",
+    className: "bg-destructive/10 text-destructive dark:text-destructive",
     icon: AlertCircle,
   },
   STOPPED: {
     label: "Stopped",
-    className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+    className: "bg-warn/10 text-warn dark:text-warn",
     icon: Pause,
   },
   // PR-D F5: synthesized client-side from agent.expired_at; the
@@ -154,8 +154,8 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
                   <Badge variant="secondary" className={`text-micro shrink-0 gap-1.5 ${status.className}`}>
                     {!isGhost && agent.status === "RUNNING" && (
                       <span className="relative flex h-1.5 w-1.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
                       </span>
                     )}
                     {StatusIcon && <StatusIcon className="h-3 w-3" />}

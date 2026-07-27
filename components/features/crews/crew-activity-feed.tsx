@@ -78,12 +78,12 @@ const TYPE_CONFIG: Record<FeedType, {
   },
   peer_conversation: {
     label: "Query",
-    className: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
+    className: "bg-purple/15 text-purple dark:bg-purple/40 dark:text-purple",
     icon: MessageSquare,
   },
   escalation: {
     label: "Escalation",
-    className: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+    className: "bg-warn/15 text-warn dark:bg-warn/40 dark:text-warn",
     icon: AlertTriangle,
   },
 }
@@ -207,7 +207,7 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
   if (error && items.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-12 text-center">
-        <AlertTriangle className="h-8 w-8 text-amber-500" />
+        <AlertTriangle className="h-8 w-8 text-warn" />
         <div>
           <p className="text-body text-muted-foreground">Couldn&apos;t load activity.</p>
           <p className="text-label text-muted-foreground mt-1">{error}</p>
@@ -245,8 +245,8 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
           component only renders the table body. */}
       <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <span className="relative flex h-1.5 w-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
         </span>
         {loading ? "Updating…" : "Live"}
       </div>

@@ -39,7 +39,7 @@ function CrewHealthIndicator({ summary }: { summary: AgentStatusSummary }) {
   const hasError = summary.error > 0
 
   return (
-    <span className={`text-micro ${hasError ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+    <span className={`text-micro ${hasError ? "text-destructive" : "text-success"}`}>
       {parts.join(" · ")}
     </span>
   )

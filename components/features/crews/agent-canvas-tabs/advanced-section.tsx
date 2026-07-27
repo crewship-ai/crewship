@@ -91,7 +91,7 @@ export function AdvancedSection({
               }}
               className={cn(
                 "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
-                agent.memory_enabled ? "bg-emerald-600/70" : "bg-zinc-700",
+                agent.memory_enabled ? "bg-success" : "bg-zinc-700",
               )}
               role="switch"
               aria-checked={agent.memory_enabled}

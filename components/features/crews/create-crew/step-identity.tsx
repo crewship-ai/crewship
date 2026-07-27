@@ -128,7 +128,7 @@ function Label({ children, required, htmlFor }: { children: React.ReactNode; req
   return (
     <label htmlFor={htmlFor} className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
       {children}
-      {required && <span className="text-red-400 ml-1">*</span>}
+      {required && <span className="text-destructive ml-1">*</span>}
     </label>
   )
 }

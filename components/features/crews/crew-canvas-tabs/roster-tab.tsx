@@ -49,7 +49,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                       <span className="font-medium truncate">{a.name}</span>
                       <span className="text-[10px] text-muted-foreground">{a.status?.toLowerCase()}</span>
                       {a.agent_role !== "AGENT" && (
-                        <span className="text-[8px] px-1 rounded bg-violet-500/20 text-violet-300">{a.agent_role}</span>
+                        <span className="text-[8px] px-1 rounded bg-purple/20 text-purple">{a.agent_role}</span>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{a.role_title || "—"}</div>
@@ -97,7 +97,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 {m.user?.avatar_url ? (
                   <img src={m.user.avatar_url} alt="" className="w-8 h-8 rounded-full" />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-violet-600 grid place-items-center text-[11px]">
+                  <div className="w-8 h-8 rounded-full bg-purple grid place-items-center text-[11px]">
                     {(m.user?.full_name ?? m.user?.email ?? "?").slice(0, 2).toUpperCase()}
                   </div>
                 )}

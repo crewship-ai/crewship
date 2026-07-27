@@ -18,18 +18,18 @@ function HealthCard({ label, value, hint, tone, href }: {
     <div
       className={cn(
         "rounded-xl border bg-card p-4 transition-colors",
-        tone === "danger" ? "border-red-500/30 ring-1 ring-red-500/20" :
+        tone === "danger" ? "border-destructive/30 ring-1 ring-destructive/20" :
         tone === "active" ? "border-white/10" : "border-white/8",
         href && "hover:border-white/20",
       )}
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
-        {tone === "danger" && <span className="text-[10px] text-red-300">action needed</span>}
+        {tone === "danger" && <span className="text-[10px] text-destructive">action needed</span>}
       </div>
       <div className={cn(
         "text-2xl font-semibold mb-1 tabular-nums",
-        tone === "danger" ? "text-red-200" : "text-foreground",
+        tone === "danger" ? "text-destructive" : "text-foreground",
       )}>
         {value}
       </div>

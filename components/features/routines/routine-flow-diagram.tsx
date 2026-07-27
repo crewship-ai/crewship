@@ -45,12 +45,12 @@ const ICONS: Record<FlowIconKey, LucideIcon> = {
 // classes: trigger=amber, agent=indigo, store=cyan, tool=violet, out=green,
 // neutral steps default.
 const KIND_STYLE: Record<FlowNodeKind, { node: string; icon: string }> = {
-  trigger: { node: "border-amber-500/35 bg-amber-500/[0.07]", icon: "text-amber-400" },
+  trigger: { node: "border-warn/35 bg-warn/[0.07]", icon: "text-warn" },
   step: { node: "border-border bg-card", icon: "text-muted-foreground" },
   agent: { node: "border-indigo-500/40 bg-indigo-500/[0.08]", icon: "text-indigo-400" },
-  store: { node: "border-cyan-500/35 bg-cyan-500/[0.07]", icon: "text-cyan-400" },
-  tool: { node: "border-violet-500/40 bg-violet-500/[0.08]", icon: "text-violet-400" },
-  out: { node: "border-emerald-500/35 bg-emerald-500/[0.07]", icon: "text-emerald-400" },
+  store: { node: "border-notice/35 bg-notice/[0.07]", icon: "text-notice" },
+  tool: { node: "border-purple/40 bg-purple/[0.08]", icon: "text-purple" },
+  out: { node: "border-success/35 bg-success/[0.07]", icon: "text-success" },
 }
 
 function FlowNodeCard({ node }: { node: FlowNode }) {
@@ -107,8 +107,8 @@ export function RoutineFlowDiagram({
       </div>
       <div className="text-[10.5px] text-muted-foreground-soft">
         <span className="text-muted-foreground">Legend:</span>{" "}
-        <span className="text-cyan-400">datastore</span> ·{" "}
-        <span className="text-violet-400">tool / script</span> ·{" "}
+        <span className="text-notice">datastore</span> ·{" "}
+        <span className="text-purple">tool / script</span> ·{" "}
         <span className="text-indigo-400">agent (AI, non-deterministic)</span> · rest deterministic
       </div>
     </div>

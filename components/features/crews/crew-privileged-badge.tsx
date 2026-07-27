@@ -29,7 +29,7 @@ export function CrewPrivilegedBadge({
   return (
     <span
       title="This crew runs privileged — no-new-privileges is off, the rootfs is writable, and the container has host device access."
-      className="text-[11px] flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/40"
+      className="text-[11px] flex items-center gap-1 px-2 py-0.5 rounded-full bg-destructive/15 text-destructive border border-destructive/40"
     >
       <ShieldAlert className="h-3 w-3" />
       Privileged · isolation reduced

@@ -473,7 +473,7 @@ export default function CredentialsPage() {
         // Load failure — visually and semantically distinct from the
         // empty state: red accent, explicit error copy, and a Retry
         // affordance. Never claims "no credentials yet".
-        <Card className="p-12 text-center border-red-500/30 bg-red-500/[0.03]" role="alert">
+        <Card className="p-12 text-center border-destructive/30 bg-destructive/[0.03]" role="alert">
           <AlertTriangle className="mx-auto h-6 w-6 text-error" />
           <h2 className="mt-3 text-sm font-medium text-foreground">Couldn&apos;t load credentials</h2>
           <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
@@ -549,7 +549,7 @@ export default function CredentialsPage() {
               animate={{ opacity: 1, y: 0 }}
               className="rounded-md border border-warn/30 bg-warn/[0.05] px-3 py-2.5 text-xs flex items-center gap-2"
             >
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+              <AlertTriangle className="h-3.5 w-3.5 text-warn shrink-0" />
               <span className="text-foreground/90">
                 <strong>{needsAttention.length}</strong> credential{needsAttention.length === 1 ? "" : "s"}
                 {" "}need attention &mdash;{" "}
@@ -559,7 +559,7 @@ export default function CredentialsPage() {
                     ? "approve the pending ones; rotate, refresh, or revoke the rest before they break agent runs."
                     : "rotate, refresh, or revoke them before they break agent runs."}
               </span>
-              <button onClick={() => setActiveTab("needs")} className="ml-auto text-amber-300 hover:text-amber-200 font-medium">
+              <button onClick={() => setActiveTab("needs")} className="ml-auto text-warn hover:text-warn font-medium">
                 Review →
               </button>
             </motion.div>
@@ -849,7 +849,7 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
             >
               <Badge
                 variant="outline"
-                className="text-[9px] h-4 px-1 border-amber-400/40 text-amber-300 font-mono hover:border-amber-300/70 hover:text-amber-200 transition-colors"
+                className="text-[9px] h-4 px-1 border-warn/40 text-warn font-mono hover:border-warn/70 hover:text-warn transition-colors"
               >
                 Pending approval →
               </Badge>
@@ -858,7 +858,7 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
           {expiresIn !== null && expiresIn >= 0 && expiresIn <= 30 && (
             <Badge
               variant="outline"
-              className="text-[9px] h-4 px-1 border-amber-400/40 text-amber-300 font-mono shrink-0"
+              className="text-[9px] h-4 px-1 border-warn/40 text-warn font-mono shrink-0"
               title={`Expires in ${expiresIn}d`}
             >
               {expiresIn}d

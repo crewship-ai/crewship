@@ -34,7 +34,7 @@ export function StepHoverCard({ payload, children }: StepHoverCardProps) {
         <Stats payload={payload} />
         <InputOutput payload={payload} />
         {payload.errorMessage && payload.status === "failed" && (
-          <div className="border-t border-rose-500/30 bg-rose-500/10 px-3 py-1.5 font-mono text-[10px] text-rose-300">
+          <div className="border-t border-destructive/30 bg-destructive/10 px-3 py-1.5 font-mono text-[10px] text-destructive">
             {payload.errorMessage.length > 200
               ? payload.errorMessage.slice(0, 199) + "…"
               : payload.errorMessage}

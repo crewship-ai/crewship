@@ -26,7 +26,7 @@ export function RoutineBudgetSummaryCard({
       title="Budgets"
       icon={Wallet}
       subtitle={summary ? `${rows.length} routine${rows.length === 1 ? "" : "s"} · ${summary.month}` : undefined}
-      tone={overCount > 0 ? "amber" : "default"}
+      tone={overCount > 0 ? "warn" : "default"}
     >
       {loading && rows.length === 0 ? (
         <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">Loading…</div>
@@ -45,14 +45,14 @@ export function RoutineBudgetSummaryCard({
                   onClick={() => onSelect(r.slug)}
                   className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.025] focus:bg-white/[0.025] focus:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                 >
-                  {r.over_budget && <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-400" />}
+                  {r.over_budget && <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />}
                   <span className="flex-1 truncate text-sm">{r.slug}</span>
-                  <span className={cn("font-mono text-[12px] tabular-nums", r.over_budget ? "text-red-400 font-medium" : "text-foreground/80")}>
+                  <span className={cn("font-mono text-[12px] tabular-nums", r.over_budget ? "text-destructive font-medium" : "text-foreground/80")}>
                     ${r.spent_usd.toFixed(2)}
                     {r.monthly_budget_usd > 0 && <span className="text-muted-foreground"> / ${r.monthly_budget_usd.toFixed(2)}</span>}
                   </span>
                   {r.monthly_budget_usd > 0 && (
-                    <span className={cn("w-12 shrink-0 text-right text-[11px] tabular-nums", r.over_budget ? "text-red-400 font-medium" : "text-muted-foreground")}>
+                    <span className={cn("w-12 shrink-0 text-right text-[11px] tabular-nums", r.over_budget ? "text-destructive font-medium" : "text-muted-foreground")}>
                       {(r.pct_used ?? 0).toFixed(0)}%
                     </span>
                   )}

@@ -88,7 +88,7 @@ export function IssueRoutineBinder({
                 "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
                 runningRoutine
                   ? "bg-blue-500/10 text-blue-400/60"
-                  : "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25",
+                  : "bg-success/15 text-success hover:bg-success/25",
               )}
             >
               <Play className="h-3 w-3" />

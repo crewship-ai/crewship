@@ -166,11 +166,11 @@ export function AgentAccessTab({
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         <span>Scope legend —</span>
-        <span className="text-emerald-400">● Full</span>
+        <span className="text-success">● Full</span>
         <span>all tools</span>
         <span className="text-blue-300">● Read-only</span>
         <span>fetch/list/get/search</span>
-        <span className="text-amber-300">● Custom</span>
+        <span className="text-warn">● Custom</span>
         <span>hand-picked tools.</span>
       </div>
 

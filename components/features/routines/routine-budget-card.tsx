@@ -67,7 +67,7 @@ export function RoutineBudgetCard({
       title="Budget"
       subtitle={budget?.month}
       icon={Wallet}
-      tone={overBudget ? "amber" : "default"}
+      tone={overBudget ? "warn" : "default"}
       action={
         !editing && (
           <button
@@ -126,14 +126,14 @@ export function RoutineBudgetCard({
             className="h-[6px]"
             indicatorClassName={cn(
               "transition-all",
-              overBudget ? "bg-red-400" : pctUsed >= 90 ? "bg-amber-400" : "bg-primary",
+              overBudget ? "bg-destructive" : pctUsed >= 90 ? "bg-warn" : "bg-primary",
             )}
           />
           <div className="mt-1.5 flex items-center justify-between font-mono text-[11px] text-muted-foreground">
-            <span className={cn(overBudget && "text-red-400 font-medium")}>
+            <span className={cn(overBudget && "text-destructive font-medium")}>
               ${spent.toFixed(2)} of ${budget.monthly_budget_usd.toFixed(2)}
             </span>
-            <span className={cn(overBudget && "text-red-400 font-medium")}>
+            <span className={cn(overBudget && "text-destructive font-medium")}>
               {pctUsed.toFixed(0)}%{overBudget ? " over" : ""}
             </span>
           </div>

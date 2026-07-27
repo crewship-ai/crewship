@@ -39,7 +39,7 @@ export function MissionWatchRoster({ mission }: MissionWatchRosterProps) {
           <Bell className="h-4 w-4" />
           Agent Inbox
           {inboxItems.length > 0 && (
-            <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white">
+            <span className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-warn px-1.5 text-[11px] font-bold text-white">
               {inboxItems.length}
             </span>
           )}
@@ -143,10 +143,10 @@ function deriveInboxItems(tasks: MissionTask[]): InboxItem[] {
 
 function InboxRow({ item }: { item: InboxItem }) {
   const tone = item.kind === "approval"
-    ? "border-amber-500/60 bg-amber-500/5"
+    ? "border-warn/60 bg-warn/5"
     : item.kind === "question"
     ? "border-blue-500/60 bg-blue-500/5"
-    : "border-emerald-500/60 bg-emerald-500/5"
+    : "border-success/60 bg-success/5"
   // Project rule (components/**/*.tsx): "ONLY lucide-react for icons".
   // Map each inbox kind to its lucide glyph + a tone-matching colour so
   // the row stays visually distinct without emoji.
@@ -156,10 +156,10 @@ function InboxRow({ item }: { item: InboxItem }) {
     ? MessageCircle
     : CheckCircle2
   const iconClass = item.kind === "approval"
-    ? "text-amber-500"
+    ? "text-warn"
     : item.kind === "question"
     ? "text-blue-500"
-    : "text-emerald-500"
+    : "text-success"
   const label = item.kind === "approval" ? "Approval" : item.kind === "question" ? "Question" : "Result"
   return (
     <li className={`rounded border-l-2 ${tone} p-3`}>

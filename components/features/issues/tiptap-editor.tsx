@@ -93,12 +93,12 @@ function getEditorClasses(compact?: boolean) {
     "[&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-1.5 [&_p]:text-foreground/80",
     "[&_strong]:text-foreground [&_strong]:font-semibold",
     // Inline code
-    "[&_code]:bg-emerald-500/10 [&_code]:text-emerald-300 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono",
+    "[&_code]:bg-success/10 [&_code]:text-success [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono",
     // Code blocks
     "[&_pre]:relative [&_pre]:bg-[#0d1117] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-4 [&_pre]:pt-8 [&_pre]:my-3 [&_pre]:overflow-x-auto",
     "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs [&_pre_code]:font-mono [&_pre_code]:text-[#c9d1d9]",
     // Blockquote
-    "[&_blockquote]:border-l-2 [&_blockquote]:border-amber-500/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-foreground/60",
+    "[&_blockquote]:border-l-2 [&_blockquote]:border-warn/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-foreground/60",
     // Lists
     "[&_ul]:pl-4 [&_ul]:mb-2 [&_ol]:pl-4 [&_ol]:mb-2",
     "[&_li]:mb-0.5 [&_li]:text-sm [&_li]:text-foreground/80",

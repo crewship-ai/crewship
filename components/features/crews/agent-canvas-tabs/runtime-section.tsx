@@ -90,8 +90,8 @@ export function RuntimeSection({
 
       {/* Custom model name — modal swap on the picker */}
       {customModelOpen && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
-          <div className="text-xs text-amber-300">Custom model identifier</div>
+        <div className="rounded-xl border border-warn/40 bg-warn/5 p-3 space-y-2">
+          <div className="text-xs text-warn">Custom model identifier</div>
           <div className="flex gap-2">
             <input
               autoFocus

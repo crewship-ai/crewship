@@ -602,10 +602,10 @@ function ConnectionBadge({ status }: { status: string }) {
     <div className={cn(
       "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-micro font-medium",
       status === "connected"
-        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400"
+        ? "bg-success/10 text-success dark:bg-success/30 dark:text-success"
         : status === "connecting"
-          ? "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
-          : "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400"
+          ? "bg-warn/10 text-warn dark:bg-warn/30 dark:text-warn"
+          : "bg-destructive/10 text-destructive dark:bg-destructive/30 dark:text-destructive"
     )}>
       {status === "connected" ? (
         <Wifi className="h-3 w-3" />
@@ -627,10 +627,10 @@ function OriginChip({ origin }: { origin?: string | null }) {
   if (!origin) return null
   const map: Record<string, { label: string; className: string }> = {
     UI:      { label: "UI",      className: "bg-blue-500/15 text-blue-300" },
-    CLI:     { label: "CLI",     className: "bg-violet-500/15 text-violet-300" },
-    WEBHOOK: { label: "Hook",    className: "bg-amber-500/15 text-amber-300" },
-    CRON:    { label: "Cron",    className: "bg-amber-500/15 text-amber-300" },
-    AGENT:   { label: "Agent",   className: "bg-fuchsia-500/15 text-fuchsia-300" },
+    CLI:     { label: "CLI",     className: "bg-purple/15 text-purple" },
+    WEBHOOK: { label: "Hook",    className: "bg-warn/15 text-warn" },
+    CRON:    { label: "Cron",    className: "bg-warn/15 text-warn" },
+    AGENT:   { label: "Agent",   className: "bg-purple/15 text-purple" },
   }
   const tag = map[origin]
   if (!tag) return null

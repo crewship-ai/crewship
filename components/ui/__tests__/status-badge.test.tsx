@@ -63,7 +63,7 @@ describe("StatusBadge", () => {
     )
     const badge = container.querySelector('[data-slot="badge"]')!
     expect(badge.classList.contains("text-[10px]")).toBe(true)
-    expect(badge.classList.contains("text-red-400")).toBe(true)
+    expect(badge.classList.contains("text-destructive")).toBe(true)
   })
 
   it("renders a leading dot only when withDot is set", () => {

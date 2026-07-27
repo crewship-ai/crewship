@@ -121,8 +121,8 @@ export function TriggersTab({
                 <span
                   className={
                     t.disabled_at
-                      ? "text-[11px] text-amber-400"
-                      : "text-[11px] text-emerald-400"
+                      ? "text-[11px] text-warn"
+                      : "text-[11px] text-success"
                   }
                 >
                   ● {t.disabled_at ? "disabled" : "live"}
@@ -152,7 +152,7 @@ export function TriggersTab({
         </div>
       </div>
 
-      {err && <div className="text-[11px] text-red-400">{err}</div>}
+      {err && <div className="text-[11px] text-destructive">{err}</div>}
 
       {typesLoading ? (
         <TableSkeleton rows={5} />
@@ -300,7 +300,7 @@ function TriggerModal({
           </div>
         </div>
 
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>

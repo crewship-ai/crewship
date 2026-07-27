@@ -373,7 +373,7 @@ export function ChatPageClient() {
   if (error || !agent) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-sm text-red-300">Could not open chat</p>
+        <p className="text-sm text-destructive">Could not open chat</p>
         <p className="text-xs text-muted-foreground max-w-sm">{error}</p>
         <Link
           href="/crews"
@@ -412,7 +412,7 @@ export function ChatPageClient() {
                 {" · "}
                 <Link
                   href={`/crews?crew=${encodeURIComponent(agent.crew.slug)}`}
-                  className="text-fuchsia-300 hover:underline"
+                  className="text-purple hover:underline"
                 >
                   {agent.crew.name}
                 </Link>

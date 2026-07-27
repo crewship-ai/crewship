@@ -11,11 +11,11 @@ import { isGhost, effectiveStatus } from "@/lib/agent-ephemeral"
 import { SidebarToolbar, SidebarSearch, SidebarRow, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
-  RUNNING: { label: "Running", className: "text-emerald-400", pulse: true },
+  RUNNING: { label: "Running", className: "text-success", pulse: true },
   IDLE: { label: "Idle", className: "text-muted-foreground" },
-  ERROR: { label: "Error", className: "text-red-400" },
-  STOPPED: { label: "Stopped", className: "text-amber-400" },
-  PENDING_REVIEW: { label: "Pending", className: "text-amber-300" },
+  ERROR: { label: "Error", className: "text-destructive" },
+  STOPPED: { label: "Stopped", className: "text-warn" },
+  PENDING_REVIEW: { label: "Pending", className: "text-warn" },
   EXPIRED: { label: "Expired", className: "text-slate-400" },
 }
 
@@ -213,10 +213,10 @@ export function CrewsExplorer({
                     {/* Mini status dots */}
                     <div className="flex items-center gap-0.5 shrink-0">
                       {Array.from({ length: dots.running }).map((_, i) => (
-                        <span key={`r${i}`} className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        <span key={`r${i}`} className="h-1.5 w-1.5 rounded-full bg-success" />
                       ))}
                       {Array.from({ length: dots.error }).map((_, i) => (
-                        <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                        <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-destructive" />
                       ))}
                       {Array.from({ length: Math.min(dots.idle, 3) }).map((_, i) => (
                         <span key={`i${i}`} className="h-1.5 w-1.5 rounded-full bg-gray-500/50" />
@@ -256,12 +256,12 @@ export function CrewsExplorer({
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {agent.ephemeral && !ghost && (
-                            <Clock className="h-2.5 w-2.5 text-cyan-300/80" aria-label="Ephemeral hire" />
+                            <Clock className="h-2.5 w-2.5 text-notice/80" aria-label="Ephemeral hire" />
                           )}
                           {badge.pulse && (
                             <span className="relative flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
                             </span>
                           )}
                           <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
@@ -309,7 +309,7 @@ export function CrewsExplorer({
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {agent.ephemeral && !ghost && (
-                          <Clock className="h-2.5 w-2.5 text-cyan-300/80" aria-label="Ephemeral hire" />
+                          <Clock className="h-2.5 w-2.5 text-notice/80" aria-label="Ephemeral hire" />
                         )}
                         <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
                       </div>

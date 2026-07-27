@@ -86,7 +86,7 @@ export function ScheduleEditor({
             onClick={() => handleToggle(!enabled)}
             className={cn(
               "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
-              enabled ? "bg-emerald-600/70" : "bg-zinc-700",
+              enabled ? "bg-success/70" : "bg-zinc-700",
               (readOnly || saving) && "opacity-50 cursor-not-allowed",
             )}
             aria-pressed={enabled}
@@ -135,7 +135,7 @@ export function ScheduleEditor({
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="text-xs px-3 py-1 rounded bg-emerald-600/80 hover:bg-emerald-500 text-white disabled:opacity-50"
+                className="text-xs px-3 py-1 rounded bg-success/80 hover:bg-success text-white disabled:opacity-50"
               >
                 {saving ? "Saving…" : "Save"}
               </button>

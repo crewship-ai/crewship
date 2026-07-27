@@ -181,7 +181,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
   if (error) {
     return (
       <Card title="Run history">
-        <div className="px-4 py-3 text-sm text-rose-400">Error: {error}</div>
+        <div className="px-4 py-3 text-sm text-destructive">Error: {error}</div>
       </Card>
     )
   }
@@ -230,9 +230,9 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
                   <Pill
                     tone={
                       run.status === "completed"
-                        ? "emerald"
+                        ? "success"
                         : run.status === "failed"
-                          ? "rose"
+                          ? "destructive"
                           : run.status === "running"
                             ? "blue"
                             : "default"
@@ -252,7 +252,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
                     if (run.status === "failed" && run.errorMessage) {
                       return (
                         <span
-                          className="min-w-0 flex-1 truncate text-[12px] text-rose-400/80"
+                          className="min-w-0 flex-1 truncate text-[12px] text-destructive/80"
                           title={run.errorMessage}
                         >
                           {run.errorMessage}
@@ -277,7 +277,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
                     disabled={cancellingRunId === run.runId}
                     aria-label="Cancel run"
                     title="Cancel this run"
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-50"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                   >
                     {cancellingRunId === run.runId ? (
                       <Spinner className="h-3.5 w-3.5" />
@@ -308,8 +308,8 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
 }
 
 function RunStatusIcon({ status }: { status: "running" | "completed" | "failed" | "unknown" }) {
-  if (status === "completed") return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-  if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
+  if (status === "completed") return <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+  if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-destructive" />
   if (status === "running") return <Spinner className="h-4 w-4 shrink-0 text-blue-400" />
   return <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
 }
@@ -338,11 +338,11 @@ const VERDICT_OUTCOME_ICON: Record<RunVerdictOutcome, typeof CheckCircle2> = {
   failed: XCircle,
 }
 
-const VERDICT_OUTCOME_PILL_TONE: Record<RunVerdictOutcome, "emerald" | "amber" | "rose"> = {
-  goal_met: "emerald",
-  partial: "amber",
-  needs_human: "amber",
-  failed: "rose",
+const VERDICT_OUTCOME_PILL_TONE: Record<RunVerdictOutcome, "success" | "warn" | "destructive"> = {
+  goal_met: "success",
+  partial: "warn",
+  needs_human: "warn",
+  failed: "destructive",
 }
 
 /** Compact outcome pill + one-liner shown in the (always-visible)
@@ -456,11 +456,11 @@ function RunWaterfall({
             <Pill
               tone={
                 s.kind === "completed"
-                  ? "emerald"
+                  ? "success"
                   : s.kind === "failed"
-                    ? "rose"
+                    ? "destructive"
                     : s.kind === "validation_failed"
-                      ? "amber"
+                      ? "warn"
                       : "default"
               }
               className="capitalize"

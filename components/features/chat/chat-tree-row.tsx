@@ -55,16 +55,16 @@ export function findTreeNode(node: TreeNode, path: string): TreeNode | undefined
 }
 
 export function getChatFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
-  if (isDir) return isOpen ? <FolderOpen className="h-3.5 w-3.5 text-amber-500" /> : <FolderClosed className="h-3.5 w-3.5 text-amber-500" />
+  if (isDir) return isOpen ? <FolderOpen className="h-3.5 w-3.5 text-warn" /> : <FolderClosed className="h-3.5 w-3.5 text-warn" />
   const ext = name.split(".").pop()?.toLowerCase() ?? ""
   switch (ext) {
-    case "py": return <FileCode className="h-3.5 w-3.5 text-yellow-500" />
+    case "py": return <FileCode className="h-3.5 w-3.5 text-warn" />
     case "js": case "jsx": case "ts": case "tsx": return <FileCode className="h-3.5 w-3.5 text-blue-500" />
-    case "json": return <FileJson className="h-3.5 w-3.5 text-yellow-600" />
-    case "yaml": case "yml": return <FileJson className="h-3.5 w-3.5 text-red-400" />
+    case "json": return <FileJson className="h-3.5 w-3.5 text-warn" />
+    case "yaml": case "yml": return <FileJson className="h-3.5 w-3.5 text-destructive" />
     case "md": return <FileText className="h-3.5 w-3.5 text-blue-300" />
-    case "sh": case "bash": return <Terminal className="h-3.5 w-3.5 text-green-500" />
-    case "zip": case "tar": case "gz": return <Box className="h-3.5 w-3.5 text-purple-400" />
+    case "sh": case "bash": return <Terminal className="h-3.5 w-3.5 text-success" />
+    case "zip": case "tar": case "gz": return <Box className="h-3.5 w-3.5 text-purple" />
     default: return <FileIcon className="h-3.5 w-3.5 text-gray-400" />
   }
 }

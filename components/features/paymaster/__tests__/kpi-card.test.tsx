@@ -49,8 +49,8 @@ describe("PaymasterKpiCard", () => {
     const { container } = render(
       <PaymasterKpiCard label="x" value="0" deltaLabel="+5%" deltaDirection="up" />,
     )
-    expect(container.querySelector(".text-red-400")).toBeTruthy()
-    expect(container.querySelector(".text-emerald-400")).toBeFalsy()
+    expect(container.querySelector(".text-destructive")).toBeTruthy()
+    expect(container.querySelector(".text-success")).toBeFalsy()
   })
 
   it("up=green when upIsGood=true (e.g. throughput, success rate)", () => {
@@ -63,14 +63,14 @@ describe("PaymasterKpiCard", () => {
         upIsGood
       />,
     )
-    expect(container.querySelector(".text-emerald-400")).toBeTruthy()
+    expect(container.querySelector(".text-success")).toBeTruthy()
   })
 
   it("down=green when upIsGood=false (cost dropping is good)", () => {
     const { container } = render(
       <PaymasterKpiCard label="x" value="0" deltaLabel="-5%" deltaDirection="down" />,
     )
-    expect(container.querySelector(".text-emerald-400")).toBeTruthy()
+    expect(container.querySelector(".text-success")).toBeTruthy()
   })
 
   it("subtitle is hidden when deltaLabel is provided (delta wins)", () => {

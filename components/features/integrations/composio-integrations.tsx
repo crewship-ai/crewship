@@ -238,7 +238,7 @@ export function ComposioIntegrations() {
           <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
           <span className="text-[11px] text-muted-foreground">· powered by Composio</span>
           {settings?.configured && (
-            <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/[0.08] px-2 py-0.5 text-[10px] text-emerald-400">
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/[0.08] px-2 py-0.5 text-[10px] text-success">
               ● key set{settings.source === "env" ? " (env)" : settings.label ? ` · ${settings.label}` : ""}
             </span>
           )}
@@ -289,12 +289,18 @@ export function ComposioIntegrations() {
       {busy && <InventorySkeleton />}
 
       {!busy && error && (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
           Couldn&apos;t load Composio inventory: {error}
         </div>
       )}
 
       {!busy && !error && !configured && <NotConfigured onAddKey={() => setKeyOpen(true)} />}
+
+      {!busy && error && (
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+          Couldn&apos;t load Composio inventory: {error}
+        </div>
+      )}
 
       {!busy && !error && configured && workspaceId && data && (
         <>
@@ -510,7 +516,7 @@ function ApiKeyModal({
           </div>
         </div>
 
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex items-center justify-between gap-2">
           <div>
@@ -651,7 +657,7 @@ function ConnectModal({
           </div>
         </div>
 
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>

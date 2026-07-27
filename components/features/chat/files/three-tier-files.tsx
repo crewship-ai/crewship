@@ -141,7 +141,7 @@ export function ThreeTierFiles({
         title="Workspace"
         defaultOpen={false}
         badge={
-          <span className="rounded bg-amber-50 dark:bg-amber-950/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-400">
+          <span className="rounded bg-warn/10 dark:bg-warn/30 px-1.5 text-[10px] text-warn dark:text-warn">
             soon
           </span>
         }

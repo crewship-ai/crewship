@@ -513,7 +513,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
           {/* Selected summary */}
           {selectedFeatureCount > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
-              <Check className="w-3 h-3 text-emerald-500" />
+              <Check className="w-3 h-3 text-success" />
               <span className="font-medium">{selectedFeatureCount} selected</span>
               <button
                 onClick={clearAllFeatures}
@@ -618,7 +618,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
                               ? "text-muted-foreground-soft"
                               : feature.tier === "community"
                                 ? "text-sky-400/70"
-                                : "text-amber-400/80"
+                                : "text-warn/80"
                           )}
                           title={`Published by ${feature.publisher} (${feature.tier})`}
                         >
@@ -672,7 +672,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
           {/* Selected summary */}
           {selectedRuntimeCount > 0 && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
-              <Check className="w-3 h-3 text-emerald-500" />
+              <Check className="w-3 h-3 text-success" />
               <span className="font-medium">{selectedRuntimeCount} selected</span>
               <button
                 onClick={clearAllRuntimes}
@@ -852,7 +852,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
             <div className="flex gap-1.5">
               <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleCopy} aria-label="Copy to clipboard">
                 {copied ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  <Check className="h-3.5 w-3.5 text-success" />
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}

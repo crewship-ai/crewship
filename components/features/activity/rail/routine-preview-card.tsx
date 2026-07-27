@@ -74,10 +74,10 @@ export function RoutinePreviewCard({
               <>
                 <span className="tabular-nums">{stats.total}</span>
                 {stats.completed > 0 && (
-                  <span className="ml-1 text-emerald-400">{stats.completed} ✓</span>
+                  <span className="ml-1 text-success">{stats.completed} ✓</span>
                 )}
                 {stats.failed > 0 && (
-                  <span className="ml-1 text-rose-400">{stats.failed} ✗</span>
+                  <span className="ml-1 text-destructive">{stats.failed} ✗</span>
                 )}
                 {stats.active > 0 && (
                   <span className="ml-1 text-blue-400">{stats.active} active</span>
@@ -107,7 +107,7 @@ export function RoutinePreviewCard({
           )}
           {schedule && (
             <Row label="Schedule">
-              <span className={schedule.enabled ? "text-emerald-300" : "text-muted-foreground/50"}>
+              <span className={schedule.enabled ? "text-success" : "text-muted-foreground/50"}>
                 {schedule.enabled ? "enabled" : "paused"}
               </span>
             </Row>
@@ -115,7 +115,7 @@ export function RoutinePreviewCard({
         </dl>
 
         {lastFail && stats.failed > 0 && (
-          <div className="border-t border-rose-500/30 bg-rose-500/10 px-3 py-1.5 font-mono text-[10px] text-rose-200">
+          <div className="border-t border-destructive/30 bg-destructive/10 px-3 py-1.5 font-mono text-[10px] text-destructive/70">
             <span className="opacity-70">Last failure:</span> {lastFail}
           </div>
         )}

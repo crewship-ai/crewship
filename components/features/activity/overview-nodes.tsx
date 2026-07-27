@@ -74,13 +74,13 @@ function RoutineNodeBase({ data: d }: NodeProps<Node<OverviewRoutineNodeData>>) 
     <Link
       href={routineHref(d.slug)}
       aria-label={`Routine ${d.name}`}
-      className="relative block w-[200px] rounded-lg border border-violet-500/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80"
+      className="relative block w-[200px] rounded-lg border border-purple/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple/80"
       onClick={(e) => e.stopPropagation()}
     >
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-violet-400/40" isConnectable={false} />
-      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-violet-400/40" isConnectable={false} />
+      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-purple/40" isConnectable={false} />
+      <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-purple/40" isConnectable={false} />
       <div className="flex items-center gap-1.5">
-        <Workflow aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-violet-300" />
+        <Workflow aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-purple" />
         <span className="truncate text-xs font-medium">{d.name}</span>
       </div>
       <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/70">
@@ -116,7 +116,7 @@ function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
       onKeyDown={activateOnEnterOrSpace}
       className={cn(
         "relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
-        isWait && "ring-1 ring-amber-400/40",
+        isWait && "ring-1 ring-warn/40",
       )}
     >
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-white/30" isConnectable={false} />
@@ -131,7 +131,7 @@ function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
         <SourceIcon source={d.triggeredVia} />
         <span>{relTime(d.startedAt)}</span>
         {isWait && (
-          <span className="ml-auto inline-flex items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0 text-[9px] font-medium text-amber-300">
+          <span className="ml-auto inline-flex items-center gap-0.5 rounded bg-warn/15 px-1 py-0 text-[9px] font-medium text-warn">
             <PauseCircle className="h-2 w-2" /> awaiting
           </span>
         )}
@@ -149,11 +149,11 @@ function StatusChip({ status }: { status: string }) {
     s === "in_progress" || s === "running"
       ? "bg-blue-500/15 text-blue-300"
       : s === "review"
-        ? "bg-purple-500/15 text-purple-300"
+        ? "bg-purple/15 text-purple"
         : s === "completed" || s === "done"
-          ? "bg-emerald-500/15 text-emerald-300"
+          ? "bg-success/15 text-success"
           : s === "failed"
-            ? "bg-rose-500/15 text-rose-300"
+            ? "bg-destructive/15 text-destructive"
             : "bg-white/[0.06] text-muted-foreground"
   return (
     <span className={cn("ml-auto rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide", cls)}>
@@ -168,10 +168,10 @@ function StatusChip({ status }: { status: string }) {
 // the parent node's aria-label already names the trigger source via
 // the run status text.
 function SourceIcon({ source }: { source?: string }) {
-  if (source === "schedule") return <span aria-hidden="true" className="text-violet-300">⌘</span>
+  if (source === "schedule") return <span aria-hidden="true" className="text-purple">⌘</span>
   if (source === "issue") return <CircleDot aria-hidden="true" className="h-2.5 w-2.5 text-blue-300" />
-  if (source === "webhook") return <span aria-hidden="true" className="text-amber-300">⚡</span>
-  if (source === "call_pipeline") return <span aria-hidden="true" className="text-purple-300">↳</span>
+  if (source === "webhook") return <span aria-hidden="true" className="text-warn">⚡</span>
+  if (source === "call_pipeline") return <span aria-hidden="true" className="text-purple">↳</span>
   return <Zap aria-hidden="true" className="h-2.5 w-2.5 text-muted-foreground/60" />
 }
 

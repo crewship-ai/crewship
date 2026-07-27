@@ -86,7 +86,7 @@ export function YamlTab({ workspaceId, context }: { workspaceId: string; context
   }, [url])
 
   if (!context || context.kind === "run") return <EmptyState>Select an entity to see its spec.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (data === null) return <EmptyState>Loading…</EmptyState>
 
   const yaml = toYaml(filterNoise(data))
@@ -123,7 +123,7 @@ function HighlightedYaml({ yaml }: { yaml: string }) {
       if (closeIdx === -1) {
         out.push(
           <div key={idx}>
-            <span className="text-amber-200">{line.length === 0 ? " " : line}</span>
+            <span className="text-warn">{line.length === 0 ? " " : line}</span>
           </div>,
         )
       } else {
@@ -132,7 +132,7 @@ function HighlightedYaml({ yaml }: { yaml: string }) {
         inString = false
         out.push(
           <div key={idx}>
-            <span className="text-amber-200">{head}</span>
+            <span className="text-warn">{head}</span>
             {tail && <span>{tail}</span>}
           </div>,
         )
@@ -187,19 +187,19 @@ function renderYamlValue(
     const closeIdx = findUnescapedQuote(value, 1)
     if (closeIdx === -1) {
       setInString()
-      return [<span key="v" className="text-amber-200">{value}</span>]
+      return [<span key="v" className="text-warn">{value}</span>]
     }
     const quoted = value.slice(0, closeIdx + 1)
     const trail = value.slice(closeIdx + 1)
-    const nodes: React.ReactNode[] = [<span key="v" className="text-amber-200">{quoted}</span>]
+    const nodes: React.ReactNode[] = [<span key="v" className="text-warn">{quoted}</span>]
     if (trail) nodes.push(<span key="t">{trail}</span>)
     return nodes
   }
   if (/^-?\d+(\.\d+)?$/.test(value)) {
-    return [<span key="v" className="text-emerald-300">{value}</span>]
+    return [<span key="v" className="text-success">{value}</span>]
   }
   if (/^(true|false|null|yes|no|~)$/i.test(value)) {
-    return [<span key="v" className="text-violet-300">{value}</span>]
+    return [<span key="v" className="text-purple">{value}</span>]
   }
-  return [<span key="v" className="text-amber-200">{value}</span>]
+  return [<span key="v" className="text-warn">{value}</span>]
 }

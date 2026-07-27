@@ -31,7 +31,7 @@ function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: Ch
             >
               <span className={cn(
                 "w-1.5 h-1.5 rounded-full shrink-0",
-                c.status === "ACTIVE" ? "bg-emerald-400" : "bg-muted-foreground/50",
+                c.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/50",
               )} />
               <div className="flex-1 min-w-0">
                 <div className="text-xs text-foreground truncate">{c.title || "Untitled session"}</div>
@@ -69,8 +69,8 @@ function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | n
             <div key={r.id} className="px-4 py-2.5 flex items-center gap-3">
               <span className={cn(
                 "w-1.5 h-1.5 rounded-full shrink-0",
-                r.status === "SUCCESS" ? "bg-emerald-400" :
-                r.status === "FAILED" ? "bg-red-400" :
+                r.status === "SUCCESS" ? "bg-success" :
+                r.status === "FAILED" ? "bg-destructive" :
                 r.status === "RUNNING" ? "bg-blue-400 animate-pulse" :
                 "bg-muted-foreground/50",
               )} />

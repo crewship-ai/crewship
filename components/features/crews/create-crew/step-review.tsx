@@ -41,7 +41,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
                     key={a.name}
                     className={cn(
                       "h-5 w-5 rounded text-[9px] font-bold flex items-center justify-center",
-                      a.agent_role === "LEAD" ? "bg-amber-500/20 text-amber-300" : "bg-violet-500/15 text-violet-300",
+                      a.agent_role === "LEAD" ? "bg-warn/20 text-warn" : "bg-purple/15 text-purple",
                     )}
                     title={`${a.name} (${a.agent_role})`}
                   >
@@ -53,7 +53,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
           </>
         ) : (
           <>
-            <span className="text-amber-300">●</span>
+            <span className="text-warn">●</span>
             <span className="text-foreground/80 text-[12.5px]">Empty crew — agents added later</span>
           </>
         )}
@@ -68,7 +68,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
       <Row label="Network" onEdit={onEdit && (() => onEdit(3))}>
         <span className={cn(
           "h-2 w-2 rounded-full inline-block",
-          state.networkMode === "free" ? "bg-emerald-400" : "bg-amber-400",
+          state.networkMode === "free" ? "bg-success" : "bg-warn",
         )} />
         <span className="capitalize text-foreground/90">{state.networkMode}</span>
         {state.networkMode === "restricted" && state.allowedDomains.length > 0 && (
@@ -93,7 +93,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
 
       {summaryMCPCount(state.mcpConfig) > 0 && (
         <Row label="MCP" onEdit={onEdit && (() => onEdit(4))}>
-          <span className="h-2 w-2 rounded-full inline-block bg-violet-400" />
+          <span className="h-2 w-2 rounded-full inline-block bg-purple" />
           <Pill>{summaryMCPCount(state.mcpConfig)} server{summaryMCPCount(state.mcpConfig) === 1 ? "" : "s"}</Pill>
         </Row>
       )}

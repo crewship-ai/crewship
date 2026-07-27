@@ -246,7 +246,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
   }, [context, previewPath, workspaceId])
 
   if (!context) return <EmptyState>Select an agent or crew to browse files.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (tree === null) return <EmptyState>Loading…</EmptyState>
   if (tree.length === 0) {
     return (
@@ -295,8 +295,8 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
               <File className="h-3 w-3 shrink-0" />
               <span className="font-mono truncate flex-1">{previewPath}</span>
               {dirty && (
-                <span className="text-[10px] text-amber-300 inline-flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                <span className="text-[10px] text-warn inline-flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-warn" />
                   Unsaved
                 </span>
               )}
@@ -354,7 +354,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
               )}
             </div>
             {previewError ? (
-              <div className="p-4 text-xs text-red-300">Failed: {previewError}</div>
+              <div className="p-4 text-xs text-destructive">Failed: {previewError}</div>
             ) : previewContent === null ? (
               <div className="p-4 text-xs text-muted-foreground">Loading…</div>
             ) : (
@@ -439,7 +439,7 @@ function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFil
             <span className="text-[10px] text-muted-foreground">{formatBytes(entry.size)}</span>
           )}
           {state === "loading" && <span className="text-[10px] text-muted-foreground italic">…</span>}
-          {state === "error" && <span className="text-[10px] text-red-400">!</span>}
+          {state === "error" && <span className="text-[10px] text-destructive">!</span>}
         </button>
       </li>
       {isOpen && children.map((child) => (

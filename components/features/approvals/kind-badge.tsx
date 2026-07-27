@@ -5,11 +5,11 @@ import { Badge } from "@/components/ui/badge"
 
 /** Kind → colour mapping per spec. Unknown kinds fall back to gray. */
 const KIND_CLASS: Record<string, string> = {
-  destructive_op: "bg-red-500/15 text-red-300 border-red-500/40",
-  cost_threshold: "bg-amber-500/15 text-amber-300 border-amber-500/40",
-  target_environment: "bg-orange-500/15 text-orange-300 border-orange-500/40",
+  destructive_op: "bg-destructive/15 text-destructive border-destructive/40",
+  cost_threshold: "bg-warn/15 text-warn border-warn/40",
+  target_environment: "bg-warn/15 text-warn border-warn/40",
   tool_call: "bg-blue-500/15 text-blue-300 border-blue-500/40",
-  ephemeral_hire: "bg-violet-500/15 text-violet-300 border-violet-500/40",
+  ephemeral_hire: "bg-purple/15 text-purple border-purple/40",
   custom: "bg-slate-500/15 text-slate-300 border-slate-500/40",
 }
 

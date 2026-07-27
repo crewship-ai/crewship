@@ -194,7 +194,7 @@ export function CanvasShell({ loading, error, notLoadedLabel, children }: Canvas
   if (error) {
     return (
       <div className="px-6 md:px-8 lg:px-12 py-12 max-w-[1180px] mx-auto w-full text-center">
-        <p className="text-sm text-red-300 mb-2">{notLoadedLabel}</p>
+        <p className="text-sm text-destructive mb-2">{notLoadedLabel}</p>
         <p className="text-xs text-muted-foreground">{error}</p>
       </div>
     )

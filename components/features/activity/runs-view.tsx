@@ -111,7 +111,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
             ))}
           </div>
         ) : error ? (
-          <div className="p-6 text-center text-xs text-rose-300">Runs unavailable: {error}</div>
+          <div className="p-6 text-center text-xs text-destructive">Runs unavailable: {error}</div>
         ) : runs.length === 0 ? (
           <EmptyState filter={filter} />
         ) : (
@@ -270,7 +270,7 @@ function SourcePill({ run }: { run: PipelineRun }) {
   }
   if (run.triggered_via === "schedule") {
     return (
-      <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-300">
+      <span className="rounded bg-purple/15 px-1.5 py-0.5 text-[10px] font-medium text-purple">
         <Calendar className="mr-1 inline h-2.5 w-2.5" />
         schedule
       </span>
@@ -278,7 +278,7 @@ function SourcePill({ run }: { run: PipelineRun }) {
   }
   if (run.triggered_via === "webhook") {
     return (
-      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+      <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-warn">
         <Webhook className="mr-1 inline h-2.5 w-2.5" />
         webhook
       </span>
@@ -386,18 +386,18 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
             />
           ))}
           {run.current_step_id && !completedSet.has(run.current_step_id) && (
-            <li className="flex items-center gap-2 px-2 py-1 text-amber-300">
+            <li className="flex items-center gap-2 px-2 py-1 text-warn">
               <PauseCircle className="h-3 w-3 animate-pulse" />
               <span className="font-mono text-[10px]">{run.current_step_id}</span>
-              <span className="text-[10px] text-amber-200/70">— in flight</span>
+              <span className="text-[10px] text-warn/70">— in flight</span>
             </li>
           )}
         </ol>
       ) : run.current_step_id ? (
-        <div className="flex items-center gap-2 px-2 py-1 text-amber-300">
+        <div className="flex items-center gap-2 px-2 py-1 text-warn">
           <PauseCircle className="h-3 w-3 animate-pulse" />
           <span className="font-mono text-[10px]">{run.current_step_id}</span>
-          <span className="text-[10px] text-amber-200/70">— in flight, no outputs yet</span>
+          <span className="text-[10px] text-warn/70">— in flight, no outputs yet</span>
         </div>
       ) : (
         <div className="px-2 py-1 text-[10px] text-muted-foreground/60">
@@ -407,14 +407,14 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
 
       {/* Error trailer */}
       {run.error_message && (
-        <div className="mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-[11px] text-rose-300">
+        <div className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
           <div className="flex items-center gap-1.5">
             <AlertCircle className="h-3 w-3 shrink-0" />
             <span className="font-medium">
               {run.failed_at_step ? `Failed at ${run.failed_at_step}` : "Failed"}
             </span>
           </div>
-          <div className="mt-0.5 font-mono text-[10px] text-rose-200/70">{run.error_message}</div>
+          <div className="mt-0.5 font-mono text-[10px] text-destructive/70">{run.error_message}</div>
         </div>
       )}
 
@@ -488,17 +488,17 @@ function StepRow({
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
           hasOutput ? "hover:bg-white/[0.04]" : "cursor-default",
-          isCurrent && "bg-amber-500/5",
+          isCurrent && "bg-warn/5",
           isPending && "opacity-50",
         )}
       >
         {stepStatus === "done" && (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">
             <Check className="h-2.5 w-2.5" />
           </span>
         )}
         {isCurrent && (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/30 text-amber-400">
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warn/30 text-warn">
             <PauseCircle className="h-2.5 w-2.5 animate-pulse" />
           </span>
         )}
@@ -516,7 +516,7 @@ function StepRow({
           <span className="text-[10px] text-muted-foreground">— {agentSlug}</span>
         )}
         {waitPrompt && (
-          <span className="truncate text-[10px] text-amber-200/80">— {waitPrompt}</span>
+          <span className="truncate text-[10px] text-warn/80">— {waitPrompt}</span>
         )}
         {hasOutput && (
           <span className="ml-auto text-muted-foreground/40">

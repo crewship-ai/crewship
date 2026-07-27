@@ -314,7 +314,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   }
   if (err) {
     return (
-      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
         {err}
       </div>
     )
@@ -379,11 +379,11 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       </div>
 
       {forbiddenCombination && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 flex items-start gap-2 text-xs text-amber-300">
+        <div className="rounded-lg border border-warn/40 bg-warn/10 p-3 flex items-start gap-2 text-xs text-warn">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <div>
             <div className="font-medium">Forbidden combination</div>
-            <div className="mt-0.5 text-amber-300/80">
+            <div className="mt-0.5 text-warn/80">
               autonomy=full × behavior_mode=block is rejected server-side (opt-in trust × opt-in restriction).
               Pick one or the other.
             </div>
@@ -414,7 +414,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
             onChange={(e) => setPendingMaxEphemeral(e.target.value)}
             className={cn(
               "w-24 rounded border bg-background px-2 py-1.5 text-sm focus:outline-none",
-              quotaInvalid ? "border-red-500/50 focus:border-red-500/70" : "border-white/10 focus:border-primary/50",
+              quotaInvalid ? "border-destructive/50 focus:border-destructive/70" : "border-white/10 focus:border-primary/50",
               (!effectiveCanEdit || saving) && "opacity-50 cursor-not-allowed",
             )}
             aria-invalid={quotaInvalid}
@@ -429,7 +429,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
           </div>
         </div>
         {quotaInvalid && (
-          <div className="mt-1.5 text-[11px] text-red-300">
+          <div className="mt-1.5 text-[11px] text-destructive">
             Must be a whole number between 0 and {MAX_EPHEMERAL_AGENTS_CEILING}.
           </div>
         )}

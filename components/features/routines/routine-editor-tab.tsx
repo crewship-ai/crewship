@@ -196,7 +196,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
           <span className="opacity-60">·</span>
           <span className="font-mono">v{routine.dsl_version}</span>
           {dirty && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/20 px-2.5 py-0.5 text-[11px] font-medium text-warn">
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
               unsaved
             </span>
@@ -251,7 +251,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
 
       {/* ── Validation banner (only when the buffer is broken) ── */}
       {!validation.ok && (
-        <div className="shrink-0 border-b border-rose-500/30 bg-rose-500/[0.06] px-4 py-2.5 text-[13px] text-rose-300">
+        <div className="shrink-0 border-b border-destructive/30 bg-destructive/[0.06] px-4 py-2.5 text-[13px] text-destructive">
           <div className="flex items-start gap-2">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="font-mono">{validation.message}</span>

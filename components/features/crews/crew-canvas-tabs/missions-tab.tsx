@@ -43,7 +43,7 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
                 >
                   <span className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",
-                    m.status === "RUNNING" ? "bg-emerald-400" : m.status === "FAILED" ? "bg-red-500" : "bg-zinc-500",
+                    m.status === "RUNNING" ? "bg-success" : m.status === "FAILED" ? "bg-destructive" : "bg-zinc-500",
                   )} />
                   <span className="truncate flex-1 text-foreground/85">{m.title}</span>
                   <span className="text-[10px] text-muted-foreground shrink-0 uppercase">

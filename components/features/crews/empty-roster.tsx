@@ -144,14 +144,14 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                         />
                         <span className="truncate">{a.name}</span>
                         {a.agent_role !== "AGENT" && (
-                          <span className="text-[8px] px-1 rounded bg-violet-500/20 text-violet-300 shrink-0">
+                          <span className="text-[8px] px-1 rounded bg-purple/20 text-purple shrink-0">
                             {a.agent_role}
                           </span>
                         )}
                         {a.ephemeral && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="text-[8px] px-1 rounded bg-cyan-500/15 text-cyan-300 shrink-0 inline-flex items-center gap-0.5">
+                              <span className="text-[8px] px-1 rounded bg-notice/15 text-notice shrink-0 inline-flex items-center gap-0.5">
                                 {ghost && <Ghost className="h-2.5 w-2.5" />}
                                 EPHEMERAL
                               </span>

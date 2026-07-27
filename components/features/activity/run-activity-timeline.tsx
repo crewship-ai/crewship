@@ -31,9 +31,9 @@ import {
 
 const TONE_ICON: Record<RunActivityTone, string> = {
   active: "text-blue-400",
-  success: "text-emerald-400",
-  warn: "text-amber-400",
-  error: "text-red-400",
+  success: "text-success",
+  warn: "text-warn",
+  error: "text-destructive",
   default: "text-foreground/50",
 }
 
@@ -174,10 +174,10 @@ const VERDICT_ICON: Record<RunVerdictOutcome, typeof CheckCircle2> = {
 }
 
 const VERDICT_ICON_TONE: Record<RunVerdictOutcome, string> = {
-  goal_met: "text-emerald-400",
-  partial: "text-amber-400",
-  needs_human: "text-amber-400",
-  failed: "text-red-400",
+  goal_met: "text-success",
+  partial: "text-warn",
+  needs_human: "text-warn",
+  failed: "text-destructive",
 }
 
 /**
@@ -208,8 +208,8 @@ export function RunActivityRail({
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold text-foreground/80">{title}</span>
           {waiting ? (
-            <span className="inline-flex items-center gap-1 text-[10px] text-amber-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+            <span className="inline-flex items-center gap-1 text-[10px] text-warn">
+              <span className="h-1.5 w-1.5 rounded-full bg-warn animate-pulse" />
               Waiting for approval
             </span>
           ) : running ? (
@@ -276,7 +276,7 @@ function RunActivityRowView({ row, last }: { row: RunActivityRow; last: boolean 
         "flex items-start gap-2.5 py-1.5 relative",
         // Parked-on-approval row: amber tint + ring so the blocked step reads
         // as "this is on you" rather than another grey completed line.
-        row.awaiting && "-mx-2 rounded-md bg-amber-500/[0.06] px-2 ring-1 ring-inset ring-amber-500/20",
+        row.awaiting && "-mx-2 rounded-md bg-warn/[0.06] px-2 ring-1 ring-inset ring-warn/20",
       )}
     >
       {/* Connector rail down to the next node. */}
@@ -297,9 +297,9 @@ function RunActivityRowView({ row, last }: { row: RunActivityRow; last: boolean 
             className={cn(
               "text-[11px] truncate",
               row.awaiting
-                ? "font-semibold text-amber-300"
+                ? "font-semibold text-warn"
                 : row.tone === "error"
-                  ? "text-red-300/90"
+                  ? "text-destructive/90"
                   : "text-foreground/85 font-medium",
             )}
           >

@@ -32,11 +32,11 @@ interface WebTerminalProps {
 function StatusIndicator({ status }: { status: TerminalStatus }) {
   switch (status) {
     case "connecting":
-      return <Spinner className="h-3.5 w-3.5 text-yellow-400" />
+      return <Spinner className="h-3.5 w-3.5 text-warn" />
     case "connected":
-      return <span className="h-2 w-2 rounded-full bg-emerald-400 inline-block" />
+      return <span className="h-2 w-2 rounded-full bg-success inline-block" />
     case "error":
-      return <WifiOff className="h-3.5 w-3.5 text-red-400" />
+      return <WifiOff className="h-3.5 w-3.5 text-destructive" />
     default:
       return <span className="h-2 w-2 rounded-full bg-neutral-500 inline-block" />
   }

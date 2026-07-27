@@ -227,7 +227,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                             type="button"
                             aria-label={`Remove ${rel.target_identifier || "relation"}`}
                             onClick={() => handleDeleteRelation(rel.id)}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-red-400 transition-all"
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-destructive transition-all"
                           >
                             <X className="h-2.5 w-2.5" />
                           </button>

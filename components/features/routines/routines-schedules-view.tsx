@@ -20,21 +20,21 @@ interface RoutinesSchedulesViewProps {
   onSelect: (slug: string) => void
 }
 
-function statusTone(status: string | undefined): "emerald" | "rose" | "blue" | "amber" | "default" {
+function statusTone(status: string | undefined): "success" | "destructive" | "blue" | "warn" | "default" {
   switch (status?.toLowerCase()) {
     case "succeeded":
     case "success":
     case "completed":
-      return "emerald"
+      return "success"
     case "failed":
     case "error":
-      return "rose"
+      return "destructive"
     case "running":
       return "blue"
     // WAITING = the cron-fired run parked on a human approval gate —
-    // healthy and non-terminal, so amber (attention), never rose.
+    // healthy and non-terminal, so warn (attention), never destructive.
     case "waiting":
-      return "amber"
+      return "warn"
     default:
       return "default"
   }
@@ -100,8 +100,8 @@ export function RoutinesSchedulesView({
   if (error) {
     return (
       <div className="p-6">
-        <Card tone="amber">
-          <div className="px-4 py-3 text-sm text-amber-300">Schedules unavailable: {error}</div>
+        <Card tone="warn">
+          <div className="px-4 py-3 text-sm text-warn">Schedules unavailable: {error}</div>
         </Card>
       </div>
     )
@@ -248,7 +248,7 @@ export function RoutinesSchedulesView({
                       <td className="px-4 py-3 text-sm font-medium">
                         <div className="flex flex-wrap items-center gap-2">
                           {s.enabled ? (
-                            <Play className="h-3.5 w-3.5 text-emerald-400" aria-label="enabled" />
+                            <Play className="h-3.5 w-3.5 text-success" aria-label="enabled" />
                           ) : (
                             <Pause className="h-3.5 w-3.5 text-muted-foreground" aria-label="paused" />
                           )}
@@ -292,11 +292,11 @@ export function RoutinesSchedulesView({
 
 const KPI_TONE = {
   default: "bg-muted text-muted-foreground",
-  emerald: "bg-emerald-500/20 text-emerald-400",
+  emerald: "bg-success/20 text-success",
   blue: "bg-blue-500/20 text-blue-400",
-  violet: "bg-violet-500/20 text-violet-400",
-  rose: "bg-rose-500/20 text-rose-400",
-  amber: "bg-amber-500/20 text-amber-400",
+  violet: "bg-purple/20 text-purple",
+  rose: "bg-destructive/20 text-destructive",
+  amber: "bg-warn/20 text-warn",
 } as const
 
 function KpiTile({

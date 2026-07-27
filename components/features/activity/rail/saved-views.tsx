@@ -124,7 +124,7 @@ export function SavedViewsMenuSection({ current, onApply, onClose }: SavedViewsM
             type="button"
             onClick={() => remove(v.id)}
             aria-label={`Delete view ${v.name}`}
-            className="rounded p-0.5 text-muted-foreground/50 hover:text-rose-300"
+            className="rounded p-0.5 text-muted-foreground/50 hover:text-destructive"
           >
             <Trash2 className="h-3 w-3" />
           </button>

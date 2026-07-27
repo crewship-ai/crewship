@@ -281,8 +281,8 @@ export function CredentialDetailSheet({
                   )}
                 </Field>
                 {credential.last_error && (
-                  <div className="rounded-md border border-red-500/30 bg-red-500/[0.05] p-3">
-                    <div className="flex items-center gap-1.5 text-xs text-red-400 font-medium">
+                  <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] p-3">
+                    <div className="flex items-center gap-1.5 text-xs text-destructive font-medium">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       Last error
                     </div>
@@ -298,7 +298,7 @@ export function CredentialDetailSheet({
                     <ul className="space-y-1">
                       {credential.last_used_ips.map((ip) => (
                         <li key={ip} className="text-xs font-mono text-foreground/80 flex items-center gap-2">
-                          <span className="h-1 w-1 rounded-full bg-emerald-500/60" />
+                          <span className="h-1 w-1 rounded-full bg-success/60" />
                           {ip}
                         </li>
                       ))}
@@ -317,7 +317,7 @@ export function CredentialDetailSheet({
                     Test now
                   </Button>
                   {testResult && (
-                    <span className={cn("text-xs inline-flex items-center gap-1.5", testResult.valid ? "text-emerald-400" : "text-red-400")}>
+                    <span className={cn("text-xs inline-flex items-center gap-1.5", testResult.valid ? "text-success" : "text-destructive")}>
                       {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
                       {testResult.valid ? "Valid" : (testResult.error || "Invalid")}
                     </span>
@@ -477,13 +477,13 @@ export function CredentialDetailSheet({
                       </Button>
                     )}
                     {valueSaved && (
-                      <span className="text-[11px] text-emerald-400 inline-flex items-center gap-1">
+                      <span className="text-[11px] text-success inline-flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" />
                         Saved
                       </span>
                     )}
                     {valueError && (
-                      <span className="text-[11px] text-red-400 inline-flex items-center gap-1">
+                      <span className="text-[11px] text-destructive inline-flex items-center gap-1">
                         <XCircle className="h-3 w-3" />
                         {valueError}
                       </span>
@@ -509,8 +509,8 @@ export function CredentialDetailSheet({
                             className={cn(
                               "text-[10px] px-1.5",
                               r.status === "ACTIVE" && "border-blue-400/40 text-blue-300",
-                              r.status === "EXPIRED" && "border-emerald-400/30 text-emerald-300",
-                              r.status === "CANCELLED" && "border-amber-400/30 text-amber-300",
+                              r.status === "EXPIRED" && "border-success/30 text-success",
+                              r.status === "CANCELLED" && "border-warn/30 text-warn",
                             )}
                           >
                             {r.status}
@@ -530,7 +530,7 @@ export function CredentialDetailSheet({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="w-full justify-start text-red-400 border-red-500/30 hover:bg-red-500/[0.05]"
+                    className="w-full justify-start text-destructive border-destructive/30 hover:bg-destructive/[0.05]"
                     onClick={() => setConfirmDelete(true)}
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />

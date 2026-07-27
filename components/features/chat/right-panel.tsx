@@ -238,7 +238,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
               title="Workspace"
               defaultOpen={false}
               badge={
-                <span className="rounded bg-amber-50 dark:bg-amber-950/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-400">
+                <span className="rounded bg-warn/10 dark:bg-warn/30 px-1.5 text-[10px] text-warn dark:text-warn">
                   soon
                 </span>
               }
@@ -275,7 +275,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
             <div className="flex items-center gap-2 min-w-0">
               {getChatFileIcon(editorFile.name, false)}
               <span className="text-label text-[#cccccc] font-medium truncate">{editorFile.name}</span>
-              {editorDirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />}
+              {editorDirty && <span className="w-1.5 h-1.5 rounded-full bg-warn shrink-0" />}
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <button

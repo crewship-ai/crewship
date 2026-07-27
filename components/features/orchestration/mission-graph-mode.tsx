@@ -272,8 +272,8 @@ function Legend() {
   return (
     <div className="flex flex-wrap gap-4 text-[11px] text-muted-foreground mb-5">
       <LegendItem cls="border-blue-500 bg-blue-500/10" label="running" />
-      <LegendItem cls="border-emerald-500 bg-emerald-500/10" label="done" />
-      <LegendItem cls="border-amber-500 bg-amber-500/10" label="awaiting approval" />
+      <LegendItem cls="border-success bg-success/10" label="done" />
+      <LegendItem cls="border-warn bg-warn/10" label="awaiting approval" />
       <LegendItem cls="border-border bg-muted/40" label="blocked / pending" />
     </div>
   )
@@ -294,11 +294,11 @@ function statusBorder(status: MissionTask["status"]): string {
       return "border-blue-500 bg-blue-500/5"
     case "COMPLETED":
     case "SKIPPED":
-      return "border-emerald-500 bg-emerald-500/5"
+      return "border-success bg-success/5"
     case "AWAITING_APPROVAL":
-      return "border-amber-500 bg-amber-500/5"
+      return "border-warn bg-warn/5"
     case "FAILED":
-      return "border-rose-500 bg-rose-500/5"
+      return "border-destructive bg-destructive/5"
     default:
       return "border-border bg-muted/40"
   }
@@ -330,11 +330,11 @@ function statusIconClass(status: MissionTask["status"]): string {
       return "text-blue-500"
     case "COMPLETED":
     case "SKIPPED":
-      return "text-emerald-500"
+      return "text-success"
     case "AWAITING_APPROVAL":
-      return "text-amber-500"
+      return "text-warn"
     case "FAILED":
-      return "text-rose-500"
+      return "text-destructive"
     default:
       return "text-muted-foreground"
   }

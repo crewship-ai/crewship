@@ -76,7 +76,7 @@ export function BackupMetricsRow({ workspaceId }: MetricsRowProps) {
       label: "Created",
       value: data.created_total.toLocaleString(),
       icon: Activity,
-      tone: "text-emerald-500",
+      tone: "text-success",
       sub: data.created_by_scope
         ? Object.entries(data.created_by_scope)
             .map(([k, v]) => `${k}=${v}`)
@@ -87,7 +87,7 @@ export function BackupMetricsRow({ workspaceId }: MetricsRowProps) {
       label: "Failed",
       value: data.failed_total.toLocaleString(),
       icon: AlertTriangle,
-      tone: data.failed_total > 0 ? "text-amber-500" : "text-muted-foreground",
+      tone: data.failed_total > 0 ? "text-warn" : "text-muted-foreground",
       sub: data.failed_by_reason
         ? Object.entries(data.failed_by_reason)
             .slice(0, 2)
@@ -106,7 +106,7 @@ export function BackupMetricsRow({ workspaceId }: MetricsRowProps) {
       label: "Total bytes",
       value: formatBytes(data.size_bytes_total),
       icon: HardDrive,
-      tone: "text-violet-400",
+      tone: "text-purple",
       sub: "",
     },
     {

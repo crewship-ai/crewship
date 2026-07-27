@@ -60,8 +60,8 @@ type StatusBucket = RoutineFilters["status"]
 
 const STATUS_BUCKETS: { id: StatusBucket; label: string; icon: typeof ScrollText; tone: string }[] = [
   { id: "all", label: "All", icon: ScrollText, tone: "text-foreground/70" },
-  { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-emerald-400" },
-  { id: "failed", label: "Failed", icon: XCircle, tone: "text-rose-400" },
+  { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-success" },
+  { id: "failed", label: "Failed", icon: XCircle, tone: "text-destructive" },
   { id: "never", label: "Never invoked", icon: CircleDashed, tone: "text-muted-foreground" },
 ]
 
@@ -326,12 +326,12 @@ export function RoutinesExplorer({
               const liveAwaiting = liveRun ? isAwaitingApproval(liveRun.status) : false
               const statusTone = liveRun
                 ? liveAwaiting
-                  ? "bg-amber-500 animate-pulse"
+                  ? "bg-warn animate-pulse"
                   : "bg-blue-500 animate-pulse"
                 : lastStatus === "completed"
-                  ? "bg-emerald-500"
+                  ? "bg-success"
                   : lastStatus === "failed"
-                    ? "bg-rose-500"
+                    ? "bg-destructive"
                     : routine.invocation_count === 0
                       ? "bg-muted-foreground/30"
                       : "bg-primary"
@@ -354,7 +354,7 @@ export function RoutinesExplorer({
                             <span
                               className={cn(
                                 "block truncate text-[10px]",
-                                liveAwaiting ? "text-amber-400" : "text-blue-300",
+                                liveAwaiting ? "text-warn" : "text-blue-300",
                               )}
                             >
                               {liveAwaiting

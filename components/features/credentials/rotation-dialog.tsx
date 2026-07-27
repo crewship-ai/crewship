@@ -146,13 +146,13 @@ export function RotationDialog({
                 </span>
               )}
               {!testing && testResult?.valid && (
-                <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                <span className="inline-flex items-center gap-1.5 text-success">
                   <CheckCircle2 className="h-3 w-3" />
                   Valid
                 </span>
               )}
               {!testing && testResult && !testResult.valid && (
-                <span className="inline-flex items-center gap-1.5 text-amber-400">
+                <span className="inline-flex items-center gap-1.5 text-warn">
                   <XCircle className="h-3 w-3" />
                   {testResult.error || "Could not validate (will rotate anyway)"}
                 </span>
@@ -216,7 +216,7 @@ export function RotationDialog({
           </div>
 
           {error && (
-            <div className="rounded-md border border-red-500/30 bg-red-500/[0.05] p-2 text-xs text-red-400 flex items-center gap-1.5">
+            <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] p-2 text-xs text-destructive flex items-center gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5" />
               {error}
             </div>

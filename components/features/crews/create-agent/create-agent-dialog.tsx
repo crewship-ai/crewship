@@ -292,8 +292,8 @@ export function CreateAgentDialog({
         <div className="overflow-y-auto max-h-[calc(100vh-180px)]">
           <div className="px-5 py-4 space-y-4">
             {hasNoCrews && (
-              <div className="flex gap-2.5 items-start px-3 py-2.5 rounded-lg bg-amber-400/[0.08] border border-amber-400/[0.25] text-[12px]">
-                <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/30">
+              <div className="flex gap-2.5 items-start px-3 py-2.5 rounded-lg bg-warn/[0.08] border border-warn/[0.25] text-[12px]">
+                <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider bg-warn/20 text-warn border border-warn/30">
                   Heads up
                 </span>
                 <div className="text-foreground/85 leading-relaxed">
@@ -496,7 +496,7 @@ WORK STYLE: …`}
               <p className="text-[10.5px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
                 {isPromptFromTemplate && draft.selectedPersona ? (
                   <>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-400/15 text-emerald-300 border border-emerald-400/25">
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/15 text-success border border-success/25">
                       Pre-filled
                     </span>
                     <span>
@@ -506,7 +506,7 @@ WORK STYLE: …`}
                   </>
                 ) : draft.editedPersonaPrompt !== null && draft.selectedPersona ? (
                   <>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300 border border-amber-400/25">
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn/15 text-warn border border-warn/25">
                       Edited
                     </span>
                     <span>
@@ -681,7 +681,7 @@ WORK STYLE: …`}
           <span
             className={cn(
               "text-[11px] mr-auto",
-              validationHint ? "text-amber-400" : "text-muted-foreground",
+              validationHint ? "text-warn" : "text-muted-foreground",
             )}
           >
             {validationHint ?? "⌘↵ to create · Esc to close"}
@@ -775,7 +775,7 @@ function FieldShell({
     <label className="block">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
         <span>{label}</span>
-        {required && <span className="text-red-400">*</span>}
+        {required && <span className="text-destructive">*</span>}
         {hint && (
           <span className="normal-case font-normal tracking-normal text-[11px] text-muted-foreground">
             — {hint}

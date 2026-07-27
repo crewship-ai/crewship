@@ -224,12 +224,12 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
                 <div>
                   <span className="text-muted-foreground">Encryption:</span>{" "}
                   {inspect.data.encryption.enabled ? (
-                    <span className="text-emerald-500 inline-flex items-center gap-1">
+                    <span className="text-success inline-flex items-center gap-1">
                       <Lock className="h-3 w-3" />
                       {inspect.data.encryption.algorithm ?? "encrypted"}
                     </span>
                   ) : (
-                    <span className="text-amber-500">unencrypted</span>
+                    <span className="text-warn">unencrypted</span>
                   )}
                 </div>
                 <div>
@@ -242,8 +242,8 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
 
           {/* What's included / what's not */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3">
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-emerald-500 mb-1.5">
+            <div className="rounded-md border border-success/30 bg-success/5 p-3">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-success mb-1.5">
                 <CheckCircle2 className="h-3 w-3" /> Included
               </div>
               <ul className="text-xs text-foreground/80 space-y-0.5 list-disc list-inside">
@@ -319,9 +319,9 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
                 transition={{ duration: 0.18, ease: "easeOut" }}
                 className="overflow-hidden"
               >
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <div className="rounded-md border border-warn/30 bg-warn/5 p-3 space-y-2">
                   <div className="flex items-start gap-2 text-xs">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
+                    <AlertTriangle className="h-3.5 w-3.5 text-warn mt-0.5 shrink-0" />
                     <div>
                       <strong className="text-foreground">Irreversible.</strong>{" "}
                       Containers will restart. In-flight runs will be terminated. Active sessions invalidated.

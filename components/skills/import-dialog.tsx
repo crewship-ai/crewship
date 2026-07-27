@@ -253,7 +253,7 @@ export function ImportSkillDialog({
                 <Checkbox checked={dryRun} onCheckedChange={(v) => setDryRun(v === true)} />
                 Dry run (preview only)
               </label>
-              <label className="flex items-center gap-2 text-xs text-amber-300">
+              <label className="flex items-center gap-2 text-xs text-warn">
                 <Checkbox checked={unsafeLicense} onCheckedChange={(v) => setUnsafeLicense(v === true)} />
                 <span className="inline-flex items-center gap-1">
                   <AlertTriangle className="h-3 w-3" />
@@ -262,8 +262,8 @@ export function ImportSkillDialog({
               </label>
             </div>
             {bulkResult && (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-2 text-xs space-y-1">
-                <div className="text-emerald-200 font-medium flex items-center gap-1">
+              <div className="rounded-md border border-success/30 bg-success/[0.06] p-2 text-xs space-y-1">
+                <div className="text-success font-medium flex items-center gap-1">
                   <Check className="h-3 w-3" />
                   {dryRun ? "Dry run" : `Imported ${bulkResult.total_imported} of ${bulkResult.total_found}`}
                 </div>
@@ -277,7 +277,7 @@ export function ImportSkillDialog({
                 )}
                 {bulkResult.skipped.length > 0 && (
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-amber-300">{bulkResult.skipped.length} skipped</summary>
+                    <summary className="cursor-pointer text-warn">{bulkResult.skipped.length} skipped</summary>
                     <ul className="mt-1 space-y-0.5 text-[11px] text-white/55">
                       {bulkResult.skipped.slice(0, 8).map((s) => (
                         <li key={s.path}><span className="font-mono">{s.path}</span>: {s.reason}</li>

@@ -254,7 +254,7 @@ function FeaturedCard({ entry, onAdd, installing }: { entry: RegistryEntry; onAd
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-semibold truncate">{entry.display_name || entry.name}</span>
           {entry.is_featured && (
-            <Badge variant="outline" className="text-[10px] h-4 px-1 border-amber-400/40 text-amber-300">★</Badge>
+            <Badge variant="outline" className="text-[10px] h-4 px-1 border-warn/40 text-warn">★</Badge>
           )}
         </div>
         <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">{entry.description}</p>

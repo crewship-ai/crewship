@@ -89,9 +89,9 @@ interface KindMeta {
 }
 
 const KIND_META: Record<InboxItem["kind"], KindMeta> = {
-  waitpoint: { label: "Waitpoint", icon: Clock, accent: "text-amber-300" },
-  escalation: { label: "Escalation", icon: AlertTriangle, accent: "text-rose-300" },
-  failed_run: { label: "Failed run", icon: XCircle, accent: "text-rose-400" },
+  waitpoint: { label: "Waitpoint", icon: Clock, accent: "text-warn" },
+  escalation: { label: "Escalation", icon: AlertTriangle, accent: "text-destructive" },
+  failed_run: { label: "Failed run", icon: XCircle, accent: "text-destructive" },
   message: { label: "Notification", icon: MessageSquare, accent: "text-blue-300" },
 }
 
@@ -703,7 +703,7 @@ export function InboxList() {
           {loading && visibleItems.length === 0 ? (
             <ListRowSkeleton rows={3} className="p-3" />
           ) : error ? (
-            <div className="p-6 text-center text-xs text-rose-300">
+            <div className="p-6 text-center text-xs text-destructive">
               Inbox unavailable: {error}
             </div>
           ) : searchedItems.length === 0 ? (
@@ -936,8 +936,8 @@ function PriorityPill({
     <span
       className={cn(
         "shrink-0 rounded px-1 py-0 text-[9px] font-semibold uppercase tracking-wide",
-        priority === "urgent" && "bg-rose-500/15 text-rose-300",
-        priority === "high" && "bg-amber-500/15 text-amber-300",
+        priority === "urgent" && "bg-destructive/15 text-destructive",
+        priority === "high" && "bg-warn/15 text-warn",
         priority === "low" && "bg-white/[0.06] text-muted-foreground",
         className,
       )}
@@ -1083,7 +1083,7 @@ function InboxDetail({
               {isResolved && item.resolved_action && (
                 <>
                   <span>·</span>
-                  <span className="text-emerald-400">{item.resolved_action}</span>
+                  <span className="text-success">{item.resolved_action}</span>
                 </>
               )}
             </div>
@@ -1247,7 +1247,7 @@ export function KindActions({
                   await onRefresh()
                 })
               }
-              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approved" ? "Approving…" : "Approve hire"}
@@ -1291,7 +1291,7 @@ export function KindActions({
                 await onRefresh()
               })
             }
-            className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+            className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
           >
             <CheckCircle2 className="h-3 w-3" />
             {busy === "approved" ? "Approving…" : "Approve"}
@@ -1360,7 +1360,7 @@ export function KindActions({
               size="sm"
               disabled={disabled || busy !== null}
               onClick={() => resolveSkill("approve")}
-              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approve" ? "Approving…" : "Approve"}
@@ -1425,7 +1425,7 @@ export function KindActions({
                 size="sm"
                 disabled={disabled || busy !== null}
                 onClick={() => resolveEsc("approve")}
-                className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
               >
                 <CheckCircle2 className="h-3 w-3" />
                 {busy === "approve" ? "Approving…" : "Approve"}
@@ -1469,7 +1469,7 @@ export function KindActions({
               size="sm"
               disabled={disabled || busy !== null}
               onClick={() => resolveEsc("approve")}
-              className="gap-1.5 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approve" ? "Approving…" : "Approve"}
