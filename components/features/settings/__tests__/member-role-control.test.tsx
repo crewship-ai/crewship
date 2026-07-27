@@ -34,7 +34,6 @@ function renderWith(callerRole: string | undefined, currentUserId: string) {
       members={members}
       workspaceId="ws1"
       currentUserId={currentUserId}
-      canInvite={false}
       callerRole={callerRole}
       onRefresh={vi.fn()}
     />,

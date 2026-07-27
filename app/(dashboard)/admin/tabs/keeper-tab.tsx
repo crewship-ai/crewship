@@ -62,6 +62,15 @@ export const KeeperTab = React.memo(function KeeperTab({
         </p>
       </div>
 
+      {/* Which model each judge actually uses, and whether it can run.
+          Deliberately OUTSIDE the `keeperStatus &&` guard below: a null
+          status means the keeper status endpoint failed, which is exactly
+          when an operator needs to know whether the judges can run — hiding
+          it then removes the diagnosis along with the symptom. Sits under
+          the governance panel conceptually; that panel is what overrides
+          these per workspace. */}
+      <JudgeModelsCard workspaceId={workspaceId} />
+
       {keeperLoading && <Skeleton className="h-[240px] rounded-xl" />}
 
       {!keeperLoading && keeperStatus && (
@@ -72,13 +81,6 @@ export const KeeperTab = React.memo(function KeeperTab({
             serverEnabled={keeperStatus.enabled}
           />
 
-          {/* Which model each judge actually uses, and whether it can run.
-              Directly under the governance panel because that panel is what
-              overrides these per workspace — the reader needs both to answer
-              "what will judge my next request?". Moved here from workspace
-              Settings, where it sat among per-workspace cards while showing
-              process-wide config. */}
-          <JudgeModelsCard workspaceId={workspaceId} />
 
           {/* ── System status card ── */}
           <SettingsCard

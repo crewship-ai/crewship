@@ -175,11 +175,26 @@ describe("InviteMemberDialog — the link outlives the roster refresh", () => {
     await waitFor(() => expect(onInvited).toHaveBeenCalled())
   })
 
-  it("refreshes when adding another, since that discards the link too", async () => {
+  it("does NOT refresh on Add another — that unmounts the dialog just the same", async () => {
     const onInvited = vi.fn()
     await provision(onInvited)
     fireEvent.click(screen.getByRole("button", { name: /add another/i }))
-    await waitFor(() => expect(onInvited).toHaveBeenCalled())
+
+    // Same trap as the success path: onInvited flips the layout to
+    // loading, MembersSection is swapped for a skeleton, and the form the
+    // admin just asked for is unmounted mid-keystroke.
+    expect(onInvited).not.toHaveBeenCalled()
+    expect(await screen.findByLabelText(/email/i)).toBeTruthy()
+  })
+
+  it("refreshes once at the end, after several additions", async () => {
+    const onInvited = vi.fn()
+    await provision(onInvited)
+    fireEvent.click(screen.getByRole("button", { name: /add another/i }))
+    await screen.findByLabelText(/email/i)
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    // One refresh for the whole session, on the way out.
+    await waitFor(() => expect(onInvited).toHaveBeenCalledTimes(1))
   })
 })
 

@@ -38,13 +38,12 @@ const members = [
   member("m-member", "MEMBER", "u-member", "Mel Member"),
 ]
 
-function renderSection(opts: { callerRole?: string; canInvite?: boolean }) {
+function renderSection(opts: { callerRole?: string }) {
   return render(
     <MembersSection
       members={members}
       workspaceId="ws1"
       currentUserId="u-caller"
-      canInvite={opts.canInvite ?? false}
       callerRole={opts.callerRole}
       onRefresh={vi.fn()}
     />,
@@ -58,9 +57,10 @@ describe("MembersSection — role-tiered controls", () => {
   })
 
   it("gives an ADMIN invite, remove and role-change", () => {
-    // canInvite deliberately false here: an ADMIN caller must still see
+    // The invite control follows callerRole alone now — the old canInvite
+    // prop is gone, so there is nothing left to contradict it with.
     // Invite because the gate is isAdminTier(callerRole), not the prop.
-    renderSection({ callerRole: "ADMIN", canInvite: false })
+    renderSection({ callerRole: "ADMIN" })
 
     expect(screen.getByTestId("invite-dialog")).toBeInTheDocument()
     // ADMIN (rank 4) outranks MANAGER and MEMBER but not OWNER — two
@@ -70,10 +70,10 @@ describe("MembersSection — role-tiered controls", () => {
   })
 
   it("gives a MANAGER role-change but NOT invite or remove", () => {
-    // canInvite deliberately true here: a MANAGER caller must still NOT
+    // A MANAGER must still NOT
     // see Invite — proves the render decision ignores the (CASL-derived,
     // here wrong-on-purpose) prop and uses isAdminTier(callerRole) instead.
-    renderSection({ callerRole: "MANAGER", canInvite: true })
+    renderSection({ callerRole: "MANAGER" })
 
     expect(screen.queryByTestId("invite-dialog")).toBeNull()
     expect(screen.queryAllByRole("button", { name: /remove member/i })).toHaveLength(0)

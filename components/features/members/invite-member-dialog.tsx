@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useRef, useState, type FormEvent } from "react"
 import { Check, Copy, UserPlus } from "lucide-react"
 
 import { inviteMemberSchema } from "@/lib/validations"
@@ -58,14 +58,25 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ProvisionResult | null>(null)
   const [copied, setCopied] = useState(false)
+  // Survives reset(), so several additions in one sitting still cost the
+  // parent exactly one refresh — on the way out.
+  const provisionedAny = useRef(false)
 
   /** Close or restart, refreshing the roster on the way out. Every path
    *  that discards the link goes through here, so the parent is refreshed
    *  exactly once and never while the link is still readable. */
   function dismiss(next: "close" | "again") {
-    if (result) onInvited?.()
+    // Refresh ONLY on the way out. onInvited flips the settings layout to
+    // loading, which swaps MembersSection for a skeleton and unmounts this
+    // dialog — fine once the admin is finished, fatal on "Add another",
+    // where it would tear down the empty form they just asked for.
     reset()
-    if (next === "close") setOpen(false)
+    if (next === "again") return
+    if (provisionedAny.current) {
+      provisionedAny.current = false
+      onInvited?.()
+    }
+    setOpen(false)
   }
 
   function reset() {
@@ -117,6 +128,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
       }
       setResult((await res.json()) as ProvisionResult)
       setStatus("idle")
+      provisionedAny.current = true
       // Deliberately NOT refreshing the roster here. onInvited makes the
       // settings layout refetch, which flips it to loading=true and swaps
       // MembersSection for a skeleton — unmounting this dialog with the
@@ -241,7 +253,10 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             )}
 
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              {/* dismiss(), not setOpen(false): a controlled setOpen does
+                  NOT fire onOpenChange, so closing this way would skip the
+                  one refresh the parent is owed. */}
+              <Button type="button" variant="outline" onClick={() => dismiss("close")}>
                 Cancel
               </Button>
               <Button type="submit" disabled={status === "saving"}>
