@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 
 import { MembersSection } from "../members-section"
 
@@ -99,5 +99,40 @@ describe("MembersSection — role-tiered controls", () => {
   it("never sends a mutating request for a MEMBER caller — there is no control that could", () => {
     renderSection({ callerRole: "MEMBER" })
     expect(apiFetch).not.toHaveBeenCalled()
+  })
+})
+
+// Progressive disclosure is right for reference material and wrong for live
+// state. The section had both behind identical accordions: a role legend
+// that never changes, and a capability grid whose checkboxes mutate
+// permissions immediately. Collapsing the second meant "who can do what
+// here?" — the question the screen exists to answer — needed extra clicks.
+describe("MembersSection — disclosure", () => {
+  beforeEach(() => cleanup())
+
+  it("shows the capability grid without making an admin open it", async () => {
+    renderSection({ callerRole: "OWNER" })
+    // Live, immediately-applied permissions are the point of the screen.
+    expect(await screen.findByTestId("capability-grid")).toBeTruthy()
+  })
+
+  it("keeps the role legend out of the way until asked for", () => {
+    renderSection({ callerRole: "OWNER" })
+    // Static reference: identical in every workspace, forever. It earns a
+    // help affordance, not permanent screen space.
+    expect(screen.queryByText(/All permissions except billing transfer/i)).toBeNull()
+    expect(screen.getByRole("button", { name: /what do the roles mean/i })).toBeTruthy()
+  })
+
+  it("reveals the legend on request", async () => {
+    renderSection({ callerRole: "OWNER" })
+    fireEvent.click(screen.getByRole("button", { name: /what do the roles mean/i }))
+    expect(await screen.findByText(/All permissions except billing transfer/i)).toBeTruthy()
+  })
+
+  it("does not show the capability grid to a non-admin", () => {
+    // Unchanged gating — the grid writes to a roleManage route.
+    renderSection({ callerRole: "MEMBER" })
+    expect(screen.queryByTestId("capability-grid")).toBeNull()
   })
 })

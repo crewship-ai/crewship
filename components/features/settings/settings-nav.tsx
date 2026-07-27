@@ -7,7 +7,7 @@ import {
   Shield, Bell, BellRing,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
+import { isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
   SidebarToolbar,

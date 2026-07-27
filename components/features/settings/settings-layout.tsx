@@ -12,7 +12,6 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
-import { isAdminTier } from "@/lib/permissions/tiers"
 import { SettingsNav, isSettingsSectionVisible } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
@@ -64,9 +63,6 @@ export function initialSettingsTab(search: string): string {
 export function SettingsLayout() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
-  // Admin console floor is ADMIN+ (#868/#893); the Aux tab reads an ADMIN+
-  // endpoint, so gate its content to match the nav.
-  const isAdmin = isAdminTier(role)
 
   const isMobile = useIsMobile()
   const [requestedTab, _setActiveTab] = useState(() =>

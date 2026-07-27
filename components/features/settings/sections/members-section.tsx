@@ -1,8 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { motion } from "motion/react"
-import { ChevronRight, Trash2 } from "lucide-react"
+import { HelpCircle, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -13,8 +12,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
-  Collapsible, CollapsibleContent, CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -112,6 +111,44 @@ function initials(name: string | null, email: string): string {
     return name.slice(0, 2).toUpperCase()
   }
   return email.slice(0, 2).toUpperCase()
+}
+
+/**
+ * The role legend, as help rather than furniture.
+ *
+ * It used to be a permanently-present accordion. The content is static —
+ * identical in every workspace, forever — so it is reference material, and
+ * reference material belongs behind a help affordance next to the thing it
+ * explains, not competing for space with the live roster. The trigger sits
+ * in the Members card header because roles apply to the whole list; a `?`
+ * repeated on every row would be noise.
+ */
+function RoleLegend() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 gap-1.5 text-[11px] text-muted-foreground"
+          aria-label="What do the roles mean?"
+        >
+          <HelpCircle className="size-3.5" />
+          <span className="hidden sm:inline">Roles</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[22rem] p-0">
+        <div className="px-3 py-2 border-b border-border/60">
+          <div className="text-xs font-medium">Roles &amp; permissions</div>
+        </div>
+        {roleSummaries.map((item, idx) => (
+          <SettingsRow key={item.role} label={item.role} border={idx < roleSummaries.length - 1}>
+            <span className="text-[11px] text-muted-foreground text-right">{item.summary}</span>
+          </SettingsRow>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 // ── Member role control ──────────────────────────────────────────────
@@ -250,8 +287,6 @@ export function MembersSection({
   callerRole,
 }: MembersSectionProps) {
   const [removingId, setRemovingId] = useState<string | null>(null)
-  const [rolesOpen, setRolesOpen] = useState(false)
-  const [capsOpen, setCapsOpen] = useState(false)
   // isAdmin gates invite, remove AND the per-member capability grid — all
   // three map to `roleManage` routes. isManager is strictly wider (also
   // true for MANAGER) and only used for the muted copy below; the
@@ -287,7 +322,12 @@ export function MembersSection({
       <SettingsCard
         title="Members"
         description={`${members.length} member${members.length === 1 ? "" : "s"} in this workspace`}
-        actions={isAdmin ? <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} /> : undefined}
+        actions={
+          <>
+            <RoleLegend />
+            {isAdmin && <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} />}
+          </>
+        }
       >
         {members.map((member, idx) => {
           const isSelf = currentUserId === member.user.id
@@ -387,67 +427,29 @@ export function MembersSection({
         </p>
       )}
 
-      {/* ── Roles & Permissions (collapsible) ── */}
-      <Collapsible open={rolesOpen} onOpenChange={setRolesOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center gap-2 mb-2.5 group"
-          >
-            <motion.div animate={{ rotate: rolesOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            </motion.div>
-            <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
-              Roles &amp; Permissions
-            </span>
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-            {roleSummaries.map((item, idx) => (
-              <SettingsRow
-                key={item.role}
-                label={item.role}
-                border={idx < roleSummaries.length - 1}
-              >
-                <span className="text-[11px] text-muted-foreground">
-                  {item.summary}
-                </span>
-              </SettingsRow>
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* ── Per-member capabilities (admin-only, PRD-SLASH-CAPABILITIES-2026 §6.7) ── */}
+      {/* ── Per-member capabilities ──
+          Deliberately NOT behind a disclosure. Progressive disclosure is for
+          reference material; this is live state whose checkboxes apply
+          immediately. Hiding it meant "who can do what here?" — the question
+          this screen exists to answer — cost an extra click. */}
       {isAdmin && currentUserId && (
-        <Collapsible open={capsOpen} onOpenChange={setCapsOpen}>
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="flex items-center gap-2 mb-2.5 group"
-            >
-              <motion.div animate={{ rotate: capsOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-              </motion.div>
-              <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
-                Per-member capabilities
-              </span>
-              <span className="text-[10px] text-muted-foreground leading-none">
-                grant individual high-value actions without promoting role
-              </span>
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="rounded-xl border border-border/60 bg-card p-3">
-              <CapabilityGrid
+        <div>
+          <div className="flex items-baseline gap-2 mb-2.5">
+            <span className="text-body font-medium text-foreground/80 leading-none">
+              Per-member capabilities
+            </span>
+            <span className="text-[10px] text-muted-foreground leading-none">
+              grant individual high-value actions without promoting role
+            </span>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-card p-3">
+            <CapabilityGrid
                 members={members}
                 workspaceId={workspaceId}
                 currentUserId={currentUserId}
               />
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+          </div>
+        </div>
       )}
     </div>
   )
