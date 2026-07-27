@@ -141,97 +141,99 @@ export function IntegrationsExplorer<K extends string>({
 
   return (
     <div className="flex h-full flex-col">
-      <SidebarToolbar>
-        <SidebarSearch
-          value={search}
-          onValueChange={onSearchChange}
-          placeholder={searchPlaceholder}
-          aria-label={searchAriaLabel}
-        />
-        {usableFacets.length > 0 && (
-          <div className="relative shrink-0">
+      {/* The popover is anchored to the PANEL, not to the Filter button.
+          Anchoring it to the button meant its width was set by its content —
+          a ~40-character Composio user id pushed it past the panel's left
+          edge. Spanning the panel's own width makes it fit by construction. */}
+      <div className="relative shrink-0">
+        <SidebarToolbar>
+          <SidebarSearch
+            value={search}
+            onValueChange={onSearchChange}
+            placeholder={searchPlaceholder}
+            aria-label={searchAriaLabel}
+          />
+          {usableFacets.length > 0 && (
             <SidebarFilterButton
               activeCount={activeCount}
               aria-expanded={filterOpen}
               onClick={() => setFilterOpen((v) => !v)}
             />
-            <AnimatePresence>
-              {filterOpen && (
-                <>
-                  {/* Click-away catcher, same as the /issues filter. */}
-                  <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(false)} />
-                  <motion.div
-                    {...POPOVER_ANIM}
-                    className={cn(
-                      // max-w matters as much as min-w: a Composio user id is
-                      // ~40 characters, and without a ceiling the popover grew
-                      // leftward past the panel and got sliced off at its edge.
-                      "absolute right-0 top-9 z-50 max-h-[340px] min-w-[210px] max-w-[248px]",
-                      "overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
-                    )}
+          )}
+          <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
+        </SidebarToolbar>
+
+        <AnimatePresence>
+          {filterOpen && usableFacets.length > 0 && (
+            <>
+              {/* Click-away catcher, same as the /issues filter. */}
+              <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(false)} />
+              <motion.div
+                {...POPOVER_ANIM}
+                className={cn(
+                  "absolute inset-x-2 top-[calc(100%-0.25rem)] z-50 max-h-[340px]",
+                  "overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
+                )}
+              >
+                {activeCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearFilters()
+                      setFilterOpen(false)
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-xs text-primary-hover hover:bg-white/[0.06]"
                   >
-                    {activeCount > 0 && (
+                    Clear all filters
+                  </button>
+                )}
+                {usableFacets.map((group) => (
+                  <div key={group.key}>
+                    <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-foreground/40">
+                      {group.label}
+                    </div>
+                    {group.options.map((opt) => (
                       <button
+                        key={opt.value}
                         type="button"
                         onClick={() => {
-                          onClearFilters()
+                          group.onSelect(group.selected === opt.value ? null : opt.value)
                           setFilterOpen(false)
                         }}
-                        className="w-full px-3 py-1.5 text-left text-xs text-primary-hover hover:bg-white/[0.06]"
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+                          group.selected === opt.value
+                            ? "text-primary-hover"
+                            : "text-muted-foreground/80",
+                        )}
                       >
-                        Clear all filters
+                        {opt.mark ? (
+                          <ProviderMark
+                            provider={opt.mark}
+                            label={opt.label}
+                            className="h-4 w-4 rounded-[4px]"
+                          />
+                        ) : opt.dot ? (
+                          <span
+                            className={cn("h-1.5 w-1.5 shrink-0 rounded-full", opt.dot)}
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        <span className="min-w-0 flex-1 truncate" title={opt.label}>
+                          {opt.label}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/50">
+                          {opt.count}
+                        </span>
                       </button>
-                    )}
-                    {usableFacets.map((group) => (
-                      <div key={group.key}>
-                        <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-foreground/40">
-                          {group.label}
-                        </div>
-                        {group.options.map((opt) => (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => {
-                              group.onSelect(group.selected === opt.value ? null : opt.value)
-                              setFilterOpen(false)
-                            }}
-                            className={cn(
-                              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
-                              group.selected === opt.value
-                                ? "text-primary-hover"
-                                : "text-muted-foreground/80",
-                            )}
-                          >
-                            {opt.mark ? (
-                              <ProviderMark
-                                provider={opt.mark}
-                                label={opt.label}
-                                className="h-4 w-4 rounded-[4px]"
-                              />
-                            ) : opt.dot ? (
-                              <span
-                                className={cn("h-1.5 w-1.5 shrink-0 rounded-full", opt.dot)}
-                                aria-hidden="true"
-                              />
-                            ) : null}
-                            <span className="min-w-0 flex-1 truncate" title={opt.label}>
-                              {opt.label}
-                            </span>
-                            <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/50">
-                              {opt.count}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
                     ))}
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-        <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
-      </SidebarToolbar>
+                  </div>
+                ))}
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
 
       <SidebarActiveChips>
         {facets.map((group) => {
