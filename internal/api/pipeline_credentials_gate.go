@@ -43,6 +43,7 @@ func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.
 		return false
 	}
 	probe := pipeline.NewVaultCredentialProbe(h.db)
+	llmProbe := pipeline.NewAnthropicLLMCredentialProbe(h.db)
 	scope := pipeline.RunScope{WorkspaceID: workspaceID, AuthorCrewID: crewID}
 	var missing []string
 	for _, credType := range required {
@@ -53,9 +54,31 @@ func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.
 				"workspace_id", workspaceID, "crew_id", crewID, "type", credType, "error", err)
 			continue
 		}
-		if !ok {
-			missing = append(missing, credType)
+		if ok {
+			continue
 		}
+		// Not resolvable as an exact-type, author-crew-scoped secret. Before
+		// blocking, check the OTHER resolution path an agent step uses: an
+		// Anthropic LLM requirement (api_key / ai_cli_token) is satisfied by a
+		// workspace-wide Anthropic key of EITHER accepted type, exactly as
+		// LLMRunner.providerForWorkspace resolves it. The gate must never 422 a
+		// run the runner could finish — that was the #1418 gate's blind spot,
+		// which 422'd approval-gate-demo whenever the vault held an
+		// AI_CLI_TOKEN (or a key pinned to a non-author crew) for an api_key
+		// requirement.
+		if pipeline.IsAnthropicLLMCredentialType(credType) {
+			llmOK, llmErr := llmProbe(r.Context(), workspaceID)
+			if llmErr != nil {
+				// FAIL-OPEN, same bias to availability as the primary probe.
+				h.logger.Warn("credential gate: anthropic probe failed, treating as available (fail-open)",
+					"workspace_id", workspaceID, "crew_id", crewID, "type", credType, "error", llmErr)
+				continue
+			}
+			if llmOK {
+				continue
+			}
+		}
+		missing = append(missing, credType)
 	}
 	if len(missing) == 0 {
 		return false

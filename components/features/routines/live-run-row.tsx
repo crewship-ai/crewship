@@ -6,6 +6,7 @@ import { Pause, Play, Square } from "lucide-react"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { isAwaitingApproval } from "@/hooks/use-active-routine-runs"
+import { SourcePill } from "@/components/features/activity/source-pill"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { apiFetch } from "@/lib/api-fetch"
 import { routineHref } from "@/lib/routine-href"
@@ -96,6 +97,8 @@ export function LiveRunRow({
         </span>
       </div>
       <div className="mt-1 flex items-center gap-1.5 pl-3.5 text-[11px] text-muted-foreground">
+        {/* provenance first — "this run happened because X" (#1418 follow-up) */}
+        <SourcePill run={run} />
         {awaiting ? (
           <>
             <Pause className="h-3 w-3 shrink-0 text-warn" />

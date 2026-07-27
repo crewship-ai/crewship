@@ -4,16 +4,13 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   AlertCircle,
-  Calendar,
   Check,
   ChevronDown,
   ChevronRight,
-  CircleDot,
   Globe,
   PauseCircle,
   ScrollText,
   Sparkles,
-  Webhook,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
@@ -22,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
+import { SourcePill } from "@/components/features/activity/source-pill"
 import { useTrace } from "@/hooks/use-trace"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime, formatDurationDecimal } from "@/lib/time"
@@ -248,54 +246,6 @@ function RunCard({
         )}
       </AnimatePresence>
     </li>
-  )
-}
-
-// SourcePill renders a chip linking this run back to its trigger:
-// an issue identifier (clickable to /issues), a schedule, a webhook,
-// a parent pipeline, or a manual run. The user's mental model is
-// "this happened because X" — the pill is the X.
-function SourcePill({ run }: { run: PipelineRun }) {
-  if (run.triggered_via === "issue" && run.issue_identifier) {
-    return (
-      <Link
-        href={`/issues/${encodeURIComponent(run.issue_identifier)}`}
-        onClick={(e) => e.stopPropagation()}
-        className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/25"
-      >
-        <CircleDot className="mr-1 inline h-2.5 w-2.5" />
-        {run.issue_identifier}
-      </Link>
-    )
-  }
-  if (run.triggered_via === "schedule") {
-    return (
-      <span className="rounded bg-purple/15 px-1.5 py-0.5 text-[10px] font-medium text-purple">
-        <Calendar className="mr-1 inline h-2.5 w-2.5" />
-        schedule
-      </span>
-    )
-  }
-  if (run.triggered_via === "webhook") {
-    return (
-      <span className="rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-warn">
-        <Webhook className="mr-1 inline h-2.5 w-2.5" />
-        webhook
-      </span>
-    )
-  }
-  if (run.triggered_via === "call_pipeline") {
-    return (
-      <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-        <ScrollText className="mr-1 inline h-2.5 w-2.5" />
-        sub-run
-      </span>
-    )
-  }
-  return (
-    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      manual
-    </span>
   )
 }
 
