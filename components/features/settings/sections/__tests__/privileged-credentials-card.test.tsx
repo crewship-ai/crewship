@@ -111,4 +111,50 @@ describe("PrivilegedCredentialsCard (#1378)", () => {
 
     expect(await screen.findByTestId("privileged-credentials-switch")).toBeDisabled()
   })
+
+  // Regression coverage for the clipped-description bug: the row used to
+  // carry the full UID 1001/1002 explanation inline, which overflowed
+  // SettingsRow's unshrinkable (`min-w-0 shrink-0`) label column and got
+  // silently cropped by SettingsCard's `overflow-hidden`.
+  it("renders the short inline description instead of the long paragraph", async () => {
+    mockWorkspace(false)
+    render(<PrivilegedCredentialsCard workspaceId="ws1" />)
+
+    await screen.findByTestId("privileged-credentials-switch")
+    expect(
+      screen.getByText(
+        "Turning this on removes the fail-closed boundary between privileged crews and stored credentials.",
+      ),
+    ).toBeInTheDocument()
+    // The long-form paragraph must not be sitting in the row anymore —
+    // only reachable via the tooltip trigger now (see next test).
+    expect(screen.queryByText(/UID 1001\/1002 sidecar boundary/)).not.toBeInTheDocument()
+  })
+
+  it("keeps the full explanation reachable via an accessible tooltip trigger", async () => {
+    mockWorkspace(false)
+    render(<PrivilegedCredentialsCard workspaceId="ws1" />)
+
+    await screen.findByTestId("privileged-credentials-switch")
+    const trigger = screen.getByRole("button", {
+      name: /more about the privileged-credentials boundary/i,
+    })
+    expect(trigger).toBeInTheDocument()
+  })
+
+  it("PATCHes the same endpoint and payload shape as before the copy/layout change", async () => {
+    mockWorkspace(false)
+    render(<PrivilegedCredentialsCard workspaceId="ws1" />)
+
+    const sw = await screen.findByTestId("privileged-credentials-switch")
+    fireEvent.click(sw)
+
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    const putCall = apiFetch.mock.calls.find(([, init]) => (init as RequestInit)?.method === "PATCH")
+    expect(putCall).toBeTruthy()
+    const [putUrl, putInit] = putCall as [string, RequestInit]
+    expect(putUrl).toBe("/api/v1/workspaces/ws1?workspace_id=ws1")
+    expect(putInit.headers).toEqual({ "Content-Type": "application/json" })
+    expect(JSON.parse(String(putInit.body))).toEqual({ allow_privileged_credentials: true })
+  })
 })

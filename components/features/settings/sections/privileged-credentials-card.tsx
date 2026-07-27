@@ -14,10 +14,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { ShieldAlert } from "lucide-react"
+import { ShieldAlert, Info } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
@@ -25,6 +26,24 @@ import { apiFetch } from "@/lib/api-fetch"
 interface WorkspaceResponse {
   allow_privileged_credentials?: boolean
 }
+
+// The row description used to carry the full explanation below and got
+// clipped: SettingsRow's label column is `min-w-0 shrink-0`, so a flex
+// item with flex-shrink:0 never shrinks below its own max-content
+// (unwrapped) width — it just overflows, and SettingsCard's
+// `overflow-hidden` silently cropped the excess instead of wrapping it.
+// Fix: keep the inline copy to one short sentence (still names the real
+// stake, not softened) and move the rest into a tooltip, which lives in
+// a portal outside this row's box model entirely.
+const SHORT_DESCRIPTION =
+  "Turning this on removes the fail-closed boundary between privileged crews and stored credentials."
+
+const FULL_EXPLANATION =
+  "Privileged crews run without the UID 1001/1002 sidecar boundary, so any process in the " +
+  "container can reach the CredStore. This is OFF by default (fail-closed, #1032) so credentials " +
+  "are never loaded into an unisolated container until a workspace owner opts in. Turn it on only " +
+  "if this workspace runs privileged crews that genuinely need credentials at runtime, and you " +
+  "accept that container-level isolation no longer applies to them."
 
 export interface PrivilegedCredentialsCardProps {
   workspaceId: string
@@ -147,12 +166,39 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
     >
       <SettingsRow
         label={
-          <span className="inline-flex items-center gap-2">
-            <ShieldAlert className="h-3.5 w-3.5 text-warn" />
-            Load credentials into privileged crews
+          <span className="inline-flex items-center gap-1.5">
+            <ShieldAlert className="h-3.5 w-3.5 text-warn shrink-0" />
+            <span>Load credentials into privileged crews</span>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* Info affordance carries the full explanation (UID
+                      1001/1002 boundary, why OFF by default, when to opt
+                      in) that no longer fits inline. `aria-label` gives it
+                      an accessible name since the icon alone has none. */}
+                  <button
+                    type="button"
+                    aria-label="More about the privileged-credentials boundary"
+                    className="text-muted-foreground hover:text-foreground cursor-help shrink-0"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs text-[11px]">
+                  {FULL_EXPLANATION}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </span>
         }
-        description="Privileged crews run without the UID 1001/1002 sidecar boundary, so any process in the container can reach the CredStore. Leave OFF unless you understand the exposure."
+        description={
+          // Explicit cap so the sentence wraps well before it could ever
+          // approach the row's available width, instead of relying on the
+          // (unshrinkable) label column to save us again.
+          <span className="block max-w-[22rem] whitespace-normal break-words">
+            {SHORT_DESCRIPTION}
+          </span>
+        }
         border={false}
       >
         <Switch

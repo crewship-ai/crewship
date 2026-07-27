@@ -1880,6 +1880,15 @@ END;
 	// without a redeploy. Absence of a row = shipped default.
 	// See migrate_consts_v168_rate_limit_overrides.go.
 	{version: 168, name: "rate_limit_overrides", sql: migrationRateLimitOverrides},
+
+	// v169: admit `account_setup` to verification_tokens.purpose so an admin
+	// can hand a new colleague a setup link on an instance with no mailer.
+	// A CHECK constraint cannot be altered in SQLite, so the column is
+	// rebuilt; live tokens are carried across rather than dropped.
+	// Was authored as v168 and renumbered on merge — #1508 took that slot
+	// first and had already been applied to live instances.
+	// See migrate_consts_v169_account_setup_purpose.go.
+	{version: 169, name: "account_setup_purpose", sql: migrationAccountSetupPurpose},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

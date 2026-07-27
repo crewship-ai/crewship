@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Calendar } from "lucide-react"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 export interface ScheduleEditorProps {
@@ -34,6 +35,12 @@ export function ScheduleEditor({
   const [draftEnabled, setDraftEnabled] = useState(enabled)
   const [saving, setSaving] = useState(false)
 
+  // The switch renders this, not the `enabled` prop directly, so a failed
+  // write can revert the visual flip instead of leaving it stuck showing a
+  // state that was never actually saved.
+  const [toggleEnabled, setToggleEnabled] = useState(enabled)
+  useEffect(() => { setToggleEnabled(enabled) }, [enabled])
+
   // Sync drafts back from props once we're not actively editing — keeps
   // the editor honest after parent re-fetches (e.g. another tab toggled
   // the schedule, or onSave returned a normalized cron expression).
@@ -46,9 +53,15 @@ export function ScheduleEditor({
 
   const handleToggle = async (next: boolean) => {
     if (readOnly) return
+    const previous = toggleEnabled
+    setToggleEnabled(next) // optimistic — this is the only feedback the switch gives
     try {
       setSaving(true)
       await onSave({ cron: cron ?? "", prompt: prompt ?? "", enabled: next })
+      toast.success(next ? "Schedule enabled" : "Schedule disabled")
+    } catch {
+      setToggleEnabled(previous) // the write failed, don't leave the switch lying
+      toast.error("Failed to update schedule")
     } finally {
       setSaving(false)
     }
@@ -83,18 +96,18 @@ export function ScheduleEditor({
           <button
             type="button"
             disabled={readOnly || saving}
-            onClick={() => handleToggle(!enabled)}
+            onClick={() => handleToggle(!toggleEnabled)}
             className={cn(
               "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
-              enabled ? "bg-success/70" : "bg-muted",
+              toggleEnabled ? "bg-success/70" : "bg-muted",
               (readOnly || saving) && "opacity-50 cursor-not-allowed",
             )}
-            aria-pressed={enabled}
+            aria-pressed={toggleEnabled}
           >
             <span
               className={cn(
                 "absolute w-4 h-4 rounded-full bg-white transition-transform",
-                enabled ? "translate-x-[18px]" : "translate-x-0.5",
+                toggleEnabled ? "translate-x-[18px]" : "translate-x-0.5",
               )}
             />
           </button>

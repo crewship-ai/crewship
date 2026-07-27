@@ -134,11 +134,16 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
 
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const handleToggleEnabled = useCallback(async (ch: NotificationChannel) => {
+    const next = !ch.enabled
+    const label = ch.type === "email" ? ch.to : ch.type === "shoutrrr" ? ch.provider : ch.url
     setTogglingId(ch.id)
     try {
-      await patch(ch.id, { enabled: !ch.enabled })
+      await patch(ch.id, { enabled: next })
+      toast.success(next ? "Channel enabled" : "Channel disabled", { description: label })
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update channel")
+      toast.error("Failed to update channel", {
+        description: e instanceof Error ? e.message : undefined,
+      })
     } finally {
       setTogglingId(null)
     }

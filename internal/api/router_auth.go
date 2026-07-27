@@ -49,14 +49,40 @@ func (r *Router) registerAuthRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/forgot", recoveryH.Forgot)
 	r.mux.HandleFunc("POST /api/v1/auth/reset", recoveryH.Reset)
 
-	// Google OAuth2
-	googleAuth := NewGoogleAuthHandler(r.db, r.logger, r.authMw.validator, r.sessionsStore, r.googleClientID, r.googleSecret, r.authBaseURL)
-	if googleAuth.Enabled() {
-		r.mux.HandleFunc("GET /api/v1/auth/google/redirect", googleAuth.Redirect)
-		r.mux.HandleFunc("GET /api/v1/auth/google/callback", googleAuth.Callback)
-	}
+	// Google OAuth2 — SWITCHED OFF (2026-07-27, Pavel's call).
+	//
+	// The redirect and callback routes are deliberately NOT registered, so
+	// the flow is unreachable even on a box that still carries
+	// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET. Gating on Enabled() would
+	// have let leftover config quietly switch it back on.
+	//
+	// Beyond "we don't want it": the flow created users with no
+	// hashed_password (auth_google.go's INSERT sets email_verified and
+	// never a password). An account somebody genuinely controls, holding
+	// no password, is the shape that made the provisioning takeover fix
+	// incomplete — see workspaces_provision.go. Removing the source stops
+	// new ones; the predicate there still has to handle the accounts real
+	// deployments already created.
+	//
+	// auth_google.go is left in the tree rather than deleted so turning this
+	// back on is re-registering NewGoogleAuthHandler against the redirect and
+	// callback handlers, not recovering a file from git — but nothing
+	// references it while nothing is registered here.
+	//
+	// The registrations are NOT kept here commented out. cmd/gen-openapi is a
+	// regex scan over this file's source and does not strip comments, so a
+	// commented-out mux registration still lands in openapi.gen.json —
+	// publishing routes that answer 404 to anyone generating a client or
+	// fuzzing the spec. (Nor can this comment quote the call shape it is
+	// warning about: doing so put the redirect route straight back into the
+	// generated spec.)
+	//
+	// The status route stays and answers a flat false. 404ing it would
+	// leave an older frontend build waiting on a request that errors; the
+	// login page renders its Google button from this and needs a definite
+	// "off".
 	r.mux.HandleFunc("GET /api/v1/auth/google/status", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"enabled": googleAuth.Enabled()})
+		writeJSON(w, http.StatusOK, map[string]bool{"enabled": false})
 	})
 
 	// Active sessions (auth required) — backs the Settings → Sessions

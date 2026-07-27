@@ -14,10 +14,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -28,6 +30,9 @@ import {
 import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
+import { isAdminTier } from "@/lib/permissions/tiers"
+import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
 import { PrivilegedCredentialsCard } from "./privileged-credentials-card"
 
 
@@ -72,43 +77,6 @@ interface CrewsContainersSectionProps {
   workspaceId: string
 }
 
-function Row({
-  label,
-  description,
-  children,
-  border = true,
-}: {
-  label?: React.ReactNode
-  description?: string
-  children: React.ReactNode
-  border?: boolean
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 px-4 py-2.5",
-        border && "border-b border-border/40 last:border-b-0",
-      )}
-    >
-      <div className="shrink-0">
-        {typeof label === "string" ? (
-          <div className="text-xs text-foreground">{label}</div>
-        ) : (
-          label
-        )}
-        {description && (
-          <div className="text-[11px] text-muted-foreground/80 mt-0.5">
-            {description}
-          </div>
-        )}
-      </div>
-      <div className="flex items-center gap-2 min-w-0 justify-end">
-        {children}
-      </div>
-    </div>
-  )
-}
-
 function buildDraft(crew: CrewData): CrewDraft {
   return {
     container_memory_mb: crew.container_memory_mb ?? 512,
@@ -135,9 +103,68 @@ function hasNetworkChanges(draft: CrewDraft, crew: CrewData): boolean {
   )
 }
 
+/** Reuse the picker's wording so read-only and editable rows never disagree. */
+function memoryLabel(mb: number): string {
+  return MEMORY_OPTIONS.find((o) => Number(o.value) === mb)?.label ?? `${mb} MB`
+}
+
+function cpuLabel(cpus: number): string {
+  return CPU_OPTIONS.find((o) => Number(o.value) === cpus)?.label ?? String(cpus)
+}
+
+/**
+ * Container limits as plain text, for callers below the ADMIN tier.
+ *
+ * Deliberately renders nothing focusable: a disabled input still reads as
+ * "try me", and the PATCH behind it can only answer 403 for these roles.
+ */
+function CrewLimitsReadOnly({ crew }: { crew: CrewData }) {
+  const restricted = (crew.network_mode ?? "free") === "restricted"
+  const value = (v: React.ReactNode) => (
+    <span className="text-xs text-muted-foreground">{v}</span>
+  )
+  return (
+    <>
+      <SettingsRow label="Memory">
+        {value(memoryLabel(crew.container_memory_mb ?? 512))}
+      </SettingsRow>
+      <SettingsRow label="CPUs">
+        {value(cpuLabel(crew.container_cpus ?? 1))}
+      </SettingsRow>
+      <SettingsRow label="Network mode" border={restricted}>
+        {value(restricted ? "Restricted" : "Free")}
+      </SettingsRow>
+      {restricted && (
+        <SettingsRow
+          label="Allowed domains"
+          border={false}
+          className="items-start"
+        >
+          <span className="text-xs text-muted-foreground text-right break-words">
+            {crew.allowed_domains?.trim() || "None"}
+          </span>
+        </SettingsRow>
+      )}
+      {/* Said once, quietly. For most of the workspace this is the normal
+          state, not a failure — muted copy, no alert colour. */}
+      <p className="px-4 pb-2.5 text-[11px] text-muted-foreground">
+        Container limits are managed by workspace admins.
+      </p>
+    </>
+  )
+}
+
 export function CrewsContainersSection({
   workspaceId,
 }: CrewsContainersSectionProps) {
+  // Container limits are written by PATCH /api/v1/crews/{id}, which the server
+  // gates at `roleManage` — ADMIN and up. Gate on the tier helper rather than
+  // CASL: CASL grants MANAGER `update Crew`, so gating there would hand a
+  // MANAGER an editing form whose Save can only ever 403 (the exact mismatch
+  // lib/permissions/tiers.ts documents). Below ADMIN the values ship as text.
+  const { role } = useAbilities()
+  const canEdit = isAdminTier(role)
+
   const [crews, setCrews] = useState<CrewData[]>([])
   const [loading, setLoading] = useState(true)
   const [drafts, setDrafts] = useState<Record<string, CrewDraft>>({})
@@ -292,17 +319,24 @@ export function CrewsContainersSection({
         {/* The privileged-credentials override is workspace-scoped, so it
             still applies (and must stay visible) when no crews exist yet. */}
         <PrivilegedCredentialsCard workspaceId={workspaceId} />
-        <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
-              <Box className="h-4 w-4 text-muted-foreground" />
+        <SettingsCard
+          title="Crews"
+          description="Per-crew container limits, network policies, and allowed domains"
+        >
+          <SettingsEmpty>
+            <div className="flex flex-col items-center gap-2 py-6">
+              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                <Box className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="text-sm font-medium text-foreground/80">
+                No crews yet
+              </div>
+              <div className="max-w-xs">
+                Create your first crew to get started with agent orchestration
+              </div>
             </div>
-            <div className="text-sm font-medium text-foreground/80">No crews yet</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-              Create your first crew to get started with agent orchestration
-            </div>
-          </div>
-        </div>
+          </SettingsEmpty>
+        </SettingsCard>
       </div>
     )
   }
@@ -312,43 +346,32 @@ export function CrewsContainersSection({
       {/* Workspace-level security override (#1378) — independent of any crew. */}
       <PrivilegedCredentialsCard workspaceId={workspaceId} />
 
-      {/* Overview section */}
-      <section className="space-y-2.5">
-        <div>
-          <h3 className="text-body font-medium text-foreground/80 leading-none">Overview</h3>
-          <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-            Resource footprint across all crews on this workspace
-          </p>
-        </div>
-        <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-          <Row label="Crews">
-            <span className="text-xs font-mono tabular-nums text-foreground">
-              <AnimatedNumber value={crews.length} />
-            </span>
-          </Row>
-          <Row label="Agents">
-            <span className="text-xs font-mono tabular-nums text-foreground">
-              <AnimatedNumber value={totalAgents} />
-            </span>
-          </Row>
-          <Row label="Containers" border={false}>
-            <span className="text-xs font-mono tabular-nums text-foreground">
-              <AnimatedNumber value={crews.length} />
-            </span>
-          </Row>
-        </div>
-      </section>
+      <SettingsCard
+        title="Overview"
+        description="Resource footprint across all crews on this workspace"
+      >
+        <SettingsRow label="Crews">
+          <span className="text-xs font-mono tabular-nums text-foreground">
+            <AnimatedNumber value={crews.length} />
+          </span>
+        </SettingsRow>
+        <SettingsRow label="Agents">
+          <span className="text-xs font-mono tabular-nums text-foreground">
+            <AnimatedNumber value={totalAgents} />
+          </span>
+        </SettingsRow>
+        <SettingsRow label="Containers" border={false}>
+          <span className="text-xs font-mono tabular-nums text-foreground">
+            <AnimatedNumber value={crews.length} />
+          </span>
+        </SettingsRow>
+      </SettingsCard>
 
-      {/* Crews accordion section */}
-      <section className="space-y-2.5">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h3 className="text-body font-medium text-foreground/80 leading-none">Crews</h3>
-            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-              Per-crew container limits, network policies, and allowed domains
-            </p>
-          </div>
-          {crews.length >= 5 && (
+      <SettingsCard
+        title="Crews"
+        description="Per-crew container limits, network policies, and allowed domains"
+        actions={
+          crews.length >= 5 && (
             <div className="relative shrink-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
@@ -358,89 +381,94 @@ export function CrewsContainersSection({
                 className="h-7 w-[180px] pl-7 text-xs"
               />
             </div>
-          )}
-        </div>
+          )
+        }
+      >
+        {filteredCrews.length === 0 ? (
+          <SettingsEmpty>No crews matching &quot;{search}&quot;</SettingsEmpty>
+        ) : (
+          filteredCrews.map((crew, index) => {
+            const resolvedColor = resolveCrewColor(crew.color)
+            const draft = drafts[crew.id]
+            const isExpanded = expandedId === crew.id
+            const resourceChanged = draft
+              ? hasResourceChanges(draft, crew)
+              : false
+            const networkChanged = draft
+              ? hasNetworkChanges(draft, crew)
+              : false
+            const hasChanges = resourceChanged || networkChanged
+            const isLast = index === filteredCrews.length - 1
 
-        <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-            {filteredCrews.length === 0 ? (
-              <div className="px-4 py-8 text-center text-[11px] text-muted-foreground">
-                No crews matching &quot;{search}&quot;
-              </div>
-            ) : (
-              filteredCrews.map((crew, index) => {
-                const resolvedColor =
-                  resolveCrewColor(crew.color)
-                const draft = drafts[crew.id]
-                const isExpanded = expandedId === crew.id
-                const resourceChanged = draft
-                  ? hasResourceChanges(draft, crew)
-                  : false
-                const networkChanged = draft
-                  ? hasNetworkChanges(draft, crew)
-                  : false
-                const hasChanges = resourceChanged || networkChanged
-                const isLast = index === filteredCrews.length - 1
-
-                return (
-                  <div key={crew.id}>
-                    {/* Crew row (clickable) */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedId(isExpanded ? null : crew.id)
+            return (
+              <div key={crew.id}>
+                {/* Crew row (accordion trigger) */}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  aria-expanded={isExpanded}
+                  onClick={() => setExpandedId(isExpanded ? null : crew.id)}
+                  className={cn(
+                    "h-auto w-full justify-start gap-3 rounded-none px-4 py-2 font-normal",
+                    (isExpanded || !isLast) && "border-b border-border/40",
+                  )}
+                >
+                  <motion.div
+                    animate={{ rotate: isExpanded ? 90 : 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {/* size-* rather than h-/w-, so Button's own icon sizing
+                        rule leaves these alone. */}
+                    <ChevronRight className="size-3.5 text-muted-foreground" />
+                  </motion.div>
+                  <div
+                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: resolvedColor }}
+                  />
+                  <span className="text-body text-foreground font-medium truncate">
+                    {crew.name}
+                  </span>
+                  <span className="text-label text-muted-foreground font-mono truncate">
+                    {crew.slug}
+                  </span>
+                  <div className="flex items-center gap-2 ml-auto shrink-0">
+                    <div className="flex items-center gap-1 text-label text-muted-foreground font-mono tabular-nums">
+                      <Users className="size-3" />
+                      {crew._count?.agents ?? 0}
+                    </div>
+                    <StatusBadge
+                      status={
+                        (crew.status ?? "active") === "active"
+                          ? "COMPLETED"
+                          : "PENDING"
                       }
-                      className={cn(
-                        "flex items-center gap-3 w-full px-4 py-2 text-left transition-colors hover:bg-muted/40",
-                        !isLast && !isExpanded && "border-b border-border/40",
-                        isExpanded && "border-b border-border/40",
-                      )}
-                    >
-                      <motion.div
-                        animate={{ rotate: isExpanded ? 90 : 0 }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                      </motion.div>
-                      <div
-                        className="h-2.5 w-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: resolvedColor }}
-                      />
-                      <span className="text-body text-foreground font-medium truncate">
-                        {crew.name}
-                      </span>
-                      <span className="text-label text-muted-foreground font-mono truncate">
-                        {crew.slug}
-                      </span>
-                      <div className="flex items-center gap-2 ml-auto shrink-0">
-                        <div className="flex items-center gap-1 text-label text-muted-foreground font-mono tabular-nums">
-                          <Users className="h-3 w-3" />
-                          {crew._count?.agents ?? 0}
-                        </div>
-                        <StatusBadge
-                          status={(crew.status ?? "active") === "active" ? "COMPLETED" : "PENDING"}
-                          label={crew.status ?? "active"}
-                        />
-                      </div>
-                    </button>
+                      label={crew.status ?? "active"}
+                    />
+                  </div>
+                </Button>
 
-                    {/* Expanded content */}
-                    <AnimatePresence initial={false}>
-                      {isExpanded && draft && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          transition={{ duration: 0.2, ease: "easeInOut" }}
-                          className="overflow-hidden"
-                        >
-                          <div
-                            className={cn(
-                              "bg-surface-subtle pl-10",
-                              !isLast && "border-b border-border/40",
-                            )}
-                          >
+                {/* Expanded content */}
+                <AnimatePresence initial={false}>
+                  {isExpanded && draft && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                      className="overflow-hidden"
+                    >
+                      <div
+                        className={cn(
+                          "bg-surface-subtle pl-10",
+                          !isLast && "border-b border-border/40",
+                        )}
+                      >
+                        {!canEdit ? (
+                          <CrewLimitsReadOnly crew={crew} />
+                        ) : (
+                          <>
                             {/* Memory */}
-                            <Row label="Memory">
+                            <SettingsRow label="Memory">
                               <Select
                                 value={String(draft.container_memory_mb)}
                                 onValueChange={(val) =>
@@ -451,6 +479,7 @@ export function CrewsContainersSection({
                               >
                                 <SelectTrigger
                                   size="sm"
+                                  aria-label="Memory"
                                   className="w-[120px] h-8 text-label"
                                 >
                                   <SelectValue />
@@ -467,10 +496,10 @@ export function CrewsContainersSection({
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </Row>
+                            </SettingsRow>
 
                             {/* CPUs */}
-                            <Row label="CPUs">
+                            <SettingsRow label="CPUs">
                               <Select
                                 value={String(draft.container_cpus)}
                                 onValueChange={(val) =>
@@ -481,6 +510,7 @@ export function CrewsContainersSection({
                               >
                                 <SelectTrigger
                                   size="sm"
+                                  aria-label="CPUs"
                                   className="w-[120px] h-8 text-label"
                                 >
                                   <SelectValue />
@@ -497,19 +527,22 @@ export function CrewsContainersSection({
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </Row>
+                            </SettingsRow>
 
                             {/* Network mode */}
-                            <Row
+                            <SettingsRow
                               label="Network mode"
                               border={
                                 draft.network_mode === "restricted" ||
                                 hasChanges
                               }
                             >
-                              <div className="flex gap-0 rounded-md overflow-hidden border border-border">
-                                <button
+                              <ButtonGroup>
+                                <Button
                                   type="button"
+                                  variant="outline"
+                                  size="xs"
+                                  aria-pressed={draft.network_mode === "free"}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     updateDraft(crew.id, {
@@ -517,17 +550,22 @@ export function CrewsContainersSection({
                                     })
                                   }}
                                   className={cn(
-                                    "flex items-center justify-center gap-1.5 h-7 px-3 text-label font-medium transition-colors border-r border-border",
+                                    "h-7 text-label",
                                     draft.network_mode === "free"
                                       ? "bg-accent text-foreground"
-                                      : "bg-transparent text-muted-foreground hover:bg-muted/60",
+                                      : "text-muted-foreground",
                                   )}
                                 >
-                                  <Globe className="h-3 w-3" />
+                                  <Globe className="size-3" />
                                   Free
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
+                                  variant="outline"
+                                  size="xs"
+                                  aria-pressed={
+                                    draft.network_mode === "restricted"
+                                  }
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     updateDraft(crew.id, {
@@ -535,17 +573,17 @@ export function CrewsContainersSection({
                                     })
                                   }}
                                   className={cn(
-                                    "flex items-center justify-center gap-1.5 h-7 px-3 text-label font-medium transition-colors",
+                                    "h-7 text-label",
                                     draft.network_mode === "restricted"
                                       ? "bg-accent text-foreground"
-                                      : "bg-transparent text-muted-foreground hover:bg-muted/60",
+                                      : "text-muted-foreground",
                                   )}
                                 >
-                                  <Shield className="h-3 w-3" />
+                                  <Shield className="size-3" />
                                   Restricted
-                                </button>
-                              </div>
-                            </Row>
+                                </Button>
+                              </ButtonGroup>
+                            </SettingsRow>
 
                             {/* Allowed domains (restricted only) */}
                             <AnimatePresence initial={false}>
@@ -560,22 +598,14 @@ export function CrewsContainersSection({
                                   }}
                                   className="overflow-hidden"
                                 >
-                                  <div
-                                    className={cn(
-                                      "flex items-start justify-between gap-4 px-4 py-2.5",
-                                      hasChanges &&
-                                        "border-b border-border/40",
-                                    )}
+                                  <SettingsRow
+                                    label="Allowed domains"
+                                    description="Comma-separated"
+                                    border={hasChanges}
+                                    className="items-start"
                                   >
-                                    <div className="shrink-0 pt-1.5">
-                                      <div className="text-body text-foreground">
-                                        Allowed domains
-                                      </div>
-                                      <div className="text-label text-muted-foreground mt-0.5">
-                                        Comma-separated
-                                      </div>
-                                    </div>
-                                    <textarea
+                                    <Textarea
+                                      aria-label="Allowed domains"
                                       value={draft.allowed_domains}
                                       onChange={(e) =>
                                         updateDraft(crew.id, {
@@ -584,9 +614,9 @@ export function CrewsContainersSection({
                                       }
                                       placeholder="github.com, api.openai.com, registry.npmjs.org"
                                       rows={2}
-                                      className="w-[280px] resize-none rounded-md bg-background border border-border text-label text-foreground placeholder:text-muted-foreground px-2.5 py-2 focus:outline-none focus:border-ring transition-colors"
+                                      className="w-[280px] min-h-0 resize-none text-label"
                                     />
-                                  </div>
+                                  </SettingsRow>
                                 </motion.div>
                               )}
                             </AnimatePresence>
@@ -620,9 +650,9 @@ export function CrewsContainersSection({
                                           }}
                                         >
                                           {savingResources[crew.id] ? (
-                                            <Spinner className="mr-1.5 h-3 w-3" />
+                                            <Spinner className="mr-1.5 size-3" />
                                           ) : (
-                                            <Save className="mr-1.5 h-3 w-3" />
+                                            <Save className="mr-1.5 size-3" />
                                           )}
                                           {savingResources[crew.id]
                                             ? "Saving..."
@@ -640,9 +670,9 @@ export function CrewsContainersSection({
                                           }}
                                         >
                                           {savingNetwork[crew.id] ? (
-                                            <Spinner className="mr-1.5 h-3 w-3" />
+                                            <Spinner className="mr-1.5 size-3" />
                                           ) : (
-                                            <Save className="mr-1.5 h-3 w-3" />
+                                            <Save className="mr-1.5 size-3" />
                                           )}
                                           {savingNetwork[crew.id]
                                             ? "Saving..."
@@ -654,16 +684,17 @@ export function CrewsContainersSection({
                                 </motion.div>
                               )}
                             </AnimatePresence>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                )
-              })
-            )}
-        </div>
-      </section>
+                          </>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )
+          })
+        )}
+      </SettingsCard>
     </div>
   )
 }

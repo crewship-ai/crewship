@@ -34,6 +34,17 @@ func SetClientVersion(v string) {
 	skewClientVersion = v
 }
 
+// currentClientVersion returns the version fed via SetClientVersion, or ""
+// if the entrypoint hasn't called it yet (e.g. a test constructing a Client
+// directly). Shared with UserAgent (user_agent.go) so the version string in
+// the User-Agent header and the one used for skew comparison never drift
+// apart by using two different sources of truth.
+func currentClientVersion() string {
+	skewMu.Lock()
+	defer skewMu.Unlock()
+	return skewClientVersion
+}
+
 // maybeWarnVersionSkew compares the server-reported version against the
 // client's and warns AT MOST once per process. Silent whenever a meaningful
 // comparison isn't possible (either side empty/dev/non-semver) or the

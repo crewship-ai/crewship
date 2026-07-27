@@ -4,9 +4,10 @@ import { useMemo, useState } from "react"
 import {
   User, Building, Users,
   Box, Link2, Activity,
-  Shield, Cpu, Bell, BellRing,
+  Shield, Bell, BellRing,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
   SidebarToolbar,
@@ -21,9 +22,25 @@ interface NavItem {
   label: string
   icon: LucideIcon
   badge?: string
-  // Hidden from the nav for non-ADMIN roles. Aux-status is ADMIN+ on the
-  // backend (#868) — surfacing the tab to a MEMBER would just 403.
-  adminOnly?: boolean
+  // Role gate for the row. Absent = visible to everyone.
+  //
+  // A row is hidden ONLY when the role can neither act nor usefully read the
+  // section; a section the role can read but not change stays in the nav and
+  // renders read-only. Hiding a readable section costs a user real
+  // information ("how many crews does this workspace have?") to save them a
+  // disabled button, which is the wrong trade.
+  //
+  // Gate on lib/permissions/tiers, never on CASL: CASL disagrees with the
+  // server's route tiers on crews and members (see that module's header).
+  visibleTo?: (role: string | null | undefined) => boolean
+  /**
+   * Set false for a section whose backing feature is not built yet. Unlike
+   * `visibleTo` this is not about the caller — nobody sees it, at any role.
+   * Hiding beats shipping a screen that can only ever be empty: an empty
+   * state reads as "nothing yet, check back", which is a promise the
+   * backend cannot keep.
+   */
+  enabled?: boolean
 }
 
 interface NavSection {
@@ -37,32 +54,71 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
-      { key: "privacy", label: "Privacy", icon: Shield },
+      // Hidden until peer-card extraction actually exists. The routine runs
+      // daily and the endpoints are real, but the extractor wired in
+      // production is consolidate.NoopExtractor (cmd/crewship/cmd_start.go)
+      // — it returns empty content, which SyncPeerCard skips rather than
+      // writes. So the card list can never be non-empty, and "No peer cards
+      // on file" tells the user to wait for something that will not come.
+      // Flip to true in the same PR that wires the aux-LLM extractor; the
+      // section, its endpoints and its tests are all kept working.
+      { key: "privacy", label: "Privacy", icon: Shield, enabled: false },
       { key: "notification-prefs", label: "Notification Prefs", icon: BellRing },
     ],
   },
   {
     label: "Workspace",
     items: [
+      // General and Crews stay open to everyone: identity, usage counts and
+      // the crew/container roster are readable at any tier, the forms inside
+      // go read-only for non-admins.
       { key: "general", label: "General", icon: Building },
       { key: "crews", label: "Crews & Containers", icon: Box },
-      { key: "aux-models", label: "Auxiliary Models", icon: Cpu, adminOnly: true },
-      { key: "connections", label: "Connections", icon: Link2 },
+      // Auxiliary Models moved to Admin → Keeper. It showed process-wide
+      // config from a workspace-scoped screen, so a new workspace never
+      // changed it, and it belongs beside the governance panel that
+      // actually overrides those judges.
+      // Cross-crew links are a roleCreate mutation with nothing useful to read
+      // underneath for a MEMBER.
+      { key: "connections", label: "Connections", icon: Link2, visibleTo: isManagerTier },
+      // Deliberately ungated: channels are a roleInline (role-OR-capability)
+      // route, so a MEMBER holding an explicit grant may manage them. Judging
+      // by role alone here would hide a tab they are allowed to use.
       { key: "notifications", label: "Notifications", icon: Bell },
+      // The roster is readable by every role; the invite/role controls inside
+      // are gated separately.
       { key: "members", label: "Members", icon: Users },
-      { key: "audit", label: "Audit Log", icon: Activity },
+      // The audit log is not readable below MANAGER, so the pane would be
+      // empty — the one section where hiding beats read-only.
+      { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isManagerTier },
     ],
   },
 ]
+
+/**
+ * Whether `role` may see the settings section `key`.
+ *
+ * Exported so the layout can apply the SAME rule to a `?tab=` deep link —
+ * /settings?tab=audit as a MEMBER must not open a pane with no row in the nav
+ * to go back to. Unknown keys are not this gate's business (the URL parser
+ * already maps them to Profile), so they pass.
+ */
+export function isSettingsSectionVisible(key: string, role: string | null | undefined): boolean {
+  const item = sections.flatMap((s) => s.items).find((i) => i.key === key)
+  if (item?.enabled === false) return false
+  return item?.visibleTo?.(role) ?? true
+}
 
 interface SettingsNavProps {
   activeTab: string
   onTabChange: (tab: string) => void
   workspaceName?: string
-  isAdmin?: boolean
+  /** Caller's workspace role. The nav owns the per-section rule; the layout
+   *  passes the raw role rather than one boolean per gated section. */
+  role?: string | null
 }
 
-export function SettingsNav({ activeTab, onTabChange, workspaceName, isAdmin }: SettingsNavProps) {
+export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: SettingsNavProps) {
   // Universal search doubles as a command-finder here — type "audit" to jump
   // straight to Audit Log. Filters the nav live; Enter opens the first match.
   const [query, setQuery] = useState("")
@@ -74,11 +130,12 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, isAdmin }: 
         .map((s) => ({
           ...s,
           items: s.items.filter(
-            (i) => (isAdmin || !i.adminOnly) && (!q || i.label.toLowerCase().includes(q)),
+            // Role gate first, so search can never surface a hidden row.
+            (i) => isSettingsSectionVisible(i.key, role) && (!q || i.label.toLowerCase().includes(q)),
           ),
         }))
         .filter((s) => s.items.length > 0),
-    [q, isAdmin],
+    [q, role],
   )
 
   const firstMatch = filtered[0]?.items[0]?.key

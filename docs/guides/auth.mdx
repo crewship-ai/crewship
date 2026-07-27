@@ -8,7 +8,7 @@ icon: "shield-check"
 
 ## Overview
 
-Authentication in Crewship is the gate every other surface sits behind — agents, credentials, journal, runs, even the onboarding wizard run inside a session, and every subsystem trusts the user identity stamped on the request without re-checking. The auth layer therefore has to handle four distinct entry points: an email/password sign-in for the web UI, a Google OAuth flow for SSO installs, an out-of-band password recovery path for accounts that have lost their credential, and a token-and-pairing handshake for the `crewship` CLI to authenticate against the same server.
+Authentication in Crewship is the gate every other surface sits behind — agents, credentials, journal, runs, even the onboarding wizard run inside a session, and every subsystem trusts the user identity stamped on the request without re-checking. The auth layer therefore has to handle four distinct entry points: an email/password sign-in for the web UI, an out-of-band password recovery path for accounts that have lost their credential, and a token-and-pairing handshake for the `crewship` CLI to authenticate against the same server.
 
 The implementation funnels every entry point through one router file (`internal/api/router_auth.go`) so the entire surface can be audited at once. Routes split into four trust tiers: `/api/v1/auth/signup`, which is public and establishes **no** session — it answers `202` and the client signs in afterwards (see the non-enumeration note below); public bootstrap endpoints (/bootstrap, OAuth callbacks, password-reset redemption) that do establish a session cookie; session-authed endpoints (session list/revoke, CLI token issuance, pairing start/poll) that act on the caller's own identity; and the NextAuth-compatible `/api/auth/*` shim that lets the Next.js frontend treat Crewship as a drop-in NextAuth provider. Passwords are persisted as bcrypt hashes; CLI tokens as SHA-256 digests (STANDARD tier) or HMAC-SHA256 digests keyed by a server-side secret (ADMIN tier) — none is recoverable from the database.
 
@@ -18,7 +18,6 @@ Two safety properties are load-bearing and worth knowing before changing this co
 
 Reach for this guide when you're configuring, debugging, or extending an authentication path — not for ordinary login flows, which Just Work via the web UI:
 
-- **You're setting up SSO for an organisation.** Google OAuth needs `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` plus a redirect URI registered with the Google Cloud project. The auth router auto-disables the `/api/v1/auth/google/*` endpoints when either env var is unset, so a half-configured install fails closed rather than half-open.
 - **You're enabling in-band password recovery.** The mailer (`internal/mailer/`) reads `RESEND_API_KEY` and `RESEND_FROM` at startup; without them, `/forgot` still returns 200 but nothing is sent and users must recover via the [Admin CLI](/guides/admin-cli). `CREWSHIP_PUBLIC_URL` must also be set to a valid `http(s)` origin or the handler refuses to mail reset links.
 - **You're issuing long-lived CLI tokens** for scripts, CI, or another machine without an interactive browser. Tokens are minted via `POST /api/v1/auth/cli-token` while session-authed, persisted as SHA-256 hashes (safe because the cleartext is 256-bit random — no dictionary to attack; ADMIN-tier tokens upgrade to keyed HMAC-SHA256), and revocable from Settings → Sessions or via `DELETE /api/v1/auth/cli-tokens/{id}`.
 - **You're pairing the `crewship` CLI on a new dev machine.** The device-code handoff produces the same token type as the in-app issuer but with the convenience that the user never has to copy-paste a secret — see the dedicated [CLI Pairing](/guides/cli-pairing) guide for the device-code flow itself.
@@ -40,7 +39,6 @@ For one-off recovery without shell access, the in-band `/forgot` flow above is t
 | **`CREWSHIP_PUBLIC_URL`** | The authoritative origin for reset-link URLs. Parsed once at handler construction; if unset or malformed, the mailer refuses to send rather than falling back to the `Host` header (which is attacker-tainted via Host-header injection on `/forgot`). |
 | **CLI token** | A long-lived API credential (`POST /api/v1/auth/cli-token`) that the `crewship` binary stores in `~/.crewship/cli-config.yaml`. Two tiers: STANDARD (`crewship_cli_`, 256-bit random, SHA-256 at rest) and ADMIN (`crewship_admin_`, HMAC-SHA256 keyed by `CREWSHIP_ADMIN_TOKEN_HMAC_KEY`, mandatory expiry ≤ 7 days, OWNER-only issuance). Revocable by the issuing user. |
 | **Pairing code** | An 8-character Crockford-base32 code with a 10-minute TTL produced by `POST /api/v1/auth/pair/start`. The CLI redeems it on `POST /api/v1/auth/pair/redeem` (unauthed by design — the code *is* the credential) and gets back a fresh CLI token. See [CLI Pairing](/guides/cli-pairing). |
-| **Google OAuth handler** | Optional. The `/api/v1/auth/google/*` routes only mount when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set; `/api/v1/auth/google/status` always responds so the frontend can decide whether to render the "Sign in with Google" button. |
 | **NextAuth shim** | The `/api/auth/*` set of endpoints (`csrf`, `providers`, `session`, `callback/credentials`, `token/refresh`, `signin`, `signout`, `error`) that implement the NextAuth client contract. Lets the Next.js frontend treat Crewship like any other NextAuth provider with no custom glue. |
 | **Mailer** | The interface in `internal/mailer/`. `mailer.NewFromEnv()` returns the Resend implementation when `RESEND_API_KEY` is set, or `mailer.Disabled` (which returns `ErrDisabled` on every `Send` call) otherwise. The disabled mailer is a feature, not a bug — it keeps `/forgot` non-enumerable on installs that haven't configured email. |
 
@@ -50,7 +48,7 @@ The end-to-end operator path from a fresh binary to working login + recovery is 
 
 ### 1. Set the public origin
 
-Required if you intend to enable in-band password recovery. This is the URL the reset email links to and the OAuth callback origin Google will see.
+Required if you intend to enable in-band password recovery. This is the URL the reset email links to.
 
 ```bash
 export CREWSHIP_PUBLIC_URL=https://crewship.example.com
@@ -67,14 +65,15 @@ export RESEND_FROM='Crewship <noreply@example.com>'
 
 Without these, the mailer falls back to `mailer.Disabled` — installs without email still work, but users can't recover passwords in-band. They must instead use [Admin CLI](/guides/admin-cli) `reset-password` from the host shell.
 
-### 3. Configure Google OAuth (optional)
+### 3. Google sign-in (removed)
 
-```bash
-export GOOGLE_CLIENT_ID=...
-export GOOGLE_CLIENT_SECRET=...
-```
+Google OAuth is **switched off**. `/api/v1/auth/google/redirect` and `/callback` are no longer registered, so setting `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` does nothing. `/api/v1/auth/google/status` still answers `{"enabled": false}` so an older frontend build gets a definite answer rather than an error.
 
-The auth router mounts `/api/v1/auth/google/redirect` and `/callback` only when both are present. `/api/v1/auth/google/status` always responds with `{"enabled": true|false}` so the frontend can render — or skip — the "Sign in with Google" button without 404 noise.
+<Warning>
+Accounts created by the old flow have no password — Google was their only credential. Their route back in is **Forgot password**, which works because the address is on file.
+
+Re-adding them through Settings → Members does *not* help: the linked provider row makes the account count as claimed, so no setup link is issued. That is deliberate. Such an account is genuinely in use by somebody, and minting a password-setting link for it would be a takeover, not a recovery.
+</Warning>
 
 ### 4. Bootstrap the first admin
 
@@ -92,7 +91,56 @@ The endpoint is idempotent — a second call against a database that already has
 
 The Next.js frontend handles credentials via `POST /api/auth/callback/credentials`, sets a session cookie, and every subsequent request rides on `RequireAuth`. No client-side state, no JWT inspection — the session is server-owned.
 
-### 6. Mint a CLI token (for scripts / CI)
+### 6. Add a colleague
+
+Adding someone needs no mail server. The workspace admin creates the account and hands over a one-time setup link; the new person sets their own password with it.
+
+<Tabs>
+  <Tab title="UI">
+    **Settings → Members → Add member.** Enter their email and role. Crewship creates the account if the email is new, adds it to the workspace, and shows a setup link. Copy it and send it however you like — Slack, SMS, in person.
+
+    The link is shown **once**. The token is stored hashed, so it cannot be displayed again; if it goes astray before it is used, add the person again to issue a fresh one (which invalidates the old). Once they have set a password the account is claimed, and re-adding stops issuing links — see below.
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    crewship workspace member invite alice@example.com --role MANAGER
+    ```
+
+    Prints the setup link on its own line so it survives a copy-paste or a pipe.
+  </Tab>
+</Tabs>
+
+The link lands on `/reset-password`, the same page a forgotten-password flow uses, and expires after **7 days** — long enough to send on a Friday and be opened on Monday. (An ordinary password-reset link is 30 minutes, because the person requesting it is waiting at the screen.)
+
+If the email already belongs to a **claimed** account, that person is added to the workspace and **no setup link is issued** — they sign in with the credential they already have. Issuing one would hand whoever holds the link the ability to change that credential, and creating a workspace is self-serve.
+
+An account counts as claimed if any one of these is true:
+
+| Signal | Meaning |
+|---|---|
+| A password is set | Ordinary credential login |
+| A linked OAuth row exists | Somebody signs in through a provider — this is what covers legacy Google-only accounts, which never had a password |
+| The email address is verified | The address was proven at some point |
+
+An account with **none** of them is unclaimed — that is exactly what this endpoint creates. Re-adding an unclaimed person issues a fresh link and invalidates the previous one, which is the supported way to recover a link that went astray before it was used.
+
+Requires **ADMIN** or **OWNER**. The link's origin is derived from the request, so a default install needs no configuration. Set `CREWSHIP_PUBLIC_URL` only when Crewship sits behind a proxy that rewrites the host — then it pins the externally reachable URL instead.
+
+<Note>
+This is the one place the origin is *not* taken from `CREWSHIP_PUBLIC_URL` first, which is worth explaining because [the rule stated in the overview](#overview) is otherwise absolute.
+
+A `/forgot` reset link is built for an **unauthenticated** request and then **mailed to somebody else**, so trusting the `Host` header would let an attacker POST `/forgot` and have Crewship mail the victim a working link pointing at an attacker-controlled domain. Setup links have neither property: the request is ADMIN-authenticated, and the link is returned in the response to that same admin's own browser. A forged `Host` there only corrupts the link the forger receives — there is nobody else to mislead and nothing to escalate. Requiring an env var for it would mean a self-hosted install could not add a user without editing the environment first, which is the whole point of this flow.
+</Note>
+
+<Note>
+Once a mailer is configured, the same action can also email the link. The copyable link stays as the fallback that works on an air-gapped or mail-less instance.
+</Note>
+
+<Warning>
+`crewship workspace invite` is a different, older command: it records an invitation row but sends nothing, because no mailer is wired to it. Use `workspace member invite` above to actually get someone in.
+</Warning>
+
+### 7. Mint a CLI token (for scripts / CI)
 
 While session-authed in the web UI:
 
@@ -136,7 +184,7 @@ Scopes use the shape `<resource>:<action>`. The recognised vocabulary is deliber
 
 **Backward compatibility.** A token minted **without** `scopes` (the default, and every token issued before enforcement) carries the **full role** of the issuing user — unchanged behavior. Scopes only ever *narrow* a token; you can never mint one above your own role.
 
-### 7. Non-interactive CLI login (systemd / CI / harnesses)
+### 8. Non-interactive CLI login (systemd / CI / harnesses)
 
 `crewship login`'s default email+password flow prompts for the password on a
 real TTY (`term.ReadPassword`), which fails outright over a pipe:
@@ -214,29 +262,16 @@ If the mailer is `mailer.Disabled`, step 2 never happens — the user must go th
 
 ## Examples
 
-### Turning on Google SSO for an org
+### Onboarding a team without SSO
 
-The product manager wants the team to sign in with their `@example.com` Google accounts instead of Crewship-local passwords.
+The product manager wants the team on Crewship. Google sign-in is switched off, so accounts are created directly and each person sets their own password.
 
 ```bash
-# 1. Create OAuth credentials in Google Cloud Console:
-#    - Application type: Web application
-#    - Authorized redirect URI:
-#      https://crewship.example.com/api/v1/auth/google/callback
-#    Copy the client ID + secret.
-
-# 2. Plumb the values into crewshipd's env:
-export GOOGLE_CLIENT_ID=783...apps.googleusercontent.com
-export GOOGLE_CLIENT_SECRET=GOCSPX-...
-export CREWSHIP_PUBLIC_URL=https://crewship.example.com
-
-# 3. Restart the server:
-sudo systemctl restart crewshipd
+crewship workspace member invite alice@example.com --role MANAGER
+crewship workspace member invite bob@example.com   --role MEMBER
 ```
 
-On the next page load the frontend hits `/api/v1/auth/google/status`, sees `{"enabled": true}`, and renders the "Sign in with Google" button. The first user to click it lands at `/api/v1/auth/google/redirect` → Google consent screen → `/api/v1/auth/google/callback`, which creates a Crewship user row tied to the Google identity and signs them in with a regular session cookie.
-
-If Google access ever needs to be turned off later, just unset either env var and restart — the routes unmount and the frontend re-reads `enabled: false` on the next status poll.
+Each prints a one-time setup link on its own line. Send them however you like — the link is valid for 7 days and the person chooses their own password with it. Nothing is emailed, so no mailer is required.
 
 ### CI bootstrap with no mailer configured
 
@@ -303,7 +338,7 @@ Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicate
 | `POST` | `/api/auth/signout` | Clears the session cookie and revokes the server-side row. |
 | `GET`  | `/api/auth/session` | NextAuth-compatible "who am I" probe. Returns user + expiry, or `null`. |
 | `GET`  | `/api/auth/csrf` | NextAuth CSRF token. Required by NextAuth client before credential POST. |
-| `GET`  | `/api/auth/providers` | Lists available providers (`credentials` + `google` if enabled). |
+| `GET`  | `/api/auth/providers` | Lists available providers (`credentials`). |
 | `POST` | `/api/auth/token/refresh` | Rotates the session token. Idempotent. |
 | `GET`  | `/api/v1/auth/sessions` | List the caller's own active sessions. **Auth required.** |
 | `POST` | `/api/v1/auth/sessions/{id}/revoke` | Revoke one of the caller's sessions. **Auth required.** |
@@ -327,16 +362,15 @@ Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicate
 | `GET`  | `/api/v1/auth/pair/poll` | Poll for redemption. **Auth required.** |
 | `POST` | `/api/v1/auth/pair/redeem` | Redeem a pairing code, return CLI token. **Public by design** — the code IS the credential. |
 
-### Google OAuth (conditional)
+### Google OAuth (removed)
 
-Routes mount only when `GOOGLE_CLIENT_ID` AND `GOOGLE_CLIENT_SECRET` are both set.
+The redirect and callback routes are no longer registered, so setting `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` has no effect.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET`  | `/api/v1/auth/google/redirect` | Begin OAuth flow; 302s to Google. |
-| `GET`  | `/api/v1/auth/google/callback` | OAuth callback; creates or updates the Crewship user, sets session cookie. |
-| `GET`  | `/api/v1/auth/google/status` | Returns `{"enabled": bool}`. Always mounted, even when OAuth is disabled, so the frontend can decide button rendering. |
-
+| Method | Path | Notes |
+|---|---|---|
+| `GET`  | `/api/v1/auth/google/redirect` | **Gone.** 404. |
+| `GET`  | `/api/v1/auth/google/callback` | **Gone.** 404. |
+| `GET`  | `/api/v1/auth/google/status` | Still answers `{"enabled": false}` so an older frontend build gets a definite answer instead of an error it might render as a spinner. |
 ### Onboarding (auth-required, but workspace-less)
 
 Mounted alongside auth because the wizard runs *before* any workspace context exists.
@@ -355,7 +389,7 @@ Mounted alongside auth because the wizard runs *before* any workspace context ex
 - **CLI tokens are not retrievable after creation.** Only the SHA-256 (or, for ADMIN tier, HMAC-SHA256) hash is stored; the raw token is shown exactly once at `POST /api/v1/auth/cli-token` response time. If a user loses theirs, the path is "revoke + mint new" — don't add an endpoint that re-displays the value.
 - **Pairing codes are single-use and 10-minute-TTL'd.** If a user starts pairing and walks away, the code expires on its own. Don't extend the TTL to "be nice" — the security argument depends on a short window where a phished code can't be used.
 - **`/api/v1/auth/reset` invalidates ALL of the user's sessions.** This is a feature: if a password reset happens because of suspected compromise, leaving old session cookies valid would defeat the rotation. Anything UI-side that depends on "logged in everywhere" must reauthenticate after a reset.
-- **Google OAuth fails closed when half-configured.** Setting only `GOOGLE_CLIENT_ID` (no secret), or only the secret, leaves the `/api/v1/auth/google/*` routes unmounted. The frontend reads `/api/v1/auth/google/status` and renders accordingly. Don't try to mount one without the other.
+- **Google sign-in cannot be re-enabled by configuration.** The routes are unregistered in code, not gated on env vars, so leftover `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` on an upgraded box cannot quietly switch it back on.
 - **Signup is OFF by default for self-hosted installs.** The `CREWSHIP_ALLOW_SIGNUP` server flag gates it. On a multi-tenant SaaS deployment you'd set it to `true`; for a self-hosted single-org install, leaving `/api/v1/auth/signup` returning **403** (`Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable.`) is correct.
 - **NextAuth clients require the CSRF dance.** A frontend that POSTs `/api/auth/callback/credentials` without first GETting `/api/auth/csrf` and sending the token gets 401. This is the NextAuth contract — not optional even when you "trust" the origin.
 - **Bcrypt cost factor must match across signup, admin CLI, and pairing redemption.** All three paths produce hashes the same verifier reads. If you change the cost factor in one place and not the others, you've just made some users' passwords slower to verify than others — measurable timing oracle.

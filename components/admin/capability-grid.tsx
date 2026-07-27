@@ -7,6 +7,7 @@ import { Check, Lock, ArrowRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import {
   Dialog,
   DialogContent,
@@ -114,7 +115,7 @@ export function CapabilityGrid({ members, workspaceId, currentUserId }: Capabili
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="border-b border-border/60">
-              <th className="text-left pl-3 py-2 font-medium text-muted-foreground sticky left-0 bg-background z-10 min-w-[180px]">
+              <th className="text-left pl-3 py-2 font-medium text-muted-foreground sticky left-0 bg-card z-10 min-w-[180px] border-r border-border/40">
                 Member
               </th>
               <th className="text-left py-2 font-medium text-muted-foreground min-w-[80px]">
@@ -242,19 +243,26 @@ function CapabilityRow({
   })
 
   return (
-    <tr className="border-b border-border/40 hover:bg-muted/30">
-      <td className="pl-3 py-2 sticky left-0 bg-background z-10">
+    <tr className="group border-b border-border/40 hover:bg-muted/30">
+      {/* Pinned column. It needs an opaque background to cover cells
+          scrolling underneath, but that background must be the SURFACE the
+          grid sits on (bg-card) — bg-background is the page behind the card,
+          and the mismatch drew a visible box around this column that stopped
+          at Role. Being opaque also blocks the row's hover tint, so it opts
+          into it explicitly; a hairline border, not a colour change, is what
+          should signal "this column is pinned". */}
+      <td className="pl-3 py-2 sticky left-0 bg-card group-hover:bg-muted/30 z-10 border-r border-border/40">
         <div className="flex items-center gap-2">
-          <div className="h-6 w-6 shrink-0 rounded-full bg-primary flex items-center justify-center">
-            <span className="text-[10px] font-semibold text-primary-foreground">
-              {initials(member.user.full_name, member.user.email)}
-            </span>
-          </div>
+          <UserAvatar
+            name={member.user.full_name}
+            email={member.user.email}
+            src={member.user.avatar_url}
+          />
           <div className="min-w-0">
             <div className="text-xs truncate">
-              {member.user.full_name ?? member.user.email}
+              {personLabel(member.user.full_name, member.user.email)}
             </div>
-            {member.user.full_name && (
+            {(member.user.full_name ?? "").trim() && (
               <div className="text-[10px] text-muted-foreground/80 font-mono truncate">
                 {member.user.email}
               </div>
@@ -271,7 +279,7 @@ function CapabilityRow({
         const isChat = cap === Capability.Chat
         const isGranted = isChat || grantedSet.has(cap)
         const cellLocked = locked || isChat
-        const memberLabel = member.user.full_name ?? member.user.email
+        const memberLabel = personLabel(member.user.full_name, member.user.email)
         // title attribute is unreliable for screen
         // readers / keyboard users. aria-label provides the
         // accessible name; aria-pressed exposes the toggle state so
@@ -302,7 +310,11 @@ function CapabilityRow({
                 "inline-flex h-5 w-5 items-center justify-center rounded border transition-colors",
                 isGranted
                   ? "bg-primary border-primary text-primary-foreground"
-                  : "bg-background border-border",
+                  // Translucent, matching components/ui/checkbox. bg-background
+                  // is the page colour, so on this card it rendered as a dark
+                  // square rather than an empty box. A translucent fill sits
+                  // correctly on whatever surface the grid is dropped onto.
+                  : "bg-input/30 border-border",
                 cellLocked && "opacity-60 cursor-not-allowed",
                 !cellLocked && "cursor-pointer hover:border-primary/60",
               )}
@@ -475,7 +487,7 @@ function PresetDiffDialog({
                 <div key={d.member.user.id} className="px-3 py-2 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="font-medium">
-                      {d.member.user.full_name ?? d.member.user.email}
+                      {personLabel(d.member.user.full_name, d.member.user.email)}
                     </span>
                     <Badge variant="outline" className="text-[10px]">
                       {d.member.role}
@@ -624,13 +636,4 @@ function humanizePatchError(status: number): string {
     default:
       return `Request failed (HTTP ${status}).`
   }
-}
-
-function initials(name: string | null, email: string): string {
-  const src = name?.trim() || email
-  const parts = src.split(/[\s@.]+/).filter(Boolean)
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return src.slice(0, 2).toUpperCase()
 }

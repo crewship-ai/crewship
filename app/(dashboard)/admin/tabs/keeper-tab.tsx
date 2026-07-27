@@ -9,6 +9,7 @@ import {
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
+import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
 import { cn } from "@/lib/utils"
 import { redactSecrets, redactUrl } from "../utils"
 import type { KeeperStatus, KeeperLogEntry } from "../types"
@@ -61,6 +62,15 @@ export const KeeperTab = React.memo(function KeeperTab({
         </p>
       </div>
 
+      {/* Which model each judge actually uses, and whether it can run.
+          Deliberately OUTSIDE the `keeperStatus &&` guard below: a null
+          status means the keeper status endpoint failed, which is exactly
+          when an operator needs to know whether the judges can run — hiding
+          it then removes the diagnosis along with the symptom. Sits under
+          the governance panel conceptually; that panel is what overrides
+          these per workspace. */}
+      <JudgeModelsCard workspaceId={workspaceId} />
+
       {keeperLoading && <Skeleton className="h-[240px] rounded-xl" />}
 
       {!keeperLoading && keeperStatus && (
@@ -70,6 +80,7 @@ export const KeeperTab = React.memo(function KeeperTab({
             workspaceId={workspaceId}
             serverEnabled={keeperStatus.enabled}
           />
+
 
           {/* ── System status card ── */}
           <SettingsCard

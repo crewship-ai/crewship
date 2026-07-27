@@ -203,6 +203,10 @@ func TestNextAuth_Session_ValidCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	// Claims name/email are deliberately NOT the seeded row's: the handler
+	// answers from the live users row so a profile edit shows up without
+	// waiting for the access token to rotate. See TestSession_* in
+	// nextauth_session_identity_test.go for that contract.
 	tok, err := v.IssueAccessToken(userID, sess.ID, "Alice", "a@b.com")
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -219,7 +223,7 @@ func TestNextAuth_Session_ValidCookie(t *testing.T) {
 	var body map[string]interface{}
 	json.Unmarshal(rr.Body.Bytes(), &body)
 	user, _ := body["user"].(map[string]interface{})
-	if user == nil || user["email"] != "a@b.com" {
+	if user == nil || user["email"] != "test@example.com" {
 		t.Errorf("session user wrong: %+v", body)
 	}
 }

@@ -1,0 +1,44 @@
+import { describe, it, expect } from "vitest"
+import { readFileSync, readdirSync, existsSync } from "node:fs"
+import { join } from "node:path"
+
+// Every unauthenticated page is a first impression, and two of them were
+// wearing a generic lucide <Ship /> instead of the product mark. Login,
+// signup and bootstrap used CrewshipLogoTile; reset-password and
+// forgot-password did not — so the page an invited colleague lands on to
+// set their password showed a stock sailboat.
+//
+// A source-level check rather than a render test: these are five separate
+// route components with five different data dependencies, and the property
+// worth pinning ("nobody hand-rolls a brand mark here") is about the import,
+// not about any one page's runtime.
+
+const AUTH_DIR = join(process.cwd(), "app", "(auth)")
+
+function authPages(): { name: string; source: string }[] {
+  return readdirSync(AUTH_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith("__"))
+    .map((e) => ({ name: e.name, file: join(AUTH_DIR, e.name, "page.tsx") }))
+    .filter((p) => existsSync(p.file))
+    .map((p) => ({ name: p.name, source: readFileSync(p.file, "utf8") }))
+}
+
+describe("auth pages wear the product mark", () => {
+  const pages = authPages()
+
+  it("finds the auth routes at all (guards against a silent rename)", () => {
+    expect(pages.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it.each(pages.map((p) => p.name))("%s uses the shared logo component", (name) => {
+    const page = pages.find((p) => p.name === name)!
+    expect(page.source).toContain("CrewshipLogoTile")
+  })
+
+  it.each(pages.map((p) => p.name))("%s does not hand-roll a lucide ship", (name) => {
+    const page = pages.find((p) => p.name === name)!
+    // The specific stand-in that shipped. A generic icon is worse than no
+    // icon here: it reads as someone else's product.
+    expect(page.source).not.toMatch(/\bShip\b/)
+  })
+})

@@ -11,6 +11,7 @@ import {
 
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
 import { useRealtime } from "@/hooks/use-realtime"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -79,34 +80,28 @@ const mobileNavSections = [
 ]
 
 
-const pageConfig: Record<string, { title: string }> = {
-  "/": { title: "Dashboard" },
-  "/crews/agents": { title: "Agents" },
-  "/crews": { title: "Crews" },
-  "/credentials": { title: "Credentials" },
-  "/skills": { title: "Skills" },
-  "/settings": { title: "Settings" },
-}
+// The top bar is the product's identity strip, not a page label — it says
+// "Crewship" and nothing else. There used to be a route -> title map here
+// ("/crews" -> "Crews & Agents", "/skills" -> "Skills", ...), which printed
+// the page name directly above the SubBar that already carries it, stacked
+// one row apart: "Crews & Agents" over "Crews & Agents · 3 crews". Only the
+// mapped routes did that; every other page (inbox, issues, routines,
+// integrations, admin) fell through to the "Crewship" default and read
+// correctly, which is the behaviour the map is removed in favour of.
+//
+// "/" is the one route that had no SubBar underneath, so it loses its only
+// on-screen name here. The fix for that belongs on the dashboard page —
+// give it the SubBar every other page has — not in a map of exceptions.
+//
+// Deep pages keep their breadcrumb (agent detail, chat) — that is a click-path
+// back out of a detail view, not a restatement of the SubBar.
+//
+// Settings used to be a third exception: a "Settings / <tab>" breadcrumb fed
+// by a settingsTab mirror in the zustand store. It is not a detail view — its
+// section nav never leaves the page — so the identity moved into the Settings
+// sub-bar (title + section, same shape as Admin) and the mirror is gone.
 
-const settingsTabTitles: Record<string, string> = {
-  profile: "Profile",
-  general: "General",
-  crews: "Crews & Containers",
-  connections: "Connections",
-  members: "Members",
-  audit: "Audit Log",
-}
 
-
-function getInitials(name: string): string {
-  if (!name.trim()) return "?"
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
-}
 
 
 interface AgentBreadcrumb {
@@ -165,7 +160,6 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
 
 export function AppToolbar() {
   const pathname = usePathname()
-  const config = pageConfig[pathname] ?? null
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
@@ -178,7 +172,6 @@ export function AppToolbar() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
-  const settingsTab = useAppStore((s) => s.settingsTab)
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   useEffect(() => {
@@ -206,10 +199,9 @@ export function AppToolbar() {
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
-  const userInitials = getInitials(userName)
+  const userAvatar = session?.user?.avatar_url ?? ""
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
-  const isCrewsPage = pathname === "/crews"
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
@@ -254,14 +246,6 @@ export function AppToolbar() {
       )
     }
 
-    // Crews page: just the section title (subbar already shows
-    // breadcrumb + stats — no point duplicating "Crews / Crews & Agents").
-    if (isCrewsPage) {
-      return (
-        <span className="text-sm font-semibold">Crews &amp; Agents</span>
-      )
-    }
-
     // Chat page: link back to /crews?agent=<slug> so the toolbar back-action
     // restores agent selection in the canvas (instead of dumping the user
     // on an empty roster).
@@ -287,26 +271,9 @@ export function AppToolbar() {
       )
     }
 
-    // Settings breadcrumb: Settings / Profile
-    if (pathname === "/settings" && settingsTab) {
-      const tabTitle = settingsTabTitles[settingsTab]
-      return (
-        <>
-          <span className="text-sm text-muted-foreground">Settings</span>
-          {tabTitle && (
-            <>
-              <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-              <span className="text-sm font-semibold truncate">{tabTitle}</span>
-            </>
-          )}
-        </>
-      )
-    }
-
-    const title = config?.title ?? "Crewship"
     return (
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-sm font-semibold truncate">{title}</span>
+        <span className="text-sm font-semibold truncate">Crewship</span>
         {breadcrumbs.length > 0 && breadcrumbs.map((item, i) => (
           <div key={i} className="flex items-center gap-1.5 min-w-0">
             <span className="text-muted-foreground/30 text-xs">/</span>
@@ -339,7 +306,14 @@ export function AppToolbar() {
         {/* Status indicators: System + Crews + Escalations */}
         {(() => {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
-          const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
+          // "degraded" (hooks/use-engine-status.ts) covers a single failed
+          // poll or a 429 throttle — neither means the engine is gone, so
+          // it renders with the same amber "not fully confirmed yet"
+          // treatment as "checking" rather than falling through to red
+          // "Offline". The pill/tooltip text below still tells the two
+          // apart ("Connecting" vs "Reconnecting") so an operator can see
+          // a mid-deploy restart for what it is.
+          const systemChecking = engineStatus === "checking" || engineStatus === "degraded" || wsStatus === "connecting"
 
           // QUEUED counts assignments parked in the per-crew admission
           // queue (PR #396). Before the backend reported this number,
@@ -411,15 +385,19 @@ export function AppToolbar() {
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
+                  <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : engineStatus === "degraded" ? "reconnecting" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
                     <AnimatedWifi ref={wifiRef} size={12} className={sysColors.icon} />
                     <span className={`text-micro font-medium ${sysColors.text}`}>
-                      {systemOnline ? "Online" : systemChecking ? "Connecting" : "Offline"}
+                      {systemOnline ? "Online" : engineStatus === "degraded" ? "Reconnecting" : systemChecking ? "Connecting" : "Offline"}
                     </span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  Engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : "Offline"} / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
+                  {/* "degraded" reads as "Reconnecting..." here — distinct from
+                      "Connecting..." (never-yet-connected) and "Offline" (two
+                      confirmed failures) so a mid-deploy restart or a 429
+                      throttle doesn't look identical to a dead engine. */}
+                  Engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : engineStatus === "degraded" ? "Reconnecting..." : "Offline"} / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
                 </TooltipContent>
               </Tooltip>
 
@@ -492,7 +470,7 @@ export function AppToolbar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="hidden md:flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-micro font-semibold text-primary-foreground">{userInitials}</div>
+              <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
               <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
             </button>
@@ -500,7 +478,7 @@ export function AppToolbar() {
           <DropdownMenuContent align="end" className="w-64">
             <div className="px-2 py-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{userInitials}</div>
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-10 w-10" textClassName="text-sm" />
                 <div>
                   <div className="text-sm font-medium">{userName}</div>
                   <div className="text-xs text-muted-foreground">{userEmail}</div>
@@ -600,7 +578,7 @@ export function AppToolbar() {
             </div>
             <div className="border-t p-4">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-primary text-micro font-bold text-primary-foreground flex items-center justify-center">{userInitials}</div>
+                <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-8 w-8" textClassName="text-micro" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium">{userName}</div>
                   <div className="text-micro text-muted-foreground">{userEmail}</div>

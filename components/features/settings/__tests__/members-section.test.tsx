@@ -38,7 +38,6 @@ function renderSection(callerRole: string | undefined) {
       members={members}
       workspaceId="ws1"
       currentUserId="u1"
-      canInvite={false}
       callerRole={callerRole}
       onRefresh={vi.fn()}
     />,

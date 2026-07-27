@@ -12,6 +12,9 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { formatDateTime } from "@/lib/time"
+import { personLabel } from "@/components/ui/user-avatar"
+import { SettingsCard, SettingsEmpty } from "../shared"
 
 interface AuditLog {
   id: string
@@ -211,7 +214,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         action: log.action,
         entity_type: log.entity_type,
         entity_id: log.entity_id,
-        user: log.user?.full_name ?? log.user?.email ?? "",
+        user: personLabel(log.user?.full_name, log.user?.email ?? ""),
         ip_address: log.ip_address ?? "",
       }))
       // Neutralise spreadsheet-formula prefixes (=, +, -, @) so an
@@ -267,7 +270,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         (log) =>
           log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
           log.entity_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (log.user?.full_name ?? log.user?.email ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
+          personLabel(log.user?.full_name, log.user?.email ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
       )
     : logs
 
@@ -277,16 +280,11 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   const rangeEnd = Math.min(page * PAGE_SIZE, total)
 
   return (
-    <div className="space-y-4">
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h3 className="text-body font-medium text-foreground/80 leading-none">Audit log</h3>
-          <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-            Every state-changing action on this workspace, immutably recorded
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+    <SettingsCard
+      title="Audit log"
+      description="Every state-changing action on this workspace, immutably recorded"
+      actions={
+        <>
           <Button
             variant="outline"
             size="sm"
@@ -320,30 +318,33 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
               Cancel
             </Button>
           )}
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {/* ── Filter bar ── */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-border/40">
         <div
-          className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-white/[0.04] border border-border/60"
+          className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-muted/40 border border-border/60"
           role="group"
           aria-label="Filter by category"
         >
           {categories.map((cat) => (
-            <button
+            <Button
               key={cat.value}
+              type="button"
+              variant="ghost"
+              size="sm"
               aria-pressed={category === cat.value}
               onClick={() => handleCategoryChange(cat.value)}
               className={cn(
-                "h-6 px-2.5 rounded text-[11px] font-medium transition-colors",
+                "h-6 px-2.5 rounded text-[11px] font-medium",
                 category === cat.value
-                  ? "bg-white/[0.08] text-foreground"
+                  ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
               {cat.label}
-            </button>
+            </Button>
           ))}
         </div>
         <Select value={dateRange} onValueChange={handleDateRangeChange}>
@@ -370,150 +371,156 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
 
       {/* Error with stale data */}
       {error && logs.length > 0 && (
-        <div role="alert" className="text-[11px] text-destructive px-3 py-2 rounded-md border border-destructive/30 bg-destructive/5">
+        <div role="alert" className="text-[11px] text-destructive px-4 py-2 border-b border-border/40 bg-destructive/5">
           {error}
         </div>
       )}
 
       {/* Content */}
       {loading ? (
-        <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className={cn("px-4 py-2.5", i < 4 && "border-b border-border/40")}>
-              <Skeleton className="h-3.5 w-full" />
-            </div>
-          ))}
-        </div>
-      ) : error ? (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/[0.03] p-6 text-center">
+        Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className={cn("px-4 py-2.5", i < 4 && "border-b border-border/40")}>
+            <Skeleton className="h-3.5 w-full" />
+          </div>
+        ))
+      ) : error && logs.length === 0 ? (
+        // Only take over the pane when there is nothing to take over FROM.
+        // A failed background refresh used to replace a perfectly good table
+        // with a full-page error — and print the same message twice, once
+        // here and once in the stale-data banner above, which promises the
+        // opposite ("your rows are still here, they're just old").
+        <div className="p-6 text-center">
           <p role="alert" className="text-xs text-destructive mb-3">{error}</p>
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => fetchLogs()}>
             Retry
           </Button>
         </div>
       ) : filteredLogs.length === 0 ? (
-        <div className="rounded-xl border border-border/60 bg-card flex flex-col items-center justify-center py-12 text-center">
-          <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
-            <Shield className="h-4 w-4 text-muted-foreground" />
+        <SettingsEmpty>
+          <div className="flex flex-col items-center gap-3 py-6">
+            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-foreground/80">
+                {searchQuery ? "No matching events" : "No activity yet"}
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
+                {searchQuery ? "Try a different search term" : "All state-changing actions will be logged here."}
+              </div>
+            </div>
           </div>
-          <div className="text-sm font-medium text-foreground/80">
-            {searchQuery ? "No matching events" : "No activity yet"}
-          </div>
-          <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-            {searchQuery ? "Try a different search term" : "All state-changing actions will be logged here."}
-          </div>
-        </div>
+        </SettingsEmpty>
       ) : (
         <>
-          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-            {filteredLogs.map((log, idx) => {
-              const isExpanded = expandedId === log.id
-              const isLast = idx === filteredLogs.length - 1
-              return (
-                <div key={log.id}>
-                  <button
-                    type="button"
-                    aria-expanded={isExpanded}
-                    aria-controls={`audit-detail-${log.id}`}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-3 px-4 py-2 cursor-pointer transition-colors text-left",
-                      !isLast && !isExpanded && "border-b border-border/40",
-                      isExpanded ? "bg-white/[0.03]" : "hover:bg-white/[0.02]",
-                    )}
-                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <ChevronRight
-                        className={cn(
-                          "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
-                          isExpanded && "rotate-90 text-foreground",
-                        )}
-                      />
-                      <span className="text-[10px] text-muted-foreground font-mono tabular-nums shrink-0">
-                        {new Date(log.created_at).toLocaleString()}
-                      </span>
-                      <span className="text-xs text-foreground/80 truncate">
-                        {log.user?.full_name ?? log.user?.email ?? (
-                          <span className="text-muted-foreground">System</span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <StatusBadge
-                        status={getActionStatusKey(log.action)}
-                        label={log.action}
-                        className="text-[10px]"
-                      />
-                      <span className="text-[11px] text-muted-foreground hidden sm:inline">
-                        {log.entity_type}
-                      </span>
-                      {log.entity_id && (
-                        <span className="font-mono text-[10px] text-muted-foreground hidden sm:inline">
-                          {log.entity_id.slice(0, 8)}
-                        </span>
+          {filteredLogs.map((log, idx) => {
+            const isExpanded = expandedId === log.id
+            const isLast = idx === filteredLogs.length - 1
+            return (
+              <div key={log.id}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  aria-expanded={isExpanded}
+                  aria-controls={`audit-detail-${log.id}`}
+                  className={cn(
+                    "flex h-auto w-full items-center justify-between gap-3 rounded-none px-4 py-2 text-left font-normal",
+                    !isLast && !isExpanded && "border-b border-border/40",
+                    isExpanded && "bg-accent/50",
+                  )}
+                  onClick={() => setExpandedId(isExpanded ? null : log.id)}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <ChevronRight
+                      className={cn(
+                        "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                        isExpanded && "rotate-90 text-foreground",
                       )}
-                    </div>
-                  </button>
-
-                  <AnimatePresence initial={false}>
-                    {isExpanded && (
-                      <motion.div
-                        id={`audit-detail-${log.id}`}
-                        role="region"
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.15, ease: "easeInOut" }}
-                        className={cn(
-                          "overflow-hidden bg-white/[0.02]",
-                          !isLast && "border-b border-border/40",
-                        )}
-                      >
-                        <div className="px-4 py-3 pl-11">
-                          <div className="grid gap-3 sm:grid-cols-2 max-w-3xl">
-                            <div>
-                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
-                                IP address
-                              </div>
-                              <div className="font-mono text-[11px] text-foreground/80">
-                                {log.ip_address ?? "—"}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
-                                User agent
-                              </div>
-                              <div className="font-mono text-[11px] text-foreground/80 truncate" title={log.user_agent ?? ""}>
-                                {log.user_agent ?? "—"}
-                              </div>
-                            </div>
-                            {log.metadata && Object.keys(log.metadata).length > 0 && (
-                              <div className="sm:col-span-2">
-                                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                                  Metadata
-                                </div>
-                                <pre className="bg-muted/40 border border-border/60 rounded p-2 text-[10px] font-mono text-muted-foreground overflow-auto max-h-32">
-                                  {JSON.stringify(log.metadata, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground">
-                            <Shield className="h-3 w-3" />
-                            This record is immutable.
-                          </div>
-                        </div>
-                      </motion.div>
+                    />
+                    <span className="text-[10px] text-muted-foreground font-mono tabular-nums shrink-0">
+                      {formatDateTime(log.created_at)}
+                    </span>
+                    <span className="text-xs text-foreground/80 truncate">
+                      {personLabel(log.user?.full_name, log.user?.email ?? "") || (
+                        <span className="text-muted-foreground">System</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <StatusBadge
+                      status={getActionStatusKey(log.action)}
+                      label={log.action}
+                      className="text-[10px]"
+                    />
+                    <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                      {log.entity_type}
+                    </span>
+                    {log.entity_id && (
+                      <span className="font-mono text-[10px] text-muted-foreground hidden sm:inline">
+                        {log.entity_id.slice(0, 8)}
+                      </span>
                     )}
-                  </AnimatePresence>
-                </div>
-              )
-            })}
-          </div>
+                  </div>
+                </Button>
+
+                <AnimatePresence initial={false}>
+                  {isExpanded && (
+                    <motion.div
+                      id={`audit-detail-${log.id}`}
+                      role="region"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.15, ease: "easeInOut" }}
+                      className={cn(
+                        "overflow-hidden bg-muted/20",
+                        !isLast && "border-b border-border/40",
+                      )}
+                    >
+                      <div className="px-4 py-3 pl-11">
+                        <div className="grid gap-3 sm:grid-cols-2 max-w-3xl">
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
+                              IP address
+                            </div>
+                            <div className="font-mono text-[11px] text-foreground/80">
+                              {log.ip_address ?? "—"}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
+                              User agent
+                            </div>
+                            <div className="font-mono text-[11px] text-foreground/80 truncate" title={log.user_agent ?? ""}>
+                              {log.user_agent ?? "—"}
+                            </div>
+                          </div>
+                          {log.metadata && Object.keys(log.metadata).length > 0 && (
+                            <div className="sm:col-span-2">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                                Metadata
+                              </div>
+                              <pre className="bg-muted/40 border border-border/60 rounded p-2 text-[10px] font-mono text-muted-foreground overflow-auto max-h-32">
+                                {JSON.stringify(log.metadata, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground">
+                          <Shield className="h-3 w-3" />
+                          This record is immutable.
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )
+          })}
 
           {/* Pagination */}
           {total > 0 && (
-            <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 border-t border-border/40">
               <span className="text-[11px] text-muted-foreground font-mono tabular-nums">
                 Showing {rangeStart}–{rangeEnd} of {total}
               </span>
@@ -543,6 +550,6 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           )}
         </>
       )}
-    </div>
+    </SettingsCard>
   )
 }

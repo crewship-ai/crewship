@@ -242,11 +242,32 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 
 	expires := time.Unix(claims.Exp, 0).UTC().Format(time.RFC3339)
 
+	// Claims are a snapshot taken when the access token was minted, so an
+	// identity edit stays invisible here until the token happens to rotate.
+	// This endpoint is the only thing the UI asks "who am I" — the top bar's
+	// name and avatar come from nothing else — so answer from the live row.
+	// That is what made uploading an avatar look like it had done nothing.
+	//
+	// A failed lookup falls back to the claims rather than logging anyone
+	// out: a DB hiccup must not evict a user, same posture as the revoke
+	// check above. full_name and avatar_url are both nullable in the schema,
+	// hence NullString for each.
+	name, email, avatarURL := claims.Name, claims.Email, ""
+	var dbName, dbEmail, dbAvatar sql.NullString
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT full_name, email, avatar_url FROM users WHERE id = ?", claims.ID,
+	).Scan(&dbName, &dbEmail, &dbAvatar); err == nil {
+		name, email, avatarURL = dbName.String, dbEmail.String, dbAvatar.String
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"user": map[string]interface{}{
 			"id":    claims.ID,
-			"name":  claims.Name,
-			"email": claims.Email,
+			"name":  name,
+			"email": email,
+			// Always present, "" when unset, so the client has one shape to
+			// parse instead of distinguishing null from absent.
+			"avatar_url": avatarURL,
 		},
 		"expires": expires,
 	})
@@ -514,15 +535,20 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Look up name/email to bake into the new access token. If the
 	// user was deleted out from under us, the JOIN-fk in user_sessions
 	// would have CASCADE-deleted the session — but defend anyway.
-	var fullName, email string
+	// full_name is nullable — a provisioned account has none until the
+	// person picks one. Scanning it into a bare string turned every token
+	// rotation for those users into "your session was revoked by an
+	// administrator", which is both false and unfixable from their side.
+	var fullNameNS, emailNS sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT full_name, email FROM users WHERE id = ?", claims.ID,
-	).Scan(&fullName, &email); err != nil {
+	).Scan(&fullNameNS, &emailNS); err != nil {
 		h.clearAuthCookies(w, r)
 		_ = h.sessions.Revoke(r.Context(), claims.Sid, sessions.ReasonAdminForce)
 		writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
 		return
 	}
+	fullName, email := fullNameNS.String, emailNS.String
 
 	// Mint the new tokens FIRST so we have the new refresh JTI to
 	// CAS-rotate against. If anything below fails after this point we

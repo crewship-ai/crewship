@@ -14,7 +14,7 @@ import (
 
 func newAuxStatusHandler(cfg llm.AuxiliaryModels) *AuxStatusHandler {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewAuxStatusHandler(cfg, logger)
+	return NewAuxStatusHandler(cfg, nil, logger)
 }
 
 func TestAuxStatus_Unauthorized(t *testing.T) {
@@ -49,13 +49,21 @@ func TestAuxStatus_HappyPath_DefaultsAllSlots(t *testing.T) {
 
 	// MVP defaults: 6 explicit slots, every one on anthropic/claude-haiku-4-5
 	// (Fallback is NOT in the slot list — it's an internal backstop).
-	if got, want := len(resp.Slots), 6; got != want {
+	// 5 consumed aux slots + the credential-access judge. `keeper` is
+	// gone: nothing calls ResolveAux for it (see system_aux_effective_test.go).
+	if got, want := len(resp.Subsystems), 6; got != want {
 		t.Fatalf("slot count = %d, want %d", got, want)
 	}
-	wantOrder := []string{"curator", "keeper", "behavior", "memory_health", "negative", "run_summary"}
-	for i, row := range resp.Slots {
-		if row.Slot != wantOrder[i] {
-			t.Errorf("slots[%d].Slot = %q, want %q", i, row.Slot, wantOrder[i])
+	// The access judge leads (it is what operators come here for), then the
+	// aux slots in llm.AuxiliaryModels field order.
+	wantOrder := []string{"access_gatekeeper", "curator", "behavior", "memory_health", "negative", "run_summary"}
+	for i, row := range resp.Subsystems {
+		if row.ID != wantOrder[i] {
+			t.Errorf("slots[%d].Slot = %q, want %q", i, row.ID, wantOrder[i])
+		}
+		if row.ID == "access_gatekeeper" {
+			// Sourced from cfg.Keeper, not from the aux config under test.
+			continue
 		}
 		if row.Provider != "anthropic" {
 			t.Errorf("slots[%d].Provider = %q, want anthropic", i, row.Provider)
@@ -92,12 +100,15 @@ func TestAuxStatus_FallbackSource(t *testing.T) {
 	var resp auxStatusResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
-	for _, row := range resp.Slots {
+	for _, row := range resp.Subsystems {
+		if row.ID == "access_gatekeeper" {
+			continue // different config path; covered in system_aux_effective_test.go
+		}
 		if row.Source != "fallback" {
-			t.Errorf("slot %q source = %q, want fallback (only Fallback configured)", row.Slot, row.Source)
+			t.Errorf("slot %q source = %q, want fallback (only Fallback configured)", row.ID, row.Source)
 		}
 		if row.TimeoutMS != 9000 {
-			t.Errorf("slot %q TimeoutMS = %d, want 9000 (fallback timeout)", row.Slot, row.TimeoutMS)
+			t.Errorf("slot %q TimeoutMS = %d, want 9000 (fallback timeout)", row.ID, row.TimeoutMS)
 		}
 	}
 }
@@ -122,8 +133,11 @@ func TestAuxStatus_MixedExplicitAndFallback(t *testing.T) {
 	var resp auxStatusResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
-	for _, row := range resp.Slots {
-		switch row.Slot {
+	for _, row := range resp.Subsystems {
+		if row.ID == "access_gatekeeper" {
+			continue // different config path; covered in system_aux_effective_test.go
+		}
+		switch row.ID {
 		case "keeper":
 			if row.Source != "explicit" {
 				t.Errorf("keeper source = %q, want explicit", row.Source)
@@ -133,10 +147,10 @@ func TestAuxStatus_MixedExplicitAndFallback(t *testing.T) {
 			}
 		default:
 			if row.Source != "fallback" {
-				t.Errorf("%s source = %q, want fallback", row.Slot, row.Source)
+				t.Errorf("%s source = %q, want fallback", row.ID, row.Source)
 			}
 			if row.Provider != "anthropic" {
-				t.Errorf("%s provider = %q, want anthropic (fallback)", row.Slot, row.Provider)
+				t.Errorf("%s provider = %q, want anthropic (fallback)", row.ID, row.Provider)
 			}
 		}
 	}
@@ -161,15 +175,18 @@ func TestAuxStatus_UnconfiguredWhenSlotAndFallbackEmpty(t *testing.T) {
 	var resp auxStatusResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 
-	if len(resp.Slots) != 6 {
-		t.Fatalf("slot count = %d, want 6", len(resp.Slots))
+	if len(resp.Subsystems) != 6 {
+		t.Fatalf("subsystem count = %d, want 6 (5 aux slots + access judge)", len(resp.Subsystems))
 	}
-	for _, row := range resp.Slots {
+	for _, row := range resp.Subsystems {
+		if row.ID == "access_gatekeeper" {
+			continue // different config path; covered in system_aux_effective_test.go
+		}
 		if row.Source != "unconfigured" {
-			t.Errorf("slot %q source = %q, want unconfigured", row.Slot, row.Source)
+			t.Errorf("slot %q source = %q, want unconfigured", row.ID, row.Source)
 		}
 		if row.Provider != "" || row.Model != "" {
-			t.Errorf("slot %q should be blank when unconfigured; got %s/%s", row.Slot, row.Provider, row.Model)
+			t.Errorf("slot %q should be blank when unconfigured; got %s/%s", row.ID, row.Provider, row.Model)
 		}
 	}
 }

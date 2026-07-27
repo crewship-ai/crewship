@@ -18,9 +18,24 @@
 //      walks the same purge path as the opt-out (minus the consent
 //      flip — a user can delete current state without committing
 //      to forever-opt-out).
+//
+// Both controls are atomic (no draft/Save step) — they PUT/DELETE
+// immediately, same as before. The only UI addition here is a toast
+// on success and a confirm dialog in place of window.confirm(), plus
+// matching the shared SettingsCard/SettingsRow chrome the rest of the
+// page uses (this used to be the visual odd-one-out with raw boxes
+// and hardcoded emerald/red/zinc colours).
 
 import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { Button } from "@/components/ui/button"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { formatDateTime } from "@/lib/time"
+import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
 
 interface ConsentResp {
   user_id: string
@@ -46,6 +61,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -89,6 +105,7 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
         })
         if (!r.ok) throw new Error(`update consent failed: ${r.status}`)
         await load()
+        toast.success(optOut ? "Opted out — existing peer cards purged" : "Opted back in")
       } catch (e) {
         setErr((e as Error).message)
       } finally {
@@ -99,7 +116,6 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
   )
 
   const deleteAll = useCallback(async () => {
-    if (!confirm("Delete every peer card about you across every agent in this workspace?")) return
     setActing(true)
     setErr(null)
     try {
@@ -109,97 +125,113 @@ export function PrivacySection({ workspaceId }: { workspaceId: string }) {
       })
       if (!r.ok) throw new Error(`delete peer cards failed: ${r.status}`)
       await load()
+      toast.success("Peer cards deleted")
     } catch (e) {
       setErr((e as Error).message)
     } finally {
       setActing(false)
+      setConfirmDeleteOpen(false)
     }
   }, [load, workspaceId])
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading privacy state...</p>
-  if (err) return <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{err}</div>
+  if (err) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/[0.02] p-4 text-sm text-destructive">
+        {err}
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <header>
-          <h2 className="text-lg font-semibold">Agent memory about you</h2>
-          <p className="text-sm text-muted-foreground">
-            Crewship agents may distil per-user profile notes from prior sessions
-            (≤1500 bytes per agent). These notes shape how the agent addresses
-            you — they are NOT shared with other operators.
-          </p>
-        </header>
+    <div className="space-y-5">
+      <SettingsCard
+        title="Agent memory about you"
+        description="Crewship agents may distil per-user profile notes from prior sessions (≤1500 bytes per agent). These notes shape how the agent addresses you — they are NOT shared with other operators."
+      >
+        <SettingsRow
+          label={consent?.opted_out ? "Opted out" : "Opted in (default)"}
+          description={
+            consent?.opted_out
+              ? `Opted out at ${consent.opted_out_at ? formatDateTime(consent.opted_out_at) : "unknown"}. Agents will not extract new peer cards about you in this workspace.`
+              : "Agents may extract peer cards about you. You can opt out at any time. Opt-out is immediate: existing cards are purged as part of the same request, not on the next routine sweep."
+          }
+          border={false}
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => flipConsent(!consent?.opted_out)}
+            disabled={acting}
+          >
+            {consent?.opted_out ? "Opt back in" : "Opt out"}
+          </Button>
+        </SettingsRow>
+      </SettingsCard>
 
-        <div className="rounded border border-white/10 p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium">
-                {consent?.opted_out ? "Opted out" : "Opted in (default)"}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {consent?.opted_out
-                  ? `Opted out at ${consent.opted_out_at ?? "unknown"}. Agents will not extract new peer cards about you in this workspace.`
-                  : "Agents may extract peer cards about you. You can opt out at any time."}
-              </p>
-            </div>
-            <button
-              onClick={() => flipConsent(!consent?.opted_out)}
+      <SettingsCard
+        title={`Peer cards on file (${cards.length})`}
+        description="Everything currently stored about you across this workspace."
+        actions={
+          cards.length > 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => setConfirmDeleteOpen(true)}
               disabled={acting}
-              className="rounded bg-success/20 px-3 py-1.5 text-sm text-success hover:bg-success/30 disabled:opacity-50"
-            >
-              {consent?.opted_out ? "Opt back in" : "Opt out"}
-            </button>
-          </div>
-          {!consent?.opted_out && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Opt-out is immediate: existing cards are purged as part of the same
-              request, not on the next routine sweep.
-            </p>
-          )}
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <header className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Peer cards on file ({cards.length})</h2>
-            <p className="text-sm text-muted-foreground">
-              Everything currently stored about you across this workspace.
-            </p>
-          </div>
-          {cards.length > 0 && (
-            <button
-              onClick={deleteAll}
-              disabled={acting}
-              className="rounded bg-destructive/15 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/25 disabled:opacity-50"
             >
               Delete all
-            </button>
-          )}
-        </header>
+            </Button>
+          )
+        }
+      >
         {cards.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No peer cards on file.</p>
+          <SettingsEmpty>No peer cards on file.</SettingsEmpty>
         ) : (
-          <ul className="space-y-2">
-            {cards.map((c) => (
-              <li key={c.id} className="rounded border border-white/10 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{c.agent_slug}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {c.bytes} B · updated {c.updated_at}
-                  </span>
-                </div>
-                {c.content && (
-                  <pre className="mt-2 whitespace-pre-wrap text-sm bg-muted/40 p-2 rounded">
-                    {c.content}
-                  </pre>
-                )}
-              </li>
-            ))}
-          </ul>
+          cards.map((c, idx) => (
+            <SettingsRow
+              key={c.id}
+              label={c.agent_slug}
+              description={c.content ? <span className="whitespace-pre-wrap">{c.content}</span> : undefined}
+              border={idx < cards.length - 1}
+              className="items-start"
+            >
+              <span className="text-[11px] text-muted-foreground shrink-0">
+                {c.bytes} B · updated {formatDateTime(c.updated_at)}
+              </span>
+            </SettingsRow>
+          ))
         )}
-      </section>
+      </SettingsCard>
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={(o) => !acting && setConfirmDeleteOpen(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-sm">Delete all peer cards</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              Delete every peer card about you across every agent in this workspace? This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-7 text-xs" disabled={acting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={acting}
+              onClick={(e) => {
+                // Keep the dialog open while the DELETE is in flight; a
+                // second click can't fire a duplicate request.
+                e.preventDefault()
+                if (!acting) void deleteAll()
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

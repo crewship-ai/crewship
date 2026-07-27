@@ -92,16 +92,31 @@ func mustGenerateDummyBcryptHash() string {
 // guess (which is the whole point of locking).
 func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password string, now time.Time) (userID, fullName string, err error) {
 	var (
-		hashedPw      string
+		// hashed_password is nullable, and NULL is the normal state for a
+		// provisioned account that has not been set up yet (and was for
+		// every OAuth-only account before Google sign-in was switched off).
+		// Scanning it into a bare string sent those attempts down the
+		// generic-error branch, which skips the failed-count bookkeeping AND
+		// the dummy-bcrypt compare — returning measurably faster than either
+		// "wrong password" or "unknown email", a timing oracle for "this
+		// address exists but has no password". It also logged an ERROR on
+		// what is ordinary traffic.
+		hashedPwNS    sql.NullString
 		failedCount   int
 		lockedUntilNS sql.NullString
+		// full_name is nullable and a provisioned account starts with no
+		// name at all. Scanning it into a bare string made every such login
+		// fail with "converting NULL to string", which the caller reports as
+		// CredentialsSignin — a permanent lockout indistinguishable from a
+		// wrong password, on accounts that had only just been created.
+		fullNameNS sql.NullString
 	)
 	row := db.QueryRowContext(ctx,
 		`SELECT id, full_name, hashed_password, failed_login_count, locked_until
 		   FROM users
 		  WHERE email = ?`, email,
 	)
-	if err := row.Scan(&userID, &fullName, &hashedPw, &failedCount, &lockedUntilNS); err != nil {
+	if err := row.Scan(&userID, &fullNameNS, &hashedPwNS, &failedCount, &lockedUntilNS); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Unknown email path. We deliberately do NOT advance
 			// any counter (no row to advance, and storing per-
@@ -118,6 +133,16 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 		}
 		return "", "", fmt.Errorf("lockout: query user: %w", err)
 	}
+	fullName = fullNameNS.String
+
+	// No password set: indistinguishable, to a caller, from an unknown
+	// email — same dummy compare, same error, same absence of counter
+	// movement, so the two cannot be told apart by timing.
+	if !hashedPwNS.Valid || hashedPwNS.String == "" {
+		_ = bcryptCompareHashAndPassword(dummyBcryptHash(), password)
+		return "", "", ErrInvalidCredentials
+	}
+	hashedPw := hashedPwNS.String
 
 	if lockedUntilNS.Valid && lockedUntilNS.String != "" {
 		lockedUntil, perr := time.Parse(time.RFC3339, lockedUntilNS.String)

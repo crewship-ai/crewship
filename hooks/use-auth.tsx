@@ -18,6 +18,10 @@ const sessionSchema = z.object({
     id: z.string(),
     name: z.string().optional().default(""),
     email: z.string().optional().default(""),
+    // Served by /api/auth/session from the live users row, so an upload is
+    // visible on the next refresh() instead of waiting for a token rotation.
+    // "" means the user has none — the caller falls back to initials.
+    avatar_url: z.string().optional().default(""),
   }),
   expires: z.string(),
 })
