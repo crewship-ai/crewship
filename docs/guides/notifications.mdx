@@ -4,6 +4,14 @@ description: "Email, signed-webhook, chat and push delivery for approvals, escal
 icon: "bell"
 ---
 
+## Where this lives
+
+**Integrations** (`/integrations`) — channels, your own preference matrix, and, for an admin, every connection in the workspace, all as tabs on one page.
+
+It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart.
+
+The **All connections** tab is ADMIN/OWNER only. It lists every channel including other members' personal ones, with the number of agents allowed to post to each — but it shows *that* a member has a channel, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration.
+
 ## Two systems, one page
 
 Crewship has grown two outbound-notification mechanisms, documented together here:
@@ -152,7 +160,15 @@ crewship notifychannel test-draft --type chat --provider ntfy --field topic=my-a
 
 A chat channel also participates in the [legacy run-terminal broadcast](#legacy-run-terminal-broadcast) if it subscribes to `events` — chat and push are **new destinations alongside** email/webhook, not a replacement.
 
-An instance admin can disable a provider instance-wide (`crewship notifychannel providers`, `PATCH /api/v1/notification-providers/{provider}`); a disabled provider is rejected at **channel-create time** (fail-closed) but doesn't retroactively break channels that already exist.
+An instance admin (ADMIN or OWNER) can disable a provider instance-wide:
+
+```bash
+crewship notifychannel providers                      # which are enabled
+crewship notifychannel providers disable discord      # refuse new channels on it
+crewship notifychannel providers enable discord       # allow them again
+```
+
+A disabled provider is rejected at **channel-create time** (fail-closed). It does **not** stop channels that already exist — they keep delivering. To silence one of those, disable or remove that channel. If you need a true kill switch for a provider, disable it *and* the channels already on it.
 
 <Note>
 `--type shoutrrr` still works as a hidden alias for `--type chat`, and `--url` still accepts a pre-composed delivery URL, so existing scripts and backup restores keep working. Both are undocumented on purpose: nobody should have to learn a URL syntax to connect Discord.

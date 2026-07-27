@@ -35,6 +35,7 @@ import { MCPLogo } from "@/components/icons/mcp-logos"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
 import { ComposioIntegrations } from "@/components/features/integrations/composio-integrations"
+import { NotificationIntegrations } from "@/components/features/integrations/notification-integrations"
 import { legacyMcpIntegrations } from "@/lib/feature-flags"
 import type {
   AgentBinding,
@@ -56,10 +57,28 @@ import type {
 // legacy implementation below is untouched — flipping the env var brings it
 // back, so this is a fully reversible rollback path, not a deletion.
 export default function IntegrationsPage() {
-  if (!legacyMcpIntegrations()) {
-    return <ComposioIntegrations />
-  }
-  return <LegacyIntegrationsPage />
+  return (
+    <>
+      {legacyMcpIntegrations() ? <LegacyIntegrationsPage /> : <ComposioIntegrations />}
+      {/* Notification channels are an integration: "connect Discord" is what
+          a user comes to this page for. They used to live under Settings,
+          which reads as personal preferences and made a workspace-wide view
+          of every connection impossible. Rendered outside the Composio/legacy
+          switch because they have nothing to do with either. */}
+      <NotificationIntegrationsPanel />
+    </>
+  )
+}
+
+/** Thin wrapper so the panel can resolve the workspace itself. */
+function NotificationIntegrationsPanel() {
+  const { workspaceId, loading } = useWorkspace()
+  if (loading || !workspaceId) return null
+  return (
+    <div className="p-4 md:p-6 pt-0 pb-10 bg-background">
+      <NotificationIntegrations workspaceId={workspaceId} />
+    </div>
+  )
 }
 
 function LegacyIntegrationsPage() {

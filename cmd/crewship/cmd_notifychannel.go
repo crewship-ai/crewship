@@ -298,6 +298,70 @@ var notifyChannelRmCmd = &cobra.Command{
 	},
 }
 
+// notifyChannelProvidersEnableCmd / …DisableCmd flip the instance-wide
+// allowlist. The API for this shipped without a CLI, while the guide already
+// told operators to disable a provider with `notifychannel providers` — which
+// only ever listed. Every /api/v1 route gets a command; this is that route's.
+//
+// The gate is a CREATE-time check, not a kill switch: disabling a provider
+// stops new channels being made on it and leaves existing ones delivering. The
+// output says so, because "disabled" reads like "switched off" and an operator
+// who believed that would think alerts had stopped when they had not.
+func notifyProviderToggle(enabled bool) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		provider := strings.TrimSpace(args[0])
+		client := newAPIClient()
+		resp, err := client.Patch("/api/v1/notification-providers/"+url.PathEscape(provider),
+			map[string]any{"enabled": enabled})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Provider string `json:"provider"`
+			Enabled  bool   `json:"enabled"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		return f.AutoHuman(body, func() {
+			if body.Enabled {
+				fmt.Printf("%s enabled — new channels may be created on it.\n", body.Provider)
+				return
+			}
+			fmt.Printf("%s disabled — new channels on it are refused.\n", body.Provider)
+			fmt.Println("Channels that already exist keep delivering; this is a create-time gate, not a kill switch.")
+		})
+	}
+}
+
+var notifyChannelProvidersEnableCmd = &cobra.Command{
+	Use:   "enable <provider>",
+	Short: "Allow new channels to be created on a provider (ADMIN+)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  notifyProviderToggle(true),
+}
+
+var notifyChannelProvidersDisableCmd = &cobra.Command{
+	Use:   "disable <provider>",
+	Short: "Refuse new channels on a provider (ADMIN+); existing ones keep delivering",
+	Long: `Disable a provider instance-wide.
+
+This is a CREATE-time gate: channels that already exist on the provider keep
+delivering. To stop an existing channel, disable or remove that channel.`,
+	Args: cobra.ExactArgs(1),
+	RunE: notifyProviderToggle(false),
+}
+
 // notifyChannelProvidersCmd lists the chat/push providers this instance
 // supports, the form fields each needs, and whether it is admin-enabled.
 var notifyChannelProvidersCmd = &cobra.Command{
@@ -570,6 +634,8 @@ func init() {
 	notifyChannelCmd.AddCommand(notifyChannelTestCmd)
 	notifyChannelCmd.AddCommand(notifyChannelRmCmd)
 	notifyChannelCmd.AddCommand(notifyChannelProvidersCmd)
+	notifyChannelProvidersCmd.AddCommand(notifyChannelProvidersEnableCmd)
+	notifyChannelProvidersCmd.AddCommand(notifyChannelProvidersDisableCmd)
 	notifyChannelCmd.AddCommand(notifyChannelTestDraftCmd)
 
 	notifyChannelAgentsAllowCmd.Flags().String("agent", "", "Agent id to allow (required)")

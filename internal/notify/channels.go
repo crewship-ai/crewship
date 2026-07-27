@@ -376,6 +376,23 @@ func (s *ChannelStore) List(ctx context.Context, workspaceID, viewerUserID strin
 	return out, nil
 }
 
+// ListAll returns EVERY channel in the workspace, including other members'
+// personal ones — the admin overview of "what is this instance wired into".
+// Secrets are redacted, exactly as in List.
+//
+// Deliberately a separate method rather than a flag on List. The viewer
+// filter in List is a privacy boundary, and a boolean parameter is the kind
+// of thing that gets passed `true` by a caller who did not think about it.
+// A distinct name forces the call site to say what it is doing, and the
+// handler that uses this is the one place that checks for the admin role.
+//
+// Callers MUST still redact the destination address for channels the viewer
+// does not own if they surface this to a non-admin — a Telegram chat id is a
+// member's personal contact detail.
+func (s *ChannelStore) ListAll(ctx context.Context, workspaceID string) ([]Channel, error) {
+	return s.query(ctx, workspaceID, "", false)
+}
+
 // ListEnabled returns the enabled channels with decrypted secrets, for
 // the dispatch path.
 func (s *ChannelStore) ListEnabled(ctx context.Context, workspaceID string) ([]Channel, error) {

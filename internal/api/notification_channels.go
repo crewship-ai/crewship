@@ -83,7 +83,33 @@ func (h *NotifyChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 	if u := UserFromContext(r.Context()); u != nil {
 		userID = u.ID
 	}
-	channels, err := h.store.List(r.Context(), workspaceID, userID)
+
+	// ?scope=all is the ADMIN overview: every connection in the workspace,
+	// including other members' personal channels, so one page can answer
+	// "what is this instance wired into, and who wired it". Metadata only —
+	// secrets are redacted on this path exactly as on the default one.
+	//
+	// Silently falling back to the filtered view for a non-admin (rather than
+	// 403ing) keeps a bookmarked admin URL from becoming an error page for a
+	// member; they simply see their own scope.
+	var (
+		channels []notify.Channel
+		err      error
+	)
+	if r.URL.Query().Get("scope") == "all" && canRole(RoleFromContext(r.Context()), "manage") {
+		channels, err = h.store.ListAll(r.Context(), workspaceID)
+		// A personal channel's destination is its owner's business — a
+		// Telegram chat id is a contact detail. An admin gets to see THAT a
+		// member has a channel and of what kind, not where it points.
+		for i := range channels {
+			if channels[i].Scope == notify.ScopeUser && channels[i].OwnerUserID != userID {
+				channels[i].URL = ""
+				channels[i].To = ""
+			}
+		}
+	} else {
+		channels, err = h.store.List(r.Context(), workspaceID, userID)
+	}
 	if err != nil {
 		h.logger.Error("notify: list channels", "err", err, "workspace_id", workspaceID)
 		replyError(w, http.StatusInternalServerError, "list failed")
