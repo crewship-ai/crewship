@@ -557,6 +557,22 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
+	// Read-only NextAuth GETs (/api/auth/session, /api/auth/csrf,
+	// /api/auth/providers, /api/auth/signin, /api/auth/error) are polled on
+	// EVERY dashboard page load — at least /session + /csrf per load. They
+	// carry no credentials, so they must NOT share the tight 10/min login
+	// brute-force bucket below: a handful of rapid refreshes would drain it,
+	// the 429 reads to the frontend session probe as "logged out", and the
+	// user gets bounced to /login (the refresh-logout bug). Route these safe
+	// reads through the general 120/min API bucket instead. The method gate
+	// keeps every credential-SUBMITTING /api/auth/ POST (login callback,
+	// token refresh, signout) on the strict bucket, so brute-force protection
+	// is untouched.
+	if req.Method == http.MethodGet && strings.HasPrefix(path, "/api/auth/") {
+		r.apiRateLimitedMux.ServeHTTP(w, req)
+		return
+	}
+
 	// Stricter rate limiting for auth endpoints
 	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
 		r.authRateLimitedMux.ServeHTTP(w, req)
