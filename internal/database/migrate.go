@@ -56,6 +56,22 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 
 		logger.Info("applying migration", "version", m.version, "name", m.name)
 
+		// A migration that cannot live inside the wrapper transaction runs
+		// here and manages its own atomicity. See the fnNoTx field for the
+		// full contract — the important half is that the _migrations row is
+		// written AFTER it returns, in a separate statement, so such a
+		// migration MUST be idempotent.
+		if m.fnNoTx != nil {
+			if err := m.fnNoTx(ctx, db, logger); err != nil {
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
+			}
+			if _, err := db.ExecContext(ctx,
+				"INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
+				return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
+			}
+			continue
+		}
+
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %d (%s): %w", m.version, m.name, err)
@@ -166,6 +182,41 @@ type migration struct {
 	// fn, if set, runs instead of sql. Receives the migration's transaction
 	// so its work commits atomically with the _migrations row.
 	fn func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
+	// fnNoTx, if set, runs instead of sql/fn and OUTSIDE the wrapper
+	// transaction, receiving the *sql.DB itself.
+	//
+	// # When this is the only option
+	//
+	// SQLite cannot drop or alter a column constraint in place: changing one
+	// means rebuilding the table (CREATE new / copy / DROP old / RENAME).
+	// That recipe does not work inside the wrapper transaction on a populated
+	// database — DROP TABLE fires the dependents' foreign keys and queues a
+	// deferred violation that COMMIT then refuses, even though the rename
+	// restores referential integrity within the same transaction. SQLite's
+	// documented workaround is `PRAGMA foreign_keys=OFF` around the rebuild,
+	// and that pragma is a NO-OP inside a transaction (SQLite only honours it
+	// in autocommit mode) — so a migration that needs it cannot be handed a
+	// transaction that is already open. v89's comment records the same dead
+	// end being hit before this escape hatch existed; it settled for
+	// emulating the FK actions with triggers instead.
+	//
+	// # Contract
+	//
+	// A fnNoTx migration MUST be idempotent. There is no way to make its work
+	// atomic with the _migrations row that records it: the runner writes that
+	// row after the function returns, in a separate autocommit statement, so a
+	// crash in between leaves the work done and the version unrecorded, and
+	// the next boot runs the function AGAIN over an already-migrated schema.
+	// Probe the live schema first and no-op (or repair-only) when the change
+	// is already in place.
+	//
+	// It also owns everything the wrapper would otherwise have given it:
+	// pinning ONE connection (pragmas are per-connection), toggling and
+	// restoring `foreign_keys`, opening/committing its own transaction, and
+	// running `PRAGMA foreign_key_check` before it commits. Default (wrapped)
+	// behaviour is unchanged for every other migration; reach for this only
+	// when a table rebuild leaves no alternative.
+	fnNoTx func(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 	// restoreBackfill, if set, runs during RestoreBackup against the rows
 	// just re-inserted from a bundle whose source schema predates this
 	// migration. The bundle's manifest records the migration versions
@@ -1811,6 +1862,18 @@ END;
 	// hash-chain it is inside. Both new tables are append-only by trigger.
 	{version: 166, name: "keeper_append_only_audit", sql: migrationKeeperAppendOnlyAudit,
 		restoreBackfill: restoreBackfillPriorityAtEmit},
+	// v167: stop the DATABASE from rewriting and deleting the audit journal
+	// (#1482). journal_entries carried ON DELETE CASCADE to crews/agents and
+	// ON DELETE SET NULL to missions — so deleting a mission silently UPDATEd
+	// hashed audit rows (breaking the v152 chain, growing with every reseed)
+	// and deleting a crew removed its audit history outright. The three
+	// columns become plain TEXT; workspace_id keeps its cascade on purpose.
+	// Runs OUTSIDE the wrapper transaction because a SQLite table rebuild
+	// needs `PRAGMA foreign_keys=OFF`, which is ignored inside one — the wall
+	// v89 hit and worked around with triggers.
+	// See migrate_consts_v167_journal_append_only_fks.go.
+	{version: 167, name: "journal_append_only_fks", fnNoTx: migrationJournalAppendOnlyFKs,
+		restoreBackfill: restoreBackfillRepairJournalMissionIDs},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
