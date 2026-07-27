@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { toast } from "sonner"
 import {
   LogOut,
   Copy,
@@ -217,6 +218,11 @@ export function ProfileSection({
         return
       }
       setAvatarUrl(body?.avatar_url ?? null)
+      // The complaint this fixes: "I set a profile picture and nothing
+      // seemed to happen" — the row updates, but that's easy to miss.
+      // Failures stay inline-only (avatarError above): a toast would just
+      // repeat what's already sitting right next to the button.
+      toast.success("Profile picture updated")
     } catch {
       setAvatarError("Upload failed")
     } finally {
@@ -235,6 +241,7 @@ export function ProfileSection({
         return
       }
       setAvatarUrl(null)
+      toast.success("Profile picture removed")
     } catch {
       setAvatarError("Could not remove avatar")
     } finally {
@@ -285,6 +292,7 @@ export function ProfileSection({
       }
       setDisplayName(trimmed)
       setEditingName(false)
+      toast.success("Name updated")
     } catch {
       setNameError("Failed to save name")
     } finally {

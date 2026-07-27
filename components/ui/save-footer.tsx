@@ -116,7 +116,12 @@ export function SaveFooter({
 
         {!saved && (
           <div className="flex items-center gap-1.5 shrink-0 max-sm:flex-1 max-sm:justify-stretch">
+            {/* type="button" is load-bearing: the shared Button leaves `type`
+                unset, which HTML defaults to "submit". Dropped inside a
+                <form> that would fire onSave AND the form's onSubmit for one
+                click — two writes, visible only as a duplicate PATCH. */}
             <Button
+              type="button"
               variant="ghost"
               size="sm"
               onClick={onCancel}
@@ -126,6 +131,7 @@ export function SaveFooter({
               Cancel
             </Button>
             <Button
+              type="button"
               variant="soft"
               size="sm"
               onClick={onSave}

@@ -92,6 +92,22 @@ describe("SaveFooter", () => {
     expect(root.className).toContain("max-sm:bottom-0")
   })
 
+  it("is safe to drop inside a <form>", () => {
+    // The shared Button leaves `type` unset, which HTML defaults to "submit".
+    // Inside a <form> that fires onSave and the form's onSubmit for a single
+    // click — two writes, and the only symptom is a duplicate request.
+    const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault())
+    const onSave = vi.fn()
+    render(
+      <form onSubmit={onSubmit}>
+        <SaveFooter dirty status="idle" onSave={onSave} onCancel={vi.fn()} />
+      </form>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it("announces itself to assistive tech when it appears", () => {
     render(<SaveFooter dirty status="idle" onSave={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByRole("status")).toBeInTheDocument()
