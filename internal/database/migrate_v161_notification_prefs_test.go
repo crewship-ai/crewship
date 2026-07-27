@@ -1,6 +1,10 @@
 package database
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/crewship-ai/crewship/internal/notify"
+)
 
 // TestMigrate_V161_NotificationChannelsWidened asserts the v133
 // notification_channels table gained the new metadata columns and that
@@ -75,10 +79,11 @@ func TestMigrate_V161_UserNotificationPrefs(t *testing.T) {
 		t.Fatalf("seed channel: %v", err)
 	}
 
-	for _, category := range []string{
-		"approvals", "escalations", "runs.failed", "runs.completed",
-		"chat.replies", "security", "budget", "system", "memory", "*",
-	} {
+	// The vocabulary is taxonomy v2's (migration v169 rewrote v161's CHECK);
+	// this chain runs to head, so it asserts the CURRENT legal set. Derived
+	// from notify.AllCategories rather than hard-coded so adding a category
+	// can't leave this test asserting a stale list.
+	for _, category := range append(append([]string{}, notify.AllCategories...), notify.CategoryMuteAll) {
 		if _, err := db.Exec(`INSERT INTO user_notification_prefs
 			(id, workspace_id, user_id, category, channel_id, state)
 			VALUES (?, 'ws_1', 'u_1', ?, 'nch_1', 'immediate')`,
@@ -99,7 +104,7 @@ func TestMigrate_V161_UserNotificationPrefs(t *testing.T) {
 	// 'digest' is legal even though MVP never writes it (schema-ready for v2).
 	if _, err := db.Exec(`INSERT INTO user_notification_prefs
 		(id, workspace_id, user_id, category, channel_id, state)
-		VALUES ('pref_digest', 'ws_1', 'u_2', 'system', 'nch_1', 'digest')`); err != nil {
+		VALUES ('pref_digest', 'ws_1', 'u_2', 'system.health', 'nch_1', 'digest')`); err != nil {
 		t.Errorf("insert with state='digest' should be legal (v2-ready enum): %v", err)
 	}
 	// UNIQUE(user_id, category, channel_id) makes a re-set an upsert target.

@@ -195,7 +195,7 @@ func seedWorkspace(t *testing.T, db *sql.DB) string {
 	}
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO user_notification_prefs (id, workspace_id, user_id, category, channel_id, state)
-		 VALUES (?, ?, ?, 'runs.failed', ?, 'immediate')`,
+		 VALUES (?, ?, ?, 'routines.failed', ?, 'immediate')`,
 		"unp_alpha_1", workspaceID, "u_admin", "nc_alpha_1"); err != nil {
 		t.Fatalf("seed user_notification_pref: %v", err)
 	}

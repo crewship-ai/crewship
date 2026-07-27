@@ -17,18 +17,12 @@ import {
   useNotificationChannels,
   type NotificationChannel,
 } from "@/hooks/use-notification-channels"
+import { NOTIFICATION_CATEGORY_GROUPS } from "@/lib/notification-categories"
 import { SettingsCard, SettingsEmpty, SettingsRow } from "../shared"
 
 interface NotificationChannelsSectionProps {
   workspaceId: string
 }
-
-// The 9 #1412 notification categories, in the fixed order the backend
-// (internal/notify.AllCategories) declares them.
-const NOTIFY_CATEGORIES = [
-  "approvals", "escalations", "runs.failed", "runs.completed",
-  "chat.replies", "security", "budget", "system", "memory",
-] as const
 
 type ChannelType = "email" | "webhook" | "shoutrrr"
 
@@ -258,12 +252,24 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
 
         {!personal && (
           <SettingsRow label="Categories" description="Admin allowlist for the preference matrix — leave empty for every category">
-            <div className="flex flex-wrap gap-x-3 gap-y-1.5 max-w-[420px]">
-              {NOTIFY_CATEGORIES.map((cat) => (
-                <label key={cat} className="flex items-center gap-1.5 cursor-pointer">
-                  <Checkbox checked={categories.includes(cat)} onCheckedChange={() => toggleCategory(cat)} />
-                  <span className="text-[11px] text-muted-foreground">{cat}</span>
-                </label>
+            <div className="flex flex-col gap-2 max-w-[420px]">
+              {NOTIFICATION_CATEGORY_GROUPS.map((group) => (
+                <div key={group.key} className="flex flex-col gap-1">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                    {group.label}
+                  </span>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                    {group.categories.map((cat) => (
+                      <label key={cat.key} className="flex items-center gap-1.5 cursor-pointer" title={cat.hint}>
+                        <Checkbox
+                          checked={categories.includes(cat.key)}
+                          onCheckedChange={() => toggleCategory(cat.key)}
+                        />
+                        <span className="text-[11px] text-muted-foreground">{cat.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </SettingsRow>

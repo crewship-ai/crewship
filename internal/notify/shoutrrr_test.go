@@ -165,7 +165,7 @@ func TestDeliverCategoryMessage_Shoutrrr(t *testing.T) {
 	ch := Channel{ID: "c1", Type: ChannelShoutrrr, Secret: "slack://hook:T@webhook", Enabled: true}
 
 	err := d.DeliverCategoryMessage(context.Background(), ch, CategoryMessage{
-		WorkspaceID: "w", Category: CategoryApprovals,
+		WorkspaceID: "w", Category: CategoryAgentsApproval,
 		Title: "Approval needed", Body: "Agent wants to run `rm -rf /tmp/x`",
 	})
 	if err != nil {

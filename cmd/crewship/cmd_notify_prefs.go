@@ -16,13 +16,14 @@ import (
 // personal channels) this matrix routes to.
 var notifyPrefsCmd = &cobra.Command{
 	Use:   "prefs",
-	Short: "Get or set your server-side notification preference matrix (approvals, escalations, …)",
+	Short: "Get or set your server-side notification preference matrix",
 	Long: `View and edit YOUR OWN category x channel notification preference matrix.
 
 A cell is 'off' (default — never delivered) or 'immediate' (delivered as
 soon as the event happens; digest batching windows are a v2 feature, not
-built here). Categories: approvals, escalations, runs.failed,
-runs.completed, chat.replies, security, budget, system, memory.
+built here).
+
+` + categoryHelp() + `
 
 The special category "*" mutes a channel entirely, overriding every other
 cell for that channel.
@@ -116,7 +117,8 @@ var notifyPrefsSetCmd = &cobra.Command{
 }
 
 func init() {
-	notifyPrefsSetCmd.Flags().String("category", "", `Category (approvals, escalations, runs.failed, runs.completed, chat.replies, security, budget, system, memory, or "*" to mute the channel)`)
+	notifyPrefsSetCmd.Flags().String("category", "",
+		`Category (see 'crewship notify prefs --help' for the list, or "*" to mute the channel)`)
 	notifyPrefsSetCmd.Flags().String("channel", "", "Channel id (see 'crewship notifychannel list')")
 	notifyPrefsSetCmd.Flags().String("state", "", "off | immediate")
 

@@ -319,7 +319,7 @@ func TestNotifyChannelHandler_PatchCategories(t *testing.T) {
 	}
 	_ = json.Unmarshal(rr.Body.Bytes(), &created)
 
-	patchBody, _ := json.Marshal(map[string]any{"categories": []string{"security", "budget"}})
+	patchBody, _ := json.Marshal(map[string]any{"categories": []string{"security", "agents.budget"}})
 	req := withWorkspaceUser(httptest.NewRequest("PATCH", "/api/v1/notification-channels/"+created.ID, strings.NewReader(string(patchBody))), "u1", "ws1", "ADMIN")
 	req.SetPathValue("id", created.ID)
 	prr := httptest.NewRecorder()

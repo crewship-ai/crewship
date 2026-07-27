@@ -92,17 +92,17 @@ func TestRouter_Route(t *testing.T) {
 	cases := []setup{
 		{
 			name:     "immediate pref delivers",
-			category: notify.CategoryApprovals,
+			category: notify.CategoryAgentsApproval,
 			item: func(chID string) inbox.Item {
 				return inbox.Item{WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-1", TargetUserID: "u_member", Title: "Approve"}
 			},
-			pref:       &PrefCell{Category: notify.CategoryApprovals, State: "immediate"},
+			pref:       &PrefCell{Category: notify.CategoryAgentsApproval, State: "immediate"},
 			wantPosts:  1,
 			wantStatus: StatusSent,
 		},
 		{
 			name:     "default off never delivers",
-			category: notify.CategoryApprovals,
+			category: notify.CategoryAgentsApproval,
 			item: func(chID string) inbox.Item {
 				return inbox.Item{WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-2", TargetUserID: "u_member", Title: "Approve"}
 			},
@@ -111,12 +111,12 @@ func TestRouter_Route(t *testing.T) {
 		},
 		{
 			name:     "admin allowlist excludes category",
-			category: notify.CategoryApprovals,
+			category: notify.CategoryAgentsApproval,
 			item: func(chID string) inbox.Item {
 				return inbox.Item{WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-3", TargetUserID: "u_member", Title: "Approve"}
 			},
-			pref:       &PrefCell{Category: notify.CategoryApprovals, State: "immediate"},
-			channelCat: []string{notify.CategoryBudget},
+			pref:       &PrefCell{Category: notify.CategoryAgentsApproval, State: "immediate"},
+			channelCat: []string{notify.CategoryAgentsBudget},
 			wantPosts:  0,
 			wantStatus: StatusDroppedPref,
 		},
@@ -133,11 +133,11 @@ func TestRouter_Route(t *testing.T) {
 		},
 		{
 			name:     "muted channel drops",
-			category: notify.CategoryBudget,
+			category: notify.CategoryAgentsBudget,
 			item: func(chID string) inbox.Item {
 				return inbox.Item{WorkspaceID: "ws1", Kind: "failed_run", SourceID: "run-1", TargetUserID: "u_member", Title: "x"}
 			},
-			pref:       &PrefCell{Category: notify.CategoryBudget, State: "immediate"},
+			pref:       &PrefCell{Category: notify.CategoryAgentsBudget, State: "immediate"},
 			wantPosts:  0,
 			wantStatus: StatusDroppedPref,
 		},
@@ -213,7 +213,7 @@ func TestRouter_Route_ApprovalsBypassRateGate(t *testing.T) {
 	ch := seedWebhookChannel(t, db, srv.URL)
 	prefs := NewPrefStore(db)
 	if err := prefs.Set(context.Background(), "ws1", "u_member",
-		[]PrefCell{{Category: notify.CategoryApprovals, ChannelID: ch.ID, State: "immediate"}}); err != nil {
+		[]PrefCell{{Category: notify.CategoryAgentsApproval, ChannelID: ch.ID, State: "immediate"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -221,7 +221,7 @@ func TestRouter_Route_ApprovalsBypassRateGate(t *testing.T) {
 	limiter := NewRateLimiter(0, 0)
 	r := newTestRouter(db, nil, limiter)
 
-	r.route(context.Background(), notify.CategoryApprovals, inbox.Item{
+	r.route(context.Background(), notify.CategoryAgentsApproval, inbox.Item{
 		WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-approve-1", TargetUserID: "u_member", Title: "Approve",
 	})
 
@@ -236,14 +236,14 @@ func TestRouter_Route_NonApprovalRespectsRateGate(t *testing.T) {
 	ch := seedWebhookChannel(t, db, srv.URL)
 	prefs := NewPrefStore(db)
 	if err := prefs.Set(context.Background(), "ws1", "u_member",
-		[]PrefCell{{Category: notify.CategoryBudget, ChannelID: ch.ID, State: "immediate"}}); err != nil {
+		[]PrefCell{{Category: notify.CategoryAgentsBudget, ChannelID: ch.ID, State: "immediate"}}); err != nil {
 		t.Fatal(err)
 	}
 
 	limiter := NewRateLimiter(0, 0) // instantly exhausted
 	r := newTestRouter(db, nil, limiter)
 
-	r.route(context.Background(), notify.CategoryBudget, inbox.Item{
+	r.route(context.Background(), notify.CategoryAgentsBudget, inbox.Item{
 		WorkspaceID: "ws1", Kind: "failed_run", SourceID: "run-rate-1", TargetUserID: "u_member", Title: "x",
 	})
 
@@ -311,12 +311,12 @@ func TestRouter_Route_TargetRoleFansOutToEveryMember(t *testing.T) {
 	// Only u_manager (role MANAGER) opts in; u_owner (role OWNER) does not
 	// share this channel's category preference.
 	if err := prefs.Set(context.Background(), "ws1", "u_manager",
-		[]PrefCell{{Category: notify.CategoryEscalations, ChannelID: ch.ID, State: "immediate"}}); err != nil {
+		[]PrefCell{{Category: notify.CategoryAgentsEscalation, ChannelID: ch.ID, State: "immediate"}}); err != nil {
 		t.Fatal(err)
 	}
 	r := newTestRouter(db, nil, nil)
 
-	r.route(context.Background(), notify.CategoryEscalations, inbox.Item{
+	r.route(context.Background(), notify.CategoryAgentsEscalation, inbox.Item{
 		WorkspaceID: "ws1", Kind: "escalation", SourceID: "esc-role-1", TargetRole: "MANAGER", Title: "Needs review",
 	})
 

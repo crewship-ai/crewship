@@ -1874,6 +1874,20 @@ END;
 	// See migrate_consts_v167_journal_append_only_fks.go.
 	{version: 167, name: "journal_append_only_fks", fnNoTx: migrationJournalAppendOnlyFKs,
 		restoreBackfill: restoreBackfillRepairJournalMissionIDs},
+	// Widen inbox_items.kind to admit 'schedule_circuit_breaker_tripped'.
+	// The #1405 circuit-breaker alert wrote that value, no migration ever
+	// admitted it, and inbox.Insert swallows its error into a log line — so
+	// "your routine was auto-disabled" reached nobody. Unlike v167 this runs
+	// INSIDE the wrapper transaction: nothing references inbox_items (verified
+	// against the migrated schema), so the rebuild needs no foreign_keys=OFF.
+	// See migrate_consts_v168_inbox_kinds.go.
+	{version: 168, name: "inbox_kinds", sql: migrationInboxKinds},
+	// Notification category taxonomy v2: widen user_notification_prefs.category
+	// to the new vocabulary and rewrite stored preference cells + per-channel
+	// allowlists onto it. The old 9-category set had 4 categories nothing could
+	// ever produce. Rewrite, never drop — an opted-in user stays opted in.
+	// See migrate_consts_v169_notify_taxonomy.go.
+	{version: 169, name: "notify_taxonomy", fn: migrationNotifyTaxonomy},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

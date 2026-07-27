@@ -453,7 +453,7 @@ func (e *MissionEngine) fireIssueReviewInboxNotification(ctx context.Context, ms
 	}
 	inbox.Insert(ctx, e.db, e.logger, inbox.Item{
 		WorkspaceID: ms.WorkspaceID,
-		Kind:        "message",
+		Kind:        inbox.KindMessage,
 		SourceID:    "issue_review_" + ms.ID,
 		TargetRole:  "MANAGER",
 		Title:       title,

@@ -17,21 +17,57 @@ Both ride the same channel type (`notification_channels`) and the same low-level
 Workspace-scoped channel writes require **ADMIN/OWNER**. A personal channel (`--personal`) is self-service — any member may add their own. A signing secret / shoutrrr service URL is shown **once** at creation — store it then; it can never be read back.
 </Note>
 
-## The 9 categories
+## Categories
+
+Categories are grouped so the matrix stays readable. Every one of them has a real event behind it — a category you can switch on always delivers something.
+
+### Routines
 
 | Category | Fires on | Bypasses the rate gate? |
 | --- | --- | --- |
-| `approvals` | A waitpoint needs a decision | Yes — never silently dropped |
-| `escalations` | An escalation needs review | Yes — never silently dropped |
-| `runs.failed` | A routine run fails | No |
-| `runs.completed` | A routine run completes | No |
-| `chat.replies` | An agent replies and you're not watching live | No |
-| `security` | Reserved for future emit points | No |
-| `budget` | Reserved for future emit points | No |
-| `system` | Reserved for future emit points | No |
-| `memory` | A memory-consolidation event | No |
+| `routines.completed` | A routine run finishes successfully | No |
+| `routines.failed` | A routine run ends in an error | No |
+| `routines.skipped` | A scheduled run was skipped by its catch-up policy | No |
+| `routines.missed` | A schedule missed occurrences, or was auto-disabled after repeated failures | No |
 
-`approvals` and `escalations` always deliver immediately and skip the anti-storm token bucket entirely — a blocking HITL item must never be dropped as "too many notifications." `security`/`budget`/`system` are selectable in the matrix today even though nothing emits them yet (the category vocabulary is fixed so a future emit point needs no schema change).
+### Issues
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `issues.created` | A new issue is opened | No |
+| `issues.state` | An issue changes status, including blocked/unblocked | No |
+| `issues.assigned` | An issue is assigned | No |
+| `issues.comment` | Someone comments on an issue | No |
+
+### Agents
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `agents.approval` | A waitpoint needs a decision | Yes — never silently dropped |
+| `agents.escalation` | An escalation needs review | Yes — never silently dropped |
+| `agents.error` | An agent container fails to start or crashes | No |
+| `agents.budget` | A spend limit is reached or exceeded | No |
+
+### System
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `system.health` | The instance itself reports a problem | No |
+| `system.migration` | A schema migration runs | No |
+| `security` | A guardrail fires, or an egress attempt is blocked | No |
+
+### Chat & memory
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `chat.replies` | An agent replies and you're not watching live | No |
+| `memory` | A memory-consolidation event needs review | No |
+
+`agents.approval` and `agents.escalation` always deliver immediately and skip the anti-storm token bucket entirely — a blocking HITL item must never be dropped as "too many notifications."
+
+<Note>
+**Renamed in taxonomy v2.** The original vocabulary used `approvals`, `escalations`, `runs.failed`, `runs.completed`, `budget` and `system`. Four of the nine categories it defined had no event behind them at all — they were switchable rows that could never deliver. Your existing preferences and per-channel allowlists were migrated automatically: an opted-in cell stays opted in, a muted channel stays muted, and `system` was split across both `system.health` and `system.migration` rather than dropping half of what it meant. Only the delivery **log** keeps the old names, because rewriting history would misreport what was actually sent.
+</Note>
 
 <Note>
 Every cell's state is `off` (default) or `immediate`. A `digest` value is legal in the schema (so a future digest-batching window needs no migration) but nothing writes it yet — that's v2 scope.

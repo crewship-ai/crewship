@@ -137,9 +137,10 @@ By default a channel is WORKSPACE-scoped (admin-managed, requires ADMIN/OWNER).
 Pass --personal to add your OWN channel instead — any member may add a personal
 channel; it is only usable in YOUR preference matrix (see 'crewship notify prefs').
 
---categories restricts a WORKSPACE channel to a subset of the 9 notification
-categories (approvals, escalations, runs.failed, runs.completed, chat.replies,
-security, budget, system, memory). Omit for "every category".`,
+--categories restricts a WORKSPACE channel to a subset of the notification
+categories. Omit for "every category".
+
+` + categoryHelp(),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
