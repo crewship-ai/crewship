@@ -2,14 +2,29 @@
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { Bell, Clock, KeyRound, Link2, Plug, Plus, RefreshCw, Wrench } from "lucide-react"
+import {
+  Bell,
+  Blocks,
+  CircleHelp,
+  Clock,
+  KeyRound,
+  Layers,
+  Link2,
+  Plug,
+  Plus,
+  RefreshCw,
+  SlidersHorizontal,
+  Users,
+  Wrench,
+  Zap,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import { apiFetch } from "@/lib/api-fetch"
+import { invalidate } from "@/lib/stale-cache"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useSession } from "@/hooks/use-auth"
 import { useNotificationChannels } from "@/hooks/use-notification-channels"
@@ -18,7 +33,7 @@ import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { NotificationPrefsSection } from "@/components/features/settings/sections/notification-prefs-section"
 import { ComposioIntegrations, type ComposioStatus } from "./composio-integrations"
-import type { Inventory, TabKey } from "./composio/types"
+import type { TabKey } from "./composio/types"
 
 import {
   applyFilters,
@@ -30,8 +45,9 @@ import {
   type ConnectionFilters,
   type ConnectionRow,
 } from "./connection-model"
-import { IntegrationsExplorer } from "./integrations-explorer"
-import { McpExplorer, mcpSectionMeta, EMPTY_MCP_FILTERS, type McpFilters } from "./mcp-explorer"
+import { IntegrationsExplorer, type ExplorerSection } from "./explorer"
+import { mcpFacets, notificationFacets } from "./facets"
+import { EMPTY_MCP_FILTERS, type McpFilters } from "./mcp-filters"
 import { ConnectionsView } from "./views/connections-view"
 import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
 import { DeliveriesView } from "./views/deliveries-view"
@@ -39,39 +55,83 @@ import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
 import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dialog"
 
 /**
- * /integrations — one page, the same chrome as Routines.
+ * /integrations — two tabs, one shape.
  *
- * This page used to be the only one in the app not built on the canonical
- * SubBar + sidebar-kit; eight others are. That is why it read as a different
- * program: no tabs, no facets, no search, and a creation form permanently
- * occupying the top of the screen above the list of what you already had.
+ * The page settled at two top-level tabs because there are exactly two kinds
+ * of thing here: places Crewship reaches a HUMAN, and things an AGENT can act
+ * through. Everything else people used to reach for a tab for — the preference
+ * matrix, the delivery log, Composio's six views — is a SECTION inside its
+ * tab, in the left panel, with the same toolbar and the same Filter popover on
+ * both sides.
  *
- * The four tabs are the four questions a person actually arrives with:
- *   Connections   — what is hooked up, and is it working?
- *   Catalog       — what COULD I hook up?
- *   Notifications — which categories reach me, on which connection?
- *   Deliveries    — why didn't that notification arrive?
+ * That symmetry is the point. "Left bars everywhere" was already true; "the
+ * same logic in every left bar" was not, and a page with five top tabs and two
+ * differently-behaving rails is not simpler for having more entry points.
  */
 
-// Notifications and managed tools are two different KINDS of integration —
-// one is where Crewship reaches a human, the other is what an agent may call —
-// so they get their own tabs rather than being interleaved. What they share is
-// this page: "what is this instance wired into" has one answer, not two
-// screens that drift apart.
 const TABS = [
-  { id: "connections" as const, label: "Connections", icon: Link2 },
-  { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
   { id: "notifications" as const, label: "Notifications", icon: Bell },
-  { id: "deliveries" as const, label: "Deliveries", icon: Clock },
+  { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
 ] as const
 
-// Catalog is deliberately NOT a tab. Browsing what you could connect is a
-// question you ask while adding something, not a place you work in, and as a
-// tab it sat at the same weight as the four that are. It is the first step of
-// "Add integration" instead — which also lets that flow ask the question the
-// old grid could not: WHICH KIND of integration, notifications or tools.
+/** Sections inside the Notifications tab. */
+type NotifySection = "connections" | "preferences" | "deliveries"
+
+const NOTIFY_SECTIONS: ExplorerSection<NotifySection>[] = [
+  {
+    key: "connections",
+    label: "Connections",
+    icon: Link2,
+    hint: "What is hooked up, and is it working",
+  },
+  {
+    key: "preferences",
+    label: "My preferences",
+    icon: SlidersHorizontal,
+    hint: "Which categories reach you, on which connection",
+  },
+  {
+    key: "deliveries",
+    label: "Deliveries",
+    icon: Clock,
+    hint: "Why a notification did or did not arrive",
+  },
+]
+
+/** Sections inside the Tools (MCP) tab — Composio's six views. */
+const MCP_SECTIONS: Omit<ExplorerSection<TabKey>, "count">[] = [
+  { key: "catalog", label: "App catalog", icon: Blocks, hint: "Every app Composio can connect" },
+  {
+    key: "accounts",
+    label: "Connected accounts",
+    icon: Users,
+    hint: "Which apps are connected, and by whom",
+  },
+  {
+    key: "agents",
+    label: "Agent access",
+    icon: Layers,
+    hint: "Which agents may call which toolkits",
+  },
+  { key: "tools", label: "Tools", icon: Wrench, hint: "Individual callable tools, per toolkit" },
+  { key: "triggers", label: "Triggers", icon: Zap, hint: "Fire a routine on an app event" },
+  {
+    key: "mcp",
+    label: "MCP endpoints",
+    icon: CircleHelp,
+    hint: "One endpoint per agent that has access",
+  },
+]
 
 type IntegrationsTab = (typeof TABS)[number]["id"]
+
+/**
+ * What the Tools panel shows before a key is saved. Offering the six real
+ * sections would be six dead ends; one row that says what to do is not.
+ */
+const SETUP_ONLY_SECTION: ExplorerSection<TabKey>[] = [
+  { key: "catalog", label: "Setup", icon: KeyRound, hint: "Add a Composio API key" },
+]
 
 /** How far back the "Sent · 24h" column and the status column look. */
 const DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -90,7 +150,8 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   // their destinations redacted and their actions off.
   const [includeEveryone, setIncludeEveryone] = React.useState(false)
 
-  const [tab, setTab] = React.useState<IntegrationsTab>("connections")
+  const [tab, setTab] = React.useState<IntegrationsTab>("notifications")
+  const [notifySection, setNotifySection] = React.useState<NotifySection>("connections")
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<ConnectionFilters>(EMPTY_FILTERS)
   const [collapsed, setCollapsed] = React.useState(false)
@@ -142,8 +203,6 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     forbidden: deliveriesForbidden,
     refresh: refreshDeliveries,
   } = useNotificationDeliveries(workspaceId, { limit: DELIVERY_LIMIT })
-
-  const composio = useComposioInventory(workspaceId)
 
   const providerCategoryOf = React.useCallback(
     (name: string) => providers.find((p) => p.provider === name)?.category,
@@ -202,41 +261,13 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       }
     })
 
-    // Composio connected accounts are connections too — the same question
-    // ("is GitHub hooked up?") should not have two places to look. Their
-    // lifecycle stays in the Composio surface, so the row is read-only here.
-    const toolRows: ConnectionRow[] = (composio.inventory?.users ?? []).flatMap((u) =>
-      u.connected_accounts.map((acct) => ({
-        id: acct.id,
-        kind: "tools" as const,
-        name: acct.toolkit.slug,
-        detail: `composio · ${acct.user_id}`,
-        provider: "composio",
-        providerLabel: "Composio",
-        scope: "workspace" as const,
-        enabled: acct.status.toUpperCase() === "ACTIVE",
-        categories: [],
-        status: acct.status.toUpperCase() === "ACTIVE" ? ("unknown" as const) : ("disabled" as const),
-        sent24h: null,
-        lastDelivery: null,
-        source: "composio" as const,
-        // Composio owns an account's lifecycle; editing it from here would be
-        // a second, weaker copy of a flow that already exists.
-        readOnly: true,
-        account: acct,
-      })),
-    )
-
-    return [...channelRows, ...toolRows]
-  }, [
-    channels,
-    deliveries,
-    composio.inventory,
-    canSeeDeliveries,
-    currentUserId,
-    providerCategoryOf,
-    providerLabelOf,
-  ])
+    // Composio accounts are deliberately NOT in this list any more. They were,
+    // and it was the single most confusing thing on the page: a Discord webhook
+    // and a Gmail tool account sat in one table under one word, with different
+    // owners, different lifecycles and different meanings of "connected". They
+    // live under Tools, where their own six views already describe them.
+    return channelRows
+  }, [channels, deliveries, canSeeDeliveries, currentUserId, providerCategoryOf, providerLabelOf])
 
   const visibleRows = React.useMemo(
     () => applyFilters(rows, filters).filter((r) => rowMatches(r, search)),
@@ -267,8 +298,11 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     void refreshChannels()
     void refreshProviders()
     void refreshDeliveries()
-    void composio.refresh()
-  }, [refreshChannels, refreshProviders, refreshDeliveries, composio])
+    // Composio is only mounted on its own tab, so there is nothing to call —
+    // dropping its cache is what makes the next visit fetch rather than paint
+    // what this button was pressed to replace.
+    if (workspaceId) invalidate(`composio:${workspaceId}:`)
+  }, [refreshChannels, refreshProviders, refreshDeliveries, workspaceId])
 
   const handleToggle = async (row: ConnectionRow, next: boolean) => {
     try {
@@ -331,8 +365,45 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     [providerCategories],
   )
 
-  const searchPlaceholder =
-    tab === "deliveries" ? "Search deliveries…" : "Search connections…"
+  // ── explorer wiring ─────────────────────────────────────────────────────
+  const notifySections: ExplorerSection<NotifySection>[] = React.useMemo(
+    () =>
+      NOTIFY_SECTIONS.map((sec) => ({
+        ...sec,
+        count:
+          sec.key === "connections"
+            ? rows.length || undefined
+            : sec.key === "deliveries"
+              ? canSeeDeliveries
+                ? deliveries.length || undefined
+                : undefined
+              : undefined,
+      })),
+    [rows.length, deliveries.length, canSeeDeliveries],
+  )
+
+  const mcpSections: ExplorerSection<TabKey>[] = React.useMemo(() => {
+    const c = composioStatus.counts
+    const counts: Partial<Record<TabKey, React.ReactNode>> = {
+      catalog: c.apps || undefined,
+      accounts: c.accounts || undefined,
+      agents: c.agentsTotal ? `${c.agentsBound}/${c.agentsTotal}` : undefined,
+      mcp: c.endpoints || undefined,
+    }
+    return MCP_SECTIONS.map((sec) => ({ ...sec, count: counts[sec.key] }))
+  }, [composioStatus.counts])
+
+  const notifyFacetGroups = React.useMemo(
+    () => notificationFacets(rows, filters, setFilters),
+    [rows, filters],
+  )
+  const mcpFacetGroups = React.useMemo(
+    () => mcpFacets(composioStatus, mcpFilters, setMcpFilters),
+    [composioStatus, mcpFilters],
+  )
+
+  const notifySearchPlaceholder =
+    notifySection === "deliveries" ? "Search deliveries…" : "Search connections…"
 
   const failing = rows.filter((r) => r.status === "failing").length
   // The number the Add-integration wizard will offer — see catalogSize.
@@ -369,16 +440,14 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           label: t.label,
           icon: t.icon,
           badge:
-            t.id === "connections"
+            t.id === "notifications"
               ? rows.length || undefined
-              : t.id === "tools"
-                ? toolCount || undefined
-                : undefined,
+              : toolCount || undefined,
         }))}
         activeTab={tab}
         onTabChange={setTab}
         tools={
-          canManageWorkspace && tab === "connections" ? (
+          canManageWorkspace && tab === "notifications" && notifySection === "connections" ? (
             <label className="flex cursor-pointer items-center gap-1.5 pr-1 text-[11px] text-muted-foreground">
               <Switch
                 size="sm"
@@ -430,29 +499,53 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
             </div>
           ) : tab === "tools" ? (
-            /* The notification facets (Kind / Status / Scope / Service) mean
-               nothing for managed tools, so the panel swaps rather than
-               showing filters that filter nothing. */
-            <McpExplorer
-              status={composioStatus}
-              section={mcpSection}
-              onSectionChange={setMcpSection}
+            /* Same component, different inputs. The facets differ because
+               Kind/Status/Scope/Service filter nothing here — but the toolbar,
+               the Filter popover and the section rows are identical. */
+            <IntegrationsExplorer<TabKey>
+              sectionsLabel="Tools (MCP)"
+              sections={composioStatus.configured ? mcpSections : SETUP_ONLY_SECTION}
+              section={composioStatus.configured ? mcpSection : "catalog"}
+              onSectionChange={(next) =>
+                composioStatus.configured ? setMcpSection(next) : setApiKeyOpen(true)
+              }
               search={search}
               onSearchChange={setSearch}
-              filters={mcpFilters}
-              onFiltersChange={setMcpFilters}
+              searchPlaceholder="Search apps, tools, agents…"
+              searchAriaLabel="Search apps, tools and agents"
+              facets={composioStatus.configured ? mcpFacetGroups : []}
+              onClearFilters={() => setMcpFilters(EMPTY_MCP_FILTERS)}
               onToggleCollapse={() => setCollapsed(true)}
-              onAddApiKey={() => setApiKeyOpen(true)}
+              footer={
+                !composioStatus.configured && !composioStatus.loading ? (
+                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                    The sections appear once an API key is saved.
+                  </p>
+                ) : undefined
+              }
             />
           ) : (
-            <IntegrationsExplorer
-              rows={rows}
+            <IntegrationsExplorer<NotifySection>
+              sectionsLabel="Notifications"
+              sections={notifySections}
+              section={notifySection}
+              onSectionChange={setNotifySection}
               search={search}
               onSearchChange={setSearch}
-              filters={filters}
-              onFiltersChange={setFilters}
+              searchPlaceholder={notifySearchPlaceholder}
+              searchAriaLabel="Search connections and deliveries"
+              facets={notifyFacetGroups}
+              onClearFilters={() => setFilters(EMPTY_FILTERS)}
               onToggleCollapse={() => setCollapsed(true)}
-              searchPlaceholder={searchPlaceholder}
+              footer={
+                rows.length === 0 ? (
+                  <p className="px-3 py-4 text-[11px] leading-relaxed text-muted-foreground">
+                    Nothing connected yet. Use{" "}
+                    <span className="text-foreground/70">Add integration</span> to see every service
+                    this instance can reach.
+                  </p>
+                ) : undefined
+              }
             />
           )}
         </aside>
@@ -460,13 +553,13 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         <div className="relative flex-1 overflow-y-auto bg-background">
           <AnimatePresence mode="wait">
             <motion.div
-              key={tab}
+              key={`${tab}:${tab === "tools" ? mcpSection : notifySection}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
             >
-              {tab === "connections" && (
+              {tab === "notifications" && notifySection === "connections" && (
                 <ConnectionsView
                   rows={visibleRows}
                   totalRows={rows.length}
@@ -489,10 +582,10 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                     <>
                       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <h2 className="text-sm font-medium text-foreground/90">
-                          {mcpSectionMeta(mcpSection, composioStatus).title}
+                          {MCP_SECTIONS.find((x) => x.key === mcpSection)?.label ?? "Tools"}
                         </h2>
                         <span className="text-xs text-muted-foreground">
-                          {mcpSectionMeta(mcpSection, composioStatus).subtitle}
+                          {MCP_SECTIONS.find((x) => x.key === mcpSection)?.hint}
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -533,13 +626,13 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                 </div>
               )}
 
-              {tab === "notifications" && (
+              {tab === "notifications" && notifySection === "preferences" && (
                 <div className="p-4 md:p-6">
                   <NotificationPrefsSection workspaceId={workspaceId} />
                 </div>
               )}
 
-              {tab === "deliveries" && (
+              {tab === "notifications" && notifySection === "deliveries" && (
                 <DeliveriesView
                   deliveries={deliveries}
                   rows={rows}
@@ -576,42 +669,6 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
       />
     </div>
   )
-}
-
-/**
- * Composio's connected accounts, read-only.
- *
- * Kept to the one endpoint the Connections table needs. The full management
- * surface (agent access, tools, triggers, MCP endpoints) stays where it is;
- * duplicating it here would recreate the two-places-for-one-thing problem
- * this page is fixing.
- */
-function useComposioInventory(workspaceId: string | null) {
-  const [inventory, setInventory] = React.useState<Inventory | null>(null)
-
-  const refresh = React.useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const r = await apiFetch(
-        `/api/v1/integrations/composio/inventory?workspace_id=${encodeURIComponent(workspaceId)}`,
-      )
-      if (!r.ok) {
-        setInventory(null)
-        return
-      }
-      setInventory((await r.json()) as Inventory)
-    } catch {
-      // Composio being unreachable must not take the notification channels
-      // down with it — the tools rows simply do not appear.
-      setInventory(null)
-    }
-  }, [workspaceId])
-
-  React.useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  return { inventory, refresh }
 }
 
 function titleCase(s: string): string {

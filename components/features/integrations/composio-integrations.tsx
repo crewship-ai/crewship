@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { invalidate, readThrough } from "@/lib/stale-cache"
 
 import type {
   Inventory,
@@ -120,17 +121,30 @@ export function ComposioIntegrations({
   const [error, setError] = React.useState<string | null>(null)
 
   const load = React.useCallback(async (wid: string) => {
-    setLoading(true)
-    setError(null)
-    try {
+    // Serve whatever is cached first. Leaving and re-entering this tab used to
+    // pay the full round trip again and show skeletons for it, even when the
+    // data was seconds old — see lib/stale-cache.ts.
+    const { value, fresh, fromCache } = readThrough(`composio:${wid}:inventory`, async () => {
       const r = await apiFetch(`/api/v1/integrations/composio/inventory?workspace_id=${wid}`)
       if (!r.ok) throw new Error(`Request failed (${r.status})`)
-      const j = (await r.json()) as Inventory
+      return (await r.json()) as Inventory
+    })
+    if (value && wsRef.current === wid) {
+      setData(value)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+    setError(null)
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
       setData(j)
     } catch (e) {
       if (wsRef.current !== wid) return
-      setError(e instanceof Error ? e.message : "Failed to load inventory")
+      // A background refresh that fails while cached data is on screen is not
+      // worth an error banner over data the user can still see.
+      if (!fromCache) setError(e instanceof Error ? e.message : "Failed to load inventory")
     } finally {
       if (wsRef.current === wid) setLoading(false)
     }
@@ -150,19 +164,31 @@ export function ComposioIntegrations({
   const [tkLoading, setTkLoading] = React.useState(true)
 
   const loadToolkits = React.useCallback(async (wid: string, q: string) => {
-    setTkLoading(true)
-    try {
+    // Cached per query, so going back to the unfiltered catalog after a search
+    // is instant — this is the slowest of the four calls, since it reaches
+    // Composio's own API.
+    const { value, fresh } = readThrough(`composio:${wid}:toolkits:${q}`, async () => {
       const params = new URLSearchParams({ workspace_id: wid })
       if (q) params.set("search", q)
       const r = await apiFetch(`/api/v1/integrations/composio/toolkits?${params}`)
       if (!r.ok) throw new Error(String(r.status))
-      const j = (await r.json()) as ToolkitsResp
+      return (await r.json()) as ToolkitsResp
+    })
+    if (value && wsRef.current === wid) {
+      setToolkits(value.toolkits ?? [])
+      setTotal(value.total ?? 0)
+      setTkLoading(false)
+    } else {
+      setTkLoading(true)
+    }
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
       setToolkits(j.toolkits ?? [])
       setTotal(j.total ?? 0)
     } catch {
       if (wsRef.current !== wid) return
-      setToolkits([])
+      if (!value) setToolkits([])
     } finally {
       if (wsRef.current === wid) setTkLoading(false)
     }
@@ -181,15 +207,16 @@ export function ComposioIntegrations({
   const [agentsLoading, setAgentsLoading] = React.useState(true)
 
   const loadAgents = React.useCallback(async (wid: string) => {
-    setAgentsLoading(true)
-    try {
+    // The priciest of the four: one call for the agent list, then one per
+    // agent for its bindings. Cached as a unit — re-running an N+1 fan-out on
+    // every tab entry is what made this surface feel slow.
+    const { value, fresh } = readThrough(`composio:${wid}:agents`, async () => {
       const r = await apiFetch(`/api/v1/agents?workspace_id=${wid}`)
       if (!r.ok) throw new Error(String(r.status))
       const list = (await r.json()) as AgentLite[]
-      if (wsRef.current !== wid) return // workspace switched mid-flight
-      setAgents(list)
-      // Fetch each agent's Composio binding in parallel. A failed lookup for one
-      // agent shouldn't blank the whole table — degrade that row to "no access".
+      // Fetch each agent's Composio binding in parallel. A failed lookup for
+      // one agent shouldn't blank the whole table — degrade that row to
+      // "no access".
       const entries = await Promise.all(
         list.map(async (a): Promise<[string, AgentBindingsMap[string]]> => {
           try {
@@ -204,12 +231,27 @@ export function ComposioIntegrations({
           }
         }),
       )
+      return { agents: list, bindings: Object.fromEntries(entries) as AgentBindingsMap }
+    })
+
+    if (value && wsRef.current === wid) {
+      setAgents(value.agents)
+      setBindings(value.bindings)
+      setAgentsLoading(false)
+    } else {
+      setAgentsLoading(true)
+    }
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
-      setBindings(Object.fromEntries(entries))
+      setAgents(j.agents)
+      setBindings(j.bindings)
     } catch {
       if (wsRef.current !== wid) return
-      setAgents([])
-      setBindings({})
+      if (!value) {
+        setAgents([])
+        setBindings({})
+      }
     } finally {
       if (wsRef.current === wid) setAgentsLoading(false)
     }
@@ -244,10 +286,14 @@ export function ComposioIntegrations({
   } | null>(null)
 
   const loadSettings = React.useCallback(async (wid: string) => {
-    try {
+    const { value, fresh } = readThrough(`composio:${wid}:settings`, async () => {
       const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
-      if (!r.ok) return
-      const j = (await r.json()) as ComposioSettings
+      if (!r.ok) throw new Error(String(r.status))
+      return (await r.json()) as ComposioSettings
+    })
+    if (value && wsRef.current === wid) setSettings(value)
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
       setSettings(j)
     } catch {
@@ -261,6 +307,9 @@ export function ComposioIntegrations({
 
   const refreshAll = React.useCallback(
     (wid: string) => {
+      // Refresh means refresh: drop this workspace's cache first, or the
+      // button would re-render the same values it was pressed to replace.
+      invalidate(`composio:${wid}:`)
       void load(wid)
       void loadToolkits(wid, search)
       void loadSettings(wid)

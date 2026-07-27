@@ -6,16 +6,18 @@ icon: "bell"
 
 ## Where this lives
 
-**Integrations** (`/integrations`) — one page, four tabs, each answering a question you actually arrive with:
+**Integrations** (`/integrations`) — two tabs, because there are exactly two kinds of thing here:
 
-| Tab | Answers |
-| --- | --- |
-| **Connections** | What is hooked up, and is it working? |
-| **Tools (MCP)** | Which managed tool accounts can agents call? |
-| **Notifications** | Which categories reach me, on which connection? |
-| **Deliveries** | Why didn't that notification arrive? |
+| Tab | Is | Sections in the left panel |
+| --- | --- | --- |
+| **Notifications** | Where Crewship reaches a *human* | Connections · My preferences · Deliveries |
+| **Tools (MCP)** | What an *agent* can act through | App catalog · Connected accounts · Agent access · Tools · Triggers · MCP endpoints |
 
-Notifications and managed tools are two different kinds of integration — one is where Crewship reaches a *human*, the other is what an *agent* may call — so they keep separate tabs rather than being interleaved. What they share is the page: "what is this instance wired into" has one answer, not two screens that drift apart. Connected tool accounts still appear in the **Connections** list under the `tools` kind, read-only, because that list is the one place that question gets asked; their lifecycle stays on the Tools tab that owns it.
+Everything else is a **section inside a tab**, in the left panel — not another top-level tab. Both panels are the same component with different inputs: the same toolbar (search + **Filter**), the same popover, the same section rows, the same active-filter chips. A page with five top tabs and two differently-behaving rails is not simpler for having more entry points.
+
+The **Filter** popover is the one every faceted page in the app uses (`sidebar-kit`'s `SidebarFilterButton`, as on /issues and /routines). Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers a filter that comes back empty — and a facet never narrows its own counts to zero.
+
+Managed tool accounts are **not** in the Notifications connection list. They were, and it was the most confusing thing on the page: a Discord webhook and a Gmail tool account sat in one table under one word, with different owners, different lifecycles and different meanings of "connected".
 
 It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart. **Notifications** and **Deliveries** stay here rather than moving back: the preference matrix is a grid *over these connections*, and "why didn't it arrive" is a question about them — splitting either from the list it refers to is the same two-places-for-one-thing this page was built to undo.
 
@@ -27,8 +29,6 @@ There is no Catalog tab. Browsing what you *could* connect is a question you ask
 
 Picking Tools jumps straight to that tab's app catalog, or to the API-key dialog when no key is set yet: browsing a catalog you cannot connect from is a dead end.
 
-The sidebar's search and its **Kind / Status / Scope / Service** facets apply to the whole page. Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers you a filter that comes back empty.
-
 ### Finding a service you have not connected yet
 
 Search on **Connections** only searches what exists. When it comes back empty but a service matches, the empty state says how many and opens **Add integration** — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
@@ -39,7 +39,9 @@ Each service carries its own brand mark in its own colour: you recognise Slack b
 
 ### Tools (MCP)
 
-Composio's six views — app catalog, connected accounts, agent access, tools, triggers, MCP endpoints — are rows in the **left panel**, not a second tab strip inside the page's own. Vertical space is free, the counts fit, and a section sits next to the facets that narrow it (Toolkit, User). The page owns the heading, the KPI row and the actions; the **API key** button appears in the sub-bar only while this tab is open, the same rule the *Everyone's connections* toggle follows.
+Composio's six views are rows in the **left panel**, not a second tab strip inside the page's own. Its facets are Toolkit and User — Kind/Status/Scope/Service filter nothing here. The page owns the heading, the KPI row and the actions; the **API key** button appears in the sub-bar only while this tab is open, the same rule the *Everyone's connections* toggle follows.
+
+Its four reads — inventory, the app catalog, settings and every agent's bindings — are cached for 30 s with stale-while-revalidate (`lib/stale-cache.ts`). Leaving and re-entering the tab used to pay the full round trip again and show skeletons for it, including an N+1 fan-out over every agent. A cached surface now paints immediately and refreshes behind; **Refresh** drops the cache first, so it means refresh.
 
 The search box in the left panel drives this tab too — Composio's own three inner search boxes are suppressed while it is, so one list never has two inputs where only one works.
 
