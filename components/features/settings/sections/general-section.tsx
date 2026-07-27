@@ -19,6 +19,7 @@ import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
+import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow, SettingsDangerCard } from "../shared"
 
 interface GeneralSectionProps {
@@ -43,6 +44,10 @@ export function GeneralSection({
   // which made the card commit two different ways depending on which control
   // you touched.
   const form = useDirtyForm({ name: orgName, slug: orgSlug, language: preferredLanguage })
+  // PATCH /api/v1/workspaces/{id} is roleManage — ADMIN and up. Below that the
+  // card is information, not a form: rendering inputs (even disabled ones) only
+  // invites an edit the server answers with a 403.
+  const canEdit = isAdminTier(role)
   const [langOpen, setLangOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -108,6 +113,10 @@ export function GeneralSection({
 
   const draftLanguage = form.draft.language
   const selectedLang = draftLanguage ? LANGUAGES.find((l) => l.name === draftLanguage) : null
+  // Read-only path renders the saved value, not the draft — there is no control
+  // that could have moved it. Looked up only for the flag; an unrecognised
+  // language still prints its own name rather than vanishing.
+  const readOnlyLang = preferredLanguage ? LANGUAGES.find((l) => l.name === preferredLanguage) : null
 
   function pickLanguage(name: string | null) {
     form.set("language", name)
@@ -117,78 +126,114 @@ export function GeneralSection({
   return (
     <div className="space-y-5">
       {/* ── Identity ── */}
-      <SettingsCard title="Identity" description="Your workspace name, slug, and default agent language">
-        <SettingsRow label="Workspace name">
-          <Input
-            value={form.draft.name}
-            onChange={(e) => form.set("name", e.target.value)}
-            placeholder="My Company"
-            aria-label="Workspace name"
-            className="h-7 text-xs w-48"
-          />
-        </SettingsRow>
-        <SettingsRow label="Slug" description="Used in URLs and CLI commands">
-          <Input
-            value={form.draft.slug}
-            onChange={(e) => form.set("slug", e.target.value)}
-            placeholder="my-company"
-            aria-label="Slug"
-            className="h-7 text-xs w-48 font-mono"
-          />
-        </SettingsRow>
-        <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
-          <Popover open={langOpen} onOpenChange={setLangOpen}>
-            <PopoverTrigger asChild>
-              <button
-                className="inline-flex items-center justify-between w-48 h-7 px-2.5 rounded-md bg-background border border-border text-xs text-foreground hover:border-ring transition-colors disabled:opacity-50"
-                disabled={form.status === "saving"}
-              >
-                {selectedLang ? (
-                  <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
-                ) : (
-                  <span className="text-muted-foreground">Select language…</span>
-                )}
-                <ChevronsUpDown className="h-3 w-3 text-muted-foreground ml-2 shrink-0" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 p-0" align="end">
-              <Command filter={(value, search) => {
-                const lang = LANGUAGES.find((l) => l.name === value)
-                if (!lang) return 0
-                const s = search.toLowerCase()
-                return (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) ? 1 : 0
-              }}>
-                <CommandInput placeholder="Search language…" />
-                <CommandList>
-                  <CommandEmpty>No language found.</CommandEmpty>
-                  <CommandGroup>
-                    {draftLanguage && (
-                      <CommandItem value="__clear__" onSelect={() => pickLanguage(null)}>
-                        <X className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-muted-foreground text-xs">Clear</span>
-                      </CommandItem>
+      <SettingsCard
+        title="Identity"
+        description={
+          canEdit
+            ? "Your workspace name, slug, and default agent language"
+            // Stated once, in the description, in the same muted type as every
+            // other hint — a non-admin viewing their own workspace is normal,
+            // so it must not read like a permission error.
+            : "Your workspace name, slug, and default agent language. Only workspace admins can change these."
+        }
+      >
+        {!canEdit ? (
+          <>
+            <SettingsRow label="Workspace name">
+              <span className="text-xs text-foreground truncate">{orgName}</span>
+            </SettingsRow>
+            <SettingsRow label="Slug" description="Used in URLs and CLI commands">
+              <span className="text-xs font-mono text-foreground truncate">{orgSlug}</span>
+            </SettingsRow>
+            <SettingsRow
+              label="Agent language"
+              description="Agents will respond in this language"
+              border={false}
+            >
+              {preferredLanguage ? (
+                <span className="text-xs text-foreground truncate">
+                  {readOnlyLang ? `${readOnlyLang.flag} ` : ""}{preferredLanguage}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">Not set</span>
+              )}
+            </SettingsRow>
+          </>
+        ) : (
+          <>
+            <SettingsRow label="Workspace name">
+              <Input
+                value={form.draft.name}
+                onChange={(e) => form.set("name", e.target.value)}
+                placeholder="My Company"
+                aria-label="Workspace name"
+                className="h-7 text-xs w-48"
+              />
+            </SettingsRow>
+            <SettingsRow label="Slug" description="Used in URLs and CLI commands">
+              <Input
+                value={form.draft.slug}
+                onChange={(e) => form.set("slug", e.target.value)}
+                placeholder="my-company"
+                aria-label="Slug"
+                className="h-7 text-xs w-48 font-mono"
+              />
+            </SettingsRow>
+            <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
+              <Popover open={langOpen} onOpenChange={setLangOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className="inline-flex items-center justify-between w-48 h-7 px-2.5 rounded-md bg-background border border-border text-xs text-foreground hover:border-ring transition-colors disabled:opacity-50"
+                    disabled={form.status === "saving"}
+                  >
+                    {selectedLang ? (
+                      <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
+                    ) : (
+                      <span className="text-muted-foreground">Select language…</span>
                     )}
-                    {LANGUAGES.map((lang) => (
-                      <CommandItem key={lang.code} value={lang.name} onSelect={() => pickLanguage(lang.name)} className="text-xs">
-                        <span className="mr-2">{lang.flag}</span>
-                        <span>{lang.name}</span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">{lang.native}</span>
-                        {draftLanguage === lang.name && <Check className="ml-1 h-3 w-3 text-primary" />}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </SettingsRow>
-        <SaveFooter
-          dirty={form.isDirty}
-          status={form.status}
-          error={form.error}
-          onSave={handleSave}
-          onCancel={form.reset}
-        />
+                    <ChevronsUpDown className="h-3 w-3 text-muted-foreground ml-2 shrink-0" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="end">
+                  <Command filter={(value, search) => {
+                    const lang = LANGUAGES.find((l) => l.name === value)
+                    if (!lang) return 0
+                    const s = search.toLowerCase()
+                    return (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) ? 1 : 0
+                  }}>
+                    <CommandInput placeholder="Search language…" />
+                    <CommandList>
+                      <CommandEmpty>No language found.</CommandEmpty>
+                      <CommandGroup>
+                        {draftLanguage && (
+                          <CommandItem value="__clear__" onSelect={() => pickLanguage(null)}>
+                            <X className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-muted-foreground text-xs">Clear</span>
+                          </CommandItem>
+                        )}
+                        {LANGUAGES.map((lang) => (
+                          <CommandItem key={lang.code} value={lang.name} onSelect={() => pickLanguage(lang.name)} className="text-xs">
+                            <span className="mr-2">{lang.flag}</span>
+                            <span>{lang.name}</span>
+                            <span className="ml-auto text-[10px] text-muted-foreground">{lang.native}</span>
+                            {draftLanguage === lang.name && <Check className="ml-1 h-3 w-3 text-primary" />}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </SettingsRow>
+            <SaveFooter
+              dirty={form.isDirty}
+              status={form.status}
+              error={form.error}
+              onSave={handleSave}
+              onCancel={form.reset}
+            />
+          </>
+        )}
       </SettingsCard>
 
       {/* ── Usage ── */}
@@ -233,7 +278,7 @@ export function GeneralSection({
       </SettingsCard>
 
       {/* ── Danger Zone ── */}
-      {role === "OWNER" && (
+      {isOwner(role) && (
         <SettingsDangerCard
           title="Danger zone"
           description="Irreversible actions that affect the whole workspace"

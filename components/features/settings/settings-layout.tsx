@@ -9,11 +9,11 @@ import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
-import { SettingsNav } from "./settings-nav"
+import { isAdminTier } from "@/lib/permissions/tiers"
+import { SettingsNav, isSettingsSectionVisible } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
@@ -67,15 +67,22 @@ export function SettingsLayout() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   // Admin console floor is ADMIN+ (#868/#893); the Aux tab reads an ADMIN+
-  // endpoint, so gate its nav entry + content to match.
-  const isAdmin = role === "OWNER" || role === "ADMIN"
-  const { abilities } = useAbilities()
+  // endpoint, so gate its content to match the nav.
+  const isAdmin = isAdminTier(role)
 
   const isMobile = useIsMobile()
-  const [activeTab, _setActiveTab] = useState(() =>
+  const [requestedTab, _setActiveTab] = useState(() =>
     typeof window === "undefined" ? "profile" : initialSettingsTab(window.location.search),
   )
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  // A deep link can name a section this role cannot see (/settings?tab=audit
+  // as a MEMBER). Rendering it gives a blank pane with no nav row to escape
+  // from, so fall back to Profile — the one section every role owns. Derived
+  // rather than corrected in an effect: an effect would still flash the hidden
+  // pane for a frame. While the role is loading nothing is judged, so an
+  // OWNER's deep link survives the round trip.
+  const activeTab = wsLoading || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
 
   // The active tab used to be mirrored into the zustand store on every change
   // (plus an initial-set / clear-on-unmount effect) for one reader: the global
@@ -224,7 +231,6 @@ export function SettingsLayout() {
           members={members}
           workspaceId={workspaceId}
           currentUserId={session?.user?.id}
-          canInvite={abilities.can("create", "Member")}
           callerRole={role ?? undefined}
           onRefresh={handleRefresh}
         />
@@ -271,7 +277,7 @@ export function SettingsLayout() {
           activeTab={activeTab}
           onTabChange={handleTabChange}
           workspaceName={org?.name}
-          isAdmin={isAdmin}
+          role={role}
         />
       )}
 
@@ -286,7 +292,7 @@ export function SettingsLayout() {
               activeTab={activeTab}
               onTabChange={handleTabChange}
               workspaceName={org?.name}
-              isAdmin={isAdmin}
+              role={role}
             />
           </SheetContent>
         </Sheet>

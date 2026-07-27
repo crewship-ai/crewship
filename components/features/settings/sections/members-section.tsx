@@ -22,6 +22,7 @@ import { InviteMemberDialog } from "@/components/features/members/invite-member-
 import { CapabilityGrid } from "@/components/admin/capability-grid"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow } from "../shared"
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -42,10 +43,18 @@ interface MembersSectionProps {
   members: Member[]
   workspaceId: string
   currentUserId?: string
-  canInvite: boolean
+  // There used to be a `canInvite` prop fed by CASL's
+  // `abilities.can("create", "Member")`. It happened to equal the right
+  // answer, but only because OWNER/ADMIN get it from the blanket "manage
+  // all" rule — nothing tied it to `POST /members`'s actual roleManage
+  // tier. The gate is derived from `callerRole` below instead; the prop is
+  // gone rather than left declared-and-ignored for the next reader to trip
+  // over. See lib/permissions/tiers.ts.
   onRefresh: () => void
   /** Caller's workspace role. Surfaces the per-member capability
-   *  grid (PRD-SLASH-CAPABILITIES-2026 §6.7) only for ADMIN+. */
+   *  grid (PRD-SLASH-CAPABILITIES-2026 §6.7), the invite control and the
+   *  remove control only for ADMIN+ (`isAdminTier`); role-change stays
+   *  gated separately in `MemberRoleControl` at MANAGER+ (`isManagerTier`). */
   callerRole?: string
 }
 
@@ -130,7 +139,10 @@ function MemberRoleControl({
   const [saving, setSaving] = useState(false)
 
   const callerRank = callerRole ? roleRank[callerRole] ?? 0 : 0
-  const canEdit = !isSelf && callerRank > (roleRank[member.role] ?? 0)
+  // Role-change is `roleCreate` server-side (MANAGER+) — a plain rank
+  // comparison alone would let e.g. a MEMBER "edit" a VIEWER's role, which
+  // the server would 403. Gate on the tier first, then the ladder.
+  const canEdit = isManagerTier(callerRole) && !isSelf && callerRank > (roleRank[member.role] ?? 0)
   // Grantable roles: strictly below the caller's own rank.
   const options = ROLE_ORDER.filter((r) => (roleRank[r] ?? 0) < callerRank)
 
@@ -234,14 +246,18 @@ export function MembersSection({
   members,
   workspaceId,
   currentUserId,
-  canInvite,
   onRefresh,
   callerRole,
 }: MembersSectionProps) {
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [rolesOpen, setRolesOpen] = useState(false)
   const [capsOpen, setCapsOpen] = useState(false)
-  const isAdmin = callerRole === "ADMIN" || callerRole === "OWNER"
+  // isAdmin gates invite, remove AND the per-member capability grid — all
+  // three map to `roleManage` routes. isManager is strictly wider (also
+  // true for MANAGER) and only used for the muted copy below; the
+  // role-change control itself is gated inside MemberRoleControl.
+  const isAdmin = isAdminTier(callerRole)
+  const isManager = isManagerTier(callerRole)
 
   async function handleRemove(memberId: string) {
     setRemovingId(memberId)
@@ -271,7 +287,7 @@ export function MembersSection({
       <SettingsCard
         title="Members"
         description={`${members.length} member${members.length === 1 ? "" : "s"} in this workspace`}
-        actions={canInvite ? <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} /> : undefined}
+        actions={isAdmin ? <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} /> : undefined}
       >
         {members.map((member, idx) => {
           const isSelf = currentUserId === member.user.id
@@ -317,7 +333,7 @@ export function MembersSection({
                   {relativeTime(member.created_at)}
                 </span>
                 <div className="w-6 flex justify-center">
-                  {!isOwner && !isSelf ? (
+                  {isAdmin && !isOwner && !isSelf ? (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
@@ -359,6 +375,17 @@ export function MembersSection({
           )
         })}
       </SettingsCard>
+
+      {/* The roster above stays visible to everyone; only the mutating
+          controls are tier-gated. Say so once, quietly — this is a normal
+          state for MANAGER/MEMBER/VIEWER, not an error. */}
+      {!isAdmin && (
+        <p className="text-[11px] text-muted-foreground px-1">
+          {isManager
+            ? "Only admins can invite or remove members."
+            : "Only managers and admins can make changes here."}
+        </p>
+      )}
 
       {/* ── Roles & Permissions (collapsible) ── */}
       <Collapsible open={rolesOpen} onOpenChange={setRolesOpen}>

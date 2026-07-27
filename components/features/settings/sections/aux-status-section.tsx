@@ -4,8 +4,10 @@ import { useCallback, useEffect, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { apiFetch } from "@/lib/api-fetch"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
 
 // PR-G F3 UI surface — auxiliary model slot diagnostic panel.
 //
@@ -104,80 +106,70 @@ export function AuxStatusSection() {
   }, [load])
 
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Auxiliary models</h2>
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wider"
+    <SettingsCard
+      title="Auxiliary models"
+      description="Each slot is the cheap / fast model the keeper invokes for that subsystem (PRD §6 F3). Per-workspace YAML overrides are on the Tier-2 roadmap; today values come from built-in defaults unless the server was started with explicit env-set overrides."
+      actions={
+        <>
+          <Badge
+            variant="outline"
+            className="text-[10px] px-1.5 py-0.5 h-5 bg-muted text-muted-foreground uppercase tracking-wider border-transparent"
             title="This tab is a read-only diagnostic. Slots are configured via YAML (per-workspace overrides are on the roadmap)."
           >
             read-only
-          </span>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void load()}
-          disabled={loading}
-          className="text-xs h-7"
-          title="Re-read aux-status from the server"
-          data-testid="aux-status-refresh"
-        >
-          <RefreshCw className={loading ? "h-3 w-3 mr-1.5 animate-spin" : "h-3 w-3 mr-1.5"} />
-          Refresh
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground -mt-1">
-        Each slot is the cheap / fast model the keeper invokes for that subsystem (PRD §6 F3).
-        <span className="ml-1">
-          Per-workspace YAML overrides are on the Tier-2 roadmap; today values come from
-          built-in defaults unless the server was started with explicit env-set overrides.
-        </span>
-      </p>
-
-      {loading && (
-        <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
+          </Badge>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            disabled={loading}
+            className="h-7 px-2.5 text-xs"
+            title="Re-read aux-status from the server"
+            data-testid="aux-status-refresh"
+          >
+            <RefreshCw className={loading ? "h-3 w-3 mr-1.5 animate-spin" : "h-3 w-3 mr-1.5"} />
+            Refresh
+          </Button>
+        </>
+      }
+    >
+      {loading ? (
+        <div className="p-4 flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner className="h-3.5 w-3.5" /> Loading…
         </div>
-      )}
-      {err && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">{err}</div>
-      )}
-      {!loading && !err && slots.length === 0 && (
-        <div className="rounded-xl border border-white/8 bg-card p-4 text-sm text-muted-foreground">
+      ) : err ? (
+        <div role="alert" className="p-4 text-sm text-destructive">{err}</div>
+      ) : slots.length === 0 ? (
+        <SettingsEmpty>
           No auxiliary slots configured. The keeper will refuse F4 endpoints with 503 until
           at least one slot is reachable (set <code className="text-[10px]">ANTHROPIC_API_KEY</code> and
           restart, or wire an explicit override in <code className="text-[10px]">crewship.yaml</code>).
-        </div>
-      )}
-      {!loading && !err && slots.length > 0 && (
-        <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-          {slots.map((s) => (
-            <div
-              key={s.slot}
-              className="px-4 py-2.5 grid grid-cols-12 items-center gap-2 text-sm"
-              data-testid={`aux-slot-${s.slot}`}
+        </SettingsEmpty>
+      ) : (
+        slots.map((s, idx) => (
+          // The outer div + ".col-span-12" description class are load-bearing
+          // for the existing #866.4 regression test
+          // (components/features/settings/__tests__/aux-status-section.test.tsx),
+          // which asserts on `[data-testid="aux-slot-<slot>"]` containing a
+          // non-empty `.col-span-12` description cell. Kept as-is rather than
+          // reshaping that test — this pass is presentational only.
+          <div key={s.slot} data-testid={`aux-slot-${s.slot}`}>
+            <SettingsRow
+              label={<span className="font-mono">{s.slot}</span>}
+              description={<span className="col-span-12">{SLOT_DESCRIPTIONS[s.slot] ?? ""}</span>}
+              border={idx < slots.length - 1}
             >
-              <div className="col-span-3 font-mono text-xs">{s.slot}</div>
-              <div className="col-span-2 text-muted-foreground">{s.provider || "—"}</div>
-              <div className="col-span-4 truncate" title={s.model}>
-                {s.model || "—"}
-              </div>
-              <div className="col-span-2 text-right text-muted-foreground tabular-nums text-xs">
-                {s.timeout_ms}ms
-              </div>
-              <div className="col-span-1 text-right">
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-muted-foreground">{s.provider || "—"}</span>
+                <span className="truncate max-w-[200px]" title={s.model}>{s.model || "—"}</span>
+                <span className="text-muted-foreground tabular-nums">{s.timeout_ms}ms</span>
                 <SourcePill source={s.source} />
               </div>
-              <div className="col-span-12 text-[11px] text-muted-foreground pl-0">
-                {SLOT_DESCRIPTIONS[s.slot] ?? ""}
-              </div>
-            </div>
-          ))}
-        </div>
+            </SettingsRow>
+          </div>
+        ))
       )}
-    </section>
+    </SettingsCard>
   )
 }

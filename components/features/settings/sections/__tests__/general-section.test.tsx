@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
@@ -13,21 +14,23 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 
 const onUpdated = vi.fn()
 
-function renderSection(preferredLanguage: string | null = null) {
-  return render(
-    <GeneralSection
-      workspaceId="ws1"
-      orgName="Acme Robotics"
-      orgSlug="acme"
-      preferredLanguage={preferredLanguage}
-      agentCount={3}
-      crewCount={2}
-      memberCount={4}
-      role="OWNER"
-      onUpdated={onUpdated}
-      onDelete={vi.fn()}
-    />,
-  )
+type SectionProps = ComponentProps<typeof GeneralSection>
+
+function renderSection(overrides: Partial<SectionProps> = {}) {
+  const props: SectionProps = {
+    workspaceId: "ws1",
+    orgName: "Acme Robotics",
+    orgSlug: "acme",
+    preferredLanguage: null,
+    agentCount: 3,
+    crewCount: 2,
+    memberCount: 4,
+    role: "OWNER",
+    onUpdated,
+    onDelete: vi.fn(),
+    ...overrides,
+  }
+  return render(<GeneralSection {...props} />)
 }
 
 const nameInput = () => screen.getByLabelText(/workspace name/i)
@@ -117,5 +120,76 @@ describe("GeneralSection — Identity save affordance", () => {
     fireEvent.click(saveButton())
     await waitFor(() => expect(patchCalls()).toHaveLength(1))
     expect(JSON.parse(patchCalls()[0][1].body)).toMatchObject({ preferred_language: "Czech" })
+  })
+})
+
+// `PATCH /api/v1/workspaces/{id}` is roleManage — ADMIN and up. The card used
+// to hand everyone an editable form, so a MEMBER could type a new name, press
+// Save and collect a 403. Read-only below the tier: the values stay legible
+// (you should be able to see which workspace you are in), the controls don't.
+describe("GeneralSection — role gating of the Identity card", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ name: "Acme Robotics Ltd", slug: "acme", preferred_language: null }),
+    })
+    onUpdated.mockReset()
+  })
+
+  it("keeps the identity fields editable and saveable for an ADMIN", async () => {
+    renderSection({ role: "ADMIN" })
+    fireEvent.change(nameInput(), { target: { value: "Acme Robotics Ltd" } })
+    fireEvent.click(saveButton())
+
+    await waitFor(() => expect(patchCalls()).toHaveLength(1))
+    expect(JSON.parse(patchCalls()[0][1].body)).toMatchObject({ name: "Acme Robotics Ltd" })
+  })
+
+  it("renders the identity card as plain text for a MEMBER — no inputs, no Save", () => {
+    renderSection({ role: "MEMBER" })
+
+    expect(screen.queryByLabelText(/workspace name/i)).toBeNull()
+    expect(screen.queryByLabelText(/^slug$/i)).toBeNull()
+    // Not "disabled inputs" — a greyed-out box still invites the attempt.
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull()
+    expect(screen.queryByText(/unsaved changes/i)).toBeNull()
+  })
+
+  it("still shows a MEMBER which workspace they are in", () => {
+    renderSection({ role: "MEMBER", preferredLanguage: "Czech" })
+
+    expect(screen.getByText("Acme Robotics")).toBeInTheDocument()
+    expect(screen.getByText("acme")).toBeInTheDocument()
+    expect(screen.getByText(/Czech/)).toBeInTheDocument()
+    // Usage counts are read-only for everyone and must survive the gate.
+    expect(screen.getByText("Agents")).toBeInTheDocument()
+  })
+
+  it("tells a MEMBER why the fields are not editable, quietly", () => {
+    renderSection({ role: "MEMBER" })
+    expect(screen.getByText(/only workspace admins can change/i)).toBeInTheDocument()
+    // No alert/banner treatment: this is a normal state, not an error.
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("does not let a MEMBER reach the language picker", () => {
+    renderSection({ role: "MEMBER" })
+    expect(screen.queryByRole("button", { name: /select language/i })).toBeNull()
+    expect(screen.queryByRole("combobox")).toBeNull()
+  })
+
+  it("hides the Danger zone from an ADMIN — delete stays OWNER-only", () => {
+    renderSection({ role: "ADMIN" })
+    expect(screen.queryByText(/danger zone/i)).toBeNull()
+    expect(screen.queryByRole("button", { name: /delete workspace/i })).toBeNull()
+  })
+
+  it("hides the Danger zone from a MEMBER", () => {
+    renderSection({ role: "MEMBER" })
+    expect(screen.queryByText(/danger zone/i)).toBeNull()
   })
 })
