@@ -138,3 +138,47 @@ describe("InviteMemberDialog — optional name", () => {
     })
   })
 })
+
+// The link never appeared on screen. Not a rendering bug — a lifecycle one:
+// onInvited fired the instant provisioning succeeded, the settings layout
+// set loading=true for the refetch, MembersSection was replaced by a
+// skeleton, and the dialog inside it was unmounted with the link still in
+// its state. It flashed and died.
+//
+// The roster can wait a few seconds. The link cannot: it is shown once.
+describe("InviteMemberDialog — the link outlives the roster refresh", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+  })
+
+  async function provision(onInvited: () => void) {
+    apiFetch.mockResolvedValue(jsonResponse({ setup_url: SETUP_URL, created_user: true, email: "new@example.com" }, 201))
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={onInvited} />)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    fireEvent.change(await screen.findByLabelText(/email/i), { target: { value: "new@example.com" } })
+    fireEvent.click(screen.getByRole("button", { name: /^add member$/i }))
+    await screen.findByDisplayValue(SETUP_URL)
+  }
+
+  it("does not trigger the parent refresh while the link is on screen", async () => {
+    const onInvited = vi.fn()
+    await provision(onInvited)
+    // Refreshing here unmounts this very dialog in the real layout.
+    expect(onInvited).not.toHaveBeenCalled()
+  })
+
+  it("refreshes once the admin is done with the link", async () => {
+    const onInvited = vi.fn()
+    await provision(onInvited)
+    fireEvent.click(screen.getByRole("button", { name: /^done$/i }))
+    await waitFor(() => expect(onInvited).toHaveBeenCalled())
+  })
+
+  it("refreshes when adding another, since that discards the link too", async () => {
+    const onInvited = vi.fn()
+    await provision(onInvited)
+    fireEvent.click(screen.getByRole("button", { name: /add another/i }))
+    await waitFor(() => expect(onInvited).toHaveBeenCalled())
+  })
+})

@@ -59,6 +59,15 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
   const [result, setResult] = useState<ProvisionResult | null>(null)
   const [copied, setCopied] = useState(false)
 
+  /** Close or restart, refreshing the roster on the way out. Every path
+   *  that discards the link goes through here, so the parent is refreshed
+   *  exactly once and never while the link is still readable. */
+  function dismiss(next: "close" | "again") {
+    if (result) onInvited?.()
+    reset()
+    if (next === "close") setOpen(false)
+  }
+
   function reset() {
     setEmail("")
     setFullName("")
@@ -108,7 +117,12 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
       }
       setResult((await res.json()) as ProvisionResult)
       setStatus("idle")
-      onInvited?.()
+      // Deliberately NOT refreshing the roster here. onInvited makes the
+      // settings layout refetch, which flips it to loading=true and swaps
+      // MembersSection for a skeleton — unmounting this dialog with the
+      // link still in its state. The link flashed and vanished before it
+      // could be copied, and it cannot be shown again. The roster can wait
+      // until the admin is finished; see dismiss() below.
     } catch {
       setStatus("error")
       setError("Couldn't reach the server")
@@ -126,8 +140,10 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next)
-        if (!next) reset()
+        // Covers Escape and the X, not just the buttons — those discard the
+        // link too, so the roster still needs refreshing.
+        if (!next) dismiss("close")
+        else setOpen(true)
       }}
     >
       <DialogTrigger asChild>
@@ -166,10 +182,10 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={reset}>
+              <Button type="button" variant="outline" onClick={() => dismiss("again")}>
                 Add another
               </Button>
-              <Button type="button" onClick={() => setOpen(false)}>
+              <Button type="button" onClick={() => dismiss("close")}>
                 Done
               </Button>
             </div>
