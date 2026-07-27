@@ -229,6 +229,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("PATCH", "/api/v1/notification-channels/{id}", roleInline, nch.Patch)
 	r.authedMut("DELETE", "/api/v1/notification-channels/{id}", roleInline, nch.Delete)
 	r.authedMut("POST", "/api/v1/notification-channels/{id}/test", roleInline, nch.Test)
+	// Test an UNSAVED draft. Without it the first time anyone learns whether
+	// their webhook URL is right is after they have already committed it.
+	// roleInline: the handler's own bar is "authenticated member", matching
+	// personal-channel creation — see TestDraft's doc comment.
+	r.authedMut("POST", "/api/v1/notification-channels/test", roleInline, nch.TestDraft)
 
 	// Providers registry (#1412): which shoutrrr providers this instance
 	// supports and which are admin-enabled. Read is any authenticated

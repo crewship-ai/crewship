@@ -17,7 +17,9 @@ import {
   useNotificationChannels,
   type NotificationChannel,
 } from "@/hooks/use-notification-channels"
+import { useNotificationProviders } from "@/hooks/use-notification-providers"
 import { NOTIFICATION_CATEGORY_GROUPS } from "@/lib/notification-categories"
+import { ProviderForm } from "./provider-form"
 import { SettingsCard, SettingsEmpty, SettingsRow } from "../shared"
 
 interface NotificationChannelsSectionProps {
@@ -29,18 +31,22 @@ type ChannelType = "email" | "webhook" | "shoutrrr"
 /**
  * Settings → Notifications: CRUD + test over the workspace's outbound
  * delivery targets — email / signed webhook (run-terminal broadcast,
- * issue #850) and email / webhook / Slack / Discord / Telegram serving
+ * issue #850) and email / webhook / chat and push destinations serving
  * the per-user category preference matrix (issue #1412). A channel here
  * is either WORKSPACE-scoped (this ADMIN/OWNER-managed list) or the
  * caller's OWN personal channel (self-service, any role).
  */
 export function NotificationChannelsSection({ workspaceId }: NotificationChannelsSectionProps) {
-  const { channels, loading, error, create, remove, sendTest, patch } =
+  const { channels, loading, error, create, remove, sendTest, sendDraftTest, patch } =
     useNotificationChannels(workspaceId)
+  const { providers } = useNotificationProviders(workspaceId)
 
   // form state
   const [type, setType] = useState<ChannelType>("webhook")
-  const [provider, setProvider] = useState<"slack" | "discord" | "telegram">("slack")
+  const [provider, setProvider] = useState<string>("discord")
+  // Per-provider form values, keyed by field key. The server composes the
+  // delivery URL from these — the user never sees or types one.
+  const [fields, setFields] = useState<Record<string, string>>({})
   const [target, setTarget] = useState("")
   const [secret, setSecret] = useState("")
   const [events, setEvents] = useState<"failed" | "completed" | "all">("failed")
@@ -50,14 +56,39 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
   const [creating, setCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
-  // Webhook signing secret / shoutrrr service url revealed exactly once on create.
+  // Webhook signing secret, revealed exactly once on create. Chat channels
+  // have nothing to reveal: their delivery URL is composed from values the
+  // user supplied, so echoing it back only puts a token on screen.
   const [revealedSecret, setRevealedSecret] = useState<{ id: string; secret: string; type: ChannelType } | null>(null)
 
-  const canCreate = target.trim() !== "" && !creating
+  const activeProvider = providers.find((p) => p.provider === provider)
+
+  // A chat channel is ready when every required field of its provider's form
+  // is filled; email/webhook still hinge on the single target input.
+  const chatReady =
+    activeProvider !== undefined &&
+    activeProvider.fields.every((f) => !f.required || (fields[f.key] ?? "").trim() !== "")
+  const canCreate = (type === "shoutrrr" ? chatReady : target.trim() !== "") && !creating
 
   const toggleCategory = useCallback((cat: string) => {
     setCategories((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]))
   }, [])
+
+  const setField = useCallback((key: string, value: string) => {
+    setFields((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  // Switching provider clears the form: field keys differ per provider, and
+  // carrying a stale `webhook_url` into Telegram would silently submit a value
+  // the user never entered for it.
+  const handleProviderChange = useCallback((next: string) => {
+    setProvider(next)
+    setFields({})
+  }, [])
+
+  const handleDraftTest = useCallback(async () => {
+    await sendDraftTest({ type: "shoutrrr", provider, fields })
+  }, [sendDraftTest, provider, fields])
 
   const handleCreate = useCallback(async () => {
     if (!canCreate) return
@@ -68,7 +99,7 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
         ...(type === "webhook"
           ? { url: target.trim(), ...(secret.trim() ? { secret: secret.trim() } : {}) }
           : type === "shoutrrr"
-            ? { provider, shoutrrr_url: target.trim() }
+            ? { provider, fields }
             : { to: target.trim() }),
         events: [events],
         personal,
@@ -78,7 +109,12 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
       toast.success("Notification channel added")
       setTarget("")
       setSecret("")
-      if (created?.secret) {
+      setFields({})
+      // Only the webhook signing secret is worth revealing: the caller needs
+      // it to verify our HMAC. A composed chat URL is built from values the
+      // user already has, so showing it back is noise that leaks a token onto
+      // the screen for nothing.
+      if (created?.secret && type === "webhook") {
         setRevealedSecret({ id: created.id, secret: created.secret, type })
       }
     } catch (e) {
@@ -86,7 +122,7 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
     } finally {
       setCreating(false)
     }
-  }, [canCreate, create, type, target, secret, events, provider, personal, categories, minPriority])
+  }, [canCreate, create, type, target, secret, events, provider, fields, personal, categories, minPriority])
 
   const handleTogglePersonal = useCallback((next: boolean) => {
     setPersonal(next)
@@ -167,53 +203,66 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
                 <span className="flex items-center gap-2"><Mail className="size-3" /> Email</span>
               </SelectItem>
               <SelectItem value="shoutrrr" className="text-xs">
-                <span className="flex items-center gap-2"><MessageSquare className="size-3" /> Slack / Discord / Telegram</span>
+                <span className="flex items-center gap-2"><MessageSquare className="size-3" /> Chat &amp; push</span>
               </SelectItem>
             </SelectContent>
           </Select>
         </SettingsRow>
 
         {type === "shoutrrr" && (
-          <SettingsRow label="Provider" description="Which shoutrrr service">
-            <Select value={provider} onValueChange={(v) => setProvider(v as typeof provider)}>
+          <SettingsRow label="Destination" description="Where this channel delivers">
+            <Select value={provider} onValueChange={handleProviderChange}>
               <SelectTrigger className="w-[220px] h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="slack" className="text-xs">Slack</SelectItem>
-                <SelectItem value="discord" className="text-xs">Discord</SelectItem>
-                <SelectItem value="telegram" className="text-xs">Telegram</SelectItem>
+                {providers.map((p) => (
+                  <SelectItem key={p.provider} value={p.provider} className="text-xs" disabled={!p.enabled}>
+                    {p.label}
+                    {!p.enabled && " (disabled)"}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </SettingsRow>
         )}
 
-        <SettingsRow
-          label={type === "webhook" ? "URL" : type === "shoutrrr" ? "Service URL" : "Recipient"}
-          description={
-            type === "webhook"
-              ? "HTTPS endpoint that receives the signed POST"
-              : type === "shoutrrr"
-                ? `Apprise-style ${provider} service URL, e.g. ${
-                    provider === "slack" ? "slack://hook:TOKEN@webhook"
-                      : provider === "discord" ? "discord://token@channel"
-                        : "telegram://token@telegram?chats=@you"
-                  }`
+        {/* Per-provider form. Each destination asks for what it actually needs —
+            Discord a webhook URL, Telegram a bot token and chat ID — with a
+            line saying where to get it. The delivery URL is composed on the
+            server; the user never sees or types one. */}
+        {type === "shoutrrr" && activeProvider && (
+          <div className="px-4 py-3 border-b border-border/40">
+            <p className="mb-2.5 text-[11px] text-muted-foreground">{activeProvider.blurb}</p>
+            <ProviderForm
+              provider={activeProvider}
+              values={fields}
+              onChange={setField}
+              onTest={handleDraftTest}
+            />
+          </div>
+        )}
+
+        {type !== "shoutrrr" && (
+          <SettingsRow
+            label={type === "webhook" ? "URL" : "Recipient"}
+            description={
+              type === "webhook"
+                ? "HTTPS endpoint that receives the signed POST"
                 : "Email address to notify"
-          }
-        >
-          <Input
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder={
-              type === "webhook" ? "https://example.com/hooks/crewship"
-                : type === "shoutrrr" ? `${provider}://…`
-                  : "ops@example.com"
             }
-            type={type === "email" ? "email" : type === "webhook" ? "url" : "text"}
-            className="w-[320px] h-7 text-xs"
-          />
-        </SettingsRow>
+          >
+            <Input
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder={
+                type === "webhook" ? "https://example.com/hooks/crewship" : "ops@example.com"
+              }
+              type={type === "email" ? "email" : "url"}
+              className="w-[320px] h-7 text-xs"
+            />
+          </SettingsRow>
+        )}
 
         {type === "webhook" && (
           <SettingsRow label="Signing secret" description="Optional — auto-generated and revealed once when blank">
@@ -309,7 +358,7 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
       {revealedSecret && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.04] px-4 py-3 space-y-1.5">
           <div className="text-xs font-medium text-foreground/90">
-            {revealedSecret.type === "shoutrrr" ? "Service URL" : "Webhook signing secret"} — shown only once
+            Webhook signing secret — shown only once
           </div>
           <div className="flex items-center gap-2">
             <code className="text-[11px] font-mono bg-muted/60 rounded px-1.5 py-0.5 break-all">
@@ -330,11 +379,7 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            {revealedSecret.type === "shoutrrr" ? (
-              "Store this service URL somewhere safe — it can't be read back."
-            ) : (
-              <>Configure your receiver to verify the <code>X-Crewship-Signature</code> HMAC with this secret.</>
-            )}{" "}
+            Configure your receiver to verify the <code>X-Crewship-Signature</code> HMAC with this secret.{" "}
             <button
               type="button"
               className="underline hover:text-foreground"

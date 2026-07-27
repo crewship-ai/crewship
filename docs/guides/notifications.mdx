@@ -1,6 +1,6 @@
 ---
 title: "Outbound notifications"
-description: "Email, signed-webhook, Slack, Discord, and Telegram delivery for approvals, escalations, failed runs, chat replies, and more — with a per-user preference matrix and anti-storm rate limiting."
+description: "Email, signed-webhook, chat and push delivery for approvals, escalations, failed runs, issue activity, chat replies, and more — with a per-user preference matrix and anti-storm rate limiting."
 icon: "bell"
 ---
 
@@ -9,12 +9,12 @@ icon: "bell"
 Crewship has grown two outbound-notification mechanisms, documented together here:
 
 1. **Run-terminal broadcast** (issue #850, below in [Legacy: run-terminal broadcast](#legacy-run-terminal-broadcast)) — workspace-wide **email**/**webhook** channels that fire on a routine run's `completed`/`failed` terminal state. Unchanged by everything below; still the right tool for "tell the whole workspace when this routine fails."
-2. **Category preference system** (issue #1412, the rest of this page) — a per-user, Linear/Novu-style **category × channel matrix** covering nine notification categories (approvals, escalations, failed/completed runs, chat replies, security, budget, system, and memory events), delivered to **email, webhook, Slack, Discord, or Telegram**, with admin-managed workspace channels AND self-service personal channels, an anti-storm rate gate, and a persistent delivery log.
+2. **Category preference system** (issue #1412, the rest of this page) — a per-user, Linear/Novu-style **category × channel matrix** covering routine, issue, agent, system and chat categories, delivered to **email, a signed webhook, or any of eleven chat and push destinations**, with admin-managed workspace channels AND self-service personal channels, an anti-storm rate gate, and a persistent delivery log.
 
 Both ride the same channel type (`notification_channels`) and the same low-level delivery code — a channel you create can serve BOTH systems (a workspace webhook can both receive the legacy `run.completed` broadcast and be selected in someone's category matrix).
 
 <Note>
-Workspace-scoped channel writes require **ADMIN/OWNER**. A personal channel (`--personal`) is self-service — any member may add their own. A signing secret / shoutrrr service URL is shown **once** at creation — store it then; it can never be read back.
+Workspace-scoped channel writes require **ADMIN/OWNER**. A personal channel (`--personal`) is self-service — any member may add their own. A webhook signing secret is shown **once** at creation — store it then; it can never be read back. Chat destinations have nothing to reveal: their delivery URL is composed from the values you supplied.
 </Note>
 
 ## Categories
@@ -116,31 +116,47 @@ Delivery is **best-effort with retries**: 3 attempts with exponential backoff. A
 
 An email channel sends via the instance mailer. **Email delivery must be configured** (`RESEND_API_KEY` and `RESEND_FROM` set on the server) — otherwise creating an email channel is rejected with a clear error, so you learn at configuration time rather than silently losing notifications (**fail-closed**).
 
-### Shoutrrr — Slack, Discord, Telegram
+### Chat and push
 
-A `shoutrrr` channel delivers via [github.com/nicholas-fedor/shoutrrr](https://github.com/nicholas-fedor/shoutrrr), an Apprise-style notification library. Give it a **provider** and a **service URL**:
+A chat channel delivers to Discord, Slack, Telegram, ntfy, Gotify, Pushover, Mattermost, Matrix, Microsoft Teams, Google Chat, or Opsgenie.
 
-| Provider | URL format | Notes |
-| --- | --- | --- |
-| `slack` | `slack://hook:TOKEN@webhook` | `TOKEN` is your Slack incoming-webhook token (the part after `/services/` in the webhook URL, dash-joined) |
-| `discord` | `discord://token@channel` | `token` and `channel` come from your Discord webhook URL: `.../webhooks/{channel}/{token}` |
-| `telegram` | `telegram://token@telegram?chats=@channel-1,chat-id-2` | `token` is your bot token from BotFather; `chats` is a comma-separated list of `@channel` handles or numeric chat ids |
+Each one asks for **what that service actually gives you** — Discord for the webhook URL you copy out of Server Settings, Telegram for a bot token and a chat ID — with a line under each field saying where to find it. You never construct or see a delivery URL: the server composes one from your answers and stores it encrypted, in the same `secret_enc` column the webhook signing secret uses. It is never returned by any read endpoint.
 
-The service URL is **secret** (it embeds your bot token / webhook token) — it rides the exact same `secret_enc` encrypt-at-rest column the webhook signing secret uses, is returned **once** at creation, and is never exposed again by any read endpoint.
+To see what a provider needs:
 
 ```bash
-# Workspace-wide Slack channel (ADMIN/OWNER only)
-crewship notifychannel add --type shoutrrr --provider slack \
-  --url "slack://hook:xoxb-...@webhook" --categories approvals,escalations
-
-# Your OWN personal Telegram channel (any role — self-service)
-crewship notifychannel add --type shoutrrr --provider telegram \
-  --url "telegram://123456:ABC-token@telegram?chats=@myhandle" --personal
+crewship notifychannel providers                      # every provider, and its required fields
+crewship notifychannel providers --provider telegram  # one provider's full form
 ```
 
-A shoutrrr channel also participates in the [legacy run-terminal broadcast](#legacy-run-terminal-broadcast) if it subscribes to `events` — Slack/Discord/Telegram is a **new provider alongside** email/webhook, not a replacement.
+Then fill the fields in with `--field key=value`:
+
+```bash
+# Workspace-wide Discord channel (ADMIN/OWNER only)
+crewship notifychannel add --type chat --provider discord \
+  --field webhook_url=https://discord.com/api/webhooks/123/abc \
+  --categories agents.approval,agents.escalation
+
+# Your OWN personal Telegram channel (any role — self-service)
+crewship notifychannel add --type chat --provider telegram \
+  --field bot_token=123456:ABC-token --field chat_id=@myhandle --personal
+```
+
+<Note>
+**Test before you save.** `crewship notifychannel test-draft` (and the **Send test** button on the form) sends one real notification using the values you have typed and stores nothing. Use it to confirm a token is right instead of saving a channel and discovering the mistake when a real alert goes missing.
+
+```bash
+crewship notifychannel test-draft --type chat --provider ntfy --field topic=my-alerts
+```
+</Note>
+
+A chat channel also participates in the [legacy run-terminal broadcast](#legacy-run-terminal-broadcast) if it subscribes to `events` — chat and push are **new destinations alongside** email/webhook, not a replacement.
 
 An instance admin can disable a provider instance-wide (`crewship notifychannel providers`, `PATCH /api/v1/notification-providers/{provider}`); a disabled provider is rejected at **channel-create time** (fail-closed) but doesn't retroactively break channels that already exist.
+
+<Note>
+`--type shoutrrr` still works as a hidden alias for `--type chat`, and `--url` still accepts a pre-composed delivery URL, so existing scripts and backup restores keep working. Both are undocumented on purpose: nobody should have to learn a URL syntax to connect Discord.
+</Note>
 
 ## Payload safety
 
@@ -226,12 +242,13 @@ crewship notifychannel add --type webhook --url https://hooks.example.com/crewsh
 crewship notifychannel add --type email --to ops@example.com
 
 # Workspace Slack channel restricted to two categories (ADMIN/OWNER)
-crewship notifychannel add --type shoutrrr --provider slack \
-  --url slack://hook:TOKEN@webhook --categories approvals,security
+crewship notifychannel add --type chat --provider slack \
+  --field webhook_url=https://hooks.slack.com/services/T0/B0/XXX \
+  --categories agents.approval,security
 
 # Your own personal Telegram channel (any role)
-crewship notifychannel add --type shoutrrr --provider telegram \
-  --url "telegram://TOKEN@telegram?chats=@you" --personal
+crewship notifychannel add --type chat --provider telegram \
+  --field bot_token=123:ABC --field chat_id=@you --personal
 
 # List channels (secrets never shown)
 crewship notifychannel list
@@ -268,7 +285,8 @@ All routes are workspace-scoped (the workspace comes from your auth context).
 | `PATCH` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Update `enabled`/`categories`/`min_priority`/`events` |
 | `POST` | `/api/v1/notification-channels/{id}/test` | ADMIN/OWNER, or owner for a personal channel | Send a test event |
 | `DELETE` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Delete a channel |
-| `GET` | `/api/v1/notification-providers` | member | Supported shoutrrr providers + enabled state |
+| `GET` | `/api/v1/notification-providers` | member | Chat/push providers, their form fields, and enabled state |
+| `POST` | `/api/v1/notification-channels/test` | member | Test an **unsaved** draft; persists nothing |
 | `PATCH` | `/api/v1/notification-providers/{provider}` | ADMIN/OWNER | Enable/disable a provider instance-wide |
 | `GET` | `/api/v1/me/notification-prefs` | self | Your category x channel matrix |
 | `PUT` | `/api/v1/me/notification-prefs` | self | Upsert one or more cells in your matrix |
@@ -283,15 +301,15 @@ Create body:
 ```json
 { "type": "webhook", "url": "https://hooks.example.com/crewship", "events": ["all"] }
 { "type": "email", "to": "ops@example.com" }
-{ "type": "shoutrrr", "provider": "slack", "shoutrrr_url": "slack://hook:TOKEN@webhook",
+{ "type": "shoutrrr", "provider": "slack", "fields": {"webhook_url": "https://hooks.slack.com/services/T0/B0/XXX"},
   "categories": ["approvals", "escalations"], "min_priority": "medium" }
-{ "type": "shoutrrr", "provider": "telegram", "shoutrrr_url": "telegram://TOKEN@telegram?chats=@you",
+{ "type": "shoutrrr", "provider": "telegram", "fields": {"bot_token": "123:ABC", "chat_id": "@you"},
   "personal": true }
 ```
 
 `events` (optional, legacy broadcast — defaults to `["run.failed"]`; accepts `completed`, `failed`, or `all`), `categories` (optional, admin allowlist — defaults to every category), `min_priority` (optional — defaults to `low`) are independent of each other: a channel can serve the legacy broadcast, the category matrix, both, or neither.
 
-The create response for a webhook or shoutrrr channel includes the `secret` field **once** — the signing secret or the shoutrrr service URL — the only time it is ever returned.
+The create response for a **webhook** channel includes the `secret` field **once** — the signing secret — the only time it is ever returned.
 
 Preference matrix body (`PUT /api/v1/me/notification-prefs`):
 
@@ -306,8 +324,8 @@ Preference matrix body (`PUT /api/v1/me/notification-prefs`):
 
 ## Legacy: run-terminal broadcast
 
-The original (#850) mechanism: workspace-wide email/webhook/shoutrrr channels that fire on a routine run's terminal state. **Unchanged** by #1412 — this is documented for reference, not deprecated; it's still the right tool for "tell the whole workspace when this routine fails," independent of anyone's personal preference matrix.
+The original (#850) mechanism: workspace-wide email/webhook/chat channels that fire on a routine run's terminal state. **Unchanged** by #1412 — this is documented for reference, not deprecated; it's still the right tool for "tell the whole workspace when this routine fails," independent of anyone's personal preference matrix.
 
-Each channel subscribes to the outcomes it cares about via `events` — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`). See [Channel types](#channel-types) above for the webhook payload shape, HMAC verification, and the shoutrrr message format.
+Each channel subscribes to the outcomes it cares about via `events` — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`). See [Channel types](#channel-types) above for the webhook payload shape and HMAC verification.
 
 Delivery is hooked on the run's **terminal write** in the pipeline finalize path — not on the CLI — so **scheduled runs** with no connected client notify exactly the same as interactive ones. Only `completed` and `failed` outcomes fire (and then only to channels subscribed to that outcome); `cancelled` and `interrupted` are operational states and are intentionally silent. Fan-out is asynchronous and best-effort, so it never slows or fails the run — a failing channel is logged, not retried into oblivion (3 attempts with exponential backoff, then it drops).

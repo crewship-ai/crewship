@@ -26,16 +26,62 @@ export interface NotificationChannel {
 }
 
 export interface ChannelCreateBody {
+  // "shoutrrr" is the stored value for every chat/push destination. It is the
+  // delivery library's name and predates the provider catalogue; it stays on
+  // the wire because existing rows carry it, but it is never shown to a user.
   type: "email" | "webhook" | "shoutrrr"
   url?: string // webhook
   to?: string // email
   secret?: string // webhook, optional — auto-generated when blank
   events?: string[] // completed | failed | all (server default: failed) — legacy #850 path
-  provider?: string // slack | discord | telegram — required for type "shoutrrr"
-  shoutrrr_url?: string // the Apprise-style service url — required for type "shoutrrr"
+  provider?: string // see GET /api/v1/notification-providers
+  /**
+   * The provider form's values, keyed by field key. The normal path: the
+   * server composes the delivery URL from these, so the user never sees or
+   * types one.
+   */
+  fields?: Record<string, string>
+  /** Pre-composed delivery URL — scripting / backup-restore only. */
+  shoutrrr_url?: string
   personal?: boolean // true = your own channel (self-service, any role)
   categories?: string[] // admin allowlist for a workspace channel; omit = every category
   min_priority?: "low" | "medium" | "high" | "urgent"
+}
+
+/** Body for testing an unsaved draft (POST /notification-channels/test). */
+export interface ChannelDraftTestBody {
+  type: "email" | "webhook" | "shoutrrr"
+  provider?: string
+  fields?: Record<string, string>
+  url?: string
+  to?: string
+  secret?: string
+}
+
+/** One input on a provider's form, as described by the providers registry. */
+export interface ProviderField {
+  key: string
+  label: string
+  type: "text" | "url" | "password"
+  required: boolean
+  secret?: boolean
+  placeholder?: string
+  help?: string
+  help_url?: string
+}
+
+/**
+ * A chat/push destination and the questions it asks.
+ *
+ * The form definition is served rather than hard-coded so the UI and the CLI
+ * ask the same things and adding a provider stays a backend-only change.
+ */
+export interface NotificationProvider {
+  provider: string
+  label: string
+  blurb: string
+  fields: ProviderField[]
+  enabled: boolean
 }
 
 export interface ChannelPatchBody {
@@ -151,6 +197,30 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
     [workspaceId],
   )
 
+  // Test a channel that has NOT been saved. The per-id test above needs a
+  // persisted row, which means the first time anyone learns whether their
+  // webhook URL is right is after they have already committed it — backwards
+  // for a form whose whole difficulty is pasting an opaque token correctly.
+  // Nothing is stored; the server composes, sends once, and drops it.
+  const sendDraftTest = useCallback(
+    async (body: ChannelDraftTestBody): Promise<void> => {
+      if (!workspaceId) return
+      const res = await apiFetch(
+        `/api/v1/notification-channels/test?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      )
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null)
+        throw new Error(errBody?.error ?? errBody?.detail ?? `test send: ${res.status}`)
+      }
+    },
+    [workspaceId],
+  )
+
   const patch = useCallback(
     async (id: string, body: ChannelPatchBody): Promise<void> => {
       if (!workspaceId) return
@@ -171,5 +241,5 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
     [workspaceId, refresh],
   )
 
-  return { channels, loading, error, refresh, create, remove, sendTest, patch }
+  return { channels, loading, error, refresh, create, remove, sendTest, sendDraftTest, patch }
 }

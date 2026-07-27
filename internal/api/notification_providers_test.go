@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/notify"
 )
 
 func TestNotifyProvidersHandler_List_DefaultsAllEnabled(t *testing.T) {
@@ -20,12 +22,21 @@ func TestNotifyProvidersHandler_List_DefaultsAllEnabled(t *testing.T) {
 		Providers []providerInfo `json:"providers"`
 	}
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-	if len(resp.Providers) != 3 {
-		t.Fatalf("expected 3 supported providers, got %d", len(resp.Providers))
+	// Bound to the catalog rather than a literal: this used to assert 3 and
+	// had to change the moment a provider was added, which tells you nothing
+	// about behaviour. What matters is that the endpoint exposes the whole
+	// catalog and defaults each entry to enabled.
+	if len(resp.Providers) != len(notify.Providers()) {
+		t.Fatalf("expected %d providers from the catalog, got %d", len(notify.Providers()), len(resp.Providers))
 	}
 	for _, p := range resp.Providers {
 		if !p.Enabled {
 			t.Errorf("provider %q should default to enabled, got disabled", p.Provider)
+		}
+		// The form definition is the point of this endpoint — a client that
+		// gets no fields back cannot render anything but a blank panel.
+		if p.Label == "" || len(p.Fields) == 0 {
+			t.Errorf("provider %q came back with no label or no fields", p.Provider)
 		}
 	}
 }
