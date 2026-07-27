@@ -10,6 +10,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"text/tabwriter"
@@ -110,7 +111,9 @@ var adminRateLimitsSetCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Put("/api/v1/admin/rate-limits/"+key, map[string]int{"value": value})
+		// Escape the user-supplied key: a stray '#' or '/' would otherwise
+		// truncate/misroute the path (mirrors the UI's encodeURIComponent).
+		resp, err := client.Put("/api/v1/admin/rate-limits/"+url.PathEscape(key), map[string]int{"value": value})
 		if err != nil {
 			return err
 		}
@@ -142,7 +145,7 @@ var adminRateLimitsResetCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/admin/rate-limits/" + key)
+		resp, err := client.Delete("/api/v1/admin/rate-limits/" + url.PathEscape(key))
 		if err != nil {
 			return err
 		}

@@ -26,9 +26,10 @@ interface Limiter {
 
 /**
  * Admin → Rate Limiters: view + tune every configurable rate limit for the
- * instance. Each limiter has a workspace-scoped override — Save PUTs the new
- * value (validated client-side against [min,max]), Reset DELETEs the override
- * so the limiter falls back to its compiled-in default.
+ * instance. Overrides are INSTANCE-GLOBAL — they apply to the whole daemon,
+ * not just the current workspace. Save PUTs the new value (validated
+ * client-side against [min,max]), Reset DELETEs the override so the limiter
+ * falls back to its compiled-in default.
  */
 export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   const [limiters, setLimiters] = useState<Limiter[]>([])
@@ -71,8 +72,12 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
 
   const handleSave = useCallback(async (limiter: Limiter, raw: string) => {
     if (!workspaceId) return
-    const value = Number(raw)
-    if (!Number.isInteger(value) || value < limiter.min || value > limiter.max) {
+    // Number("") is 0, not NaN — guard the empty string explicitly so an
+    // emptied field can never validate as 0 (harmless today since every
+    // min is >= 1, but robust if a future limiter allows 0).
+    const trimmed = raw.trim()
+    const value = Number(trimmed)
+    if (trimmed === "" || !Number.isInteger(value) || value < limiter.min || value > limiter.max) {
       toast.error(`${limiter.display_name}: must be between ${limiter.min} and ${limiter.max}`)
       return
     }
@@ -160,9 +165,10 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
         >
           {rows.map((l, i) => {
             const draft = drafts[l.key] ?? String(l.value)
-            const parsed = Number(draft)
-            const inRange = Number.isInteger(parsed) && parsed >= l.min && parsed <= l.max
-            const changed = String(l.value) !== draft.trim()
+            const trimmedDraft = draft.trim()
+            const parsed = Number(trimmedDraft)
+            const inRange = trimmedDraft !== "" && Number.isInteger(parsed) && parsed >= l.min && parsed <= l.max
+            const changed = String(l.value) !== trimmedDraft
             const busy = busyKey === l.key
             const inputId = `ratelimit-${l.key}`
             return (

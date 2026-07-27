@@ -75,6 +75,10 @@ The per-IP bucket sizes — and every other tunable limiter in the system (login
 
 Overrides persist in the instance-global `rate_limit_overrides` table and apply immediately: the per-IP HTTP buckets are retuned live (`RateLimiter.SetReqPerMin`); the other limiters read their value on next use. The registry of keys, defaults, and bounds lives in `internal/ratelimitcfg`. A value out of a limiter's `[min, max]` range is rejected (`400`); an unknown key is `404`.
 
+<Warning>
+  These overrides are **instance-wide**, not per-workspace — the write is gated by the OWNER/ADMIN role check (like the other instance-scoped admin operations: re-encrypt, prune, backups), but its effect applies to the whole daemon. On a **multi-tenant** deployment, treat OWNER/ADMIN on any workspace as the authority to retune (and therefore weaken) rate limiting for every tenant. On a single-tenant self-hosted instance — Crewship's primary shape — this is a non-issue.
+</Warning>
+
 <Note>
   Raising the **auth** bucket (`http.auth_per_min`) is the knob for an instance whose users are being logged out under heavy refresh traffic behind a shared NAT. The read-only session polls that caused the original refresh-logout no longer touch this bucket at all (they ride the 120/min general bucket), so most instances never need to change it.
 </Note>

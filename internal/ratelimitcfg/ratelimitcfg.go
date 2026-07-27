@@ -69,6 +69,15 @@ const (
 // is fine.
 const hardMax = 100000
 
+// lockoutThresholdMax is a tighter ceiling than hardMax for the account
+// lockout THRESHOLD specifically: unlike a throughput bucket (where a large
+// value just means "more permissive"), a large lockout threshold silently
+// removes brute-force protection. Capping it keeps the knob a real lockout —
+// generous (1000 consecutive failures is far above any honest fat-fingering,
+// and the per-IP auth bucket throttles the attempt rate anyway) but never a
+// de-facto "off switch" (100000 ≈ days per IP behind the auth bucket).
+const lockoutThresholdMax = 1000
+
 // registry is the ordered, authoritative list. Order is the admin-table
 // display order, grouped by subsystem. Defaults mirror the values these
 // limiters shipped with before they became tunable — installing this package
@@ -77,11 +86,11 @@ var registry = []Meta{
 	{KeyHTTPAuthPerMin, "HTTP (per-IP)", "Auth endpoints", "Login / token-refresh / bootstrap, per client IP. Read-only session polls do NOT count against this.", "req/min", 10, 1, hardMax},
 	{KeyHTTPAPIPerMin, "HTTP (per-IP)", "General API", "Every other /api/* route, per client IP. Authenticated CLI tokens are exempt.", "req/min", 120, 1, hardMax},
 	{KeyHTTPCredTestPerMin, "HTTP (per-IP)", "Credential test", "The credential-validation test endpoints, per IP — tighter to blunt their use as a key-validation oracle.", "req/min", 60, 1, hardMax},
-	{KeyLoginLockoutThresh, "Login", "Account lockout threshold", "Consecutive failed sign-ins on one account before it locks. Layered on top of the per-IP auth bucket.", "attempts", 10, 1, hardMax},
+	{KeyLoginLockoutThresh, "Login", "Account lockout threshold", "Consecutive failed sign-ins on one account before it locks. Layered on top of the per-IP auth bucket.", "attempts", 10, 1, lockoutThresholdMax},
 	{KeyLoginLockoutDurSec, "Login", "Account lockout duration", "How long a locked account stays frozen before a legitimate user can retry.", "seconds", 300, 1, 86400},
 	{KeyNotifyBurst, "Notifications", "Notification burst", "Max notifications one recipient can absorb on a single (channel, category) before throttling kicks in.", "tokens", 5, 1, hardMax},
 	{KeyNotifyRefillSec, "Notifications", "Notification refill interval", "After a burst, one notification token is restored every N seconds.", "seconds/token", 30, 1, 86400},
-	{KeyProvMaxConcurrentWS, "Provisioning", "Concurrent provisions / workspace", "How many crew provisioning jobs a single workspace may run at once.", "jobs", 8, 1, hardMax},
+	{KeyProvMaxConcurrentWS, "Provisioning", "Concurrent provisions / workspace", "How many crew provisioning jobs a single workspace may run at once. Setting this below the number of crews a fresh seed creates (currently 4) can make `crewship seed` block on its own trigger requests.", "jobs", 8, 1, hardMax},
 	{KeyProvMaxStartsPerMin, "Provisioning", "Provision starts / minute", "How many crew provisioning jobs a workspace may START per minute.", "starts/min", 20, 1, hardMax},
 	{KeyWebhookAgentPerMin, "Webhooks", "Agent webhook fires", "Default cap on agent-webhook triggers per agent per minute.", "req/min", 60, 1, hardMax},
 }
@@ -137,6 +146,14 @@ func New(db *sql.DB) *Store {
 // Load replaces the in-memory override cache from the rate_limit_overrides
 // table. Unknown keys (left over from a removed limiter) are ignored so a
 // stale row can never resurrect a limiter that no longer exists.
+//
+// Call Load exactly once, at boot, BEFORE the store is installed
+// (SetGlobal) or handed to the router — i.e. before any Set/Reset can run.
+// It reads the DB outside the lock and then swaps the whole map under the
+// lock, so a Load racing a concurrent Set could clobber the just-committed
+// in-memory override (the DB row is still correct; the cache would lag until
+// the next Load). There is deliberately no supported "reload at runtime" path;
+// if one is ever added, make it merge under a single held lock instead.
 func (s *Store) Load(ctx context.Context) error {
 	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM rate_limit_overrides`)
 	if err != nil {
