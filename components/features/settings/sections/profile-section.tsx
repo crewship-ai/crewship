@@ -18,6 +18,7 @@ import {
   Shield,
 } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAuth } from "@/hooks/use-auth"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -181,6 +182,11 @@ const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp"
 export function ProfileSection({
   userName, userEmail, userAvatarUrl, role, workspaceName, joinedAt, sessionExpires, onSignOut,
 }: ProfileSectionProps) {
+  // The avatar and display name also live in the global session, which the
+  // top bar renders from. Writing them without re-pulling it is what made an
+  // upload look like it had done nothing outside this one card.
+  const { refresh: refreshSession } = useAuth()
+
   // ── Editable profile (name) state (#867.1) ──
   const [displayName, setDisplayName] = useState<string | null | undefined>(userName)
   useEffect(() => { setDisplayName(userName) }, [userName])
@@ -223,12 +229,13 @@ export function ProfileSection({
       // Failures stay inline-only (avatarError above): a toast would just
       // repeat what's already sitting right next to the button.
       toast.success("Profile picture updated")
+      void refreshSession()
     } catch {
       setAvatarError("Upload failed")
     } finally {
       setAvatarUploading(false)
     }
-  }, [])
+  }, [refreshSession])
 
   const removeAvatar = useCallback(async () => {
     setAvatarError(null)
@@ -242,12 +249,13 @@ export function ProfileSection({
       }
       setAvatarUrl(null)
       toast.success("Profile picture removed")
+      void refreshSession()
     } catch {
       setAvatarError("Could not remove avatar")
     } finally {
       setAvatarUploading(false)
     }
-  }, [])
+  }, [refreshSession])
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState("")
   const [savingName, setSavingName] = useState(false)
@@ -293,12 +301,13 @@ export function ProfileSection({
       setDisplayName(trimmed)
       setEditingName(false)
       toast.success("Name updated")
+      void refreshSession()
     } catch {
       setNameError("Failed to save name")
     } finally {
       setSavingName(false)
     }
-  }, [nameDraft])
+  }, [nameDraft, refreshSession])
 
   const resetPwForm = useCallback(() => {
     setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwError(null); setPwDone(false)

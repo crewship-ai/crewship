@@ -10,6 +10,14 @@ vi.mock("@/lib/api-fetch", () => ({
   apiFetch: (...args: unknown[]) => apiFetch(...args),
 }))
 
+// The avatar and name live in the global session too (top bar). Writing them
+// without re-pulling it is what made an upload look like it had done nothing
+// everywhere except the one row in Settings.
+const refresh = vi.fn().mockResolvedValue(undefined)
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ refresh }),
+}))
+
 const toastSuccess = vi.fn()
 const toastError = vi.fn()
 vi.mock("sonner", () => ({
@@ -78,6 +86,40 @@ describe("ProfileSection", () => {
     fireEvent.change(input, { target: { files: [pngFile()] } })
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith(expect.stringMatching(/profile picture/i)))
+  })
+
+  it("re-pulls the session after an upload so the top bar shows the new picture", async () => {
+    mockApi()
+    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+
+    fireEvent.change(screen.getByLabelText("Upload profile picture") as HTMLInputElement, {
+      target: { files: [pngFile()] },
+    })
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+  })
+
+  it("does not re-pull the session when the upload failed", async () => {
+    mockApi({ avatarPostStatus: 400 })
+    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+
+    fireEvent.change(screen.getByLabelText("Upload profile picture") as HTMLInputElement, {
+      target: { files: [pngFile()] },
+    })
+
+    await waitFor(() => expect(screen.getByText("upload rejected")).toBeTruthy())
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("re-pulls the session after a name change so the top bar renames too", async () => {
+    mockApi()
+    render(<ProfileSection userName="Ada Lovelace" userEmail="ada@example.com" />)
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }))
+    fireEvent.change(screen.getByDisplayValue("Ada Lovelace"), { target: { value: "Ada L" } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 
   it("on a rejected upload, does not toast success and keeps the inline error", async () => {
