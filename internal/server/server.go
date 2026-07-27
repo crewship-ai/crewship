@@ -35,6 +35,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
@@ -752,6 +753,19 @@ func (s *Server) mountAPIRouter(
 		evals.memoryHealth,
 		evals.negative,
 	))
+
+	// Runtime-tunable rate limiters (#1505 follow-up). One store, loaded from
+	// the rate_limit_overrides table, feeds the router's per-IP buckets AND —
+	// via ratelimitcfg.SetGlobal — the ambient readers in lockout / notify /
+	// provisioning / agent-webhook. A load failure is non-fatal: the store
+	// starts empty (all shipped defaults) so a transient DB hiccup at boot
+	// degrades to shipped behaviour rather than blocking startup.
+	rateLimitStore := ratelimitcfg.New(deps.DB)
+	if err := rateLimitStore.Load(context.Background()); err != nil {
+		logger.Warn("rate limit overrides failed to load; using shipped defaults", "error", err)
+	}
+	ratelimitcfg.SetGlobal(rateLimitStore)
+	opts = append(opts, goapi.WithRateLimitStore(rateLimitStore))
 
 	apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 	if err != nil {

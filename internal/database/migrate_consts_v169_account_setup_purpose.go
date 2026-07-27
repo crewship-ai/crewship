@@ -1,6 +1,6 @@
 package database
 
-// v168 — allow `account_setup` in verification_tokens.purpose.
+// v169 — allow `account_setup` in verification_tokens.purpose.
 //
 // Adding a colleague to a workspace had no working path on an instance
 // without a mail server: the invite endpoint wrote a row, never called the
@@ -25,7 +25,7 @@ package database
 // keys in either direction, which is what makes the straightforward
 // create-copy-swap safe here rather than needing v167's PRAGMA dance.
 const migrationAccountSetupPurpose = `
-CREATE TABLE verification_tokens_v168 (
+CREATE TABLE verification_tokens_v169 (
     identifier TEXT NOT NULL,
     token      TEXT NOT NULL UNIQUE,
     expires    DATETIME NOT NULL,
@@ -36,11 +36,11 @@ CREATE TABLE verification_tokens_v168 (
 
 -- Carry every live token across. Dropping them instead would invalidate
 -- any reset link already in someone's inbox at upgrade time.
-INSERT INTO verification_tokens_v168 (identifier, token, expires, purpose)
+INSERT INTO verification_tokens_v169 (identifier, token, expires, purpose)
     SELECT identifier, token, expires, purpose FROM verification_tokens;
 
 DROP TABLE verification_tokens;
-ALTER TABLE verification_tokens_v168 RENAME TO verification_tokens;
+ALTER TABLE verification_tokens_v169 RENAME TO verification_tokens;
 
 CREATE INDEX IF NOT EXISTS idx_verification_tokens_purpose
     ON verification_tokens (purpose, expires);

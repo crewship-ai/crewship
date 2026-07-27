@@ -6,6 +6,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react"
 import { z } from "zod"
@@ -43,17 +44,67 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-async function fetchSession(): Promise<AuthSession | null> {
+/**
+ * Session-poll retry policy. A 429 (rate limited), a 5xx/408 (transient
+ * backend hiccup), or a network blip on /api/auth/session is NOT a
+ * "you're logged out" signal — the user's cookies may be perfectly valid.
+ * refresh() retries these instead of dropping the session, so hammering
+ * refresh or a momentary outage can never evict a logged-in user.
+ *
+ * These are module-level (not const) solely so tests can collapse the backoff
+ * to near-zero; production never reassigns them.
+ */
+export const sessionRetryPolicy = {
+  maxAttempts: 5,
+  baseMs: 500,
+  capMs: 8000,
+}
+
+type SessionResult =
+  // Definitive answer from the backend: a valid session, or `null` meaning
+  // genuinely not authenticated (empty {} body, 401/403, revoked cookie).
+  | { kind: "settled"; session: AuthSession | null }
+  // Transient failure (429 / 5xx / 408 / network) — retry, never log out.
+  | { kind: "retry"; retryAfterMs?: number }
+
+function parseRetryAfterMs(res: Response): number | undefined {
   try {
-     
+    const raw = res.headers?.get?.("Retry-After")
+    if (!raw) return undefined
+    const secs = Number(raw)
+    if (!Number.isFinite(secs) || secs < 0) return undefined
+    return Math.min(secs * 1000, sessionRetryPolicy.capMs)
+  } catch {
+    return undefined
+  }
+}
+
+async function fetchSession(): Promise<SessionResult> {
+  try {
+
     const res = await serverFetch("/api/auth/session")
-    if (!res.ok) return null
+    // Transient, retryable statuses must not read as a logout. 429: the
+    // rate limiter fired (a burst of refreshes). 408/5xx: the backend hit
+    // a transient error and deliberately left the auth cookies intact
+    // (see NextAuthHandler.Session) so the next probe can recover.
+    if (res.status === 429 || res.status === 408 || res.status >= 500) {
+      return { kind: "retry", retryAfterMs: parseRetryAfterMs(res) }
+    }
+    if (!res.ok) {
+      // 401/403/other 4xx — a definitive "not authenticated".
+      return { kind: "settled", session: null }
+    }
     const data = await res.json()
     const parsed = sessionSchema.safeParse(data)
-    return parsed.success ? parsed.data : null
+    return { kind: "settled", session: parsed.success ? parsed.data : null }
   } catch {
-    return null
+    // Network error / unreadable body — treat as transient, not a logout.
+    return { kind: "retry" }
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function fetchCsrfToken(): Promise<string | null> {
@@ -78,10 +129,42 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
 
+  // Monotonic generation guard: a newer refresh() (e.g. one fired by signIn)
+  // supersedes any retry loop still backing off, so a stale loop can't
+  // clobber fresh session state.
+  const refreshGen = useRef(0)
+
   const refresh = useCallback(async () => {
-    const s = await fetchSession()
-    setSession(s)
-    setStatus(s ? "authenticated" : "unauthenticated")
+    const gen = ++refreshGen.current
+
+    for (let attempt = 0; ; attempt++) {
+      if (gen !== refreshGen.current) return // superseded by a newer refresh
+      const result = await fetchSession()
+
+      if (result.kind === "settled") {
+        if (gen !== refreshGen.current) return
+        setSession(result.session)
+        setStatus(result.session ? "authenticated" : "unauthenticated")
+        return
+      }
+
+      // Transient failure: never downgrade the session here. Back off and
+      // retry up to the policy limit.
+      if (attempt >= sessionRetryPolicy.maxAttempts - 1) break
+      const backoff = Math.min(
+        result.retryAfterMs ?? sessionRetryPolicy.baseMs * 2 ** attempt,
+        sessionRetryPolicy.capMs,
+      )
+      await sleep(backoff)
+    }
+
+    if (gen !== refreshGen.current) return
+    // Retries exhausted on transient failures only. Preserve an existing
+    // authenticated session — a real outage must never force a logout. Only a
+    // cold load that never once reached the backend settles on
+    // "unauthenticated", so the UI can offer login instead of spinning
+    // forever. (setSession is intentionally left untouched.)
+    setStatus((prev) => (prev === "authenticated" ? prev : "unauthenticated"))
   }, [])
 
   useEffect(() => {

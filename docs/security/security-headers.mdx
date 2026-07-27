@@ -56,7 +56,8 @@ The SPA `img-src` allows one extra host, `https://logos.composio.dev`, which ser
 
 | Route family | Limit | Handler |
 |---|---|---|
-| `/api/auth/*`, `/api/v1/auth/*`, `/api/v1/bootstrap` | **10 req/min** per IP | Auth endpoints — strict because these gate the entire system. |
+| `GET /api/auth/*` (read-only NextAuth: `session`, `csrf`, `providers`, `signin`, `error`) | **120 req/min** per IP | Polled on every dashboard page load (≥2 calls/load). Credential-free reads, so they ride the general bucket — see note below. |
+| `/api/auth/*` (non-GET), `/api/v1/auth/*`, `/api/v1/bootstrap` | **10 req/min** per IP | Credential-submitting auth endpoints (login callback, token refresh, sign-out, pairing) — strict because these gate the entire system. |
 | `/api/v1/credentials/test`, stored-credential test paths | **60 req/min** per IP | Credential-test endpoints hit external provider APIs; a tighter bucket keeps them from being used as a free key-validation oracle for stolen secrets. |
 | `/api/*` (all other), with a **valid CLI token** | **no rate limit** | Authenticated CLI/admin bulk operations (`crewship seed`, template import, bulk-create) exempt from the per-IP bucket — see below. |
 | `/api/*` (all other) | **120 req/min** per IP | Public API endpoints. |
@@ -65,11 +66,32 @@ The SPA `img-src` allows one extra host, `https://logos.composio.dev`, which ser
 
 The limiter can be disabled entirely (dev only) by setting `CREWSHIP_RATELIMIT_DISABLED` — but in production (`CREWSHIP_ENV=prod`/`production`) the toggle is ignored and the limiter always runs.
 
+### Runtime tuning (admin "Rate Limiters")
+
+The per-IP bucket sizes — and every other tunable limiter in the system (login lockout, the notification anti-storm bucket, crew provisioning, agent webhooks) — are **adjustable at runtime** by an OWNER/ADMIN, without a redeploy. The shipped defaults above are unchanged until an operator overrides them.
+
+- **UI:** Admin Console → **Infrastructure → Rate Limiters** — a table of every limiter with its current value, default, and an inline editor + reset-to-default.
+- **CLI:** `crewship admin ratelimits list | set <key> <value> | reset <key>` (see the [admin CLI reference](/cli/admin)).
+- **API:** `GET /api/v1/admin/rate-limits`, `PUT /api/v1/admin/rate-limits/{key}` (`{"value": N}`), `DELETE /api/v1/admin/rate-limits/{key}`.
+
+Overrides persist in the instance-global `rate_limit_overrides` table and apply immediately: the per-IP HTTP buckets are retuned live (`RateLimiter.SetReqPerMin`); the other limiters read their value on next use. The registry of keys, defaults, and bounds lives in `internal/ratelimitcfg`. A value out of a limiter's `[min, max]` range is rejected (`400`); an unknown key is `404`.
+
+<Warning>
+  These overrides are **instance-wide**, not per-workspace — the write is gated by the OWNER/ADMIN role check (like the other instance-scoped admin operations: re-encrypt, prune, backups), but its effect applies to the whole daemon. On a **multi-tenant** deployment, treat OWNER/ADMIN on any workspace as the authority to retune (and therefore weaken) rate limiting for every tenant. On a single-tenant self-hosted instance — Crewship's primary shape — this is a non-issue.
+</Warning>
+
+<Note>
+  Raising the **auth** bucket (`http.auth_per_min`) is the knob for an instance whose users are being logged out under heavy refresh traffic behind a shared NAT. The read-only session polls that caused the original refresh-logout no longer touch this bucket at all (they ride the 120/min general bucket), so most instances never need to change it.
+</Note>
+
 Dispatch happens in `Router.routeWithRateLimiting`:
 
 ```go
 // Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
 if strings.HasPrefix(path, "/api/v1/internal/") { r.mux.ServeHTTP(w, req); return }
+// Read-only NextAuth GETs (session/csrf/…) are polled on every page load —
+// route them through the general 120/min bucket, not the strict auth one.
+if req.Method == http.MethodGet && strings.HasPrefix(path, "/api/auth/") { r.apiRateLimitedMux.ServeHTTP(…); return }
 if strings.HasPrefix(path, "/api/auth/") || … { r.authRateLimitedMux.ServeHTTP(…); return }
 if path == "/api/v1/credentials/test" || … { r.credTestRateLimitedMux.ServeHTTP(…); return }
 if strings.HasPrefix(path, "/api/") {
@@ -95,6 +117,15 @@ A `crewship seed` or template-import run fires far more requests than the 120/mi
 The exemption applies **only** to the general `/api/*` bucket. The auth endpoints (`/api/auth/*`) and the credential-test anti-oracle bucket (`/api/v1/credentials/test`) are unaffected — a valid CLI token does not bypass either, since both exist specifically to throttle actions that stay dangerous even when authenticated (login/signup credential stuffing, key-validation oracling). A CLI-token-*shaped* bearer that doesn't hash-match a live row (forged, revoked, expired) gets no exemption and falls through to the normal per-IP bucket like any other request.
 
 Because the validity check runs *before* the limiter, failed lookups are remembered in a small bounded negative cache (SHA-256 of the bearer, 30 s TTL, 1024-entry cap) so a flood of spoofed CLI-prefix bearers cannot force an unthrottled database lookup on every request. Only failures are cached — a valid token is re-checked on every request, so revoking or expiring it removes the exemption immediately.
+
+### Read-only auth GETs stay out of the login bucket
+
+The dashboard's auth provider polls `GET /api/auth/session` (and `GET /api/auth/csrf`) on **every** page load. If those reads shared the 10 req/min login bucket, a handful of rapid refreshes would drain it; the resulting `429` was interpreted by the frontend session probe as "logged out", bouncing the user to `/login`.
+
+Two independent guards close this:
+
+1. **Router split** — `GET /api/auth/*` requests carry no credentials, so they route through the general **120 req/min** bucket. Only credential-*submitting* auth requests (the login callback, token refresh, sign-out — all non-GET) stay on the strict 10/min bucket, so brute-force protection is untouched. See `Router.routeWithRateLimiting` (`internal/api/router.go`).
+2. **Frontend resilience** — the session probe (`hooks/use-auth.tsx`) treats a `429`, a `5xx`/`408`, or a network error as a *transient* failure: it backs off and retries (honouring `Retry-After`) instead of dropping the session. An existing authenticated session is **never** downgraded to logged-out by a transient response — only a definitive `200 {}` (empty), `401`, or `403` unauthenticates.
 
 ### Burst, cleanup, 429 response
 

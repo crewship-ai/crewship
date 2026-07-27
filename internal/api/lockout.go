@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -198,15 +199,26 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 			       END
 			 WHERE id = ?
 		 RETURNING failed_login_count, locked_until`
-		lockedUntilStr := now.Add(LockoutDuration).UTC().Format(time.RFC3339)
+		// Threshold and duration are runtime-tunable via the admin Rate
+		// Limiters console; the package consts remain the shipped defaults
+		// and a defensive floor if the store ever reads a nonsensical value.
+		threshold := ratelimitcfg.Int(ratelimitcfg.KeyLoginLockoutThresh)
+		if threshold < 1 {
+			threshold = LockoutThreshold
+		}
+		lockoutDur := ratelimitcfg.Dur(ratelimitcfg.KeyLoginLockoutDurSec)
+		if lockoutDur <= 0 {
+			lockoutDur = LockoutDuration
+		}
+		lockedUntilStr := now.Add(lockoutDur).UTC().Format(time.RFC3339)
 		var newCount int
 		var newLockedUntil sql.NullString
 		if scanErr := db.QueryRowContext(ctx, q,
-			now.UTC().Format(time.RFC3339), LockoutThreshold, lockedUntilStr, userID,
+			now.UTC().Format(time.RFC3339), threshold, lockedUntilStr, userID,
 		).Scan(&newCount, &newLockedUntil); scanErr != nil {
 			return "", "", fmt.Errorf("lockout: bump: %w", scanErr)
 		}
-		if newCount >= LockoutThreshold {
+		if newCount >= threshold {
 			return "", "", ErrAccountLocked
 		}
 		return "", "", ErrInvalidCredentials
