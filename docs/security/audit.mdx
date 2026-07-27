@@ -362,6 +362,45 @@ fabricated audit record. The guarantee starts at the upgrade and runs forward.
   key-unaware edits. Production installs always have a persisted `ENCRYPTION_KEY`.
 </Note>
 
+### The audit log outlives what it refers to
+
+A journal entry points at the crew, agent and mission it describes. Until
+schema v167 those pointers were ordinary foreign keys, and they gave the
+**database itself** the ability to edit and delete the audit log:
+
+| column | old constraint | what happened |
+|---|---|---|
+| `crew_id` | `REFERENCES crews(id) ON DELETE CASCADE` | deleting a crew **deleted** its audit rows |
+| `agent_id` | `REFERENCES agents(id) ON DELETE CASCADE` | deleting an agent **deleted** its audit rows |
+| `mission_id` | `REFERENCES missions(id) ON DELETE SET NULL` | deleting a mission **rewrote** `mission_id` to NULL on every row that referenced it |
+
+`mission_id` is one of the fields the chain hash commits to, so the last one
+silently broke verification on rows nobody had touched: the stored `entry_hash`
+had been computed over the real id. To the verifier, a foreign key doing its job
+and an attacker editing rows are the same event — it reported
+`entry was modified after write`. The other two were worse in kind, if quieter:
+they destroyed audit history outright, leaving a `seq` gap that reads as a
+malicious mid-chain deletion.
+
+All three are now plain `TEXT` columns. An entry keeps the ids it was written
+with even after the crew, agent or mission is gone — which is the point of an
+audit log. `workspace_id` deliberately **keeps** `ON DELETE CASCADE`: the chain
+is per-workspace, so a workspace's journal going away with the workspace is
+coherent (and is what makes workspace teardown and `backup --replace` work).
+
+<Note>
+Upgrading repairs the damage rather than papering over it. Values the old
+constraint nulled are recoverable from the entry's `refs` JSON, which the
+constraint could not reach — but the migration does **not** trust that blindly.
+Each candidate is re-hashed and written back only when it reproduces the
+`entry_hash` already on disk, which (the hash being an HMAC under a key that is
+not in the database) proves it is the value the row was written with. Rows that
+cannot be proven are **counted and logged, never rehashed**: recomputing a hash
+over content nobody can vouch for would launder real tampering into a clean
+chain. Restoring a backup taken before the upgrade runs the same repair, so a
+restore cannot reintroduce the breakage.
+</Note>
+
 ### Determinism
 
 Hashing never depends on Go map iteration order. `payload` and `refs` are

@@ -35,6 +35,13 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 		return fmt.Errorf("seedRoutines: workspace_id not set on client")
 	}
 
+	// The Anthropic credentials_required type is baked into these vars at
+	// package init, before runSeed loaded .env.local — so on a slot whose real
+	// key is an OAuth token it was frozen to the placeholder API_KEY while the
+	// seed creates an AI_CLI_TOKEN. Re-derive it now that the key is in the
+	// environment, before the definitions are POSTed. See #1485.
+	seeddata.ReresolveAnthropicRequirements(seeddata.Routines, seeddata.EvalScenarios)
+
 	fmt.Fprintln(os.Stderr, "Creating routines...")
 	starterStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Routine", seeddata.Routines)
 	if err != nil {
