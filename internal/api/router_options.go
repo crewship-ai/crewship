@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -27,6 +28,16 @@ type RouterOption func(*Router)
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {
 		r.socketPath = path
+	}
+}
+
+// WithRateLimitStore installs the runtime-tunable rate-limiter store. The
+// router reads the per-IP bucket sizes from it at construction and registers
+// a live-apply callback so an admin override retunes the running limiters
+// without a restart. When unset the router uses the shipped defaults.
+func WithRateLimitStore(store *ratelimitcfg.Store) RouterOption {
+	return func(r *Router) {
+		r.ratelimitStore = store
 	}
 }
 

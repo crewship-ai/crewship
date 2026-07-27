@@ -175,6 +175,28 @@ func (rl *RateLimiter) Close() {
 	close(rl.stop)
 }
 
+// SetReqPerMin retunes the limiter to reqPerMin requests/minute (burst =
+// reqPerMin) at runtime — the hook the admin "Rate Limiters" console uses to
+// apply an override without a restart. New per-IP buckets pick up the new
+// rate immediately; existing buckets are retuned in place so the change also
+// reaches IPs already being tracked, not just the next new one. A reqPerMin
+// below 1 is ignored (the registry floor already forbids it; this is defence
+// in depth against a zero/negative bucket that would wedge every caller).
+func (rl *RateLimiter) SetReqPerMin(reqPerMin int) {
+	if reqPerMin < 1 {
+		return
+	}
+	newRPS := rate.Limit(float64(reqPerMin) / 60.0)
+	rl.mu.Lock()
+	rl.rps = newRPS
+	rl.burst = reqPerMin
+	for _, v := range rl.visitors {
+		v.limiter.SetLimit(newRPS)
+		v.limiter.SetBurst(reqPerMin)
+	}
+	rl.mu.Unlock()
+}
+
 // getLimiter returns the rate limiter for the given IP, creating one if needed.
 func (rl *RateLimiter) getLimiter(ip string) *rate.Limiter {
 	now := time.Now().UnixNano()

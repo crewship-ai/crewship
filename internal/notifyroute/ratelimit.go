@@ -24,6 +24,12 @@ type RateLimiter struct {
 	capacity float64
 	refillPS float64 // tokens added per second
 	nowFunc  func() time.Time
+	// capacityFn/refillFn, when set (NewDynamicRateLimiter), make the limiter
+	// runtime-tunable: Allow refreshes capacity/refillPS from them on each
+	// call so an admin change to the notification limits takes effect without
+	// a restart. nil for the static constructor.
+	capacityFn func() float64
+	refillFn   func() float64
 }
 
 // evictThreshold is the bucket-count at which Allow opportunistically
@@ -55,6 +61,28 @@ func NewRateLimiter(capacity, refillPerSecond float64) *RateLimiter {
 	}
 }
 
+// NewDynamicRateLimiter builds a limiter whose capacity and refill rate are
+// resolved live from the given functions on every Allow — the shape the
+// production wiring uses so the admin "Rate Limiters" console can retune the
+// notification anti-storm bucket at runtime. capacityFn returns the burst
+// size; refillFn returns tokens/second. The seed values prime the fields for
+// any read before the first Allow.
+func NewDynamicRateLimiter(capacityFn, refillFn func() float64) *RateLimiter {
+	rl := &RateLimiter{
+		buckets:    make(map[string]*bucket),
+		nowFunc:    time.Now,
+		capacityFn: capacityFn,
+		refillFn:   refillFn,
+	}
+	if capacityFn != nil {
+		rl.capacity = capacityFn()
+	}
+	if refillFn != nil {
+		rl.refillPS = refillFn()
+	}
+	return rl
+}
+
 // Allow reports whether a delivery to (recipientUserID, channelID,
 // category) may proceed right now, consuming one token if so. Category is
 // part of the key so a chatty chat.replies stream can't starve out a rare
@@ -68,6 +96,15 @@ func (r *RateLimiter) Allow(recipientUserID, channelID, category string) bool {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Dynamic limiter: pick up any runtime override before deciding. A
+	// capacity that dropped below a bucket's current token count is clamped
+	// on the next refill branch below.
+	if r.capacityFn != nil {
+		r.capacity = r.capacityFn()
+	}
+	if r.refillFn != nil {
+		r.refillPS = r.refillFn()
+	}
 	b, ok := r.buckets[key]
 	if !ok {
 		if len(r.buckets) >= evictThreshold {

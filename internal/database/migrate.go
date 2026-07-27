@@ -1874,6 +1874,12 @@ END;
 	// See migrate_consts_v167_journal_append_only_fks.go.
 	{version: 167, name: "journal_append_only_fks", fnNoTx: migrationJournalAppendOnlyFKs,
 		restoreBackfill: restoreBackfillRepairJournalMissionIDs},
+	// v168: runtime-tunable rate limiters (#1505 follow-up). One instance-global
+	// override table behind the admin "Rate Limiters" console — replaces the
+	// hardcoded limiter constants so an operator can raise a too-tight bucket
+	// without a redeploy. Absence of a row = shipped default.
+	// See migrate_consts_v168_rate_limit_overrides.go.
+	{version: 168, name: "rate_limit_overrides", sql: migrationRateLimitOverrides},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

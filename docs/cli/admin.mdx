@@ -37,6 +37,7 @@ crewship admin <subcommand> [flags]
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
+| `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
 
 ---
 
@@ -415,3 +416,48 @@ Rows already older than the new window become **eligible for deletion** on the r
 Sent as a **partial `PATCH`** carrying only the key being changed. The server merges it into the stored document and preserves settings this CLI doesn't know about, so an older binary can't silently drop a newer knob by writing a whole document back.
 
 The same data backs the **Admin → Runtime → Memory configuration** card in the dashboard.
+
+---
+
+## `crewship admin ratelimits`
+
+Inspect and tune the instance's rate limiters at runtime — the same surface as the dashboard's **Infrastructure → Rate Limiters** tab. Every limiter that was once a hardcoded constant (the per-IP HTTP buckets, the login lockout, the notification anti-storm bucket, crew provisioning, agent webhooks) is listed and overridable without a redeploy.
+
+```bash
+crewship admin ratelimits list
+crewship admin ratelimits list --format json
+crewship admin ratelimits set http.auth_per_min 30
+crewship admin ratelimits reset http.auth_per_min
+```
+
+`list` shows each limiter's group, key, current value, shipped default, unit, and whether the value is a default or an override:
+
+```console
+GROUP         KEY                                 VALUE  DEFAULT  UNIT        SOURCE
+HTTP (per-IP) http.auth_per_min                   30     10       req/min     override
+HTTP (per-IP) http.api_per_min                    120    120      req/min     default
+Login         login.lockout_threshold             10     10       attempts    default
+Notifications notify.burst                        5      5        tokens      default
+Provisioning  provisioning.max_starts_per_min     20     20       starts/min  default
+```
+
+`set <key> <value>` overrides a limiter; `reset <key>` reverts it to the shipped default. Overrides persist in the instance-global `rate_limit_overrides` table and take effect **immediately** — the per-IP HTTP buckets are retuned on the live limiter, the rest read their value on next use.
+
+| Key | Default | Unit | Limits |
+|---|---|---|---|
+| `http.auth_per_min` | 10 | req/min | Login / token-refresh / bootstrap, per IP (read-only session polls do **not** count). |
+| `http.api_per_min` | 120 | req/min | Every other `/api/*` route, per IP. |
+| `http.cred_test_per_min` | 60 | req/min | Credential-test endpoints (anti key-validation-oracle). |
+| `login.lockout_threshold` | 10 | attempts | Consecutive failed sign-ins before an account locks. |
+| `login.lockout_duration_sec` | 300 | seconds | How long a locked account stays frozen. |
+| `notify.burst` | 5 | tokens | Notification burst per (recipient, channel, category). |
+| `notify.refill_interval_sec` | 30 | seconds/token | Refill rate after a burst. |
+| `provisioning.max_concurrent_per_ws` | 8 | jobs | Concurrent crew provisions per workspace. |
+| `provisioning.max_starts_per_min` | 20 | starts/min | Crew provision starts per workspace per minute. |
+| `webhook.agent_per_min` | 60 | req/min | Agent-webhook fires per agent. |
+
+Writes are **manage-tier** (OWNER/ADMIN) and logged at WARN with the actor. A value outside a limiter's allowed range is rejected (`400`); an unknown key is `404`.
+
+<Note>
+Raising `http.auth_per_min` is the fix for an instance whose users get logged out under heavy refresh behind a shared NAT. On current builds the read-only session polls that caused that no longer touch this bucket, so most instances never need to.
+</Note>

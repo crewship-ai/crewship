@@ -27,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -131,11 +132,19 @@ type Router struct {
 	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
 	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
-	cappedMux              http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
-	cliExemptNeg           *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
-	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
-	consolidator           *consolidate.Consolidator
-	consolidateMemoryRoot  string
+	// authRL/apiRL/credTestRL are the underlying limiters behind the wrapped
+	// muxes above, retained so a runtime override from the admin Rate Limiters
+	// console (ratelimitStore.OnChange) can retune them in place — SetReqPerMin
+	// — without rebuilding the handler chain.
+	authRL                *RateLimiter
+	apiRL                 *RateLimiter
+	credTestRL            *RateLimiter
+	ratelimitStore        *ratelimitcfg.Store // runtime-tunable limiter values; nil → shipped defaults
+	cappedMux             http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
+	cliExemptNeg          *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
+	journal               journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
+	consolidator          *consolidate.Consolidator
+	consolidateMemoryRoot string
 	// outputBasePath is the host-side root that the container
 	// provider bind-mounts. PR-E F6 uses this to resolve per-agent
 	// and per-crew PERSONA + peers/ paths without going through the
@@ -483,11 +492,35 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// a Router, never pay for it at all.
 	go dummyBcryptHash()
 
-	// Pre-wrap mux with rate limiters (once, not per-request)
+	// Pre-wrap mux with rate limiters (once, not per-request). Values come
+	// from the runtime store when one is installed, else the shipped defaults
+	// (10 auth / 120 api / 60 cred-test req/min per IP — cred-test is tighter
+	// to blunt its use as a credential-validation oracle).
 	r.cliExemptNeg = newCLIExemptNegCache()
-	r.authRateLimitedMux = NewRateLimiter(10).Middleware(capped)     // 10 req/min per IP
-	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(capped)     // 120 req/min per IP
-	r.credTestRateLimitedMux = NewRateLimiter(60).Middleware(capped) // 60 req/min per IP — tighter on /credentials/test to limit its use as a credential-validation oracle (a tenant should never need 60 manual test clicks per minute)
+	authPM, apiPM, credPM := ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin),
+		ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAPIPerMin),
+		ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPCredTestPerMin)
+	if r.ratelimitStore != nil {
+		authPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAuthPerMin)
+		apiPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAPIPerMin)
+		credPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPCredTestPerMin)
+	}
+	r.authRL = NewRateLimiter(authPM)
+	r.apiRL = NewRateLimiter(apiPM)
+	r.credTestRL = NewRateLimiter(credPM)
+	r.authRateLimitedMux = r.authRL.Middleware(capped)
+	r.apiRateLimitedMux = r.apiRL.Middleware(capped)
+	r.credTestRateLimitedMux = r.credTestRL.Middleware(capped)
+
+	// Push runtime overrides onto the live limiters the moment an admin
+	// changes one — no restart, no dropped in-flight buckets.
+	if r.ratelimitStore != nil {
+		r.ratelimitStore.OnChange(func() {
+			r.authRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAuthPerMin))
+			r.apiRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAPIPerMin))
+			r.credTestRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPCredTestPerMin))
+		})
+	}
 
 	return r, nil
 }
