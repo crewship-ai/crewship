@@ -134,7 +134,7 @@ export const KeeperTab = React.memo(function KeeperTab({
               </>
             )}
             {!keeperStatus.enabled && (
-              <div className="px-4 py-2.5 bg-amber-500/[0.04] border-t border-amber-500/20">
+              <div className="px-4 py-2.5 bg-warn/[0.04] border-t border-warn/20">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   To enable Keeper, set{" "}
                   <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
@@ -185,9 +185,9 @@ export const KeeperTab = React.memo(function KeeperTab({
               <span className={cn(
                 "inline-flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-semibold uppercase tracking-wide border",
                 keeperWsStatus === "connected"
-                  ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                  ? "text-success border-success/30 bg-success/10"
                   : keeperWsStatus === "connecting"
-                    ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
+                    ? "text-warn border-warn/30 bg-warn/10"
                     : "text-muted-foreground border-border bg-muted/20",
               )}>
                 <Radio className="h-2.5 w-2.5" />

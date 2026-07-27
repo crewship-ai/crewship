@@ -495,22 +495,22 @@ function PresetDiffDialog({
                   </div>
                   {d.gains.length > 0 && (
                     <div className="flex items-center gap-1.5 text-[11px]">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-mono">
+                      <span className="text-success dark:text-success font-mono">
                         +{d.gains.length}
                       </span>
                       <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                      <code className="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-1 rounded text-[10px]">
+                      <code className="bg-success/[0.08] dark:bg-success/[0.08] text-success px-1 rounded text-[10px]">
                         {d.gains.join(", ")}
                       </code>
                     </div>
                   )}
                   {d.losses.length > 0 && (
                     <div className="flex items-center gap-1.5 text-[11px]">
-                      <span className="text-rose-600 dark:text-rose-400 font-mono">
+                      <span className="text-destructive dark:text-destructive font-mono">
                         -{d.losses.length}
                       </span>
                       <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                      <code className="bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 px-1 rounded text-[10px]">
+                      <code className="bg-destructive/[0.08] dark:bg-destructive/[0.08] text-destructive px-1 rounded text-[10px]">
                         {d.losses.join(", ")}
                       </code>
                     </div>

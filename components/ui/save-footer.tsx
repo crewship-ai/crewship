@@ -73,7 +73,7 @@ export function SaveFooter({
       className={cn(
         "flex flex-col gap-2 px-4 py-2.5 border-t",
         saved
-          ? "border-emerald-500/25 bg-emerald-500/[0.06]"
+          ? "border-success/25 bg-success/[0.06]"
           : failed
             ? "border-destructive/30 bg-destructive/[0.05]"
             : "border-primary/25 bg-primary/[0.05]",
@@ -104,7 +104,7 @@ export function SaveFooter({
         <span
           className={cn(
             "text-[11.5px] min-w-0 truncate",
-            saved ? "text-emerald-400" : failed ? "text-destructive" : "text-primary-hover",
+            saved ? "text-success" : failed ? "text-destructive" : "text-primary-hover",
           )}
         >
           {saved
@@ -144,7 +144,7 @@ export function SaveFooter({
           </div>
         )}
 
-        {saved && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />}
+        {saved && <Check className="h-3.5 w-3.5 text-success shrink-0" />}
       </div>
     </div>
   )

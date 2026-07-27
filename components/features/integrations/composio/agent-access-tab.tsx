@@ -72,13 +72,13 @@ export function AgentAccessTab({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter agents…"
-              className="w-44 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+              className="w-44 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
             />
           </div>
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value as AccessFilter)}
-            className="rounded-lg border border-white/10 bg-card px-2.5 py-1.5 text-xs focus:border-blue-400/50 focus:outline-none"
+            className="rounded-lg border border-white/10 bg-card px-2.5 py-1.5 text-xs focus:border-primary/50 focus:outline-none"
           >
             <option value="any">Any app</option>
             <option value="has">Has access</option>
@@ -154,7 +154,7 @@ export function AgentAccessTab({
                 <button
                   type="button"
                   onClick={() => setEditing(a)}
-                  className="shrink-0 text-xs text-blue-400 hover:text-blue-300"
+                  className="shrink-0 text-xs text-primary hover:text-primary/80"
                 >
                   {bs.length > 0 ? "Edit" : "Assign"}
                 </button>
@@ -166,11 +166,11 @@ export function AgentAccessTab({
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         <span>Scope legend —</span>
-        <span className="text-emerald-400">● Full</span>
+        <span className="text-success">● Full</span>
         <span>all tools</span>
         <span className="text-blue-300">● Read-only</span>
         <span>fetch/list/get/search</span>
-        <span className="text-amber-300">● Custom</span>
+        <span className="text-warn">● Custom</span>
         <span>hand-picked tools.</span>
       </div>
 

@@ -127,7 +127,7 @@ export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId:
                     <div
                       className={cn(
                         "h-full rounded-full transition-all",
-                        p.progress >= 100 ? "bg-green-500/70" : "bg-blue-500/60",
+                        p.progress >= 100 ? "bg-success/70" : "bg-primary/60",
                       )}
                       style={{ width: `${Math.min(p.progress, 100)}%` }}
                     />
@@ -280,7 +280,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           <div className="px-4">
           {editingTitle ? (
             <input
-              className="text-[15px] font-semibold text-foreground bg-transparent border-b border-blue-500 outline-none w-full pb-1"
+              className="text-[15px] font-semibold text-foreground bg-transparent border-b border-primary outline-none w-full pb-1"
               value={titleDraft}
               onChange={(e) => setTitleDraft(e.target.value)}
               onBlur={() => {
@@ -298,7 +298,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
             />
           ) : (
             <h2
-              className="text-[15px] font-semibold text-foreground cursor-pointer hover:text-blue-400 transition-colors"
+              className="text-[15px] font-semibold text-foreground cursor-pointer hover:text-primary transition-colors"
               onClick={() => {
                 setTitleDraft(project.name)
                 setEditingTitle(true)
@@ -524,7 +524,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                 </div>
                 <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
                   <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Completed</div>
-                  <div className="text-[18px] font-semibold text-green-400 tabular-nums">
+                  <div className="text-[18px] font-semibold text-success tabular-nums">
                     {stats?.completed_issues ?? project.done_count}
                   </div>
                 </div>
@@ -571,7 +571,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                   className={cn(
                     "text-[11px] px-2 py-1.5 border-b-2 transition-colors",
                     progressTab === "assignees"
-                      ? "border-blue-500 text-foreground"
+                      ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
                   )}
                 >
@@ -582,7 +582,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                   className={cn(
                     "text-[11px] px-2 py-1.5 border-b-2 transition-colors",
                     progressTab === "labels"
-                      ? "border-blue-500 text-foreground"
+                      ? "border-primary text-foreground"
                       : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
                   )}
                 >
@@ -606,7 +606,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                         </span>
                         <div className="w-8 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-blue-500/70 rounded-full"
+                            className="h-full bg-primary/70 rounded-full"
                             style={{ width: `${a.total > 0 ? (a.completed / a.total) * 100 : 0}%` }}
                           />
                         </div>

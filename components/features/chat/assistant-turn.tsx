@@ -68,7 +68,7 @@ function ResultCard({ part }: { part: TurnPart }) {
 
   if (isError && errors?.length) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-label text-red-700 dark:text-red-400 max-w-lg">
+      <div className="flex items-center gap-2 px-3 py-2 bg-destructive/10 dark:bg-destructive/30 border border-destructive/25 dark:border-destructive rounded-lg text-label text-destructive dark:text-destructive max-w-lg">
         <AlertCircle className="h-4 w-4 shrink-0" />
         <span>{errors.join("; ")}</span>
       </div>
@@ -93,7 +93,7 @@ function ResultCard({ part }: { part: TurnPart }) {
       <div className="mt-1.5 bg-muted/30 border rounded-lg px-4 py-3 space-y-2">
         <div className="flex items-center gap-4 flex-wrap text-label">
           {cost != null && cost > 0 && (
-            <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+            <span className="flex items-center gap-1 text-success dark:text-success font-medium">
               <DollarSign className="h-3 w-3" />
               {formatCost(cost, true)}
             </span>
@@ -200,9 +200,9 @@ function TodoWriteCard({ part, agentId }: { part: TurnPart; agentId?: string }) 
           {todos.map((todo, i) => (
             <div key={i} className="flex items-start gap-2 text-label py-0.5">
               {todo.status === "completed" ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0 mt-0.5" />
               ) : todo.status === "in_progress" ? (
-                <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5 animate-spin" />
+                <Clock className="h-3.5 w-3.5 text-warn shrink-0 mt-0.5 animate-spin" />
               ) : (
                 <CircleDot className="h-3.5 w-3.5 text-muted-foreground-soft shrink-0 mt-0.5" />
               )}
@@ -215,10 +215,10 @@ function TodoWriteCard({ part, agentId }: { part: TurnPart; agentId?: string }) 
             value={pct}
             max={100}
             aria-label={`Progress ${pct}%`}
-            className="h-1.5 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:bg-emerald-500 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-all [&::-moz-progress-bar]:bg-emerald-500 [&::-moz-progress-bar]:rounded-full"
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:bg-success [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-all [&::-moz-progress-bar]:bg-success [&::-moz-progress-bar]:rounded-full"
           />
           {inProgress > 0 && (
-            <p className="text-micro text-amber-500 mt-1">{inProgress} in progress</p>
+            <p className="text-micro text-warn mt-1">{inProgress} in progress</p>
           )}
         </div>
       </div>
@@ -238,14 +238,14 @@ function TaskCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
       <div className="bg-primary/5 border border-primary/20 border-l-4 border-l-amber-400 rounded-lg overflow-hidden">
         <div className="px-4 py-3">
           <div className="flex items-center gap-2 text-label">
-            <Crown className="h-3.5 w-3.5 text-amber-500" />
+            <Crown className="h-3.5 w-3.5 text-warn" />
             <span className="font-medium">Subagent: {input.subagent_type ?? "worker"}</span>
             {isCompleted ? (
-              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
+              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro bg-success/10 dark:bg-success/30 text-success dark:text-success">
                 <CheckCircle2 className="h-3 w-3" /> Done
               </span>
             ) : (
-              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
+              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro bg-warn/10 dark:bg-warn/30 text-warn dark:text-warn">
                 <Clock className="h-3 w-3 animate-spin" /> Working
               </span>
             )}
@@ -387,7 +387,7 @@ function DelegationContent({ content }: { content: string }) {
       <div className="bg-primary/5 border border-primary/20 border-l-4 border-l-[#4ECDC4] rounded-lg overflow-hidden">
         <div className="px-4 py-3">
           <div className="flex items-center gap-2 text-label">
-            <Crown className="h-3.5 w-3.5 text-amber-500" />
+            <Crown className="h-3.5 w-3.5 text-warn" />
             <span className="font-medium text-muted-foreground">Delegated to</span>
             <span className="font-semibold">{targetMatch?.[1] ?? "Agent"}</span>
           </div>
@@ -398,12 +398,12 @@ function DelegationContent({ content }: { content: string }) {
           )}
           <div className="mt-2 flex items-center gap-2">
             {isCompleted ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-medium bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-medium bg-success/10 dark:bg-success/30 text-success dark:text-success">
                 <CheckCircle2 className="h-3 w-3" />
                 Completed in {completedMatch[1]}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-medium bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-medium bg-warn/10 dark:bg-warn/30 text-warn dark:text-warn">
                 <Clock className="h-3 w-3 animate-spin" />
                 In progress...
               </span>
@@ -464,9 +464,9 @@ function ActivityGroup({ tools, agentId }: { tools: ToolNode[]; agentId?: string
         <span>· {tools.length} steps · {summarizeTools(tools)}</span>
         <span className="ml-auto inline-flex items-center">
           {allDone ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-success" />
           ) : (
-            <Clock className="h-3.5 w-3.5 animate-spin text-amber-500" />
+            <Clock className="h-3.5 w-3.5 animate-spin text-warn" />
           )}
         </span>
       </summary>
@@ -550,7 +550,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
           case "error":
             if (part.content.toLowerCase().includes("rate limit") || part.content.toLowerCase().includes("429")) {
               return (
-                <div key={part.id} className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-label text-amber-700 dark:text-amber-400 max-w-md">
+                <div key={part.id} className="flex items-center gap-2 px-3 py-2 bg-warn/10 dark:bg-warn/30 border border-warn/25 dark:border-warn rounded-lg text-label text-warn dark:text-warn max-w-md">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   <span>{part.content}</span>
                 </div>
@@ -706,7 +706,7 @@ function TurnFeedbackActions({
         data-active={submitted.helpful ? "true" : "false"}
       >
         <ThumbsUp
-          className={"h-3.5 w-3.5 " + (submitted.helpful ? "text-emerald-500" : "")}
+          className={"h-3.5 w-3.5 " + (submitted.helpful ? "text-success" : "")}
         />
       </MessageAction>
       <MessageAction
@@ -716,7 +716,7 @@ function TurnFeedbackActions({
         data-active={submitted.not_helpful ? "true" : "false"}
       >
         <ThumbsDown
-          className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-rose-500" : "")}
+          className={"h-3.5 w-3.5 " + (submitted.not_helpful ? "text-destructive" : "")}
         />
       </MessageAction>
       <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />

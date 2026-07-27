@@ -101,7 +101,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
                           className={cn(
                             "transition-all duration-200",
                             isDimmed && "opacity-40 scale-[0.98]",
-                            isHighlighted && "ring-1 ring-blue-500/50 rounded-lg",
+                            isHighlighted && "ring-1 ring-primary/50 rounded-lg",
                           )}
                         >
                           <IssueCard

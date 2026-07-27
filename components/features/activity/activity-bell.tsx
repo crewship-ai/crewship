@@ -18,6 +18,7 @@ import {
   useCancelRoutineRun,
 } from "@/components/features/routines/live-run-row"
 import { formatStepCost } from "@/components/features/routines/routine-cost-format"
+import { SourcePill } from "@/components/features/activity/source-pill"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { useActiveRuns, type ActiveRunItem } from "@/hooks/use-active-runs"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -66,10 +67,10 @@ export function ActivityBell() {
   // Live-run semantics win the badge tone; the count merges both feeds.
   const badgeClass =
     awaitingApproval > 0
-      ? "bg-amber-500 text-amber-950"
+      ? "bg-warn text-warn"
       : activeCount > 0
-        ? "bg-blue-500 text-white"
-        : "bg-emerald-500 text-white"
+        ? "bg-primary text-white"
+        : "bg-success text-white"
 
   const ariaLabel =
     liveTotal > 0
@@ -169,7 +170,7 @@ function ActivityDropdownBody({
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full animate-pulse",
-                awaitingApproval > 0 ? "bg-amber-500" : "bg-blue-500",
+                awaitingApproval > 0 ? "bg-warn" : "bg-primary",
               )}
             />
             {liveTotal} live
@@ -225,7 +226,7 @@ function ActivityDropdownBody({
         <Link
           href={liveTotal > 0 ? "/activity?status=active" : "/activity"}
           onClick={onNavigate}
-          className="block w-full rounded px-2 py-1.5 text-center text-xs text-emerald-400 hover:bg-white/[0.04]"
+          className="block w-full rounded px-2 py-1.5 text-center text-xs text-success hover:bg-white/[0.04]"
         >
           View all activity →
         </Link>
@@ -251,11 +252,11 @@ function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => vo
       }}
       className="flex cursor-pointer items-start gap-2 px-3 py-2 hover:bg-white/[0.04]"
     >
-      <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+      <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs font-medium text-foreground">{item.label}</div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="h-1 w-1 rounded-full bg-success animate-pulse" />
           Agent
           {item.sublabel ? ` · ${item.sublabel}` : ""}
           {item.startedAt ? ` · ${relTime(item.startedAt)}` : ""}
@@ -286,12 +287,13 @@ function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void 
       <span
         className={cn(
           "h-1.5 w-1.5 shrink-0 rounded-full",
-          failed ? "bg-rose-500" : "bg-emerald-500",
+          failed ? "bg-destructive" : "bg-success",
         )}
       />
       <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
         {run.pipeline_name || run.pipeline_slug}
       </span>
+      <SourcePill run={run} />
       <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
         {run.status} · {relTime(run.ended_at || run.started_at)}
         {run.cost_usd > 0 ? ` · ${formatStepCost(run.cost_usd)}` : ""}

@@ -306,7 +306,7 @@ export function NotificationChannelsSection({ workspaceId }: NotificationChannel
 
       {/* ── One-time secret reveal ── */}
       {revealedSecret && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.04] px-4 py-3 space-y-1.5">
+        <div className="rounded-xl border border-warn/40 bg-warn/[0.04] px-4 py-3 space-y-1.5">
           <div className="text-xs font-medium text-foreground/90">
             {revealedSecret.type === "shoutrrr" ? "Service URL" : "Webhook signing secret"} — shown only once
           </div>

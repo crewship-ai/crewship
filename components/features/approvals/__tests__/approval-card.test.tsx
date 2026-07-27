@@ -97,7 +97,7 @@ describe("ApprovalCard — status styling", () => {
     // lookup. We assert by querying the badge element and its class.
     const badge = screen.getByText("PENDING")
     expect(badge).toBeInTheDocument()
-    expect(badge.className).toContain("text-amber-300")
+    expect(badge.className).toContain("text-warn")
   })
 
   it("unknown status falls back to muted styling", () => {

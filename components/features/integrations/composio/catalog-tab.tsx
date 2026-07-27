@@ -41,7 +41,7 @@ export function CatalogTab({
             value={search}
             onChange={(e) => onSearch(e.target.value)}
             placeholder="Search apps (gmail, github, slack…)"
-            className="w-64 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+            className="w-64 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
           />
         </div>
       </div>
@@ -75,8 +75,8 @@ export function CatalogTab({
                   className={cn(
                     "shrink-0 rounded-lg border px-2 py-1 text-[11px] transition-colors",
                     isConfigured
-                      ? "border-emerald-400/30 text-emerald-400 hover:bg-emerald-500/10"
-                      : "border-white/10 text-foreground/80 hover:border-blue-400/50 hover:text-blue-400",
+                      ? "border-success/30 text-success hover:bg-success/10"
+                      : "border-white/10 text-foreground/80 hover:border-primary/50 hover:text-primary",
                   )}
                 >
                   {isConfigured ? "+ Account" : "Connect"}

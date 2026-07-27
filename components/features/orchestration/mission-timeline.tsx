@@ -25,16 +25,16 @@ const AGENT_W = 160
 const TICK_COUNT = 8
 
 const statusBadge: Record<MissionStatus, string> = {
-  BACKLOG: "border-slate-400 text-slate-400",
-  TODO: "border-slate-400 text-slate-400",
-  IN_PROGRESS: "border-blue-500 text-blue-400",
-  COMPLETED: "border-emerald-500 text-emerald-400",
-  DONE: "border-emerald-500 text-emerald-400",
-  FAILED: "border-red-500 text-red-400",
-  PLANNING: "border-slate-400 text-slate-400",
-  REVIEW: "border-purple-500 text-purple-400",
-  CANCELLED: "border-gray-500 text-gray-400",
-  DUPLICATE: "border-gray-500 text-gray-400",
+  BACKLOG: "border-border text-muted-foreground",
+  TODO: "border-border text-muted-foreground",
+  IN_PROGRESS: "border-primary text-primary",
+  COMPLETED: "border-success text-success",
+  DONE: "border-success text-success",
+  FAILED: "border-destructive text-destructive",
+  PLANNING: "border-border text-muted-foreground",
+  REVIEW: "border-purple text-purple",
+  CANCELLED: "border-border text-muted-foreground",
+  DUPLICATE: "border-border text-muted-foreground",
 }
 
 function getTimeRange(missions: Mission[]): { start: number; end: number } {
@@ -70,8 +70,8 @@ const TASK_BAR_STYLES: Record<string, React.CSSProperties> = {
     animation: "shimmer 2.5s linear infinite",
   },
   BLOCKED: {
-    background: "repeating-linear-gradient(-45deg, rgba(245,158,11,0.15) 0px 4px, rgba(245,158,11,0.05) 4px 8px)",
-    border: "1px solid rgba(245,158,11,0.4)",
+    background: "repeating-linear-gradient(-45deg, rgba(217,119,6,0.15) 0px 4px, rgba(217,119,6,0.05) 4px 8px)",
+    border: "1px solid rgba(217,119,6,0.4)",
     color: "#fcd34d",
   },
   PENDING: { background: "rgba(72,79,88,0.2)", border: "1.5px dashed rgba(72,79,88,0.5)", color: "rgb(72,79,88)" },
@@ -283,7 +283,7 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
                           ))}
                           {/* Now marker */}
                           {nowPct != null && (
-                            <div className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-[15] pointer-events-none" style={{ left: `${nowPct}%` }}>
+                            <div className="absolute top-0 bottom-0 w-0.5 bg-destructive z-[15] pointer-events-none" style={{ left: `${nowPct}%` }}>
                               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-rose-500" />
                             </div>
                           )}

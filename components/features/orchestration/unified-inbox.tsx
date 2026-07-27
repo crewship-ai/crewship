@@ -152,7 +152,7 @@ function InboxSection({
               </div>
               {showApprove && onApprove && (
                 <button
-                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors opacity-0 group-hover:opacity-100"
+                  className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warn/10 text-warn hover:bg-warn/20 transition-colors opacity-0 group-hover:opacity-100"
                   onClick={(e) => {
                     e.stopPropagation()
                     onApprove(task.id, mission.id)
@@ -192,7 +192,7 @@ export function UnifiedInbox({
             label="Approvals"
             icon={<Diamond className="h-3.5 w-3.5" />}
             items={approvals}
-            accentClass="text-amber-400"
+            accentClass="text-warn"
             onTaskSelect={onTaskSelect}
             onApprove={onApproveGate}
             showApprove
@@ -201,14 +201,14 @@ export function UnifiedInbox({
             label="Failed"
             icon={<X className="h-3.5 w-3.5" />}
             items={failed}
-            accentClass="text-red-400"
+            accentClass="text-destructive"
             onTaskSelect={onTaskSelect}
           />
           <InboxSection
             label="Blocked"
             icon={<PauseCircle className="h-3.5 w-3.5" />}
             items={blocked}
-            accentClass="text-amber-400"
+            accentClass="text-warn"
             onTaskSelect={onTaskSelect}
           />
 

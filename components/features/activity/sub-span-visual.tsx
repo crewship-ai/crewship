@@ -28,13 +28,13 @@ interface KindVisual {
 }
 
 const KIND_VISUAL: Record<SubSpanKind, KindVisual> = {
-  bash: { Icon: Terminal, tint: "text-emerald-300", tile: "bg-emerald-500/10 border-emerald-500/30", label: "bash" },
-  write: { Icon: FileText, tint: "text-amber-300", tile: "bg-amber-500/10 border-amber-500/30", label: "write" },
-  edit: { Icon: FileText, tint: "text-amber-300", tile: "bg-amber-500/10 border-amber-500/30", label: "edit" },
+  bash: { Icon: Terminal, tint: "text-success", tile: "bg-success/10 border-success/30", label: "bash" },
+  write: { Icon: FileText, tint: "text-warn", tile: "bg-warn/10 border-warn/30", label: "write" },
+  edit: { Icon: FileText, tint: "text-warn", tile: "bg-warn/10 border-warn/30", label: "edit" },
   read: { Icon: Eye, tint: "text-sky-300", tile: "bg-sky-500/10 border-sky-500/30", label: "read" },
-  mcp_tool: { Icon: Wrench, tint: "text-violet-300", tile: "bg-violet-500/10 border-violet-500/30", label: "mcp" },
-  http: { Icon: Globe, tint: "text-cyan-300", tile: "bg-cyan-500/10 border-cyan-500/30", label: "http" },
-  tool: { Icon: Wrench, tint: "text-violet-300", tile: "bg-violet-500/10 border-violet-500/30", label: "tool" },
+  mcp_tool: { Icon: Wrench, tint: "text-purple", tile: "bg-purple/10 border-purple/30", label: "mcp" },
+  http: { Icon: Globe, tint: "text-notice", tile: "bg-notice/10 border-notice/30", label: "http" },
+  tool: { Icon: Wrench, tint: "text-purple", tile: "bg-purple/10 border-purple/30", label: "tool" },
   think: { Icon: Sparkles, tint: "text-indigo-300", tile: "bg-indigo-500/10 border-indigo-500/30", label: "think" },
 }
 
@@ -67,9 +67,9 @@ export function SubSpanIcon({
 }
 
 export const SUB_SPAN_STATUS_COLOR: Record<SubSpanStatus, string> = {
-  ok: "text-emerald-300",
-  error: "text-rose-300",
-  running: "text-amber-300",
+  ok: "text-success",
+  error: "text-destructive",
+  running: "text-warn",
 }
 
 // Waterfall bar gradient per kind — mirrors the mockup's lane colors.

@@ -292,7 +292,7 @@ function IssueSidebarBody({
                   onClick={() => patchIssue({ estimate: pts })}
                   className={cn(
                     "w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06]",
-                    issue.estimate === pts && "bg-blue-500/10 text-blue-400",
+                    issue.estimate === pts && "bg-primary/10 text-primary",
                   )}
                 >
                   {pts} points
@@ -425,7 +425,7 @@ function IssueSidebarBody({
             {currentProject && (
               <a
                 href={`/issues?project=${currentProject.id}`}
-                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground/30 hover:text-blue-400 transition-all shrink-0"
+                className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground/30 hover:text-primary transition-all shrink-0"
                 title="Open project"
               >
                 <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3"/><path d="M10 2h4v4"/><path d="M14 2L7 9"/></svg>

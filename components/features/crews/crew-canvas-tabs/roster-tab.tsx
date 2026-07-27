@@ -49,7 +49,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                       <span className="font-medium truncate">{a.name}</span>
                       <span className="text-[10px] text-muted-foreground">{a.status?.toLowerCase()}</span>
                       {a.agent_role !== "AGENT" && (
-                        <span className="text-[8px] px-1 rounded bg-violet-500/20 text-violet-300">{a.agent_role}</span>
+                        <span className="text-[8px] px-1 rounded bg-purple/20 text-purple">{a.agent_role}</span>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{a.role_title || "—"}</div>
@@ -57,7 +57,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 </div>
                 <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
                   {a.llm_model && (
-                    <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 truncate">
+                    <span className="px-1.5 py-0.5 rounded bg-muted border border-white/10 truncate">
                       {a.llm_model}
                     </span>
                   )}
@@ -97,7 +97,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                 {m.user?.avatar_url ? (
                   <img src={m.user.avatar_url} alt="" className="w-8 h-8 rounded-full" />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-violet-600 grid place-items-center text-[11px]">
+                  <div className="w-8 h-8 rounded-full bg-purple grid place-items-center text-[11px]">
                     {(m.user?.full_name ?? m.user?.email ?? "?").slice(0, 2).toUpperCase()}
                   </div>
                 )}

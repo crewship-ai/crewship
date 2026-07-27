@@ -120,7 +120,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select a routine to see its schedule.</EmptyState>
   if (context.kind !== "routine") return <EmptyState>Schedule is shown per routine.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (loading) return <EmptyState>Loading…</EmptyState>
   if (!schedule) return <EmptyState>This routine has no schedule — it runs only when triggered manually.</EmptyState>
 
@@ -132,7 +132,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
       </span>
     ) },
     { k: "Timezone", v: schedule.timezone || "UTC" },
-    { k: "Status", v: <span className={schedule.enabled ? "text-emerald-300" : "text-muted-foreground"}>{schedule.enabled ? "Enabled" : "Paused"}</span> },
+    { k: "Status", v: <span className={schedule.enabled ? "text-success" : "text-muted-foreground"}>{schedule.enabled ? "Enabled" : "Paused"}</span> },
     { k: "Next run", v: schedule.next_run_at ? formatRelative(schedule.next_run_at) : "—" },
     { k: "Last run", v: schedule.last_run_at ? formatRelative(schedule.last_run_at) : "—" },
     { k: "Last status", v: schedule.last_status ? <span className={statusColor(schedule.last_status)}>{schedule.last_status}</span> : "—" },
@@ -148,7 +148,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
           disabled={running}
           className={cn(
             "px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5 transition-colors",
-            ran ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-500",
+            ran ? "bg-success text-white" : "bg-primary text-white hover:bg-primary",
             running && "opacity-60",
           )}
         >
@@ -156,7 +156,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
         </button>
       </div>
       {actionError && (
-        <div className="mb-3 text-[11px] text-red-300 border border-red-500/20 bg-red-500/5 rounded-md px-3 py-1.5">
+        <div className="mb-3 text-[11px] text-destructive border border-destructive/20 bg-destructive/5 rounded-md px-3 py-1.5">
           Run now failed: {actionError}
         </div>
       )}

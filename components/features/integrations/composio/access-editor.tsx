@@ -244,7 +244,7 @@ export function AccessEditor({
             <TableSkeleton rows={4} />
           </div>
         ) : loadErr ? (
-          <div className="mt-4 text-xs text-red-400">{loadErr}</div>
+          <div className="mt-4 text-xs text-destructive">{loadErr}</div>
         ) : (
           <div className="mt-4 space-y-4">
             {/* Acts-as user */}
@@ -253,7 +253,7 @@ export function AccessEditor({
               <select
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
-                className="rounded-lg border border-white/10 bg-background px-2.5 py-1.5 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+                className="rounded-lg border border-white/10 bg-background px-2.5 py-1.5 font-mono text-xs focus:border-primary/50 focus:outline-none"
               >
                 {!users.includes(userId) && <option value="">— pick a user —</option>}
                 {users.map((u) => (
@@ -292,7 +292,7 @@ export function AccessEditor({
                             value={app.mode}
                             onChange={(e) => setMode(app.toolkit.slug, e.target.value as Scope)}
                             className={cn(
-                              "rounded-lg border border-white/10 bg-background px-2 py-1 text-xs focus:border-blue-400/50 focus:outline-none",
+                              "rounded-lg border border-white/10 bg-background px-2 py-1 text-xs focus:border-primary/50 focus:outline-none",
                               app.mode === "off" && "text-muted-foreground",
                             )}
                           >
@@ -353,7 +353,7 @@ export function AccessEditor({
           </div>
         )}
 
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex items-center gap-2">
           <Button size="sm" onClick={save} disabled={busy || loading || !!loadErr}>
@@ -515,7 +515,7 @@ function ToolPicker({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={`Search ${total || ""} tools…`}
-            className="w-44 rounded-lg border border-white/10 bg-background py-1.5 pl-8 pr-2 text-xs focus:border-blue-400/50 focus:outline-none"
+            className="w-44 rounded-lg border border-white/10 bg-background py-1.5 pl-8 pr-2 text-xs focus:border-primary/50 focus:outline-none"
           />
         </div>
         <div className="flex items-center gap-1.5">
@@ -545,7 +545,7 @@ function ToolPicker({
       </div>
 
       {err ? (
-        <div className="py-2 text-[11px] text-red-400">{err}</div>
+        <div className="py-2 text-[11px] text-destructive">{err}</div>
       ) : loading ? (
         <TableSkeleton rows={4} />
       ) : tools.length === 0 ? (
@@ -565,7 +565,7 @@ function ToolPicker({
                     type="checkbox"
                     checked={on}
                     onChange={() => toggle(t.slug)}
-                    className="h-3.5 w-3.5 shrink-0 accent-blue-500"
+                    className="h-3.5 w-3.5 shrink-0 accent-primary"
                   />
                   <span className="truncate font-mono text-[11px] text-foreground/90">
                     {t.slug}
@@ -574,7 +574,7 @@ function ToolPicker({
                 <span
                   className={cn(
                     "shrink-0 rounded-full border border-white/10 px-1.5 py-px text-[9px]",
-                    read ? "text-muted-foreground" : "text-amber-300",
+                    read ? "text-muted-foreground" : "text-warn",
                   )}
                 >
                   {read ? "read" : "write"}

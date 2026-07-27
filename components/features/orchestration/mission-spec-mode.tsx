@@ -123,9 +123,9 @@ function PhaseBar({ phases }: { phases: MissionPhase[] }) {
             <div
               className={cn(
                 "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0",
-                phase.status === "done" && "bg-emerald-500 text-white",
+                phase.status === "done" && "bg-success text-white",
                 phase.status === "active" &&
-                  "bg-blue-500 text-white ring-4 ring-blue-500/20 animate-pulse",
+                  "bg-primary text-primary-foreground ring-4 ring-primary/20 animate-pulse",
                 phase.status === "pending" &&
                   "bg-background text-muted-foreground border",
               )}
@@ -135,8 +135,8 @@ function PhaseBar({ phases }: { phases: MissionPhase[] }) {
             <span
               className={cn(
                 "text-[13px] whitespace-nowrap",
-                phase.status === "done" && "text-emerald-600 dark:text-emerald-400 font-medium",
-                phase.status === "active" && "text-blue-600 dark:text-blue-400 font-semibold",
+                phase.status === "done" && "text-success dark:text-success font-medium",
+                phase.status === "active" && "text-primary dark:text-primary font-semibold",
                 phase.status === "pending" && "text-muted-foreground",
               )}
             >
@@ -147,7 +147,7 @@ function PhaseBar({ phases }: { phases: MissionPhase[] }) {
             <div
               className={cn(
                 "flex-1 h-0.5 mx-3",
-                phase.status === "done" ? "bg-emerald-500" : "bg-border",
+                phase.status === "done" ? "bg-success" : "bg-border",
               )}
             />
           )}
@@ -185,8 +185,8 @@ function PhaseSection({ phase, title, defaultOpen = false, rightHeader, children
         <span
           className={cn(
             "h-2.5 w-2.5 rounded-full flex-shrink-0",
-            phase.status === "done" && "bg-emerald-500",
-            phase.status === "active" && "bg-blue-500 ring-4 ring-blue-500/20",
+            phase.status === "done" && "bg-success",
+            phase.status === "active" && "bg-primary ring-4 ring-primary/20",
             phase.status === "pending" && "bg-border",
           )}
         />
@@ -208,7 +208,7 @@ function ApprovalStamp({ label, at }: { label: string; at: string }) {
   const ts = new Date(at)
   if (Number.isNaN(ts.getTime())) return null
   return (
-    <div className="mt-3 inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+    <div className="mt-3 inline-flex items-center gap-1 rounded bg-success/10 px-2 py-1 text-xs text-success dark:text-success">
       <Check className="h-3 w-3" /> {label} {ts.toLocaleDateString()}
     </div>
   )
@@ -260,27 +260,27 @@ function taskVisual(status: MissionTaskStatus) {
     case "IN_PROGRESS":
       return {
         Icon: Clock,
-        containerClass: "border-blue-500 bg-blue-500/5",
-        iconClass: "text-blue-500",
+        containerClass: "border-primary bg-primary/5",
+        iconClass: "text-primary",
       }
     case "COMPLETED":
     case "SKIPPED":
       return {
         Icon: Check,
-        containerClass: "border-emerald-500 bg-emerald-500/5",
-        iconClass: "text-emerald-500",
+        containerClass: "border-success bg-success/5",
+        iconClass: "text-success",
       }
     case "AWAITING_APPROVAL":
       return {
         Icon: Pause,
-        containerClass: "border-amber-500 bg-amber-500/5",
-        iconClass: "text-amber-500",
+        containerClass: "border-warn bg-warn/5",
+        iconClass: "text-warn",
       }
     case "FAILED":
       return {
         Icon: Lock,
-        containerClass: "border-rose-500 bg-rose-500/5",
-        iconClass: "text-rose-500",
+        containerClass: "border-destructive bg-destructive/5",
+        iconClass: "text-destructive",
       }
     case "BLOCKED":
     case "PENDING":

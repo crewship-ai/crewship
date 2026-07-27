@@ -167,7 +167,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
       <SettingsRow
         label={
           <span className="inline-flex items-center gap-1.5">
-            <ShieldAlert className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+            <ShieldAlert className="h-3.5 w-3.5 text-warn shrink-0" />
             <span>Load credentials into privileged crews</span>
             <TooltipProvider delayDuration={0}>
               <Tooltip>

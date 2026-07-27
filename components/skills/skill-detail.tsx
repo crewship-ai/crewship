@@ -17,8 +17,8 @@ interface SkillDetailProps {
 const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
   BUILTIN: { label: "Built-in", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
   BUNDLED: { label: "Bundled", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
-  CUSTOM: { label: "Custom", className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400" },
-  MARKETPLACE: { label: "Marketplace", className: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400" },
+  CUSTOM: { label: "Custom", className: "bg-warn/10 text-warn dark:bg-warn dark:text-warn" },
+  MARKETPLACE: { label: "Marketplace", className: "bg-purple/10 text-purple dark:bg-purple dark:text-purple" },
 }
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
@@ -66,13 +66,13 @@ export function SkillDetailView({ skill }: SkillDetailProps) {
               {sourceCfg.label}
             </Badge>
             {skill.verification && skill.verification !== "UNVERIFIED" && (
-              <Badge variant="outline" className="text-xs gap-1 text-emerald-700 dark:text-emerald-400">
+              <Badge variant="outline" className="text-xs gap-1 text-success">
                 <ShieldCheck className="h-3 w-3" />
                 Verified
               </Badge>
             )}
             {skill.featured && (
-              <Badge variant="outline" className="text-xs gap-1 text-amber-600 dark:text-amber-400">
+              <Badge variant="outline" className="text-xs gap-1 text-warn">
                 <Star className="h-3 w-3" />
                 Featured
               </Badge>
@@ -266,7 +266,7 @@ export function SkillDetailView({ skill }: SkillDetailProps) {
                     <div className="flex items-center gap-2">
                       <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${skill.security_score >= 80 ? "bg-emerald-500" : skill.security_score >= 50 ? "bg-amber-500" : "bg-red-500"}`}
+                          className={`h-full rounded-full ${skill.security_score >= 80 ? "bg-success" : skill.security_score >= 50 ? "bg-warn" : "bg-destructive"}`}
                           style={{ width: `${skill.security_score}%` }}
                         />
                       </div>

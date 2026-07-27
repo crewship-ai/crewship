@@ -46,7 +46,7 @@ export function RealtimeStatusBanner() {
 
   if (showReconnected) {
     return (
-      <div role="status" aria-live="polite" aria-atomic="true" className="bg-emerald-500/90 text-white text-center py-1.5 px-4 text-xs font-medium flex items-center justify-center gap-2">
+      <div role="status" aria-live="polite" aria-atomic="true" className="bg-success/90 text-white text-center py-1.5 px-4 text-xs font-medium flex items-center justify-center gap-2">
         <Wifi className="h-3.5 w-3.5" />
         Reconnected
       </div>
@@ -54,7 +54,7 @@ export function RealtimeStatusBanner() {
   }
 
   return (
-    <div role="status" aria-live="polite" aria-atomic="true" className="bg-amber-500/90 text-white text-center py-1.5 px-4 text-xs font-medium flex items-center justify-center gap-2 animate-pulse">
+    <div role="status" aria-live="polite" aria-atomic="true" className="bg-warn/90 text-white text-center py-1.5 px-4 text-xs font-medium flex items-center justify-center gap-2 animate-pulse">
       {status === "error" ? (
         <>
           <WifiOff className="h-3.5 w-3.5" />

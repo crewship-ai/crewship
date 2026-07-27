@@ -43,12 +43,12 @@ export interface EmptyRosterProps {
 }
 
 const STATUS_COLORS: Record<string, { label: string; dot: string; text: string; pulse?: boolean }> = {
-  RUNNING: { label: "Running", dot: "bg-emerald-400", text: "text-emerald-400", pulse: true },
-  IDLE: { label: "Idle", dot: "bg-zinc-500", text: "text-muted-foreground" },
-  ERROR: { label: "Error", dot: "bg-red-500", text: "text-red-400" },
-  STOPPED: { label: "Stopped", dot: "bg-amber-500", text: "text-amber-400" },
-  PENDING_REVIEW: { label: "Pending review", dot: "bg-amber-400", text: "text-amber-300" },
-  EXPIRED: { label: "Expired", dot: "bg-slate-500", text: "text-slate-400" },
+  RUNNING: { label: "Running", dot: "bg-success", text: "text-success", pulse: true },
+  IDLE: { label: "Idle", dot: "bg-muted-foreground", text: "text-muted-foreground" },
+  ERROR: { label: "Error", dot: "bg-destructive", text: "text-destructive" },
+  STOPPED: { label: "Stopped", dot: "bg-warn", text: "text-warn" },
+  PENDING_REVIEW: { label: "Pending review", dot: "bg-warn", text: "text-warn" },
+  EXPIRED: { label: "Expired", dot: "bg-muted-foreground", text: "text-muted-foreground" },
 }
 
 function timeSince(iso: string | null | undefined): string {
@@ -144,14 +144,14 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                         />
                         <span className="truncate">{a.name}</span>
                         {a.agent_role !== "AGENT" && (
-                          <span className="text-[8px] px-1 rounded bg-violet-500/20 text-violet-300 shrink-0">
+                          <span className="text-[8px] px-1 rounded bg-purple/20 text-purple shrink-0">
                             {a.agent_role}
                           </span>
                         )}
                         {a.ephemeral && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="text-[8px] px-1 rounded bg-cyan-500/15 text-cyan-300 shrink-0 inline-flex items-center gap-0.5">
+                              <span className="text-[8px] px-1 rounded bg-notice/15 text-notice shrink-0 inline-flex items-center gap-0.5">
                                 {ghost && <Ghost className="h-2.5 w-2.5" />}
                                 EPHEMERAL
                               </span>
@@ -207,9 +207,9 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
 
       <div className="mt-6 text-center text-xs text-muted-foreground">
         Bulk operations live in the CLI:{" "}
-        <code className="bg-zinc-800 px-1.5 py-0.5 rounded">crewship agent list</code>{" "}
+        <code className="bg-muted px-1.5 py-0.5 rounded">crewship agent list</code>{" "}
         ·{" "}
-        <code className="bg-zinc-800 px-1.5 py-0.5 rounded">
+        <code className="bg-muted px-1.5 py-0.5 rounded">
           crewship agent update &lt;slug&gt; --crew &lt;crew&gt;
         </code>
       </div>

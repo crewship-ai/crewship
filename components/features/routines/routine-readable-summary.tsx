@@ -12,13 +12,13 @@ import { describeRoutine, type ReadableStep } from "@/lib/routine-readable"
 // describe-first authoring previews.
 
 const STEP_TONE: Record<ReadableStep["kind"], string> = {
-  trigger: "bg-amber-500/15 text-amber-400",
-  agent_run: "bg-violet-500/15 text-violet-300",
-  http: "bg-cyan-500/15 text-cyan-300",
+  trigger: "bg-warn/15 text-warn",
+  agent_run: "bg-purple/15 text-purple",
+  http: "bg-notice/15 text-notice",
   transform: "bg-blue-500/15 text-blue-300",
-  wait: "bg-amber-500/15 text-amber-300",
-  code: "bg-emerald-500/15 text-emerald-300",
-  call_pipeline: "bg-fuchsia-500/15 text-fuchsia-300",
+  wait: "bg-warn/15 text-warn",
+  code: "bg-success/15 text-success",
+  call_pipeline: "bg-purple/15 text-purple",
   unknown: "bg-white/[0.06] text-muted-foreground",
 }
 
@@ -35,8 +35,8 @@ export function RoutineReadableSummary({
     <div className={cn("space-y-3", className)}>
       {/* Trigger line */}
       <div className="flex items-start gap-2.5 px-3 py-2.5">
-        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/15">
-          <Clock className="h-3 w-3 text-amber-400" aria-hidden />
+        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-warn/15">
+          <Clock className="h-3 w-3 text-warn" aria-hidden />
         </span>
         <div className="min-w-0">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -94,7 +94,7 @@ export function RoutineReadableSummary({
               className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/[0.04] px-2 py-0.5 text-[11px] font-medium text-foreground/90"
               title={slug}
             >
-              <Puzzle className="h-3 w-3 text-cyan-400" aria-hidden />
+              <Puzzle className="h-3 w-3 text-notice" aria-hidden />
               {integrationLabel(slug)}
             </span>
           ))}

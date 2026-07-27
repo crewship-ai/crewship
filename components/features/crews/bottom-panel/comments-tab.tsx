@@ -80,7 +80,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
 
   if (!context) return <EmptyState>Select an issue to see its comments.</EmptyState>
   if (context.kind !== "mission") return <EmptyState>Comments are per-issue — select one.</EmptyState>
-  if (error && comments === null) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error && comments === null) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (comments === null) return <EmptyState>Loading…</EmptyState>
 
   return (
@@ -102,7 +102,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
               <div className="min-w-0">
                 <div className="text-muted-foreground text-[11px] mb-0.5">
                   <span className="text-foreground font-medium mr-1.5">{name}</span>
-                  {c.author_type === "agent" && <span className="mr-1.5 text-emerald-300/70">agent</span>}
+                  {c.author_type === "agent" && <span className="mr-1.5 text-success/70">agent</span>}
                   {formatRelative(c.created_at)}
                 </div>
                 <div className="text-foreground/85 whitespace-pre-wrap break-words">{c.body}</div>
@@ -116,7 +116,7 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
           above, so once the thread is shown this is the only place a
           failed POST can report itself. */}
       {error && comments !== null && (
-        <div className="shrink-0 px-3 py-1.5 text-[11px] text-red-300 border-t border-red-500/20 bg-red-500/5">
+        <div className="shrink-0 px-3 py-1.5 text-[11px] text-destructive border-t border-destructive/20 bg-destructive/5">
           Failed to send: {error}
         </div>
       )}
@@ -127,13 +127,13 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }}
           placeholder="Write a comment…"
           aria-label="Write a comment"
-          className="flex-1 bg-background border border-white/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500/50"
+          className="flex-1 bg-background border border-white/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
         />
         <button
           type="button"
           onClick={send}
           disabled={sending || !draft.trim()}
-          className="px-3 rounded-md bg-blue-600 text-white text-xs flex items-center gap-1.5 disabled:opacity-40"
+          className="px-3 rounded-md bg-primary text-white text-xs flex items-center gap-1.5 disabled:opacity-40"
         >
           <Send className="h-3 w-3" /> Send
         </button>

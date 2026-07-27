@@ -4,16 +4,13 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   AlertCircle,
-  Calendar,
   Check,
   ChevronDown,
   ChevronRight,
-  CircleDot,
   Globe,
   PauseCircle,
   ScrollText,
   Sparkles,
-  Webhook,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { motion, AnimatePresence } from "motion/react"
@@ -22,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
+import { SourcePill } from "@/components/features/activity/source-pill"
 import { useTrace } from "@/hooks/use-trace"
 import { statusIcon, statusTint } from "@/lib/activity/run-status"
 import { relTime, formatDurationDecimal } from "@/lib/time"
@@ -111,7 +109,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
             ))}
           </div>
         ) : error ? (
-          <div className="p-6 text-center text-xs text-rose-300">Runs unavailable: {error}</div>
+          <div className="p-6 text-center text-xs text-destructive">Runs unavailable: {error}</div>
         ) : runs.length === 0 ? (
           <EmptyState filter={filter} />
         ) : (
@@ -149,13 +147,13 @@ function FilterBtn({
       onClick={onClick}
       className={cn(
         "flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors",
-        active ? "bg-blue-500/15 text-blue-300" : "text-muted-foreground hover:text-foreground/80",
+        active ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground/80",
       )}
     >
       <span>{label}</span>
       <span className={cn(
         "rounded px-1 py-0.5 text-[10px] tabular-nums",
-        active ? "bg-blue-500/20 text-blue-200" : "bg-white/[0.06] text-foreground/40",
+        active ? "bg-primary/20 text-primary/90" : "bg-white/[0.06] text-foreground/40",
       )}>
         {count}
       </span>
@@ -184,7 +182,7 @@ function RunCard({
       id={`run-card-${run.id}`}
       className={cn(
         "transition-colors",
-        focused && "ring-1 ring-blue-400/40",
+        focused && "ring-1 ring-primary/40",
         expanded && "bg-card/40",
       )}
     >
@@ -248,54 +246,6 @@ function RunCard({
         )}
       </AnimatePresence>
     </li>
-  )
-}
-
-// SourcePill renders a chip linking this run back to its trigger:
-// an issue identifier (clickable to /issues), a schedule, a webhook,
-// a parent pipeline, or a manual run. The user's mental model is
-// "this happened because X" — the pill is the X.
-function SourcePill({ run }: { run: PipelineRun }) {
-  if (run.triggered_via === "issue" && run.issue_identifier) {
-    return (
-      <Link
-        href={`/issues/${encodeURIComponent(run.issue_identifier)}`}
-        onClick={(e) => e.stopPropagation()}
-        className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-300 hover:bg-blue-500/25"
-      >
-        <CircleDot className="mr-1 inline h-2.5 w-2.5" />
-        {run.issue_identifier}
-      </Link>
-    )
-  }
-  if (run.triggered_via === "schedule") {
-    return (
-      <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-300">
-        <Calendar className="mr-1 inline h-2.5 w-2.5" />
-        schedule
-      </span>
-    )
-  }
-  if (run.triggered_via === "webhook") {
-    return (
-      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
-        <Webhook className="mr-1 inline h-2.5 w-2.5" />
-        webhook
-      </span>
-    )
-  }
-  if (run.triggered_via === "call_pipeline") {
-    return (
-      <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-        <ScrollText className="mr-1 inline h-2.5 w-2.5" />
-        sub-run
-      </span>
-    )
-  }
-  return (
-    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-      manual
-    </span>
   )
 }
 
@@ -386,18 +336,18 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
             />
           ))}
           {run.current_step_id && !completedSet.has(run.current_step_id) && (
-            <li className="flex items-center gap-2 px-2 py-1 text-amber-300">
+            <li className="flex items-center gap-2 px-2 py-1 text-warn">
               <PauseCircle className="h-3 w-3 animate-pulse" />
               <span className="font-mono text-[10px]">{run.current_step_id}</span>
-              <span className="text-[10px] text-amber-200/70">— in flight</span>
+              <span className="text-[10px] text-warn/70">— in flight</span>
             </li>
           )}
         </ol>
       ) : run.current_step_id ? (
-        <div className="flex items-center gap-2 px-2 py-1 text-amber-300">
+        <div className="flex items-center gap-2 px-2 py-1 text-warn">
           <PauseCircle className="h-3 w-3 animate-pulse" />
           <span className="font-mono text-[10px]">{run.current_step_id}</span>
-          <span className="text-[10px] text-amber-200/70">— in flight, no outputs yet</span>
+          <span className="text-[10px] text-warn/70">— in flight, no outputs yet</span>
         </div>
       ) : (
         <div className="px-2 py-1 text-[10px] text-muted-foreground/60">
@@ -407,14 +357,14 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
 
       {/* Error trailer */}
       {run.error_message && (
-        <div className="mt-2 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-[11px] text-rose-300">
+        <div className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
           <div className="flex items-center gap-1.5">
             <AlertCircle className="h-3 w-3 shrink-0" />
             <span className="font-medium">
               {run.failed_at_step ? `Failed at ${run.failed_at_step}` : "Failed"}
             </span>
           </div>
-          <div className="mt-0.5 font-mono text-[10px] text-rose-200/70">{run.error_message}</div>
+          <div className="mt-0.5 font-mono text-[10px] text-destructive/70">{run.error_message}</div>
         </div>
       )}
 
@@ -488,17 +438,17 @@ function StepRow({
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
           hasOutput ? "hover:bg-white/[0.04]" : "cursor-default",
-          isCurrent && "bg-amber-500/5",
+          isCurrent && "bg-warn/5",
           isPending && "opacity-50",
         )}
       >
         {stepStatus === "done" && (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-success/20 text-success">
             <Check className="h-2.5 w-2.5" />
           </span>
         )}
         {isCurrent && (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/30 text-amber-400">
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warn/30 text-warn">
             <PauseCircle className="h-2.5 w-2.5 animate-pulse" />
           </span>
         )}
@@ -516,7 +466,7 @@ function StepRow({
           <span className="text-[10px] text-muted-foreground">— {agentSlug}</span>
         )}
         {waitPrompt && (
-          <span className="truncate text-[10px] text-amber-200/80">— {waitPrompt}</span>
+          <span className="truncate text-[10px] text-warn/80">— {waitPrompt}</span>
         )}
         {hasOutput && (
           <span className="ml-auto text-muted-foreground/40">

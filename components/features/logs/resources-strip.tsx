@@ -149,7 +149,7 @@ function Cell({
         <button
           type="button"
           aria-label={`Open ${label} history chart`}
-          className="px-3 py-2 flex items-center gap-3 border-r border-border/50 last:border-r-0 min-w-0 text-left hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+          className="px-3 py-2 flex items-center gap-3 border-r border-border/50 last:border-r-0 min-w-0 text-left hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           disabled={!hasData}
         >
           <div className="flex items-center gap-1.5 shrink-0 w-12">

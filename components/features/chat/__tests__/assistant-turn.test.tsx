@@ -143,9 +143,9 @@ describe("AssistantTurn dispatch", () => {
     it("uses the amber rate-limit banner for 'rate limit' content", () => {
       render(<AssistantTurn turn={turn([part({ type: "error", content: "Hit a rate limit, slow down" })])} onCopy={onCopy} onFileClick={onFileClick} />)
       // Rate-limit branch emits a plain div (no MessageContent wrapper) with
-      // the amber-50 class as the visual marker.
+      // the warn token class as the visual marker.
       const banner = screen.getByText("Hit a rate limit, slow down").parentElement
-      expect(banner?.className).toMatch(/amber-/)
+      expect(banner?.className).toMatch(/warn/)
       expect(screen.queryByTestId("message-content")).toBeNull()
     })
 

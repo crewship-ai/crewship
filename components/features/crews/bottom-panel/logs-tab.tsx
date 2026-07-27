@@ -70,7 +70,7 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
 
   if (!context) return <EmptyState>Select a run or routine to see its logs.</EmptyState>
   if (!isRun && !isRoutine) return <EmptyState>Logs are shown per run or routine.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (runId === "") return <EmptyState>No runs yet to show logs for.</EmptyState>
   if (logs === null) return <EmptyState>Loading…</EmptyState>
   if (logs.length === 0) return <EmptyState>No log output for this run.</EmptyState>
@@ -82,9 +82,9 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
         const msg = l.message ?? l.msg ?? l.text ?? JSON.stringify(l)
         const level = String(l.level ?? "").toLowerCase()
         const levelColor =
-          level.includes("error") || level.includes("fatal") ? "text-red-300" :
-          level.includes("warn") ? "text-amber-300" :
-          level.includes("info") ? "text-blue-300" :
+          level.includes("error") || level.includes("fatal") ? "text-destructive" :
+          level.includes("warn") ? "text-warn" :
+          level.includes("info") ? "text-info" :
           "text-muted-foreground"
         return (
           <div key={i} className="flex gap-2 hover:bg-white/[0.03] px-1 -mx-1 rounded">

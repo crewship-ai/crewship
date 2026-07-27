@@ -7,10 +7,10 @@ import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 
 export const MSG_TYPE_COLORS: Record<string, string> = {
-  "task.updated": "text-blue-400",
-  "mission.updated": "text-purple-400",
-  "mission.started": "text-emerald-400",
-  "agent.log": "text-cyan-400",
+  "task.updated": "text-info",
+  "mission.updated": "text-purple",
+  "mission.started": "text-success",
+  "agent.log": "text-notice",
 }
 export const MSG_TYPE_LABELS: Record<string, string> = {
   "task.updated": "task",
@@ -72,7 +72,7 @@ export function LiveMessagesPanel() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1 border-b border-white/[0.06] shrink-0">
         <span className="text-[10px] text-muted-foreground">{messages.length} messages</span>
-        <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-blue-400 bg-blue-400/10" : "text-muted-foreground")}>
+        <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-primary bg-primary/10" : "text-muted-foreground")}>
           Auto-scroll {autoScroll ? "ON" : "OFF"}
         </button>
       </div>
@@ -95,9 +95,9 @@ export function LiveMessagesPanel() {
 }
 
 const EVENT_COLORS: Record<string, string> = {
-  text: "text-foreground", thinking: "text-muted-foreground", tool_call: "text-cyan-400",
-  tool_result: "text-emerald-400", error: "text-red-400", status: "text-amber-400",
-  result: "text-purple-400", system: "text-blue-400", rate_limit: "text-amber-400",
+  text: "text-foreground", thinking: "text-muted-foreground", tool_call: "text-notice",
+  tool_result: "text-success", error: "text-destructive", status: "text-warn",
+  result: "text-purple", system: "text-info", rate_limit: "text-warn",
 }
 
 interface LogEntry { ts: string; agent: string; event: string; content: string }
@@ -136,7 +136,7 @@ export function ExecLogPanel() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1 border-b border-white/[0.06] shrink-0">
         <span className="text-[10px] text-muted-foreground">{logs.length} entries</span>
-        <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-blue-400 bg-blue-400/10" : "text-muted-foreground")}>
+        <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-primary bg-primary/10" : "text-muted-foreground")}>
           Auto-scroll {autoScroll ? "ON" : "OFF"}
         </button>
       </div>

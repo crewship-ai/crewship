@@ -95,8 +95,8 @@ function TraceDataFlowEdgeBase(props: EdgeProps) {
           {d?.label && (
             <div
               className={cn(
-                "rounded border border-blue-500/30 bg-card px-1.5 py-0.5 font-mono text-[10px] text-blue-300 shadow-sm transition-colors",
-                hovered && "bg-blue-500/15",
+                "rounded border border-primary/30 bg-card px-1.5 py-0.5 font-mono text-[10px] text-primary shadow-sm transition-colors",
+                hovered && "bg-primary/15",
               )}
             >
               {d.label}

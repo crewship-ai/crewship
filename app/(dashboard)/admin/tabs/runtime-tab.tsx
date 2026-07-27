@@ -60,7 +60,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
                 key={rt.runtime + i}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg border border-border/60 bg-white/[0.02]"
               >
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-medium">
                     {rt.runtime === "apple"
@@ -87,7 +87,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
         {!runtimeChecking && !runtimeAvailable && (
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+              <AlertTriangle className="h-4 w-4 text-warn shrink-0" />
               <div className="min-w-0">
                 <div className="text-xs font-medium">No runtime detected</div>
                 <p className="text-[11px] text-muted-foreground">

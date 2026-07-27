@@ -10,6 +10,8 @@
 //                                   Problem Details body returned by a
 //                                   refused run (HTTP 422).
 
+import { extractProblemStringList } from "@/lib/problem-details"
+
 // Brand-correct casings that a naive title-case would get wrong. Keyed by
 // the lowercased slug. Anything not here falls back to per-token
 // capitalisation (so "hubspot" → "Hubspot", "google-calendar" → "Google
@@ -59,22 +61,10 @@ export function integrationLabel(slug: string): string {
 }
 
 /** extractMissingIntegrations reads the `missing_integrations` extension
- *  member from a parsed Problem Details body (or any object). Returns a
- *  de-duplicated, trimmed, string-only list; `[]` when the field is
- *  absent or malformed — callers use a non-empty result to switch from
- *  the generic "run failed" toast to the integration-block UX. */
+ *  member from a parsed Problem Details body. Returns a de-duplicated,
+ *  trimmed, string-only list; `[]` when the field is absent or malformed —
+ *  callers use a non-empty result to switch from the generic "run failed"
+ *  toast to the integration-block UX. */
 export function extractMissingIntegrations(body: unknown): string[] {
-  if (!body || typeof body !== "object") return []
-  const raw = (body as Record<string, unknown>)["missing_integrations"]
-  if (!Array.isArray(raw)) return []
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const item of raw) {
-    if (typeof item !== "string") continue
-    const slug = item.trim()
-    if (!slug || seen.has(slug)) continue
-    seen.add(slug)
-    out.push(slug)
-  }
-  return out
+  return extractProblemStringList(body, "missing_integrations")
 }

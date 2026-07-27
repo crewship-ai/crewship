@@ -209,15 +209,15 @@ export function BackupSelfTestCard({ workspaceId }: SelfTestCardProps) {
                 className={cn(
                   "rounded-md border p-3 text-xs",
                   lastResult.ok
-                    ? "bg-emerald-500/5 border-emerald-500/30"
+                    ? "bg-success/5 border-success/30"
                     : "bg-destructive/5 border-destructive/30",
                 )}
               >
                 <div className="flex items-center gap-2 mb-2">
                   {lastResult.ok ? (
                     <>
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                      <span className="font-semibold text-emerald-500 uppercase tracking-wider text-[10px]">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                      <span className="font-semibold text-success uppercase tracking-wider text-[10px]">
                         passed
                       </span>
                     </>

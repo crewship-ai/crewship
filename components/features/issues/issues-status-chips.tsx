@@ -62,7 +62,7 @@ export function IssuesStatusChips({
         className={cn(
           "shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] transition-colors",
           allActive
-            ? "border-blue-400/40 bg-blue-500/[0.12] text-blue-300"
+            ? "border-primary/40 bg-primary/[0.12] text-primary"
             : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
         )}
       >
@@ -85,7 +85,7 @@ export function IssuesStatusChips({
             className={cn(
               "shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
               active
-                ? "border-blue-400/40 bg-blue-500/[0.12] text-blue-300"
+                ? "border-primary/40 bg-primary/[0.12] text-primary"
                 : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
             )}
           >

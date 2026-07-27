@@ -41,7 +41,7 @@ export function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: n
   }
   return (
     <span
-      className="flex items-center justify-center rounded bg-blue-500/10 text-[10px] font-semibold uppercase text-blue-400"
+      className="flex items-center justify-center rounded bg-primary/10 text-[10px] font-semibold uppercase text-primary"
       style={{ width: size, height: size }}
     >
       {toolkit.slug.slice(0, 2)}
@@ -55,7 +55,7 @@ export function StatusDot({ status }: { status: string }) {
     <span
       className={cn(
         "inline-flex items-center gap-1 text-[11px]",
-        ok ? "text-emerald-400" : "text-amber-400",
+        ok ? "text-success" : "text-warn",
       )}
     >
       {ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
@@ -125,9 +125,9 @@ export function isReadTool(slug: string): boolean {
 // (full=emerald, read=blue, custom=amber). Shared by the agent-access list and
 // the per-agent Connectors card so both read from one renderer.
 const SCOPE_STYLES: Record<BindingMode, string> = {
-  full: "border-emerald-400/30 bg-emerald-500/[0.08] text-emerald-400",
+  full: "border-success/30 bg-success/[0.08] text-success",
   read: "border-blue-400/35 bg-blue-500/[0.12] text-blue-300",
-  custom: "border-amber-400/30 bg-amber-500/[0.08] text-amber-300",
+  custom: "border-warn/30 bg-warn/[0.08] text-warn",
 }
 
 export function ScopeChip({

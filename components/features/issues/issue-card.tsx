@@ -36,7 +36,7 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
       aria-label={`Issue ${issue.identifier || ""}: ${issue.title}`}
       className={cn(
         "px-2.5 py-2 cursor-pointer hover:bg-accent/50 transition-colors border-border/60 gap-0",
-        overdue && "border-red-500/40",
+        overdue && "border-destructive/40",
         issue.status === "IN_PROGRESS" && "agent-active-card",
       )}
       onClick={onClick}
@@ -48,7 +48,7 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
           {issue.identifier && (
             <span className="text-[10px] font-mono text-foreground/50">{issue.identifier}</span>
           )}
-          {overdue && <Clock className="h-2.5 w-2.5 text-red-500" />}
+          {overdue && <Clock className="h-2.5 w-2.5 text-destructive" />}
         </div>
         {issue.assignee_id && (
           <div className="flex items-center gap-1 shrink-0">
@@ -74,7 +74,7 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
                 />
               )}
               {issue.status === "IN_PROGRESS" && (
-                <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 ring-1 ring-card agent-active-dot" />
+                <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-success ring-1 ring-card agent-active-dot" />
               )}
             </div>
           </div>

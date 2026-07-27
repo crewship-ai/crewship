@@ -522,9 +522,9 @@ export default function OnboardingPage() {
                     {/* Upfront warning so users get the CLI token ready BEFORE
                         step 3 instead of bouncing back and forth. Copy-paste
                         cmd inline for the most common (Claude Code) case. */}
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed">
+                    <div className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs leading-relaxed">
                       <div className="flex items-start gap-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                        <AlertTriangle className="h-4 w-4 text-warn shrink-0 mt-0.5" />
                         <div className="space-y-1.5 min-w-0">
                           <div className="text-foreground/90 font-medium">
                             Heads up — you&apos;ll need a CLI token in step 3
@@ -535,7 +535,7 @@ export default function OnboardingPage() {
                           </div>
                           <div className="rounded-md border border-border bg-card/60 p-2 font-mono mt-1.5">
                             <span className="text-muted-foreground">Claude Code:</span>{" "}
-                            <span className="text-emerald-500 select-all">$ claude setup-token</span>
+                            <span className="text-success select-all">$ claude setup-token</span>
                           </div>
                           <div className="text-[10px] text-muted-foreground">
                             Other adapters (Gemini, Codex, Cursor, OpenCode, Factory) have their own
@@ -568,13 +568,13 @@ export default function OnboardingPage() {
                         initial={{ opacity: 0, x: -6 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.35, ease, delay: 0.15 }}
-                        className="inline-flex items-center gap-2 text-xs text-emerald-500"
+                        className="inline-flex items-center gap-2 text-xs text-success"
                       >
                         <Check className="h-3.5 w-3.5" /> Docker detected
                       </motion.div>
                     )}
                     {runtimeReady === false && (
-                      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                      <div className="rounded-xl border border-warn/30 bg-warn/10 p-3 text-xs text-warn">
                         Docker isn&apos;t reachable. You can still finish setup now and start a runtime later from
                         Settings.
                       </div>
@@ -688,7 +688,7 @@ export default function OnboardingPage() {
                           {pairCode ? (
                             <>
                               <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 font-mono text-xs shadow-sm">
-                                <code className="text-emerald-400 break-all leading-snug select-all">
+                                <code className="text-success break-all leading-snug select-all">
                                   $ {pairCommand}
                                 </code>
                                 <Button
@@ -708,7 +708,7 @@ export default function OnboardingPage() {
                                         exit={{ scale: 0.6, opacity: 0 }}
                                         transition={{ duration: 0.2 }}
                                       >
-                                        <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                        <Check className="h-3.5 w-3.5 text-success" />
                                       </motion.span>
                                     ) : (
                                       <motion.span
@@ -726,10 +726,10 @@ export default function OnboardingPage() {
                               </div>
                               {pairStatus === "pending" && (
                                 <div className="flex items-center justify-between text-xs">
-                                  <div className="flex items-center gap-2 text-amber-500">
+                                  <div className="flex items-center gap-2 text-warn">
                                     <span className="relative inline-flex h-2 w-2">
-                                      <span className="absolute inset-0 rounded-full bg-amber-500 animate-ping opacity-75" />
-                                      <span className="relative inline-block h-2 w-2 rounded-full bg-amber-500" />
+                                      <span className="absolute inset-0 rounded-full bg-warn animate-ping opacity-75" />
+                                      <span className="relative inline-block h-2 w-2 rounded-full bg-warn" />
                                     </span>
                                     Waiting for your CLI…
                                   </div>
@@ -737,7 +737,7 @@ export default function OnboardingPage() {
                                     <div
                                       className={`tabular-nums font-mono ${
                                         pairRemainingSec < 60
-                                          ? "text-amber-500"
+                                          ? "text-warn"
                                           : "text-muted-foreground"
                                       }`}
                                     >
@@ -751,7 +751,7 @@ export default function OnboardingPage() {
                                   initial={{ opacity: 0, scale: 0.96 }}
                                   animate={{ opacity: 1, scale: 1 }}
                                   transition={{ duration: 0.35, ease }}
-                                  className="flex items-center gap-2 text-xs text-emerald-500"
+                                  className="flex items-center gap-2 text-xs text-success"
                                 >
                                   <Check className="h-3.5 w-3.5" /> CLI paired. You can finish below or jump
                                   to <code className="font-mono">crewship setup</code> in the terminal.
@@ -893,7 +893,7 @@ export default function OnboardingPage() {
                       {!isLocalModel(model) && ADAPTER_TOKEN_CMD[adapter] && (
                         <div className="rounded-md border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed">
                           <span className="text-muted-foreground">Run this on your machine, paste the output above:</span>
-                          <div className="text-emerald-500 mt-1 select-all">$ {ADAPTER_TOKEN_CMD[adapter]}</div>
+                          <div className="text-success mt-1 select-all">$ {ADAPTER_TOKEN_CMD[adapter]}</div>
                         </div>
                       )}
                       {!isLocalModel(model) && (

@@ -99,7 +99,7 @@ export function ScheduleEditor({
             onClick={() => handleToggle(!toggleEnabled)}
             className={cn(
               "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
-              toggleEnabled ? "bg-emerald-600/70" : "bg-zinc-700",
+              toggleEnabled ? "bg-success/70" : "bg-muted",
               (readOnly || saving) && "opacity-50 cursor-not-allowed",
             )}
             aria-pressed={toggleEnabled}
@@ -123,7 +123,7 @@ export function ScheduleEditor({
                 value={draftCron}
                 onChange={(e) => setDraftCron(e.target.value)}
                 placeholder="0 9 * * 1-5"
-                className="bg-zinc-950 border border-white/15 rounded px-2 py-1 text-sm font-mono outline-none focus:border-blue-400"
+                className="bg-background border border-white/15 rounded px-2 py-1 text-sm font-mono outline-none focus:border-primary"
               />
             </div>
             <div className="px-4 py-2.5 grid grid-cols-[180px_1fr] gap-3 items-start">
@@ -132,7 +132,7 @@ export function ScheduleEditor({
                 value={draftPrompt}
                 onChange={(e) => setDraftPrompt(e.target.value)}
                 rows={3}
-                className="bg-zinc-950 border border-white/15 rounded px-2 py-1 text-sm outline-none focus:border-blue-400 resize-y min-h-[60px]"
+                className="bg-background border border-white/15 rounded px-2 py-1 text-sm outline-none focus:border-primary resize-y min-h-[60px]"
                 placeholder="What this agent should do every time the schedule fires…"
               />
             </div>
@@ -148,7 +148,7 @@ export function ScheduleEditor({
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="text-xs px-3 py-1 rounded bg-emerald-600/80 hover:bg-emerald-500 text-white disabled:opacity-50"
+                className="text-xs px-3 py-1 rounded bg-success/80 hover:bg-success text-white disabled:opacity-50"
               >
                 {saving ? "Saving…" : "Save"}
               </button>
@@ -160,7 +160,7 @@ export function ScheduleEditor({
               <span className="text-xs text-muted-foreground">Cron</span>
               <div className="flex items-center gap-2">
                 {cron ? (
-                  <code className="text-sm bg-zinc-950 px-2 py-0.5 rounded border border-white/10 font-mono">
+                  <code className="text-sm bg-background px-2 py-0.5 rounded border border-white/10 font-mono">
                     {cron}
                   </code>
                 ) : (

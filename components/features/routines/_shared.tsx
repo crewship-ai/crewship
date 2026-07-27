@@ -14,7 +14,7 @@ interface CardProps {
   subtitle?: string
   icon?: React.ComponentType<{ className?: string }>
   action?: React.ReactNode
-  tone?: "default" | "violet" | "emerald" | "amber"
+  tone?: "default" | "purple" | "success" | "warn"
   className?: string
   children: React.ReactNode
 }
@@ -24,9 +24,9 @@ interface CardProps {
 // surface family matches DashboardCard / shadcn Card / Sidebar exactly.
 const TONE_BORDER: Record<NonNullable<CardProps["tone"]>, string> = {
   default: "border-border/60",
-  violet: "border-violet-500/30",
-  emerald: "border-emerald-500/30",
-  amber: "border-amber-500/30",
+  purple: "border-purple/30",
+  success: "border-success/30",
+  warn: "border-warn/30",
 }
 
 export function Card({ title, subtitle, icon: Icon, action, tone = "default", className, children }: CardProps) {
@@ -76,7 +76,7 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyStat
 }
 
 interface PillProps {
-  tone?: "default" | "emerald" | "rose" | "amber" | "blue" | "violet"
+  tone?: "default" | "success" | "destructive" | "warn" | "blue" | "purple"
   children: React.ReactNode
   className?: string
 }
@@ -87,11 +87,11 @@ interface PillProps {
 // visually identical regardless of which page rendered them.
 const PILL_TONE: Record<NonNullable<PillProps["tone"]>, string> = {
   default: "bg-muted text-muted-foreground",
-  emerald: "bg-emerald-500/20 text-emerald-400",
-  rose: "bg-rose-500/20 text-rose-400",
-  amber: "bg-amber-500/20 text-amber-400",
-  blue: "bg-blue-500/20 text-blue-400",
-  violet: "bg-violet-500/20 text-violet-400",
+  success: "bg-success/20 text-success",
+  destructive: "bg-destructive/20 text-destructive",
+  warn: "bg-warn/20 text-warn",
+  blue: "bg-primary/20 text-primary",
+  purple: "bg-purple/20 text-purple",
 }
 
 export function Pill({ tone = "default", children, className }: PillProps) {

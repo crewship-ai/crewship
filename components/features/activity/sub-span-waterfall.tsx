@@ -85,12 +85,12 @@ export function SubSpanWaterfall({
                   {span.name}
                 </span>
                 {span.attributes.tool && (
-                  <span className="shrink-0 rounded border border-violet-500/30 px-1 text-[9px] text-violet-300">
+                  <span className="shrink-0 rounded border border-purple/30 px-1 text-[9px] text-purple">
                     {span.attributes.tool}
                   </span>
                 )}
                 {span.attributes.artifact_path && (
-                  <span className="shrink-0 rounded border border-amber-500/30 px-1 text-[9px] text-amber-300">
+                  <span className="shrink-0 rounded border border-warn/30 px-1 text-[9px] text-warn">
                     {fileName(span.attributes.artifact_path)}
                   </span>
                 )}
@@ -101,7 +101,7 @@ export function SubSpanWaterfall({
                   className={cn(
                     "absolute top-0 h-full rounded-sm left-[var(--bar-left)] w-[var(--bar-width)]",
                     SUB_SPAN_BAR_CLASS[span.kind],
-                    span.status === "error" && "ring-1 ring-rose-500/60",
+                    span.status === "error" && "ring-1 ring-destructive/60",
                     span.status === "running" && "animate-pulse",
                   )}
                   style={
@@ -146,7 +146,7 @@ function SpanDetail({
         {span.attributes.host && (
           <>
             <dt className="text-muted-foreground/60">egress</dt>
-            <dd className="font-mono text-blue-300">{span.attributes.host}</dd>
+            <dd className="font-mono text-info">{span.attributes.host}</dd>
           </>
         )}
         {span.attributes.model && (
@@ -172,9 +172,9 @@ function SpanDetail({
         <button
           type="button"
           onClick={() => onOpenArtifact?.(span.attributes.artifact_path as string)}
-          className="inline-flex items-center gap-1.5 rounded border border-white/[0.08] bg-background px-2 py-1 text-[11px] text-foreground transition-colors hover:border-amber-500/40 hover:bg-amber-500/5"
+          className="inline-flex items-center gap-1.5 rounded border border-white/[0.08] bg-background px-2 py-1 text-[11px] text-foreground transition-colors hover:border-warn/40 hover:bg-warn/5"
         >
-          <FileText className="h-3 w-3 text-amber-300" />
+          <FileText className="h-3 w-3 text-warn" />
           <span className="font-mono">{fileName(span.attributes.artifact_path)}</span>
           <span className="text-muted-foreground/50">open</span>
         </button>
@@ -205,7 +205,7 @@ function SpanIO({
         </span>
         {truncated && (
           <span
-            className="rounded border border-amber-500/30 px-1 text-[9px] text-amber-300"
+            className="rounded border border-warn/30 px-1 text-[9px] text-warn"
             title="Capped at the per-action byte limit — see the step's Output tab for the full result."
           >
             truncated

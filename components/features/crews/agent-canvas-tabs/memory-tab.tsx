@@ -118,7 +118,7 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
             onClick={() => setSub(s)}
             className={`px-3 py-2 text-sm border-b-2 -mb-px ${
               sub === s
-                ? "border-emerald-500 text-emerald-300"
+                ? "border-success text-success"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -206,7 +206,7 @@ function MemoryTierEditor({
   return (
     <div className="space-y-6">
       {err && (
-        <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+        <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           {err}
         </div>
       )}
@@ -216,7 +216,7 @@ function MemoryTierEditor({
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">{title}</h3>
             {badge && (
-              <span className="rounded bg-blue-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-blue-300">
+              <span className="rounded bg-info/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-info">
                 {badge}
               </span>
             )}
@@ -241,7 +241,7 @@ function MemoryTierEditor({
               ariaLabel={`${title} (read-only)`}
             />
           ) : (
-            <pre className="rounded border border-white/10 bg-zinc-900/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
+            <pre className="rounded border border-white/10 bg-muted/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
               (empty)
             </pre>
           )
@@ -254,7 +254,7 @@ function MemoryTierEditor({
               autoFocus
               ariaLabel={`${title} editor`}
             />
-            <div className={`text-xs ${over ? "text-red-400" : "text-muted-foreground"}`}>
+            <div className={`text-xs ${over ? "text-destructive" : "text-muted-foreground"}`}>
               {editingBytes}/{capBytes} B {over && "— over cap"}
             </div>
           </div>
@@ -270,7 +270,7 @@ function MemoryTierEditor({
               <>
                 <button
                   onClick={() => setEditing(content ?? "")}
-                  className="rounded bg-emerald-500/20 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-500/30"
+                  className="rounded bg-success/20 px-3 py-1.5 text-sm text-success hover:bg-success/30"
                 >
                   Edit
                 </button>
@@ -293,7 +293,7 @@ function MemoryTierEditor({
                     setEditing(null)
                   }}
                   disabled={saving || editing.length === 0 || over}
-                  className="rounded bg-emerald-500 px-3 py-1.5 text-sm text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
+                  className="rounded bg-success px-3 py-1.5 text-sm text-muted-foreground hover:bg-success disabled:opacity-50"
                 >
                   {saving ? "Saving..." : "Save"}
                 </button>
@@ -574,7 +574,7 @@ function PersonaPanel({
               {crewPersona.bytes}/{PERSONA_CAP_BYTES} B
             </span>
           </header>
-          <pre className="rounded border border-white/10 bg-zinc-900/40 p-3 text-sm whitespace-pre-wrap min-h-[4rem]">
+          <pre className="rounded border border-white/10 bg-muted/40 p-3 text-sm whitespace-pre-wrap min-h-[4rem]">
             {crewPersona.content || "(no crew persona configured)"}
           </pre>
           <p className="text-xs text-muted-foreground">
@@ -651,7 +651,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
   )
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading peers...</p>
-  if (err) return <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{err}</div>
+  if (err) return <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{err}</div>
   if (peers.length === 0)
     return (
       <p className="text-sm text-muted-foreground">
@@ -671,8 +671,8 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
                 onClick={() => loadDetail(p.user_id)}
                 aria-pressed={isActive}
                 aria-label={`Open peer card for ${p.user_id}`}
-                className={`w-full text-left cursor-pointer rounded border border-white/10 px-3 py-2 text-sm hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500/60 ${
-                  isActive ? "border-emerald-500/40 bg-emerald-500/5" : ""
+                className={`w-full text-left cursor-pointer rounded border border-white/10 px-3 py-2 text-sm hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-success/60 ${
+                  isActive ? "border-success/40 bg-success/5" : ""
                 }`}
               >
                 <div className="font-medium">{p.user_id}</div>
@@ -692,7 +692,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
               <h4 className="text-sm font-semibold">{active.user_id}</h4>
               <button
                 onClick={() => deleteCard(active.user_id)}
-                className="rounded bg-red-500/15 px-2 py-1 text-xs text-red-300 hover:bg-red-500/25"
+                className="rounded bg-destructive/15 px-2 py-1 text-xs text-destructive hover:bg-destructive/25"
               >
                 Delete
               </button>

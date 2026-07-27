@@ -107,7 +107,7 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
         return (
           <div key={msg.id} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
             <div className="flex items-center gap-1.5 text-micro">
-              <span className={cn("font-medium", isOutgoing ? "text-blue-400" : "text-emerald-400")}>
+              <span className={cn("font-medium", isOutgoing ? "text-info" : "text-success")}>
                 {msg.from_name}
               </span>
               <span className="text-muted-foreground-soft">&rarr;</span>
@@ -118,12 +118,12 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
             </div>
             <p className="text-xs text-foreground/80 whitespace-pre-wrap line-clamp-3">{msg.question}</p>
             {msg.response && (
-              <div className="pl-2 border-l-2 border-emerald-500/30">
+              <div className="pl-2 border-l-2 border-success/30">
                 <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-3">{msg.response}</p>
               </div>
             )}
             {msg.status === "RUNNING" && (
-              <div className="flex items-center gap-1 text-micro text-blue-400">
+              <div className="flex items-center gap-1 text-micro text-primary">
                 <Spinner className="h-3 w-3" /> Processing...
               </div>
             )}

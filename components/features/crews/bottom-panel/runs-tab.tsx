@@ -72,7 +72,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
   if (context.kind !== "mission" && context.kind !== "routine") {
     return <EmptyState>Runs are shown per issue or routine.</EmptyState>
   }
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (runs === null) return <EmptyState>Loading…</EmptyState>
   if (runs.length === 0) {
     return <EmptyState>No runs yet — start the issue (or trigger the routine) to see executions here.</EmptyState>
@@ -109,7 +109,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
               {!isMission && <td className="py-2 pr-3 text-muted-foreground">{run.triggered_via || "—"}</td>}
               <td className="py-2 text-muted-foreground truncate max-w-[220px]">
                 {run.error_message
-                  ? <span className="text-red-300">{run.error_message}</span>
+                  ? <span className="text-destructive">{run.error_message}</span>
                   : isMission
                     ? (run.result_summary || "—")
                     : (typeof run.cost_usd === "number" ? `$${run.cost_usd.toFixed(4)}` : "—")}

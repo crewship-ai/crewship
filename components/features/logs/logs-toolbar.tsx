@@ -243,7 +243,7 @@ export function LogsToolbar({
       <ToolbarToggle on={live} onClick={onLiveToggle} title={live ? "Pause live tail" : "Resume live tail"}>
         {live ? (
           <>
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-success animate-pulse" /> Live
           </>
         ) : (
           <>
@@ -273,7 +273,7 @@ export function LogsToolbar({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: -2 }}
             transition={{ type: "spring", damping: 18, stiffness: 320 }}
-            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-violet-500/40 bg-violet-500/10 text-[10px] font-mono text-violet-300 hover:bg-violet-500/20"
+            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-purple/40 bg-purple/10 text-[10px] font-mono text-purple hover:bg-purple/20"
             title="Clear trace focus"
           >
             <Filter className="h-3 w-3" />
@@ -290,7 +290,7 @@ export function LogsToolbar({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: -2 }}
             transition={{ type: "spring", damping: 18, stiffness: 320 }}
-            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] font-mono text-sky-300 hover:bg-sky-500/20"
+            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-primary/40 bg-primary/10 text-[10px] font-mono text-primary hover:bg-primary/20"
             title="Clear histogram selection"
           >
             <Filter className="h-3 w-3" />
@@ -337,7 +337,7 @@ export function LogsToolbar({
         <button
           type="button"
           onClick={onLiveToggle}
-          className="inline-flex items-center gap-1 h-6 px-2 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-300 hover:bg-emerald-500/20"
+          className="inline-flex items-center gap-1 h-6 px-2 rounded border border-success/40 bg-success/10 text-[10px] text-success hover:bg-success/20"
           title="Resume live tail"
         >
           <Play className="h-3 w-3" /> Resume
@@ -473,7 +473,7 @@ function ToolbarToggle({
       className={cn(
         "inline-flex items-center gap-1 h-6 px-2 rounded border text-[10px] transition-colors",
         on
-          ? "bg-sky-500/10 text-sky-300 border-sky-500/40"
+          ? "bg-primary/10 text-primary border-primary/40"
           : "bg-card border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent/40",
       )}
     >

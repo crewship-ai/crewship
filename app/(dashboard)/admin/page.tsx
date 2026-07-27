@@ -386,7 +386,7 @@ export default function AdminPage() {
           {fetchError && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+              className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn"
             >
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>{fetchError}</span>

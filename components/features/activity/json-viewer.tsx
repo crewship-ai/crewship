@@ -71,7 +71,7 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
           aria-pressed={mode === "json"}
           className={cn(
             "px-1.5 text-[10px]",
-            mode === "json" && "bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200",
+            mode === "json" && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary/80",
           )}
         >
           <Braces className="h-3 w-3" /> JSON
@@ -85,7 +85,7 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
           disabled={!tableEnabled}
           className={cn(
             "px-1.5 text-[10px]",
-            mode === "table" && "bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200",
+            mode === "table" && "bg-primary/15 text-primary hover:bg-primary/20 hover:text-primary/80",
           )}
         >
           <TableIcon className="h-3 w-3" /> Table

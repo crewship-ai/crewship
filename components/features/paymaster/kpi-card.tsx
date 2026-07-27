@@ -32,11 +32,11 @@ export function PaymasterKpiCard({
       ? "text-muted-foreground"
       : deltaDirection === "up"
         ? upIsGood
-          ? "text-emerald-400"
-          : "text-red-400"
+          ? "text-success"
+          : "text-destructive"
         : upIsGood
-          ? "text-red-400"
-          : "text-emerald-400"
+          ? "text-destructive"
+          : "text-success"
 
   return (
     <div className="flex flex-col gap-1 px-4 py-4 rounded-xl border border-border/60 bg-card">

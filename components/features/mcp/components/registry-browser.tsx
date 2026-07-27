@@ -290,7 +290,7 @@ export function RegistryBrowser({
                         {server.display_name || server.name}
                       </span>
                       {server.is_verified && (
-                        <BadgeCheck className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                        <BadgeCheck className="h-3.5 w-3.5 text-info shrink-0" />
                       )}
                       <Badge
                         variant="outline"

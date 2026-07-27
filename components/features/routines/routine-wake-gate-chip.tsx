@@ -12,7 +12,7 @@ export function WakeGateChip({ wakePipelineSlug }: { wakePipelineSlug?: string }
   return (
     <Badge
       variant="outline"
-      className="gap-1 border-violet-500/30 bg-violet-500/10 px-1.5 py-0 text-[10px] font-medium text-violet-400"
+      className="gap-1 border-purple/30 bg-purple/10 px-1.5 py-0 text-[10px] font-medium text-purple"
       title="Wake gate: runs a token-zero probe first; the agent only wakes when the gate opens."
     >
       <Radio className="h-2.5 w-2.5" aria-hidden />

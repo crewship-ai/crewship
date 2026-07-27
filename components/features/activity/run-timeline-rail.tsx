@@ -246,7 +246,7 @@ export function RunTimelineRail({
             <Spinner className="mr-2 h-3 w-3" /> Loading runs…
           </div>
         ) : error ? (
-          <div className="p-3 text-xs text-rose-300">Runs unavailable: {error}</div>
+          <div className="p-3 text-xs text-destructive">Runs unavailable: {error}</div>
         ) : runs.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
             <ScrollText className="h-6 w-6 text-muted-foreground/30" />

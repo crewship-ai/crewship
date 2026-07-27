@@ -121,8 +121,8 @@ export function TriggersTab({
                 <span
                   className={
                     t.disabled_at
-                      ? "text-[11px] text-amber-400"
-                      : "text-[11px] text-emerald-400"
+                      ? "text-[11px] text-warn"
+                      : "text-[11px] text-success"
                   }
                 >
                   ● {t.disabled_at ? "disabled" : "live"}
@@ -139,7 +139,7 @@ export function TriggersTab({
           value={toolkit}
           onChange={(e) => setToolkit(e.target.value)}
           placeholder="Filter by toolkit (gmail…)"
-          className="w-48 rounded-lg border border-white/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+          className="w-48 rounded-lg border border-white/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
         />
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -147,12 +147,12 @@ export function TriggersTab({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search trigger types…"
-            className="w-56 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+            className="w-56 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
           />
         </div>
       </div>
 
-      {err && <div className="text-[11px] text-red-400">{err}</div>}
+      {err && <div className="text-[11px] text-destructive">{err}</div>}
 
       {typesLoading ? (
         <TableSkeleton rows={5} />
@@ -188,7 +188,7 @@ export function TriggersTab({
                     <button
                       type="button"
                       onClick={() => setEnable(t)}
-                      className="text-xs text-blue-400 hover:text-blue-300"
+                      className="text-xs text-primary hover:text-primary/80"
                     >
                       Enable
                     </button>
@@ -278,7 +278,7 @@ function TriggerModal({
               <select
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
               >
                 <option value="">— enter a user id —</option>
                 {users.map((u) => (
@@ -295,12 +295,12 @@ function TriggerModal({
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               placeholder="e.g. alice@acme.com"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
             />
           </div>
         </div>
 
-        {err && <div className="mt-3 text-xs text-red-400">{err}</div>}
+        {err && <div className="mt-3 text-xs text-destructive">{err}</div>}
 
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>

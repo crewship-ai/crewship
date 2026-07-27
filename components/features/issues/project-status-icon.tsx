@@ -39,9 +39,9 @@ export function ProjectStatusIcon({ status, className }: { status: ProjectStatus
 export function HealthBadge({ health }: { health: string }) {
   switch (health) {
     case "at_risk":
-      return <span className="text-[11px] text-amber-400">At risk</span>
+      return <span className="text-[11px] text-warn">At risk</span>
     case "off_track":
-      return <span className="text-[11px] text-red-400">Off track</span>
+      return <span className="text-[11px] text-destructive">Off track</span>
     default:
       return <span className="text-[11px] text-muted-foreground/40">No updates</span>
   }

@@ -247,7 +247,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                       unoptimized
                     />
                     {a.lead && (
-                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm">
+                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warn text-black shadow-sm">
                         <Star className="h-2 w-2 fill-current" />
                       </span>
                     )}
@@ -287,8 +287,8 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             transition={{ duration: 0.4, ease }}
             className={`mt-4 rounded-[20px] p-3 text-xs flex items-center gap-3 shadow-md border ${
               pairingPending
-                ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
-                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                ? "bg-warn/10 border-warn/30 text-warn dark:text-warn"
+                : "bg-success/10 border-success/30 text-success dark:text-success"
             }`}
           >
             {AdapterIcon && brand && (

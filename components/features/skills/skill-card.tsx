@@ -61,8 +61,8 @@ export interface SkillCardData {
 // enum values onto 4 visual treatments (MARKETPLACE / VERIFIED share).
 const SOURCE_BADGE: Record<string, { label: string; icon: React.ElementType; className: string }> = {
   BUNDLED:   { label: "Official",  icon: ShieldCheck, className: "bg-blue-500/10 text-blue-300 border-blue-500/30" },
-  GENERATED: { label: "Generated", icon: Sparkles,    className: "bg-violet-500/10 text-violet-300 border-violet-500/30" },
-  MARKETPLACE: { label: "Verified", icon: BadgeCheck, className: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" },
+  GENERATED: { label: "Generated", icon: Sparkles,    className: "bg-purple/10 text-purple border-purple/30" },
+  MARKETPLACE: { label: "Verified", icon: BadgeCheck, className: "bg-success/10 text-success border-success/30" },
   CUSTOM:    { label: "Community", icon: Dot,         className: "bg-white/[0.05] text-white/55 border-white/10" },
   MANAGED:   { label: "Managed",   icon: Lock,        className: "bg-white/[0.05] text-white/55 border-white/10" },
 }
@@ -105,9 +105,9 @@ const DOMAIN_ICONS: Record<string, React.ElementType> = {
 // shows a source shield). Stable=COMMUNITY without a maturity badge
 // would be the silent default once we promote skills via review.
 const MATURITY_BADGE: Record<string, { label: string; className: string }> = {
-  EXPERIMENTAL: { label: "Experimental", className: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
-  COMMUNITY:    { label: "Beta",         className: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30" },
-  CURATED:      { label: "Curated",      className: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+  EXPERIMENTAL: { label: "Experimental", className: "bg-purple/15 text-purple border-purple/30" },
+  COMMUNITY:    { label: "Beta",         className: "bg-warn/15 text-warn border-warn/30" },
+  CURATED:      { label: "Curated",      className: "bg-notice/15 text-notice border-notice/30" },
 }
 
 function formatRelative(iso?: string): string {
@@ -199,7 +199,7 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
               </span>
             )}
             {flagged && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-300">
+              <span className="inline-flex items-center gap-1 rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
                 <AlertTriangle className="h-3 w-3" />
                 Flagged
               </span>

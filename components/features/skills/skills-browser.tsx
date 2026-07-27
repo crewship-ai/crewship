@@ -82,11 +82,11 @@ const DOMAINS: Array<{ value: string; icon: typeof Code2 }> = [
 // classes are applied directly on the icon so the count column keeps
 // the standard muted colour.
 const SOURCES = [
-  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-emerald-400" },
+  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-success" },
   { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck, colour: "text-sky-400" },
   { value: "CUSTOM", label: "Community", icon: Users, colour: "text-white/55" },
-  { value: "GENERATED", label: "Generated", icon: Sparkles, colour: "text-violet-400" },
-  { value: "MANAGED", label: "Private", icon: Lock, colour: "text-amber-400" },
+  { value: "GENERATED", label: "Generated", icon: Sparkles, colour: "text-purple" },
+  { value: "MANAGED", label: "Private", icon: Lock, colour: "text-warn" },
 ]
 const RUNTIMES = [
   { value: "INSTRUCTIONS", label: "Instructions" },
@@ -110,10 +110,10 @@ const RAIL_COLLAPSED_PX = 44
 // EXPERIMENTAL. The dot is the visual weight; without it all four
 // rows read as equal-weight text.
 const MATURITIES = [
-  { value: "OFFICIAL", label: "Official", dot: "bg-emerald-400" },
+  { value: "OFFICIAL", label: "Official", dot: "bg-success" },
   { value: "CURATED", label: "Curated", dot: "bg-sky-400" },
   { value: "COMMUNITY", label: "Community", dot: "bg-white/40" },
-  { value: "EXPERIMENTAL", label: "Experimental", dot: "bg-amber-400" },
+  { value: "EXPERIMENTAL", label: "Experimental", dot: "bg-warn" },
 ]
 
 interface FilterState {
@@ -689,7 +689,7 @@ export function SkillsBrowser() {
                 Loading skills…
               </div>
             ) : error ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-red-300 text-sm">
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-destructive text-sm">
                 <AlertTriangle className="h-5 w-5" />
                 {error}
               </div>
@@ -745,7 +745,7 @@ export function SkillsBrowser() {
                 role="separator"
                 aria-label="Resize detail panel"
                 aria-orientation="vertical"
-                className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+                className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-primary/40 active:bg-primary/60 transition-colors"
                 onMouseDown={onDetailDragStart}
               />
               <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />

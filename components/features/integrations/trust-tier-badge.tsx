@@ -19,13 +19,13 @@ const META: Record<TrustTier, { label: string; tooltip: string; icon: React.Comp
     label: "Verified by Crewship",
     tooltip: "Reviewed for compatibility and security by the crewship team.",
     icon: BadgeCheck,
-    cls: "border-emerald-400/40 text-emerald-300 bg-emerald-500/[0.05]",
+    cls: "border-success/40 text-success bg-success/[0.05]",
   },
   community: {
     label: "Community",
     tooltip: "Not verified by Anthropic or Crewship. Review the source before installing.",
     icon: Globe2,
-    cls: "border-white/15 text-muted-foreground bg-zinc-950",
+    cls: "border-white/15 text-muted-foreground bg-background",
   },
 }
 
@@ -59,7 +59,7 @@ export function TrustTierBadge({ tier, size = "sm", className }: TrustTierBadgeP
           <p className="text-xs">{m.tooltip}</p>
           <a
             href="/docs/mcp-trust-tiers"
-            className="text-[11px] text-blue-300 hover:underline mt-1 inline-block"
+            className="text-[11px] text-primary hover:underline mt-1 inline-block"
           >
             Read trust tier criteria →
           </a>

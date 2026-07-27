@@ -74,13 +74,13 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
               <CpuSparkline history={e.cpu_history ?? []} color={strokeHex} />
             </div>
 
-            <div className={cn("hidden md:block text-[10px] font-mono tabular-nums", e.cpu_percent > 80 && "text-red-400")}>
+            <div className={cn("hidden md:block text-[10px] font-mono tabular-nums", e.cpu_percent > 80 && "text-destructive")}>
               {e.cpu_percent.toFixed(0)}% CPU
             </div>
 
             {/* Mobile: inline CPU + mem + pids below sparkline */}
             <div className="md:hidden flex items-center justify-between gap-3 mt-2 text-[10px] font-mono text-muted-foreground tabular-nums">
-              <span className={cn(e.cpu_percent > 80 && "text-red-400")}>{e.cpu_percent.toFixed(0)}% CPU</span>
+              <span className={cn(e.cpu_percent > 80 && "text-destructive")}>{e.cpu_percent.toFixed(0)}% CPU</span>
               <span>{memMB} / {memLimitMB} MB</span>
               <span>{e.pids} PIDs</span>
             </div>
@@ -92,7 +92,7 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
                 className="h-[3px] bg-white/[0.05]"
                 indicatorClassName={cn(
                   "transition-all",
-                  e.memory_percent > 85 ? "bg-red-400" : bgClass,
+                  e.memory_percent > 85 ? "bg-destructive" : bgClass,
                 )}
               />
               <div className="text-[10px] font-mono text-muted-foreground mt-1 tabular-nums">
@@ -138,8 +138,8 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
 
 function StatusPill({ status, className }: { status: "hot" | "running" | "idle"; className?: string }) {
   const cfg = {
-    hot: { label: "Hot", cls: "text-red-400 border-red-500/30 bg-red-500/10" },
-    running: { label: "Running", cls: "text-blue-400 border-blue-500/30 bg-blue-500/10" },
+    hot: { label: "Hot", cls: "text-destructive border-destructive/30 bg-destructive/10" },
+    running: { label: "Running", cls: "text-primary border-primary/30 bg-primary/10" },
     idle: { label: "Idle", cls: "text-muted-foreground border-border bg-muted/20" },
   }[status]
   return (
