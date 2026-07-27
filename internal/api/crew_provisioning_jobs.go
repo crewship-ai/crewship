@@ -19,6 +19,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 )
 
 // provisionLogTailCap bounds the in-memory ring buffer of progress messages
@@ -93,13 +94,24 @@ func (r *provisionRateLimiter) tryAcquire(workspaceID string) error {
 	}
 	r.recentStarts[workspaceID] = fresh
 
-	if r.running[workspaceID] >= maxConcurrentProvisionsPerWorkspace {
-		return fmt.Errorf("%w: %d concurrent provisions already running (max %d)",
-			ErrRateLimited, r.running[workspaceID], maxConcurrentProvisionsPerWorkspace)
+	// Limits are runtime-tunable via the admin Rate Limiters console; the
+	// constants remain the shipped defaults and a defensive floor.
+	maxConcurrent := ratelimitcfg.Int(ratelimitcfg.KeyProvMaxConcurrentWS)
+	if maxConcurrent < 1 {
+		maxConcurrent = maxConcurrentProvisionsPerWorkspace
 	}
-	if len(fresh) >= maxProvisionStartsPerMinute {
+	maxStarts := ratelimitcfg.Int(ratelimitcfg.KeyProvMaxStartsPerMin)
+	if maxStarts < 1 {
+		maxStarts = maxProvisionStartsPerMinute
+	}
+
+	if r.running[workspaceID] >= maxConcurrent {
+		return fmt.Errorf("%w: %d concurrent provisions already running (max %d)",
+			ErrRateLimited, r.running[workspaceID], maxConcurrent)
+	}
+	if len(fresh) >= maxStarts {
 		return fmt.Errorf("%w: %d provisions started in last minute (max %d)",
-			ErrRateLimited, len(fresh), maxProvisionStartsPerMinute)
+			ErrRateLimited, len(fresh), maxStarts)
 	}
 
 	r.running[workspaceID]++

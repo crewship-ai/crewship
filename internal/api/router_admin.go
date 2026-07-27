@@ -69,6 +69,16 @@ func (r *Router) registerAdminRoutes() {
 	posture := NewSecurityPostureHandler(r.allowSignup, r.googleClientID != "" && r.googleSecret != "")
 	r.authedAdmin("GET", "/api/v1/admin/security-posture", posture.Get)
 
+	// Runtime rate-limiter tuning (#1505 follow-up). Read ADMIN+, write
+	// OWNER/ADMIN. Lists every tunable limiter with its current value; an
+	// override applies instance-wide and takes effect immediately (per-IP HTTP
+	// buckets retune live, the rest read their value on next use). Replaces
+	// the removed "Rate Limits" placeholder tab with a real backend.
+	rateLimits := NewAdminRateLimitsHandler(r.ratelimitStore, r.logger)
+	r.authedAdmin("GET", "/api/v1/admin/rate-limits", rateLimits.List)
+	r.authedMut("PUT", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Set)
+	r.authedMut("DELETE", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Reset)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())
