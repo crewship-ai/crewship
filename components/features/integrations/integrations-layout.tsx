@@ -30,7 +30,7 @@ import {
 } from "./connection-model"
 import { IntegrationsExplorer } from "./integrations-explorer"
 import { ConnectionsView } from "./views/connections-view"
-import { CatalogView, TOOLS_SECTION } from "./views/catalog-view"
+import { CatalogView, catalogSize, TOOLS_SECTION } from "./views/catalog-view"
 import { DeliveriesView } from "./views/deliveries-view"
 import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
 
@@ -289,6 +289,8 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     tab === "catalog" ? "Search services…" : tab === "deliveries" ? "Search deliveries…" : "Search connections…"
 
   const failing = rows.filter((r) => r.status === "failing").length
+  // Same number the Catalog tab renders — see catalogSize's comment.
+  const serviceCount = providers.length > 0 ? catalogSize(providers.length) : 0
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -298,7 +300,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         description={
           <>
             {rows.length} {rows.length === 1 ? "connection" : "connections"} ·{" "}
-            {providers.length} {providers.length === 1 ? "service" : "services"} available
+            {serviceCount} {serviceCount === 1 ? "service" : "services"} available
             {failing > 0 && ` · ${failing} failing`}
           </>
         }
@@ -311,7 +313,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             t.id === "connections"
               ? rows.length || undefined
               : t.id === "catalog"
-                ? providers.length || undefined
+                ? serviceCount || undefined
                 : undefined,
         }))}
         activeTab={tab}

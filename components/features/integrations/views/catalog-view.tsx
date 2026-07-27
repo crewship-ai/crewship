@@ -42,6 +42,22 @@ export interface CatalogEntry {
 export const BUILTIN_SECTION = "builtin"
 export const TOOLS_SECTION = "tools"
 
+/**
+ * Entries the catalog adds on top of the provider registry: the two built-in
+ * transports and the managed-tools card.
+ *
+ * Exported as a count so the sub-bar and the tab badge can say the same number
+ * the catalog says. They diverged once already — the bar counted providers
+ * (11) while the catalog listed 14 — and a page that contradicts itself in two
+ * places a centimetre apart is not one anybody trusts.
+ */
+export const CATALOG_EXTRA_ENTRIES = 3
+
+/** Total services the catalog will render for a given provider registry. */
+export function catalogSize(providerCount: number): number {
+  return providerCount + CATALOG_EXTRA_ENTRIES
+}
+
 const EXTRA_SECTIONS: NotificationProviderCategory[] = [
   {
     key: BUILTIN_SECTION,
