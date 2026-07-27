@@ -1888,6 +1888,10 @@ END;
 	// ever produce. Rewrite, never drop — an opted-in user stays opted in.
 	// See migrate_consts_v169_notify_taxonomy.go.
 	{version: 169, name: "notify_taxonomy", fn: migrationNotifyTaxonomy},
+	// Agent↔channel pairing for agent-initiated notifications. Default-deny:
+	// an agent posts nowhere until a human grants it a specific channel.
+	// See migrate_consts_v170_channel_agents.go.
+	{version: 170, name: "notification_channel_agents", sql: migrationChannelAgents},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

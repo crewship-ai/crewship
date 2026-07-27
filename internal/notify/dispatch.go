@@ -415,3 +415,17 @@ func EventTypeForStatus(status string) string {
 		return ""
 	}
 }
+
+// ScrubText runs the shared secret scrubber over an arbitrary string.
+//
+// DeliverCategoryMessage scrubs a message's BODY, which covers everything the
+// product generates itself. Agent-authored content arrives through fields
+// that path was never asked to cover — a title, for one — and it is untrusted
+// output about to leave the instance. Exposing the scrubber directly lets a
+// caller cover those fields rather than hoping the delivery path does.
+func ScrubText(s string) string {
+	if s == "" {
+		return ""
+	}
+	return scrubber.New().Scrub(s)
+}

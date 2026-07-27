@@ -62,13 +62,17 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /mcp/memory/":    guardMemoryChokepoint,
 
 	// --- routes that resolve the acting agent inside the handler -------
-	"POST /query":                 guardHandlerIdentity,
-	"POST /escalate":              guardHandlerIdentity,
-	"POST /issue/create":          guardHandlerIdentity,
-	"POST /expose-port":           guardHandlerIdentity,
-	"POST /keeper/request":        guardHandlerIdentity,
-	"POST /keeper/execute":        guardHandlerIdentity,
-	"POST /mcp/routines":          guardHandlerIdentity,
+	"POST /query":          guardHandlerIdentity,
+	"POST /escalate":       guardHandlerIdentity,
+	"POST /issue/create":   guardHandlerIdentity,
+	"POST /expose-port":    guardHandlerIdentity,
+	"POST /keeper/request": guardHandlerIdentity,
+	"POST /keeper/execute": guardHandlerIdentity,
+	"POST /mcp/routines":   guardHandlerIdentity,
+	// notify_send is authorised by the agent↔channel pairing on the server,
+	// which keys on the ACTING agent — so this route must resolve identity or
+	// the grant model means nothing.
+	"POST /mcp/notify":            guardHandlerIdentity,
 	"POST /pipelines/save":        guardHandlerIdentity,
 	"POST /pipelines/ /run":       guardHandlerIdentity,
 	"POST /connections/ /message": guardHandlerIdentity,

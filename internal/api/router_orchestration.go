@@ -235,6 +235,15 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// personal-channel creation — see TestDraft's doc comment.
 	r.authedMut("POST", "/api/v1/notification-channels/test", roleInline, nch.TestDraft)
 
+	// Agent pairing: which agents may post to a channel of their own accord.
+	// roleInline because the authority mirrors editing the channel itself —
+	// MANAGER+ for a workspace channel, ownership for a personal one — and
+	// only the handler can tell which it is looking at.
+	nca := NewNotifyChannelAgentsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/notification-channels/{id}/agents", authed(wsCtx(http.HandlerFunc(nca.List))))
+	r.authedMut("POST", "/api/v1/notification-channels/{id}/agents", roleInline, nca.Allow)
+	r.authedMut("DELETE", "/api/v1/notification-channels/{id}/agents/{agentId}", roleInline, nca.Deny)
+
 	// Providers registry (#1412): which shoutrrr providers this instance
 	// supports and which are admin-enabled. Read is any authenticated
 	// member (roleSelf — informational, no secrets); the enable/disable

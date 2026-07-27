@@ -127,6 +127,16 @@ func setupMCPConfig(
 		logger.Warn("routines MCP injection failed; agent will have no save_routine tool", "error", err)
 	}
 
+	// Auto-inject the sidecar-hosted notification MCP server (notify_send /
+	// list_notification_channels) so the agent can reach a human on a channel
+	// it has been paired with. No-op if the operator already declared a
+	// server named "crewship-notify".
+	if injected, err := injectNotifyMCPIntoClaudeJSON(mcpJSON); err == nil {
+		mcpJSON = injected
+	} else if logger != nil {
+		logger.Warn("notify MCP injection failed; agent will have no notify_send tool", "error", err)
+	}
+
 	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
 	// Write config file (600 perms, owned by agent user).
 	// Use base64 encoding to prevent shell injection if mcpJSON contains

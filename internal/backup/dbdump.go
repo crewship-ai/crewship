@@ -126,6 +126,10 @@ var BackupTables = []string{
 	// operational delivery log (IntentExcludeOperational), not config.
 	"notification_channels",
 	"user_notification_prefs",
+	// notification_channel_agents (v170) references BOTH notification_channels
+	// and agents, so it restores after its channel parent above. agents are
+	// dumped earlier in this list.
+	"notification_channel_agents",
 	"webhooks",
 	"routines",
 	"schedules",

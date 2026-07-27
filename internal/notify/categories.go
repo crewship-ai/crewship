@@ -69,6 +69,22 @@ const (
 	// the preference matrix — not a real notification category, never
 	// appears on a delivery or a channel's admin allowlist.
 	CategoryMuteAll = "*"
+
+	// CategoryAgentsMessage labels a message an AGENT sent of its own accord
+	// through the notify_send tool.
+	//
+	// Deliberately NOT in AllCategories, so it never appears as a row in the
+	// preference matrix. Everything else in this file describes an EVENT a
+	// user chooses to subscribe to; an agent send is not an event, it is a
+	// direct message to a channel a human explicitly paired that agent with.
+	// The pairing IS the authorization (see agent_pairing.go), so routing it
+	// through the matrix as well would mean someone's mute could silently
+	// swallow a message an admin had already approved — confusing from both
+	// ends, and it would make the pairing look like it had not worked.
+	//
+	// It exists as a constant so the delivery log and the Activity entry can
+	// say where a message came from.
+	CategoryAgentsMessage = "agents.message"
 )
 
 // CategoryGroup labels the UI grouping a category belongs to. The matrix is

@@ -158,6 +158,50 @@ An instance admin can disable a provider instance-wide (`crewship notifychannel 
 `--type shoutrrr` still works as a hidden alias for `--type chat`, and `--url` still accepts a pre-composed delivery URL, so existing scripts and backup restores keep working. Both are undocumented on purpose: nobody should have to learn a URL syntax to connect Discord.
 </Note>
 
+## Agents sending notifications
+
+An agent can send a notification itself — "the migration finished", "this needs a decision", "the build is broken" — through the `notify_send` tool inside its container.
+
+**An agent has no channels by default.** Access is granted per (channel, agent) by a human, and there is no way for an agent to grant itself one. That is deliberate: an agent can already reach the network, so the question this answers is not "can it send" but *which of your team's channels may it speak on*. On Slack or Discord a reader cannot tell an agent's message from a colleague's at a glance, so an agent that could post anywhere by virtue of existing turns one confused or prompt-injected agent into a workspace-wide megaphone.
+
+```bash
+# Let one agent post to the ops channel
+crewship notifychannel agents allow nch_abc123 --agent agt_xyz789
+
+# Who can post here?
+crewship notifychannel agents list nch_abc123
+
+# Revoke
+crewship notifychannel agents deny nch_abc123 --agent agt_xyz789
+```
+
+Pairing takes the same authority as editing the channel: **ADMIN/OWNER** for a workspace channel, ownership for a personal one.
+
+### What the agent sees
+
+Two tools, injected automatically into every agent's MCP config:
+
+| Tool | Does |
+| --- | --- |
+| `list_notification_channels` | The channels THIS agent may send to — id, type and provider only, never a destination address |
+| `notify_send` | Sends `title` (+ optional `body`) to one of them |
+
+### What is enforced on the way out
+
+| Gate | Behaviour |
+| --- | --- |
+| **Identity** | The agent id comes from the container's own token, not the request. An agent cannot send as a sibling and inherit its grants. |
+| **Pairing** | Default-deny. The refusal names the CLI command a human needs to run, since the agent cannot fix it. |
+| **Rate** | Per (agent, channel): burst 3, refilling one per minute. Tighter than the human-facing gate — an agent in a loop can call a tool hundreds of times a minute without noticing, and the blast radius is a channel other people are reading. A `429` means slow down, not retry. |
+| **Scrubbing** | Title and body both go through the secret scrubber. Agent-authored text is untrusted output about to leave the instance. |
+| **Size** | 8 KB body cap, so a runaway agent cannot page a wall of text onto someone's phone. |
+
+Every agent send lands on the [Activity](/guides/activity) timeline as `notification.delivered` with the agent as the actor, so "who sent this to Slack?" has an answer.
+
+<Note>
+Agent messages are **not** routed through the per-user preference matrix. The pairing is the authorization — a human already decided this agent may post here — so letting someone's mute silently swallow it would make an approved grant look broken from both ends.
+</Note>
+
 ## Payload safety
 
 Every notification body — the legacy `output_preview` and the new category message's `body` — is passed through the secret **scrubber** (the same redaction the `notify` step uses) and capped before it leaves the instance — API keys and tokens in a run's output or an agent's reply never reach a webhook body, an email, or a chat message.

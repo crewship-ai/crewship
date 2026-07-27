@@ -571,5 +571,139 @@ func init() {
 	notifyChannelCmd.AddCommand(notifyChannelRmCmd)
 	notifyChannelCmd.AddCommand(notifyChannelProvidersCmd)
 	notifyChannelCmd.AddCommand(notifyChannelTestDraftCmd)
+
+	notifyChannelAgentsAllowCmd.Flags().String("agent", "", "Agent id to allow (required)")
+	notifyChannelAgentsDenyCmd.Flags().String("agent", "", "Agent id to revoke (required)")
+	notifyChannelAgentsCmd.AddCommand(notifyChannelAgentsListCmd)
+	notifyChannelAgentsCmd.AddCommand(notifyChannelAgentsAllowCmd)
+	notifyChannelAgentsCmd.AddCommand(notifyChannelAgentsDenyCmd)
+	notifyChannelCmd.AddCommand(notifyChannelAgentsCmd)
 	notifyChannelCmd.AddCommand(notifyChannelDeliveriesCmd)
+}
+
+// notifyChannelAgentsCmd manages which agents may post to a channel on their
+// own initiative. Default-deny: an agent has no channels until a human grants
+// one, so this command is the only way an agent ever gets to speak on a
+// team's Slack.
+var notifyChannelAgentsCmd = &cobra.Command{
+	Use:   "agents",
+	Short: "Manage which agents may send to a notification channel",
+	Long: `Agents can send notifications themselves, but only to channels a human
+has explicitly paired them with — there is no default access.
+
+  crewship notifychannel agents list <channel-id>
+  crewship notifychannel agents allow <channel-id> --agent <agent-id>
+  crewship notifychannel agents deny  <channel-id> --agent <agent-id>
+
+Pairing takes the same authority as editing the channel: ADMIN/OWNER for a
+workspace channel, ownership for a personal one.`,
+}
+
+type notifyChannelAgentRow struct {
+	AgentID   string `json:"agent_id"`
+	AgentName string `json:"agent_name,omitempty"`
+	AgentSlug string `json:"agent_slug,omitempty"`
+	GrantedBy string `json:"granted_by,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+var notifyChannelAgentsListCmd = &cobra.Command{
+	Use:   "list <channel-id>",
+	Short: "List the agents allowed to send to a channel",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/notification-channels/" + url.PathEscape(args[0]) + "/agents")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Agents []notifyChannelAgentRow `json:"agents"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		headers := []string{"AGENT", "NAME", "GRANTED BY", "SINCE"}
+		rows := make([][]string, 0, len(body.Agents))
+		for _, a := range body.Agents {
+			name := a.AgentName
+			if a.AgentSlug != "" {
+				name = a.AgentSlug
+			}
+			rows = append(rows, []string{truncateString(a.AgentID, 24), name, truncateString(a.GrantedBy, 24), a.CreatedAt})
+		}
+		return f.Auto(body.Agents, headers, rows)
+	},
+}
+
+var notifyChannelAgentsAllowCmd = &cobra.Command{
+	Use:   "allow <channel-id>",
+	Short: "Allow an agent to send to this channel",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		agentID, _ := cmd.Flags().GetString("agent")
+		if agentID == "" {
+			return fmt.Errorf("--agent is required")
+		}
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/notification-channels/"+url.PathEscape(args[0])+"/agents",
+			map[string]any{"agent_id": agentID})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		f := newFormatter()
+		return f.AutoHuman(map[string]any{"channel_id": args[0], "agent_id": agentID, "allowed": true}, func() {
+			cli.PrintSuccess(fmt.Sprintf("Agent %s may now send to channel %s", agentID, args[0]))
+		})
+	},
+}
+
+var notifyChannelAgentsDenyCmd = &cobra.Command{
+	Use:   "deny <channel-id>",
+	Short: "Revoke an agent's access to this channel",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		agentID, _ := cmd.Flags().GetString("agent")
+		if agentID == "" {
+			return fmt.Errorf("--agent is required")
+		}
+		client := newAPIClient()
+		resp, err := client.Delete("/api/v1/notification-channels/" +
+			url.PathEscape(args[0]) + "/agents/" + url.PathEscape(agentID))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		f := newFormatter()
+		return f.AutoHuman(map[string]any{"channel_id": args[0], "agent_id": agentID, "allowed": false}, func() {
+			cli.PrintSuccess(fmt.Sprintf("Agent %s can no longer send to channel %s", agentID, args[0]))
+		})
+	},
 }
