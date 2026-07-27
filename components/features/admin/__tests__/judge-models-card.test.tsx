@@ -74,3 +74,52 @@ describe("JudgeModelsCard", () => {
     expect(await screen.findByText(/no judge/i)).toBeTruthy()
   })
 })
+
+// "Configured" and "answering" are different questions and the card has to
+// keep them apart: a judge whose provider builds fine can still be pointing
+// at a model server that is not running — which is exactly what dev3 did.
+describe("JudgeModelsCard — reachability", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  const UNREACHABLE = {
+    id: "access_gatekeeper", label: "Credential access judge",
+    provider: "ollama", model: "qwen2.5:7b", source: "keeper_config",
+    healthy: true, reachable: false, reach_detail: "no response from http://127.0.0.1:11434",
+  }
+  const REACHABLE = { ...UNREACHABLE, reachable: true, reach_detail: "" }
+  const UNPROBED = {
+    id: "curator", label: "Skill review + memory consolidation",
+    provider: "anthropic", model: "claude-haiku-4-5", source: "explicit",
+    healthy: true, reach_detail: "not probed — Crewship does not call a paid API to render a status page",
+  }
+
+  it("flags a configured judge whose model server is not answering", async () => {
+    apiFetch.mockResolvedValue(ok({ subsystems: [UNREACHABLE] }))
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    expect(await screen.findByText(/no response from/i)).toBeTruthy()
+  })
+
+  it("does not call an unreachable judge healthy just because it is configured", async () => {
+    apiFetch.mockResolvedValue(ok({ subsystems: [UNREACHABLE] }))
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await screen.findByText(/no response from/i)
+    // The summary line is what an admin scans; it must count this one.
+    expect(screen.getByText(/cannot run right now/i)).toBeTruthy()
+  })
+
+  it("stays quiet when the judge answers", async () => {
+    apiFetch.mockResolvedValue(ok({ subsystems: [REACHABLE] }))
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await screen.findByText(/credential access judge/i)
+    expect(screen.queryByText(/cannot run right now/i)).toBeNull()
+  })
+
+  it("says a paid provider was not probed rather than guessing", async () => {
+    apiFetch.mockResolvedValue(ok({ subsystems: [UNPROBED] }))
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await screen.findByText(/skill review/i)
+    // Neither green-with-confidence nor red-with-alarm: unknown, and why.
+    expect(screen.getByText(/not probed/i)).toBeTruthy()
+    expect(screen.queryByText(/cannot run right now/i)).toBeNull()
+  })
+})

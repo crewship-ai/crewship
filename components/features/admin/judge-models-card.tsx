@@ -44,6 +44,20 @@ interface Subsystem {
   source: string
   healthy: boolean
   detail?: string
+  /** Absent = not probed (paid provider). true/false = the model server did
+   *  or did not answer just now. */
+  reachable?: boolean
+  reach_detail?: string
+}
+
+/**
+ * A judge is usable only if it is BOTH configured-and-buildable and, where we
+ * can check, actually answering. Keeping the two apart matters: an Ollama
+ * provider constructs without ever dialling, so a box with no model server
+ * running reported a perfectly healthy judge.
+ */
+function isUsable(r: Subsystem): boolean {
+  return r.healthy && r.reachable !== false
 }
 
 export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null }) {
@@ -67,7 +81,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
 
   useEffect(() => { load() }, [load])
 
-  const unhealthy = (rows ?? []).filter((r) => !r.healthy).length
+  const unusable = (rows ?? []).filter((r) => !isUsable(r)).length
 
   return (
     <SettingsCard
@@ -97,9 +111,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
         <SettingsEmpty>No judge models are wired into this build.</SettingsEmpty>
       ) : (
         <>
-          {unhealthy > 0 && (
+          {unusable > 0 && (
             <div role="status" className="px-4 py-2 text-[11px] text-destructive border-b border-border/40 bg-destructive/[0.05]">
-              {unhealthy} of {rows.length} judges cannot run right now — evaluations that need them will fail closed.
+              {unusable} of {rows.length} judges cannot run right now — evaluations that need them will fail closed.
             </div>
           )}
           {rows.map((r) => (
@@ -109,17 +123,28 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                 <span className="flex items-center gap-2">
                   <span
                     aria-hidden="true"
-                    className={`size-1.5 rounded-full shrink-0 ${r.healthy ? "bg-success" : "bg-destructive"}`}
+                    className={`size-1.5 rounded-full shrink-0 ${
+                      !isUsable(r) ? "bg-destructive" : r.reachable === undefined ? "bg-muted-foreground/50" : "bg-success"
+                    }`}
                   />
                   <span>{r.label}</span>
                 </span>
               }
               description={
-                r.detail ? (
-                  // The reason, verbatim from the server. A red dot that does
-                  // not say what is wrong cannot be acted on.
-                  <span role="status" className="block max-w-[28rem] whitespace-normal break-words text-destructive/90">
-                    Not running — {r.detail}
+                // Verbatim from the server. A dot that does not say what is
+                // wrong — or why it is grey — cannot be acted on.
+                r.detail || r.reach_detail ? (
+                  <span
+                    role="status"
+                    className={`block max-w-[28rem] whitespace-normal break-words ${
+                      isUsable(r) ? "text-muted-foreground/80" : "text-destructive/90"
+                    }`}
+                  >
+                    {r.detail
+                      ? `Not running — ${r.detail}`
+                      : r.reachable === false
+                        ? `Not answering — ${r.reach_detail}`
+                        : r.reach_detail}
                   </span>
                 ) : undefined
               }

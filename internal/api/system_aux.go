@@ -1,8 +1,13 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -31,6 +36,13 @@ type AuxStatusHandler struct {
 	// most misleading thing this surface did.
 	keeper *config.KeeperConfig
 	logger *slog.Logger
+
+	// Probe results are cached so several open admin consoles do not turn a
+	// status read into a poll loop against the model server.
+	probeMu  sync.Mutex
+	probeAt  time.Time
+	probeOK  map[string]bool
+	probeErr map[string]string
 }
 
 // NewAuxStatusHandler builds a handler bound to cfg. Pass the same
@@ -57,6 +69,16 @@ type auxSubsystemRow struct {
 	// actionable, and this surface exists to be acted on.
 	Healthy bool   `json:"healthy"`
 	Detail  string `json:"detail,omitempty"`
+	// Reachable answers a DIFFERENT question from Healthy: not "is this
+	// configured and buildable" but "did the model server answer just now".
+	// llm.NewOllama never dials, so a box with no Ollama running reported a
+	// perfectly healthy judge — that gap is what this closes.
+	//
+	// nil means "not probed", an honest third state. Only self-hosted
+	// providers are dialled: rendering a status card must not spend money on
+	// a paid API, and an admin refreshing the page would do exactly that.
+	Reachable   *bool  `json:"reachable,omitempty"`
+	ReachDetail string `json:"reach_detail,omitempty"`
 }
 
 // auxStatusResponse wraps the slot rows so the response is an object
@@ -103,7 +125,7 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// The credential-access judge first: it is the one operators mean when
 	// they ask "is the keeper working?", and it is the one most likely to be
 	// silently down (it defaults to a local Ollama that may not be running).
-	out.Subsystems = append(out.Subsystems, h.accessJudgeRow())
+	out.Subsystems = append(out.Subsystems, h.accessJudgeRow(r.Context()))
 
 	for _, s := range slots {
 		resolved, err := llm.ResolveAux(h.cfg, s.slot)
@@ -137,6 +159,7 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 			row.Healthy = false
 			row.Detail = berr.Error()
 		}
+		h.annotateReach(r.Context(), &row, resolved.Provider)
 		out.Subsystems = append(out.Subsystems, row)
 	}
 
@@ -146,7 +169,7 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 // accessJudgeRow describes the credential-access gatekeeper, which server.go
 // builds from cfg.Keeper rather than from any aux slot. Separate function
 // because the two config paths must not be allowed to blur again.
-func (h *AuxStatusHandler) accessJudgeRow() auxSubsystemRow {
+func (h *AuxStatusHandler) accessJudgeRow(ctx context.Context) auxSubsystemRow {
 	row := auxSubsystemRow{
 		ID:     "access_gatekeeper",
 		Label:  "Credential access judge",
@@ -169,5 +192,89 @@ func (h *AuxStatusHandler) accessJudgeRow() auxSubsystemRow {
 		return row
 	}
 	row.Healthy = true
+	// Configured and buildable — but is anything listening? This is the
+	// check that would have caught dev3, where the judge reported fine
+	// while Ollama was not running at all.
+	ok, detail := h.probe(ctx, h.keeper.OllamaURL)
+	row.Reachable = &ok
+	row.ReachDetail = detail
 	return row
+}
+
+// probeBudget bounds a single reachability dial. A model server that hangs
+// must not hang the admin console; 2s is generous for a local process and
+// short enough that a page load never feels stuck.
+const probeBudget = 2 * time.Second
+
+// probeTTL is how long a dial result is reused. Long enough that several
+// open consoles cost one dial, short enough that an operator who just
+// started Ollama sees it turn green on the next refresh.
+const probeTTL = 30 * time.Second
+
+// selfHostedProviders are the ones worth dialling: local, free, and the
+// realistic failure mode (a model server that simply is not running). Paid
+// APIs are deliberately absent — see auxSubsystemRow.Reachable.
+func isSelfHosted(provider string) bool {
+	return strings.EqualFold(provider, "ollama")
+}
+
+// reachOllama reports whether an Ollama server answers at base. Any HTTP
+// response counts as reachable: a 404 still proves something is listening
+// and speaking HTTP, which is the question being asked. Only a transport
+// failure or a timeout is "not reachable".
+func reachOllama(ctx context.Context, base string) (bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, probeBudget)
+	defer cancel()
+
+	url := strings.TrimSuffix(base, "/") + "/api/tags"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, "malformed model server url: " + err.Error()
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "no response from " + base
+	}
+	_ = resp.Body.Close()
+	return true, ""
+}
+
+// probe dials base once per probeTTL, keyed by url. Returns (ok, detail).
+func (h *AuxStatusHandler) probe(ctx context.Context, base string) (bool, string) {
+	h.probeMu.Lock()
+	if time.Since(h.probeAt) > probeTTL {
+		h.probeOK, h.probeErr, h.probeAt = map[string]bool{}, map[string]string{}, time.Now()
+	}
+	if ok, seen := h.probeOK[base]; seen {
+		detail := h.probeErr[base]
+		h.probeMu.Unlock()
+		return ok, detail
+	}
+	h.probeMu.Unlock()
+
+	ok, detail := reachOllama(ctx, base)
+
+	h.probeMu.Lock()
+	h.probeOK[base], h.probeErr[base] = ok, detail
+	h.probeMu.Unlock()
+	return ok, detail
+}
+
+// annotateReach fills the reachability fields for a slot row. Self-hosted
+// providers get dialled; a paid API is left unprobed with a reason, because
+// the alternative is billing the operator for looking at a status page.
+func (h *AuxStatusHandler) annotateReach(ctx context.Context, row *auxSubsystemRow, provider string) {
+	if !isSelfHosted(provider) {
+		row.ReachDetail = "not probed — Crewship does not call a paid API to render a status page"
+		return
+	}
+	base := os.Getenv("KEEPER_OLLAMA_URL")
+	if base == "" {
+		// Mirrors llm.BuildAuxProvider's own default, so the row reports the
+		// endpoint the evaluator would actually use.
+		base = "http://localhost:11434"
+	}
+	ok, detail := h.probe(ctx, base)
+	row.Reachable = &ok
+	row.ReachDetail = detail
 }
