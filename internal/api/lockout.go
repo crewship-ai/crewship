@@ -94,13 +94,19 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 		hashedPw      string
 		failedCount   int
 		lockedUntilNS sql.NullString
+		// full_name is nullable and a provisioned account starts with no
+		// name at all. Scanning it into a bare string made every such login
+		// fail with "converting NULL to string", which the caller reports as
+		// CredentialsSignin — a permanent lockout indistinguishable from a
+		// wrong password, on accounts that had only just been created.
+		fullNameNS sql.NullString
 	)
 	row := db.QueryRowContext(ctx,
 		`SELECT id, full_name, hashed_password, failed_login_count, locked_until
 		   FROM users
 		  WHERE email = ?`, email,
 	)
-	if err := row.Scan(&userID, &fullName, &hashedPw, &failedCount, &lockedUntilNS); err != nil {
+	if err := row.Scan(&userID, &fullNameNS, &hashedPw, &failedCount, &lockedUntilNS); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Unknown email path. We deliberately do NOT advance
 			// any counter (no row to advance, and storing per-
@@ -117,6 +123,7 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 		}
 		return "", "", fmt.Errorf("lockout: query user: %w", err)
 	}
+	fullName = fullNameNS.String
 
 	if lockedUntilNS.Valid && lockedUntilNS.String != "" {
 		lockedUntil, perr := time.Parse(time.RFC3339, lockedUntilNS.String)

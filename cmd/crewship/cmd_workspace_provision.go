@@ -63,7 +63,11 @@ var workspaceMemberInviteCmd = &cobra.Command{
 		if out.CreatedUser {
 			cli.PrintSuccess(fmt.Sprintf("Created %s as %s.", out.Email, out.Role))
 		} else {
-			cli.PrintSuccess(fmt.Sprintf("Added existing account %s as %s.", out.Email, out.Role))
+			// No link for an account somebody already controls — one would
+			// reset their password, and this command prints it to whoever
+			// ran it. See ProvisionMember.
+			cli.PrintSuccess(fmt.Sprintf("Added existing account %s as %s. They sign in with their existing password.", out.Email, out.Role))
+			return nil
 		}
 		// Printed on its own line, unadorned, so it survives a copy-paste and
 		// a pipe into another command. It is the only time it is shown.

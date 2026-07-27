@@ -122,8 +122,10 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	defer tx.Rollback() //nolint:errcheck
 
 	var userID string
+	var existingPassword sql.NullString
 	createdUser := false
-	err = tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE email = ?`, email).Scan(&userID)
+	err = tx.QueryRowContext(r.Context(),
+		`SELECT id, hashed_password FROM users WHERE email = ?`, email).Scan(&userID, &existingPassword)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		userID = uuid.NewString()
@@ -170,6 +172,31 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		memberID, workspaceID, userID, role, now, now); err != nil {
 		replyInternalError(w, h.logger, "provision: insert membership", err)
+		return
+	}
+
+	// A setup token sets a password. Minting one for an account SOMEBODY
+	// ALREADY CONTROLS turns this endpoint into account takeover: creating a
+	// workspace is self-serve (POST /api/v1/workspaces is authedSelfMut), so
+	// any signed-up user could make themselves OWNER of a throwaway
+	// workspace, provision a victim's email into it, and receive a live
+	// token in the response — no mail is sent, so the victim never learns.
+	// They would then redeem it at /auth/reset and own the account.
+	//
+	// An account with no password yet is different: nobody controls it, and
+	// re-issuing is the legitimate "the link went astray" case.
+	claimed := existingPassword.Valid && existingPassword.String != ""
+	if claimed {
+		if err := tx.Commit(); err != nil {
+			replyInternalError(w, h.logger, "provision: commit", err)
+			return
+		}
+		h.logger.Info("workspace member added (existing account, no setup link issued)",
+			"workspace_id", workspaceID, "email", email, "role", role,
+			"by_user_id", UserFromContext(r.Context()).ID)
+		writeJSON(w, http.StatusCreated, provisionResponse{
+			UserID: userID, Email: email, Role: role, CreatedUser: false,
+		})
 		return
 	}
 

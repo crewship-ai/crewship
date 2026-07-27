@@ -157,7 +157,9 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
           <DialogTitle>{result ? "Send them this link" : "Add member"}</DialogTitle>
           <DialogDescription>
             {result
-              ? "This is the only time the link is shown — the token is stored hashed and cannot be displayed again."
+              ? result.setup_url
+                ? "This is the only time the link is shown — the token is stored hashed and cannot be displayed again."
+                : "They already have an account, so nothing needs setting up."
               : "Creates the account if the email is new, then gives you a setup link to send them."}
           </DialogDescription>
         </DialogHeader>
@@ -170,8 +172,9 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
             <p className="text-body text-muted-foreground">
               {result.created_user
                 ? `Account created for ${result.email}. They set their own password through this link.`
-                : `${result.email} already had an account and has been added to this workspace. They can sign in as usual — the link below is only needed if they have forgotten their password.`}
+                : `${result.email} already had an account and has been added to this workspace. They sign in with their existing password — no setup link is issued, because one would let anybody holding it change that password.`}
             </p>
+            {result.setup_url ? (
             <div className="space-y-2">
               <Label htmlFor="setup-link">Setup link</Label>
               <div className="flex gap-2">
@@ -181,6 +184,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                 </Button>
               </div>
             </div>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => dismiss("again")}>
                 Add another

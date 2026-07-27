@@ -182,3 +182,19 @@ describe("InviteMemberDialog — the link outlives the roster refresh", () => {
     await waitFor(() => expect(onInvited).toHaveBeenCalled())
   })
 })
+
+// Provisioning an email that already has a password withholds the setup
+// link server-side — a token there would let whoever holds it change that
+// person's password, and any user can self-serve a workspace to reach this
+// endpoint. The dialog must not promise a link it will not get.
+describe("InviteMemberDialog — existing account", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  it("shows no link when the server withholds one", async () => {
+    apiFetch.mockResolvedValue(jsonResponse({ created_user: false, email: "old@example.com" }, 201))
+    await submit("old@example.com")
+    expect(await screen.findByText(/existing password/i)).toBeTruthy()
+    expect(screen.queryByLabelText(/setup link/i)).toBeNull()
+    expect(screen.queryByRole("button", { name: /copy/i })).toBeNull()
+  })
+})

@@ -535,15 +535,20 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	// Look up name/email to bake into the new access token. If the
 	// user was deleted out from under us, the JOIN-fk in user_sessions
 	// would have CASCADE-deleted the session — but defend anyway.
-	var fullName, email string
+	// full_name is nullable — a provisioned account has none until the
+	// person picks one. Scanning it into a bare string turned every token
+	// rotation for those users into "your session was revoked by an
+	// administrator", which is both false and unfixable from their side.
+	var fullNameNS, emailNS sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT full_name, email FROM users WHERE id = ?", claims.ID,
-	).Scan(&fullName, &email); err != nil {
+	).Scan(&fullNameNS, &emailNS); err != nil {
 		h.clearAuthCookies(w, r)
 		_ = h.sessions.Revoke(r.Context(), claims.Sid, sessions.ReasonAdminForce)
 		writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
 		return
 	}
+	fullName, email := fullNameNS.String, emailNS.String
 
 	// Mint the new tokens FIRST so we have the new refresh JTI to
 	// CAS-rotate against. If anything below fails after this point we

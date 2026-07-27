@@ -113,6 +113,8 @@ Adding someone needs no mail server. The workspace admin creates the account and
 
 The link lands on `/reset-password`, the same page a forgotten-password flow uses, and expires after **7 days** — long enough to send on a Friday and be opened on Monday. (An ordinary password-reset link is 30 minutes, because the person requesting it is waiting at the screen.)
 
+If the email already belongs to an account, that person is added to the workspace and **no setup link is issued** — they sign in with the password they already have. Issuing one would hand whoever holds the link the ability to change that password, and creating a workspace is self-serve.
+
 Requires **ADMIN** or **OWNER**. `CREWSHIP_PUBLIC_URL` must be set — without it there is no link to build, and Crewship refuses rather than creating an account nobody can reach.
 
 <Note>
