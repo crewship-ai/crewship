@@ -36,6 +36,20 @@ func applyMigrationsUpTo(ctx context.Context, db *sql.DB, max int, logger *slog.
 		if m.version > max {
 			continue
 		}
+		// Mirror the runner's escape hatch: a fnNoTx migration must NOT be
+		// handed a transaction (see migration.fnNoTx). Without this branch a
+		// helper call with max >= 167 would silently skip the migration body
+		// and record it as applied.
+		if m.fnNoTx != nil {
+			if err := m.fnNoTx(ctx, db, logger); err != nil {
+				return fmt.Errorf("apply v%d fnNoTx: %w", m.version, err)
+			}
+			if _, err := db.ExecContext(ctx,
+				"INSERT OR IGNORE INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
+				return fmt.Errorf("record v%d: %w", m.version, err)
+			}
+			continue
+		}
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin v%d: %w", m.version, err)
