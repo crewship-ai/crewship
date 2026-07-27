@@ -275,7 +275,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 	var email, expiresStr string
 	err = tx.QueryRowContext(r.Context(), `
 		SELECT identifier, expires FROM verification_tokens
-		WHERE token = ? AND purpose = 'password_reset'`, tokenHash).Scan(&email, &expiresStr)
+		WHERE token = ? AND purpose IN ('password_reset', 'account_setup')`, tokenHash).Scan(&email, &expiresStr)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusBadRequest, "Invalid or expired token")
 		return
@@ -285,8 +285,14 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// account_setup is accepted alongside password_reset: both redeem to
+	// "prove you hold this one-time secret, then set a password". They
+	// differ only in lifetime and in who initiated them, so keeping two
+	// redemption paths would be duplicate code with one of them
+	// under-tested.
+	//
 	// The authorization gate is the parameterized lookup above
-	// (`WHERE token = ? AND purpose = 'password_reset'`): a row only
+	// (`WHERE token = ? AND purpose IN (…)`): a row only
 	// comes back when the SHA-256 of the supplied token matches a stored
 	// hash. The token column carries the full 256-bit hash, so there is
 	// no separate hash field on the row to constant-time compare against

@@ -551,7 +551,11 @@ func sendWorkspaceInvitation(email, role string) error {
 		return err
 	}
 
-	cli.PrintSuccess(fmt.Sprintf("Invitation sent to %s (%s role).", inv.Email, inv.Role))
+	// Deliberately not "Invitation sent": no mail is sent. CreateInvitation
+	// holds no mailer, so this writes a row and nothing reaches the invitee.
+	// `workspace member invite` is the command that actually gets someone in.
+	cli.PrintSuccess(fmt.Sprintf("Invitation recorded for %s (%s role).", inv.Email, inv.Role))
+	cli.PrintWarning("No email was sent — no mailer is wired. Use `crewship workspace member invite` to create the account and get a setup link.")
 	return nil
 }
 

@@ -92,7 +92,38 @@ The endpoint is idempotent — a second call against a database that already has
 
 The Next.js frontend handles credentials via `POST /api/auth/callback/credentials`, sets a session cookie, and every subsequent request rides on `RequireAuth`. No client-side state, no JWT inspection — the session is server-owned.
 
-### 6. Mint a CLI token (for scripts / CI)
+### 6. Add a colleague
+
+Adding someone needs no mail server. The workspace admin creates the account and hands over a one-time setup link; the new person sets their own password with it.
+
+<Tabs>
+  <Tab title="UI">
+    **Settings → Members → Add member.** Enter their email and role. Crewship creates the account if the email is new, adds it to the workspace, and shows a setup link. Copy it and send it however you like — Slack, SMS, in person.
+
+    The link is shown **once**. The token is stored hashed, so it cannot be displayed again; if it goes astray, add the person again to issue a fresh one (which invalidates the old).
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    crewship workspace member invite alice@example.com --role MANAGER
+    ```
+
+    Prints the setup link on its own line so it survives a copy-paste or a pipe.
+  </Tab>
+</Tabs>
+
+The link lands on `/reset-password`, the same page a forgotten-password flow uses, and expires after **7 days** — long enough to send on a Friday and be opened on Monday. (An ordinary password-reset link is 30 minutes, because the person requesting it is waiting at the screen.)
+
+Requires **ADMIN** or **OWNER**. `CREWSHIP_PUBLIC_URL` must be set — without it there is no link to build, and Crewship refuses rather than creating an account nobody can reach.
+
+<Note>
+Once a mailer is configured, the same action can also email the link. The copyable link stays as the fallback that works on an air-gapped or mail-less instance.
+</Note>
+
+<Warning>
+`crewship workspace invite` is a different, older command: it records an invitation row but sends nothing, because no mailer is wired to it. Use `workspace member invite` above to actually get someone in.
+</Warning>
+
+### 7. Mint a CLI token (for scripts / CI)
 
 While session-authed in the web UI:
 
@@ -136,7 +167,7 @@ Scopes use the shape `<resource>:<action>`. The recognised vocabulary is deliber
 
 **Backward compatibility.** A token minted **without** `scopes` (the default, and every token issued before enforcement) carries the **full role** of the issuing user — unchanged behavior. Scopes only ever *narrow* a token; you can never mint one above your own role.
 
-### 7. Non-interactive CLI login (systemd / CI / harnesses)
+### 8. Non-interactive CLI login (systemd / CI / harnesses)
 
 `crewship login`'s default email+password flow prompts for the password on a
 real TTY (`term.ReadPassword`), which fails outright over a pipe:

@@ -90,6 +90,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Workspace members
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members", authed(wsCtx(http.HandlerFunc(ws.ListMembers))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/members", roleManage, ws.AddMember)
+	// One action for "add a colleague": creates the account when the email
+	// is new, adds the membership, and returns a setup link the admin
+	// delivers out of band. Replaces the invite flow, which wrote a row and
+	// told nobody because no mailer is wired.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/members/provision", roleManage, ws.ProvisionMember)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/members/{memberId}", roleManage, ws.RemoveMember)
 	// Member role change (#867.2). MANAGER+ at the route (roleCreate); the
 	// ladder (grant-below-own, no-modify-superior, last-owner) is enforced
