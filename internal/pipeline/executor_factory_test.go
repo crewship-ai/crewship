@@ -199,7 +199,7 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		}
 		fv := v.Field(i)
 		switch fv.Kind() {
-		case reflect.Ptr, reflect.Interface, reflect.Func, reflect.Map, reflect.Slice, reflect.Chan:
+		case reflect.Pointer, reflect.Interface, reflect.Func, reflect.Map, reflect.Slice, reflect.Chan:
 			if fv.IsNil() {
 				t.Errorf("Executor.%s is nil after NewWiredExecutor with full deps — a new dependency was added without factory wiring; add it to ExecutorDeps + NewWiredExecutor (or allowlist it here with a reason)", f.Name)
 			}
