@@ -389,9 +389,11 @@ export function AppToolbar() {
           }
 
           const colorMap = {
-            emerald: { bg: "bg-success dark:bg-success/30 border-success dark:border-success", dot: "bg-success", text: "text-success dark:text-success", icon: "text-success" },
-            amber: { bg: "bg-warn dark:bg-warn/30 border-warn dark:border-warn", dot: "bg-warn", text: "text-warn dark:text-warn", icon: "text-warn" },
-            red: { bg: "bg-destructive dark:bg-destructive/30 border-destructive dark:border-destructive", dot: "bg-destructive", text: "text-destructive dark:text-destructive", icon: "text-destructive" },
+            // Subtle tinted pill (matches the pre-token muted look: a low-opacity
+            // fill + a soft same-hue border, not a full-strength ring). #online-badge
+            emerald: { bg: "bg-success/10 border-success/25", dot: "bg-success", text: "text-success", icon: "text-success" },
+            amber: { bg: "bg-warn/10 border-warn/25", dot: "bg-warn", text: "text-warn", icon: "text-warn" },
+            red: { bg: "bg-destructive/10 border-destructive/25", dot: "bg-destructive", text: "text-destructive", icon: "text-destructive" },
             muted: { bg: "bg-muted/50 border-border", dot: "bg-muted-foreground/40", text: "text-muted-foreground", icon: "text-muted-foreground" },
           }
 
