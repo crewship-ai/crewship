@@ -182,7 +182,7 @@ export function RoutinesSchedulesView({
                           : "cursor-default opacity-60",
                       )}
                     >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-info/20 text-info">
                         <Calendar className="h-4 w-4" />
                       </div>
                       <div className="min-w-0">
@@ -193,7 +193,7 @@ export function RoutinesSchedulesView({
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-medium text-blue-400">{relativeTime(s.next_run_at)}</div>
+                        <div className="text-sm font-medium text-info">{relativeTime(s.next_run_at)}</div>
                         <div className="text-[10px] text-muted-foreground">{new Date(s.next_run_at!).toLocaleString()}</div>
                       </div>
                     </button>
@@ -293,7 +293,7 @@ export function RoutinesSchedulesView({
 const KPI_TONE = {
   default: "bg-muted text-muted-foreground",
   emerald: "bg-success/20 text-success",
-  blue: "bg-blue-500/20 text-blue-400",
+  blue: "bg-info/20 text-info",
   violet: "bg-purple/20 text-purple",
   rose: "bg-destructive/20 text-destructive",
   amber: "bg-warn/20 text-warn",

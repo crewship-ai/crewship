@@ -99,7 +99,7 @@ export function BackupMetricsRow({ workspaceId }: MetricsRowProps) {
       label: "Restored",
       value: data.restored_total.toLocaleString(),
       icon: Lock,
-      tone: "text-sky-400",
+      tone: "text-info",
       sub: "",
     },
     {

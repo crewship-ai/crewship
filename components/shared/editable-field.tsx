@@ -137,7 +137,7 @@ export function EditableField({
             }
           }}
           className={cn(
-            "flex-1 bg-transparent border border-white/15 rounded px-2 py-0.5 text-sm text-foreground outline-none focus:border-blue-400",
+            "flex-1 bg-transparent border border-white/15 rounded px-2 py-0.5 text-sm text-foreground outline-none focus:border-primary",
             mono && "font-mono",
           )}
         />

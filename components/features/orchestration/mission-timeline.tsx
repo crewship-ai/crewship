@@ -27,7 +27,7 @@ const TICK_COUNT = 8
 const statusBadge: Record<MissionStatus, string> = {
   BACKLOG: "border-slate-400 text-slate-400",
   TODO: "border-slate-400 text-slate-400",
-  IN_PROGRESS: "border-blue-500 text-blue-400",
+  IN_PROGRESS: "border-primary text-primary",
   COMPLETED: "border-success text-success",
   DONE: "border-success text-success",
   FAILED: "border-destructive text-destructive",

@@ -189,7 +189,7 @@ export function SkillsDetailPanel({
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/70 prose-li:text-white/70 prose-code:text-blue-300 prose-code:bg-white/[0.06] prose-code:px-1 prose-code:rounded prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/[0.08]">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/70 prose-li:text-white/70 prose-code:text-info prose-code:bg-white/[0.06] prose-code:px-1 prose-code:rounded prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/[0.08]">
         {loading && <p className="text-white/45 text-xs italic">Loading…</p>}
         {!loading && detail?.content && <Streamdown>{detail.content}</Streamdown>}
         {!loading && !detail?.content && (
@@ -323,8 +323,8 @@ function InstallToAgentDialog({
           <DialogTitle>Install {skill.display_name ?? skill.name}</DialogTitle>
           <DialogDescription>
             Pick one or more agents. The skill body is materialised into each agent&apos;s container under
-            <code className="text-blue-300 mx-1">.claude/skills/</code>,
-            <code className="text-blue-300 mx-1">.agents/skills/</code>,
+            <code className="text-info mx-1">.claude/skills/</code>,
+            <code className="text-info mx-1">.agents/skills/</code>,
             and the other CLI discovery paths.
           </DialogDescription>
         </DialogHeader>
@@ -360,12 +360,12 @@ function InstallToAgentDialog({
                     })
                   }
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    selected ? "bg-blue-500/[0.12]" : "hover:bg-white/[0.04]"
+                    selected ? "bg-primary/[0.12]" : "hover:bg-white/[0.04]"
                   }`}
                 >
                   <span
                     className={`inline-block h-3 w-3 rounded border ${
-                      selected ? "border-blue-400 bg-blue-500" : "border-white/20"
+                      selected ? "border-primary bg-primary" : "border-white/20"
                     }`}
                   />
                   <span className="font-medium text-white/90 flex-1 truncate">{a.name}</span>
@@ -711,12 +711,12 @@ function AssignToCrewDialog({
                   type="button"
                   onClick={() => setPickedCrew(c.id)}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    selected ? "bg-blue-500/[0.12]" : "hover:bg-white/[0.04]"
+                    selected ? "bg-primary/[0.12]" : "hover:bg-white/[0.04]"
                   }`}
                 >
                   <span
                     className={`inline-block h-3 w-3 rounded-full border ${
-                      selected ? "border-blue-400 bg-blue-500" : "border-white/20"
+                      selected ? "border-primary bg-primary" : "border-white/20"
                     }`}
                   />
                   <span className="font-medium text-white/90 flex-1 truncate">{c.name}</span>

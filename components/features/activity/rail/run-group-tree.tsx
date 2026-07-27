@@ -378,7 +378,7 @@ function statusIconFor(group: RunGroup) {
 function tintFor(group: RunGroup) {
   switch (group.status) {
     case "running":
-      return { dot: "bg-blue-400", icon: "animate-spin text-blue-400" }
+      return { dot: "bg-primary", icon: "animate-spin text-primary" }
     case "paused":
       return { dot: "bg-warn animate-pulse", icon: "text-warn" }
     case "failed":

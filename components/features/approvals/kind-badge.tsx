@@ -8,9 +8,9 @@ const KIND_CLASS: Record<string, string> = {
   destructive_op: "bg-destructive/15 text-destructive border-destructive/40",
   cost_threshold: "bg-warn/15 text-warn border-warn/40",
   target_environment: "bg-warn/15 text-warn border-warn/40",
-  tool_call: "bg-blue-500/15 text-blue-300 border-blue-500/40",
+  tool_call: "bg-info/15 text-info border-info/40",
   ephemeral_hire: "bg-purple/15 text-purple border-purple/40",
-  custom: "bg-slate-500/15 text-slate-300 border-slate-500/40",
+  custom: "bg-muted text-muted-foreground border-border",
 }
 
 interface KindBadgeProps {

@@ -215,10 +215,10 @@ export function EscalationResponseCard({
           )}
 
           {evidencePack.suggested_action && (
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 p-2.5">
-              <span className="text-label font-medium text-blue-700 dark:text-blue-300">
+            <div className="rounded-md bg-info/10 dark:bg-info/30 border border-info/20 dark:border-info/50 p-2.5">
+              <span className="text-label font-medium text-info dark:text-info">
                 Suggested: </span>
-              <span className="text-body text-blue-600 dark:text-blue-400">
+              <span className="text-body text-info dark:text-info">
                 {evidencePack.suggested_action}
               </span>
             </div>
@@ -241,7 +241,7 @@ export function EscalationResponseCard({
             href={metadataUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary dark:text-primary dark:hover:text-primary underline"
           >
             <ExternalLink className="h-3.5 w-3.5" />
             Open link
@@ -332,7 +332,7 @@ export function EscalationResponseCard({
             variant="outline"
             onClick={handleRedirectClick}
             disabled={submitting}
-            className="border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/30"
+            className="border-primary text-primary hover:bg-primary/10 dark:border-primary dark:text-primary dark:hover:bg-primary/30"
           >
             <ArrowRightLeft className="h-3.5 w-3.5 mr-1" />
             Redirect
@@ -342,7 +342,7 @@ export function EscalationResponseCard({
               size="sm"
               onClick={() => handleResolve("redirect")}
               disabled={submitting || !resolution.trim() || !redirectTo}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-primary hover:bg-primary text-white"
             >
               <Send className="h-3.5 w-3.5 mr-1" />
               Send redirect
@@ -371,7 +371,7 @@ const ACTION_BADGES: Record<string, { label: string; className: string; icon: Re
   },
   redirect: {
     label: "Redirected",
-    className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+    className: "bg-info/15 text-info dark:bg-info/40 dark:text-info",
     icon: ArrowRightLeft,
   },
 }

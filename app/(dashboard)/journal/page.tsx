@@ -678,7 +678,7 @@ function StreamStatusBadge({ status }: { status: string }) {
   }
   if (status === "connecting") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-blue-500/10 text-blue-300 border-blue-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-info/10 text-info border-info/30">
         <Radio className="h-3 w-3" /> Connecting
       </Badge>
     )

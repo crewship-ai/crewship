@@ -168,7 +168,7 @@ function AccountAction({
         // ring-inset so the focus outline draws inside the button and isn't
         // clipped by the row container's overflow-hidden rounded border.
         "rounded px-1.5 py-0.5 text-[10px] transition-colors disabled:opacity-50",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-blue-400/70",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/70",
         danger
           ? "text-muted-foreground hover:text-destructive"
           : "text-muted-foreground hover:text-foreground",

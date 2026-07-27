@@ -300,7 +300,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       className={cn(
         "px-2 py-0.5 rounded text-[11px] border transition-colors",
         active
-          ? "bg-blue-500/20 border-blue-400 text-blue-300"
+          ? "bg-primary/20 border-primary text-primary"
           : "bg-card border-white/10 text-foreground/70 hover:border-white/20",
       )}
     >
@@ -338,7 +338,7 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
           error
             ? "bg-destructive/10 border-destructive/60"
             : active
-              ? "bg-blue-500/20 border-blue-400"
+              ? "bg-primary/20 border-primary"
               : "bg-card border-white/10",
         )}>
           <input
@@ -371,7 +371,7 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
             }}
             className={cn(
               "w-12 bg-transparent outline-none text-right font-medium",
-              error ? "text-destructive" : "text-blue-300",
+              error ? "text-destructive" : "text-primary",
             )}
           />
           <span className="text-[9px] text-muted-foreground" aria-hidden="true">{suffix}</span>
@@ -409,7 +409,7 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 border border-white/15 rounded-md min-h-[40px] focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 transition-shadow">
+    <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 border border-white/15 rounded-md min-h-[40px] focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-shadow">
       {value.map((d) => (
         <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-warn/10 border border-warn/30 font-mono text-[11px] text-warn/90">
           {d}

@@ -290,7 +290,7 @@ export function LogsToolbar({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: -2 }}
             transition={{ type: "spring", damping: 18, stiffness: 320 }}
-            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] font-mono text-sky-300 hover:bg-sky-500/20"
+            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-primary/40 bg-primary/10 text-[10px] font-mono text-primary hover:bg-primary/20"
             title="Clear histogram selection"
           >
             <Filter className="h-3 w-3" />
@@ -473,7 +473,7 @@ function ToolbarToggle({
       className={cn(
         "inline-flex items-center gap-1 h-6 px-2 rounded border text-[10px] transition-colors",
         on
-          ? "bg-sky-500/10 text-sky-300 border-sky-500/40"
+          ? "bg-primary/10 text-primary border-primary/40"
           : "bg-card border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent/40",
       )}
     >

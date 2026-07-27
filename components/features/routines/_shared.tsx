@@ -90,7 +90,7 @@ const PILL_TONE: Record<NonNullable<PillProps["tone"]>, string> = {
   success: "bg-success/20 text-success",
   destructive: "bg-destructive/20 text-destructive",
   warn: "bg-warn/20 text-warn",
-  blue: "bg-blue-500/20 text-blue-400",
+  blue: "bg-primary/20 text-primary",
   purple: "bg-purple/20 text-purple",
 }
 

@@ -537,7 +537,7 @@ function EmptyState({
             onClick={onClearFilters}
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
-            className="mt-1 inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] text-sky-300 hover:bg-sky-500/20"
+            className="mt-1 inline-flex items-center gap-1 h-6 px-2 rounded border border-primary/40 bg-primary/10 text-[10px] text-primary hover:bg-primary/20"
           >
             Clear all filters
             <span className="opacity-60 font-mono">Esc</span>

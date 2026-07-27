@@ -214,7 +214,7 @@ function ProvisioningRow({
       {/* Active step at feature granularity — "Building image · installing ansible". */}
       {crew.status === "running" && crew.activeFeature && (
         <div className="ml-4 mb-1 text-[11px] text-foreground flex items-center gap-1.5">
-          <Spinner className="h-3 w-3 shrink-0 text-blue-400" />
+          <Spinner className="h-3 w-3 shrink-0 text-primary" />
           <span className="truncate">
             Building image · installing <span className="font-medium">{crew.activeFeature}</span>
           </span>
@@ -370,7 +370,7 @@ function ProvisioningChecklist({
             {row.state === "done" ? (
               <Check className="h-3 w-3 text-success" />
             ) : row.state === "active" ? (
-              <Spinner className="h-3 w-3 text-blue-400" />
+              <Spinner className="h-3 w-3 text-primary" />
             ) : (
               <Circle className="h-2 w-2 text-muted-foreground-soft" />
             )}
@@ -384,7 +384,7 @@ function ProvisioningChecklist({
 
 
 function ProvisioningStatusDot({ status, recent }: { status: string; recent?: "completed" | "failed" }) {
-  if (status === "running") return <Spinner className="h-3 w-3 text-blue-500 shrink-0" />
+  if (status === "running") return <Spinner className="h-3 w-3 text-primary shrink-0" />
   if (status === "failed") return <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
   if (recent === "completed") return <Check className="h-3 w-3 text-success shrink-0" />
   // needs_provision
@@ -423,7 +423,7 @@ function ProvisioningEventSteps({ steps }: { steps: ProvisionStepState[] }) {
             ) : s.status === "failed" ? (
               <AlertTriangle className="h-3 w-3 text-destructive" />
             ) : (
-              <Spinner className="h-3 w-3 text-blue-400" />
+              <Spinner className="h-3 w-3 text-primary" />
             )}
           </span>
           <span className="truncate">{s.label}</span>

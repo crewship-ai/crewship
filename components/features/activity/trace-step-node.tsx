@@ -86,7 +86,7 @@ function StatusPip({ status }: { status: StepStatus }) {
   switch (status) {
     case "running":
       return (
-        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 ring-2 ring-background">
+        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary ring-2 ring-background">
           <Spinner className="h-2 w-2 text-white" />
         </span>
       )
@@ -230,10 +230,10 @@ function TraceStepNodeBase({ data }: NodeProps) {
         }
       }}
       className={cn(
-        "relative w-[200px] rounded-lg border border-white/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
+        "relative w-[200px] rounded-lg border border-white/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
         ring.bg,
         ring.ring,
-        selected && "ring-2 ring-blue-400",
+        selected && "ring-2 ring-primary",
         "hover:bg-card/80",
         heatmapClass,
       )}
@@ -291,7 +291,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
             <span
               className={cn(
                 "ml-auto inline-flex items-center gap-0.5 rounded bg-white/[0.06] px-1 py-0 text-[9px] font-medium",
-                selected ? "text-blue-300" : "text-muted-foreground",
+                selected ? "text-primary" : "text-muted-foreground",
               )}
             >
               {selected ? "▾" : "▸"} {subSpans.length}{" "}

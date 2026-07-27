@@ -68,7 +68,7 @@ function originTag(s: SessionRow): OriginTag | null {
     case "CLI":
       return { label: "CLI", icon: Terminal, className: "bg-purple/15 text-purple" }
     case "UI":
-      return { label: "UI", icon: MonitorSmartphone, className: "bg-blue-500/15 text-blue-300" }
+      return { label: "UI", icon: MonitorSmartphone, className: "bg-info/15 text-info" }
     case "WEBHOOK":
       return { label: "Hook", icon: Terminal, className: "bg-warn/15 text-warn" }
     case "CRON":
@@ -148,7 +148,7 @@ export function SessionsSidebar({
               <button
                 type="button"
                 onClick={() => setShowEmptyOverride(true)}
-                className="text-blue-300 hover:underline"
+                className="text-primary hover:underline"
               >
                 Show {hiddenCount} empty session{hiddenCount === 1 ? "" : "s"}
               </button>
@@ -170,7 +170,7 @@ export function SessionsSidebar({
                   onClick={() => onSelect(s.id)}
                   className={cn(
                     "w-full text-left px-3 py-2 hover:bg-white/[0.04] border-l-2 transition-colors",
-                    active ? "bg-blue-500/10 border-blue-400" : "border-transparent",
+                    active ? "bg-primary/10 border-primary" : "border-transparent",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -187,9 +187,9 @@ export function SessionsSidebar({
                       {unread > 0 && (
                         <span
                           aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] leading-none"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-info/20 text-info text-[10px] leading-none"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden />
+                          <span className="h-1.5 w-1.5 rounded-full bg-info" aria-hidden />
                           {unread > 99 ? "99+" : unread}
                         </span>
                       )}

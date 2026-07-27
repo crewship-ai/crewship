@@ -229,7 +229,7 @@ export function CanvasTabs<TTab extends string>({ tabs, active, onChange }: Canv
           className={cn(
             "text-sm py-2 px-1 border-b-2 transition-colors shrink-0",
             active === t.id
-              ? "border-blue-400 text-foreground"
+              ? "border-primary text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground/80",
           )}
         >

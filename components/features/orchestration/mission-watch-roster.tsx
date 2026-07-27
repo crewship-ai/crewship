@@ -70,7 +70,7 @@ export function MissionWatchRoster({ mission }: MissionWatchRosterProps) {
           <ul className="flex flex-col gap-2">
             {agentTools.map(({ agent, tools }) => (
               <li key={agent} className="flex items-start gap-3 border-b last:border-b-0 pb-2 last:pb-0">
-                <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400 min-w-[100px]">
+                <span className="font-mono text-xs font-semibold text-primary dark:text-primary min-w-[100px]">
                   @{agent}
                 </span>
                 <span className="flex flex-wrap gap-1 flex-1">
@@ -145,7 +145,7 @@ function InboxRow({ item }: { item: InboxItem }) {
   const tone = item.kind === "approval"
     ? "border-warn/60 bg-warn/5"
     : item.kind === "question"
-    ? "border-blue-500/60 bg-blue-500/5"
+    ? "border-info/60 bg-info/5"
     : "border-success/60 bg-success/5"
   // Project rule (components/**/*.tsx): "ONLY lucide-react for icons".
   // Map each inbox kind to its lucide glyph + a tone-matching colour so
@@ -158,7 +158,7 @@ function InboxRow({ item }: { item: InboxItem }) {
   const iconClass = item.kind === "approval"
     ? "text-warn"
     : item.kind === "question"
-    ? "text-blue-500"
+    ? "text-info"
     : "text-success"
   const label = item.kind === "approval" ? "Approval" : item.kind === "question" ? "Question" : "Result"
   return (
@@ -166,7 +166,7 @@ function InboxRow({ item }: { item: InboxItem }) {
       <div className="text-xs font-semibold mb-1 flex items-center gap-1">
         <Icon className={`h-3.5 w-3.5 ${iconClass}`} aria-hidden="true" />
         <span>{label}</span>
-        <span className="ml-auto font-mono text-[10px] text-blue-600 dark:text-blue-400">
+        <span className="ml-auto font-mono text-[10px] text-primary dark:text-primary">
           @{item.agent}
         </span>
       </div>

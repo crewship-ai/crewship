@@ -66,11 +66,11 @@ export function RuntimeSection({
                     className={cn(
                       "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
                       isActive
-                        ? "border-blue-400 bg-blue-500/10 ring-1 ring-blue-500/30"
+                        ? "border-primary bg-primary/10 ring-1 ring-primary/30"
                         : "border-white/10 hover:bg-white/[0.03]",
                     )}
                   >
-                    <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-blue-300" : "text-muted-foreground")} />
+                    <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium leading-tight">{cfg.label}</div>
                       <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
@@ -99,7 +99,7 @@ export function RuntimeSection({
               value={customModelDraft}
               onChange={(e) => setCustomModelDraft(e.target.value)}
               placeholder="e.g. claude-3-7-sonnet or my-fine-tuned-llama"
-              className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-blue-400"
+              className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-primary"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && customModelDraft.trim()) {
                   safePatch({ llm_model: customModelDraft.trim() })
@@ -121,7 +121,7 @@ export function RuntimeSection({
                 }
               }}
               disabled={!customModelDraft.trim()}
-              className="px-3 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 disabled:opacity-40 text-sm text-white"
+              className="px-3 py-1.5 rounded-md bg-primary hover:bg-primary disabled:opacity-40 text-sm text-white"
             >
               Save
             </button>

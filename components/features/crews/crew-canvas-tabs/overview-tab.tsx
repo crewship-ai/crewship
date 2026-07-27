@@ -85,7 +85,7 @@ export function OverviewTab({
               className={cn(
                 "px-2 py-0.5 rounded border transition-colors",
                 activityFilter === "all"
-                  ? "border-blue-500/45 bg-blue-500/15 text-blue-300"
+                  ? "border-primary/45 bg-primary/15 text-primary"
                   : "border-white/10 text-muted-foreground hover:text-foreground/80",
               )}
             >
@@ -100,7 +100,7 @@ export function OverviewTab({
                 className={cn(
                   "px-2 py-0.5 rounded border transition-colors",
                   activityFilter === a.id
-                    ? "border-blue-500/45 bg-blue-500/15 text-blue-300"
+                    ? "border-primary/45 bg-primary/15 text-primary"
                     : "border-white/10 text-muted-foreground hover:text-foreground/80",
                 )}
               >

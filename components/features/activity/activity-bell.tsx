@@ -68,7 +68,7 @@ export function ActivityBell() {
     awaitingApproval > 0
       ? "bg-warn text-warn"
       : activeCount > 0
-        ? "bg-blue-500 text-white"
+        ? "bg-primary text-white"
         : "bg-success text-white"
 
   const ariaLabel =
@@ -169,7 +169,7 @@ function ActivityDropdownBody({
             <span
               className={cn(
                 "h-1.5 w-1.5 rounded-full animate-pulse",
-                awaitingApproval > 0 ? "bg-warn" : "bg-blue-500",
+                awaitingApproval > 0 ? "bg-warn" : "bg-primary",
               )}
             />
             {liveTotal} live
@@ -251,7 +251,7 @@ function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => vo
       }}
       className="flex cursor-pointer items-start gap-2 px-3 py-2 hover:bg-white/[0.04]"
     >
-      <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+      <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs font-medium text-foreground">{item.label}</div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">

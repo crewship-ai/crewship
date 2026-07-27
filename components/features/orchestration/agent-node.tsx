@@ -43,8 +43,8 @@ const statusConfig: Record<string, {
   IN_PROGRESS: {
     accent: STATUS_COLORS.IN_PROGRESS,
     bg: STATUS_BG.IN_PROGRESS,
-    headerBg: "bg-gradient-to-r from-blue-600/30 to-blue-500/10",
-    dot: "bg-blue-500 animate-pulse",
+    headerBg: "bg-gradient-to-r from-primary/30 to-primary/10",
+    dot: "bg-primary animate-pulse",
     glow: "shadow-[0_0_25px_rgba(59,130,246,0.3)]",
     label: "Running",
   },
@@ -209,7 +209,7 @@ function AgentNodeComponent({ data }: NodeProps) {
         {/* Live activity snippet */}
         {d.status === "IN_PROGRESS" && d.activitySnippet && (
           <div className="mt-2 pt-1.5 border-t border-white/[0.04]">
-            <p className="text-[10px] text-blue-300/50 italic truncate leading-relaxed">
+            <p className="text-[10px] text-info/50 italic truncate leading-relaxed">
               {d.activitySnippet}
             </p>
           </div>

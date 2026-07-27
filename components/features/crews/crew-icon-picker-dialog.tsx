@@ -118,7 +118,7 @@ export function CrewIconPickerDialog({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search icons…"
-              className="w-full bg-zinc-950 border border-white/15 rounded pl-7 pr-2 py-1.5 text-xs outline-none focus:border-blue-400"
+              className="w-full bg-zinc-950 border border-white/15 rounded pl-7 pr-2 py-1.5 text-xs outline-none focus:border-primary"
             />
           </div>
           <div className="grid grid-cols-10 gap-1 max-h-[260px] overflow-y-auto p-1 rounded bg-zinc-950/30 border border-white/5">
@@ -134,7 +134,7 @@ export function CrewIconPickerDialog({
                   className={cn(
                     "aspect-square rounded grid place-items-center transition-colors",
                     active
-                      ? "bg-blue-500/25 border border-blue-400"
+                      ? "bg-primary/25 border border-primary"
                       : "hover:bg-white/5 border border-transparent",
                   )}
                 >
@@ -163,7 +163,7 @@ export function CrewIconPickerDialog({
             type="button"
             onClick={submit}
             disabled={busy}
-            className="text-sm px-3 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40"
+            className="text-sm px-3 py-1.5 rounded bg-primary hover:bg-primary text-white disabled:opacity-40"
           >
             {busy ? "Saving…" : "Save"}
           </button>

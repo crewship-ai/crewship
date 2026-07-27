@@ -121,7 +121,7 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
               <button
                 type="button"
                 onClick={() => { onChange("NONE"); setOpen(false) }}
-                className="text-blue-400 hover:underline mt-2 inline-block"
+                className="text-primary hover:underline mt-2 inline-block"
               >
                 Use generic icon →
               </button>
@@ -166,7 +166,7 @@ function CategoryChip({
       className={cn(
         "h-5 px-2 rounded text-[10px] font-medium transition-colors",
         active
-          ? "bg-blue-500/20 text-blue-300 border border-blue-400/40"
+          ? "bg-primary/20 text-primary border border-primary/40"
           : "border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20",
       )}
     >
@@ -187,12 +187,12 @@ function BrandTile({
       className={cn(
         "relative aspect-square rounded-md border flex flex-col items-center justify-center gap-1 p-1 transition-all hover:scale-105",
         selected
-          ? "border-blue-400/60 bg-blue-500/10 ring-2 ring-blue-400/30"
+          ? "border-primary/60 bg-primary/10 ring-2 ring-primary/30"
           : "border-white/10 bg-zinc-950 hover:border-white/30",
       )}
     >
       {selected && (
-        <Check className="absolute top-0.5 right-0.5 h-2.5 w-2.5 text-blue-400" />
+        <Check className="absolute top-0.5 right-0.5 h-2.5 w-2.5 text-primary" />
       )}
       <Icon className="h-5 w-5" style={{ color: brandColor(brand) }} />
       <span className="text-[8px] leading-none text-muted-foreground truncate max-w-full">

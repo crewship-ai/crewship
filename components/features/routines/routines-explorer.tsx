@@ -327,7 +327,7 @@ export function RoutinesExplorer({
               const statusTone = liveRun
                 ? liveAwaiting
                   ? "bg-warn animate-pulse"
-                  : "bg-blue-500 animate-pulse"
+                  : "bg-primary animate-pulse"
                 : lastStatus === "completed"
                   ? "bg-success"
                   : lastStatus === "failed"
@@ -354,7 +354,7 @@ export function RoutinesExplorer({
                             <span
                               className={cn(
                                 "block truncate text-[10px]",
-                                liveAwaiting ? "text-warn" : "text-blue-300",
+                                liveAwaiting ? "text-warn" : "text-primary",
                               )}
                             >
                               {liveAwaiting

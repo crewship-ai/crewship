@@ -150,7 +150,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
         {/* Current task */}
         {d.currentTask && (
           <div className="mt-1.5 pt-1.5 border-t border-border pl-11">
-            <p className="text-[9px] text-blue-300/50 italic truncate">
+            <p className="text-[9px] text-info/50 italic truncate">
               {d.currentTask}
             </p>
           </div>

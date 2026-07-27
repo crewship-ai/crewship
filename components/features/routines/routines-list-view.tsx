@@ -237,7 +237,7 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
 
 const KPI_TONE: Record<string, { bg: string; text: string; iconBg: string; Icon: typeof Activity }> = {
   default: { bg: "bg-muted", text: "text-muted-foreground", iconBg: "bg-muted text-muted-foreground", Icon: Activity },
-  blue: { bg: "bg-blue-500/20", text: "text-blue-400", iconBg: "bg-blue-500/20 text-blue-400", Icon: Zap },
+  blue: { bg: "bg-info/20", text: "text-info", iconBg: "bg-info/20 text-info", Icon: Zap },
   violet: { bg: "bg-purple/20", text: "text-purple", iconBg: "bg-purple/20 text-purple", Icon: Activity },
   emerald: { bg: "bg-success/20", text: "text-success", iconBg: "bg-success/20 text-success", Icon: CheckCircle2 },
   amber: { bg: "bg-warn/20", text: "text-warn", iconBg: "bg-warn/20 text-warn", Icon: AlertTriangle },
@@ -326,7 +326,7 @@ function RoutineRow({
         <span
           className={cn(
             "h-1.5 w-1.5 rounded-full animate-pulse",
-            liveAwaiting ? "bg-warn" : "bg-blue-400",
+            liveAwaiting ? "bg-warn" : "bg-primary",
           )}
         />
         {liveAwaiting ? "Awaiting approval" : "Running"}
@@ -496,7 +496,7 @@ function EmptyState() {
         <div className="grid w-full max-w-3xl grid-cols-1 gap-3 md:grid-cols-3">
           {quickstarts.map((q) => (
             <div key={q.title} className="rounded-xl border border-border/60 bg-card/60 p-4">
-              <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/20 text-base text-blue-400">
+              <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 text-base text-primary">
                 {q.icon}
               </div>
               <h4 className="mb-1 text-sm font-medium">{q.title}</h4>

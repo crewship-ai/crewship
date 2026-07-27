@@ -88,11 +88,11 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
               <div key={stepId} className="relative pb-4 pl-3.5">
                 <span className={cn(
                   "absolute -left-[15px] top-0.5 h-2.5 w-2.5 rounded-full bg-card border-2",
-                  failed ? "border-destructive" : current ? "border-blue-400" : "border-success",
+                  failed ? "border-destructive" : current ? "border-primary" : "border-success",
                 )} />
                 <div className="text-foreground font-mono">
                   {stepId}
-                  {current && <span className="ml-2 text-blue-300 text-[10px]">current</span>}
+                  {current && <span className="ml-2 text-primary text-[10px]">current</span>}
                 </div>
                 {preview(out) && (
                   <div className="text-muted-foreground mt-0.5 break-all">{preview(out)}</div>

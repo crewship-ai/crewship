@@ -47,10 +47,10 @@ export interface PipelineRunData {
 const statusConfig = {
   running: {
     icon: Loader2,
-    iconClass: "animate-spin text-blue-400",
-    dot: "bg-blue-500",
+    iconClass: "animate-spin text-primary",
+    dot: "bg-primary",
     pulse: true,
-    border: "border-blue-500/30",
+    border: "border-primary/30",
     bg: "bg-[#0a1320]/70",
     label: "Running",
   },

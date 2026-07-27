@@ -61,9 +61,9 @@ export function UpdateBanner() {
   if (!info?.newer || dismissed) return null
 
   return (
-    <div className="flex items-center gap-2 bg-blue-50 border-b border-blue-200 px-4 py-2 text-xs">
-      <ArrowUpCircle className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-      <span className="text-blue-800">
+    <div className="flex items-center gap-2 bg-info/10 border-b border-info/20 px-4 py-2 text-xs">
+      <ArrowUpCircle className="h-3.5 w-3.5 text-info shrink-0" />
+      <span className="text-info">
         Crewship <span className="font-mono">{info.latest}</span> is available
         (you have <span className="font-mono">{info.current}</span>).{" "}
         {info.url && (
@@ -88,7 +88,7 @@ export function UpdateBanner() {
           }
           setDismissed(true)
         }}
-        className="ml-auto text-blue-600 hover:text-blue-800"
+        className="ml-auto text-info hover:text-info"
         aria-label="Dismiss"
       >
         <X className="h-3.5 w-3.5" />

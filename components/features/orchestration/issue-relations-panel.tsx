@@ -148,7 +148,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                     value={newRelationTarget}
                     onChange={(e) => setNewRelationTarget(e.target.value)}
                     placeholder="Target identifier (e.g. ENG-5)"
-                    className="w-full h-7 px-2 bg-white/[0.04] border border-white/[0.08] rounded text-[11px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-blue-400/40"
+                    className="w-full h-7 px-2 bg-white/[0.04] border border-white/[0.08] rounded text-[11px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-primary/40"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleAddRelation()
                     }}
@@ -162,7 +162,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                         className={cn(
                           "px-2 py-0.5 rounded text-[10px] border transition-colors",
                           newRelationType === opt.value
-                            ? "border-blue-400/50 bg-blue-500/10 text-blue-400"
+                            ? "border-primary/50 bg-primary/10 text-primary"
                             : "border-white/[0.08] text-muted-foreground/60 hover:border-white/[0.15]",
                         )}
                       >
@@ -177,7 +177,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                     className={cn(
                       "w-full h-7 rounded text-[11px] font-medium transition-colors",
                       newRelationTarget.trim() && !addingRelation
-                        ? "bg-blue-600 text-white hover:bg-blue-500"
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
                         : "bg-white/[0.04] text-muted-foreground/30 cursor-not-allowed",
                     )}
                   >

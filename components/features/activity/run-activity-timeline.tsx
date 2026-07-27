@@ -30,7 +30,7 @@ import {
 // re-deriving the journal fetch.
 
 const TONE_ICON: Record<RunActivityTone, string> = {
-  active: "text-blue-400",
+  active: "text-primary",
   success: "text-success",
   warn: "text-warn",
   error: "text-destructive",
@@ -213,8 +213,8 @@ export function RunActivityRail({
               Waiting for approval
             </span>
           ) : running ? (
-            <span className="inline-flex items-center gap-1 text-[10px] text-blue-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+            <span className="inline-flex items-center gap-1 text-[10px] text-primary">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
               Running
             </span>
           ) : null}

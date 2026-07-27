@@ -110,7 +110,7 @@ export const ChatTreeRow = React.memo(function ChatTreeRow({ node, depth, expand
         className={cn(
           "w-full flex items-center gap-1.5 py-1 pr-3 text-label transition-colors",
           isSelected
-            ? "bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300"
+            ? "bg-primary/10 text-primary dark:bg-primary/20 dark:text-primary"
             : canPreview
               ? "text-muted-foreground hover:text-foreground hover:bg-accent/50 cursor-pointer"
               : "text-muted-foreground hover:text-foreground hover:bg-accent/50",

@@ -541,7 +541,7 @@ function LastRunCard({
     ? { bg: "bg-success/20", text: "text-success" }
     : isFailed
       ? { bg: "bg-destructive/20", text: "text-destructive" }
-      : { bg: "bg-blue-500/20", text: "text-blue-400" }
+      : { bg: "bg-primary/20", text: "text-primary" }
 
   return (
     <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
@@ -618,7 +618,7 @@ function LastRunCard({
         {workspaceId && (
           <Link
             href={`/activity?run=${encodeURIComponent(run.id)}`}
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-500/20 px-2.5 py-1.5 text-[11px] font-medium text-blue-400 transition-colors hover:bg-blue-500/30"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary/20 px-2.5 py-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/30"
           >
             <ExternalLink className="h-3 w-3" />
             Open full trace in Activity
@@ -642,7 +642,7 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
           "h-2.5 w-2.5 shrink-0 rounded-full",
           run.status === "completed" && "bg-success",
           run.status === "failed" && "bg-destructive",
-          run.status === "running" && "bg-blue-500",
+          run.status === "running" && "bg-primary",
           run.status === "queued" && "bg-warn",
           run.status === "cancelled" && "bg-muted-foreground/40",
           run.status === "dry_run" && "bg-purple",

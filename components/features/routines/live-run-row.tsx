@@ -84,7 +84,7 @@ export function LiveRunRow({
         <span
           className={cn(
             "h-1.5 w-1.5 shrink-0 rounded-full animate-pulse",
-            awaiting ? "bg-warn" : "bg-blue-500",
+            awaiting ? "bg-warn" : "bg-primary",
           )}
         />
         <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
@@ -110,7 +110,7 @@ export function LiveRunRow({
           </>
         ) : (
           <>
-            <Play className="h-3 w-3 shrink-0 text-blue-400" />
+            <Play className="h-3 w-3 shrink-0 text-primary" />
             {/* current_step_id is the step's id/slug — the list feed
                 has no step totals, so no "2/3" here by design. */}
             <span className="truncate font-mono text-foreground/85">

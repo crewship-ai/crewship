@@ -264,7 +264,7 @@ export function LogsHistogram({
         tabIndex={onSelect ? 0 : -1}
         role={onSelect ? "application" : undefined}
         aria-label={onSelect ? "Event volume histogram. Use arrow keys to navigate buckets, Enter to filter, Escape to clear." : undefined}
-        className="relative [&_*]:!outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60 focus-visible:rounded"
+        className="relative [&_*]:!outline-none focus-visible:ring-1 focus-visible:ring-primary/60 focus-visible:rounded"
         style={{
           height,
           cursor: onSelect ? (dragRect ? "ew-resize" : "pointer") : "default",
@@ -275,7 +275,7 @@ export function LogsHistogram({
             navigating via Tab/Arrow, never on mouse interaction. */}
         {keyFocusIdx !== null && (
           <div
-            className="absolute top-0 bottom-0 pointer-events-none border border-sky-300/80 z-20"
+            className="absolute top-0 bottom-0 pointer-events-none border border-primary/80 z-20"
             style={{
               left: `${(keyFocusIdx / BUCKET_COUNT) * 100}%`,
               width: `${(1 / BUCKET_COUNT) * 100}%`,
@@ -303,7 +303,7 @@ export function LogsHistogram({
           {dragRect && (
             <motion.div
               key="drag-overlay"
-              className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-sky-400/60 bg-sky-500/15 z-10"
+              className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-primary/60 bg-primary/15 z-10"
               style={{ left: `${dragRect.left}%`, width: `${dragRect.width}%` }}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -388,7 +388,7 @@ function SelectionOverlay({ data, selected }: { data: Bucket[]; selected: Bucket
   const width = ((lastIdx - firstIdx + 1) / BUCKET_COUNT) * 100
   return (
     <div
-      className="absolute top-0 bottom-0 pointer-events-none border-l border-r border-sky-500/60 bg-sky-500/10"
+      className="absolute top-0 bottom-0 pointer-events-none border-l border-r border-primary/60 bg-primary/10"
       style={{ left: `${left}%`, width: `${width}%` }}
     />
   )

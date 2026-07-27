@@ -146,7 +146,7 @@ describe("<ActivityBell> badge", () => {
     render(<ActivityBell />)
     const badge = screen.getByTestId("activity-live-badge")
     expect(badge).toHaveTextContent("2")
-    expect(badge.className).toContain("bg-blue-500")
+    expect(badge.className).toContain("bg-primary")
   })
 
   it("turns the badge amber when a run awaits approval", () => {

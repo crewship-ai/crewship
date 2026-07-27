@@ -125,7 +125,7 @@ function PhaseBar({ phases }: { phases: MissionPhase[] }) {
                 "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0",
                 phase.status === "done" && "bg-success text-white",
                 phase.status === "active" &&
-                  "bg-blue-500 text-white ring-4 ring-blue-500/20 animate-pulse",
+                  "bg-primary text-primary-foreground ring-4 ring-primary/20 animate-pulse",
                 phase.status === "pending" &&
                   "bg-background text-muted-foreground border",
               )}
@@ -136,7 +136,7 @@ function PhaseBar({ phases }: { phases: MissionPhase[] }) {
               className={cn(
                 "text-[13px] whitespace-nowrap",
                 phase.status === "done" && "text-success dark:text-success font-medium",
-                phase.status === "active" && "text-blue-600 dark:text-blue-400 font-semibold",
+                phase.status === "active" && "text-primary dark:text-primary font-semibold",
                 phase.status === "pending" && "text-muted-foreground",
               )}
             >
@@ -186,7 +186,7 @@ function PhaseSection({ phase, title, defaultOpen = false, rightHeader, children
           className={cn(
             "h-2.5 w-2.5 rounded-full flex-shrink-0",
             phase.status === "done" && "bg-success",
-            phase.status === "active" && "bg-blue-500 ring-4 ring-blue-500/20",
+            phase.status === "active" && "bg-primary ring-4 ring-primary/20",
             phase.status === "pending" && "bg-border",
           )}
         />
@@ -260,8 +260,8 @@ function taskVisual(status: MissionTaskStatus) {
     case "IN_PROGRESS":
       return {
         Icon: Clock,
-        containerClass: "border-blue-500 bg-blue-500/5",
-        iconClass: "text-blue-500",
+        containerClass: "border-primary bg-primary/5",
+        iconClass: "text-primary",
       }
     case "COMPLETED":
     case "SKIPPED":

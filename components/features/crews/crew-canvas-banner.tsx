@@ -55,10 +55,10 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
 
   if (crew.status === "running") {
     return (
-      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex items-start gap-3">
-        <Spinner className="h-4 w-4 text-blue-300 shrink-0 mt-0.5" />
+      <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 flex items-start gap-3">
+        <Spinner className="h-4 w-4 text-primary shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
-          <div className="text-sm text-blue-200">
+          <div className="text-sm text-primary">
             {crew.activeFeature
               ? <>Building container image · installing <span className="font-medium">{crew.activeFeature}</span></>
               : "Building container image…"}

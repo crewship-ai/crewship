@@ -284,7 +284,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 className={cn(
                   "flex items-center gap-1 px-2 py-0.5 rounded text-micro font-medium transition-colors",
                   editorDirty && !editorSaving
-                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                    ? "bg-primary text-white hover:bg-primary/90"
                     : "bg-[#3c3c3c] text-[#666] cursor-default",
                 )}
               >

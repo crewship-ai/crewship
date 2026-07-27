@@ -127,13 +127,13 @@ export function CommentsTab({ workspaceId, context }: { workspaceId: string; con
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }}
           placeholder="Write a comment…"
           aria-label="Write a comment"
-          className="flex-1 bg-background border border-white/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500/50"
+          className="flex-1 bg-background border border-white/10 rounded-md px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/50"
         />
         <button
           type="button"
           onClick={send}
           disabled={sending || !draft.trim()}
-          className="px-3 rounded-md bg-blue-600 text-white text-xs flex items-center gap-1.5 disabled:opacity-40"
+          className="px-3 rounded-md bg-primary text-white text-xs flex items-center gap-1.5 disabled:opacity-40"
         >
           <Send className="h-3 w-3" /> Send
         </button>

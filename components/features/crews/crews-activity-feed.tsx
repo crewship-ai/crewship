@@ -76,7 +76,7 @@ export function CrewsActivityFeed({ agents }: CrewsActivityFeedProps) {
   }, [entries])
 
   const typeColors: Record<string, string> = {
-    status: "text-blue-400", run: "text-success", mission: "text-purple",
+    status: "text-info", run: "text-success", mission: "text-purple",
   }
 
   if (entries.length === 0) {

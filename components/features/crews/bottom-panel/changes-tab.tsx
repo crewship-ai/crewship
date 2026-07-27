@@ -109,7 +109,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
                   "inline-block w-4",
                   f.status === "added" ? "text-success" :
                   f.status === "deleted" ? "text-destructive" :
-                  f.status === "renamed" ? "text-blue-300" : "text-warn",
+                  f.status === "renamed" ? "text-info" : "text-warn",
                 )}>
                   {f.status === "added" ? "A" : f.status === "deleted" ? "D" : f.status === "renamed" ? "R" : "M"}
                 </span>

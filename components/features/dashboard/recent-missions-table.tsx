@@ -14,7 +14,7 @@ const STATUS_STYLES: Record<string, string> = {
   BACKLOG: "text-muted-foreground border-border bg-muted/20",
   TODO: "text-notice border-notice/30 bg-notice/10",
   PLANNING: "text-muted-foreground border-border bg-muted/20",
-  IN_PROGRESS: "text-blue-400 border-blue-500/30 bg-blue-500/10",
+  IN_PROGRESS: "text-primary border-primary/30 bg-primary/10",
   REVIEW: "text-warn border-warn/30 bg-warn/10",
   COMPLETED: "text-success border-success/30 bg-success/10",
   DONE: "text-success border-success/30 bg-success/10",
@@ -27,7 +27,7 @@ const PROGRESS_INDICATOR: Record<string, string> = {
   COMPLETED: "bg-success",
   DONE: "bg-success",
   FAILED: "bg-destructive",
-  IN_PROGRESS: "bg-blue-400",
+  IN_PROGRESS: "bg-primary",
   REVIEW: "bg-warn",
 }
 
@@ -65,7 +65,7 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
           // Clamp in case of stale aggregates or task/mission status drift.
           const pct = Math.max(0, Math.min(100, rawPct))
           const statusCls = STATUS_STYLES[m.status] ?? STATUS_STYLES.BACKLOG
-          const progressCls = PROGRESS_INDICATOR[m.status] ?? "bg-blue-400"
+          const progressCls = PROGRESS_INDICATOR[m.status] ?? "bg-primary"
           return (
             <Link
               key={m.id}

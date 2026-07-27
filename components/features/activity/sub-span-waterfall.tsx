@@ -146,7 +146,7 @@ function SpanDetail({
         {span.attributes.host && (
           <>
             <dt className="text-muted-foreground/60">egress</dt>
-            <dd className="font-mono text-blue-300">{span.attributes.host}</dd>
+            <dd className="font-mono text-info">{span.attributes.host}</dd>
           </>
         )}
         {span.attributes.model && (

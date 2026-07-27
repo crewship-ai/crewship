@@ -370,7 +370,7 @@ function MissionLogs({ mission }: { mission: Mission }) {
 const traceStatusIcon: Record<string, React.ReactNode> = {
   COMPLETED: <CheckCircle2 className="size-3 text-success" />,
   FAILED: <XCircle className="size-3 text-destructive" />,
-  IN_PROGRESS: <Clock className="size-3 text-blue-400 animate-pulse" />,
+  IN_PROGRESS: <Clock className="size-3 text-primary animate-pulse" />,
   PENDING: <Clock className="size-3 text-muted-foreground/40" />,
   BLOCKED: <AlertTriangle className="size-3 text-warn" />,
   SKIPPED: <ArrowRight className="size-3 text-muted-foreground/40" />,

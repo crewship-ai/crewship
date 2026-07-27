@@ -96,7 +96,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
         <button
           type="button"
           onClick={openPicker}
-          className="text-xs px-2.5 py-1 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 flex items-center gap-1.5"
+          className="text-xs px-2.5 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 flex items-center gap-1.5"
         >
           <Plus className="h-3 w-3" />
           Assign skill
@@ -258,7 +258,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
         <button
           type="button"
           onClick={openPicker}
-          className="text-xs px-2.5 py-1 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 flex items-center gap-1.5"
+          className="text-xs px-2.5 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 flex items-center gap-1.5"
         >
           <Plus className="h-3 w-3" />
           Assign credential

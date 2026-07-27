@@ -62,7 +62,7 @@ export function InboxBell() {
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 exit={{ scale: 0 }}
-                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-500 px-1 text-[9px] font-semibold text-white"
+                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-info px-1 text-[9px] font-semibold text-white"
               >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </motion.span>
@@ -102,7 +102,7 @@ export function InboxBell() {
           <Link
             href="/inbox"
             onClick={() => setOpen(false)}
-            className="block w-full rounded px-2 py-1.5 text-center text-xs text-blue-400 hover:bg-white/[0.04]"
+            className="block w-full rounded px-2 py-1.5 text-center text-xs text-primary hover:bg-white/[0.04]"
           >
             View all in inbox →
           </Link>
@@ -128,7 +128,7 @@ function BellRow({ item, onClick }: { item: InboxItem; onClick: () => void }) {
         ? "text-destructive"
         : item.kind === "failed_run"
           ? "text-destructive"
-          : "text-blue-300"
+          : "text-info"
 
   return (
     <li

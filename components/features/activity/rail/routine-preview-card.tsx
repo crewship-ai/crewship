@@ -80,7 +80,7 @@ export function RoutinePreviewCard({
                   <span className="ml-1 text-destructive">{stats.failed} ✗</span>
                 )}
                 {stats.active > 0 && (
-                  <span className="ml-1 text-blue-400">{stats.active} active</span>
+                  <span className="ml-1 text-primary">{stats.active} active</span>
                 )}
               </>
             )}
@@ -123,7 +123,7 @@ export function RoutinePreviewCard({
         <div className="flex gap-1 border-t border-border p-2">
           <Link
             href={routineHref(slug)}
-            className="flex flex-1 items-center justify-center gap-1 rounded bg-blue-500/15 px-2 py-1 text-[10px] text-blue-300 hover:bg-blue-500/25"
+            className="flex flex-1 items-center justify-center gap-1 rounded bg-primary/15 px-2 py-1 text-[10px] text-primary hover:bg-primary/25"
           >
             <ExternalLink className="h-3 w-3" />
             Open routine

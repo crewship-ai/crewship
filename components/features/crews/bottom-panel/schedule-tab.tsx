@@ -148,7 +148,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
           disabled={running}
           className={cn(
             "px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5 transition-colors",
-            ran ? "bg-success text-white" : "bg-blue-600 text-white hover:bg-blue-500",
+            ran ? "bg-success text-white" : "bg-primary text-white hover:bg-primary",
             running && "opacity-60",
           )}
         >

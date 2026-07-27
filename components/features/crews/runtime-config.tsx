@@ -617,7 +617,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false }: Ru
                             feature.tier === "official"
                               ? "text-muted-foreground-soft"
                               : feature.tier === "community"
-                                ? "text-sky-400/70"
+                                ? "text-info/70"
                                 : "text-warn/80"
                           )}
                           title={`Published by ${feature.publisher} (${feature.tier})`}

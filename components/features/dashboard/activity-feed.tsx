@@ -21,8 +21,8 @@ interface FeedEntry {
 const MAX_ENTRIES = 30
 
 const TAG_STYLES: Record<string, string> = {
-  IN_PROGRESS: "text-blue-400 border-blue-500/30 bg-blue-500/10",
-  RUNNING: "text-blue-400 border-blue-500/30 bg-blue-500/10",
+  IN_PROGRESS: "text-primary border-primary/30 bg-primary/10",
+  RUNNING: "text-primary border-primary/30 bg-primary/10",
   COMPLETED: "text-success border-success/30 bg-success/10",
   DONE: "text-success border-success/30 bg-success/10",
   REVIEW: "text-warn border-warn/30 bg-warn/10",
@@ -31,7 +31,7 @@ const TAG_STYLES: Record<string, string> = {
   ERROR: "text-destructive border-destructive/30 bg-destructive/10",
   ESCALATED: "text-destructive border-destructive/30 bg-destructive/10",
   CANCELLED: "text-muted-foreground border-border bg-muted/20",
-  STARTED: "text-blue-400 border-blue-500/30 bg-blue-500/10",
+  STARTED: "text-primary border-primary/30 bg-primary/10",
 }
 
 function tagStyle(label: string): string {

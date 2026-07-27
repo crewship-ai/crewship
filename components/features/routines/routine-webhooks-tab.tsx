@@ -134,7 +134,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   className={cn(
                     "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
                     w.enabled
-                      ? "bg-blue-500/20 text-blue-400"
+                      ? "bg-primary/20 text-primary"
                       : "bg-muted text-muted-foreground",
                   )}
                 >

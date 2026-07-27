@@ -69,7 +69,7 @@ const ROLE_OPTIONS: CrewMemberRole[] = ["ADMIN", "MANAGER", "MEMBER", "VIEWER"]
 const roleCls: Record<CrewMemberRole, string> = {
   OWNER: "bg-muted text-foreground border-border",
   ADMIN: "bg-warn/10 text-warn border-warn/40 dark:text-warn",
-  MANAGER: "bg-blue-500/10 text-blue-600 border-blue-500/40 dark:text-blue-400",
+  MANAGER: "bg-info/10 text-info border-info/40 dark:text-info",
   MEMBER: "bg-muted text-muted-foreground border-border",
   VIEWER: "bg-muted text-muted-foreground border-border",
 }

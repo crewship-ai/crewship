@@ -25,7 +25,7 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
               <span className="text-muted-foreground text-sm font-normal ml-2">{recentMissions.length}</span>
             )}
           </h2>
-          <Link href="/issues" className="text-xs text-blue-300 hover:underline">
+          <Link href="/issues" className="text-xs text-primary hover:underline">
             Open in /issues →
           </Link>
         </div>
@@ -68,7 +68,7 @@ export function MissionsTab({ crew, recentMissions, issues, recentIssues }: Miss
               <span className="text-muted-foreground text-sm font-normal ml-2 font-mono uppercase">{crew.issue_prefix}</span>
             )}
           </h2>
-          <Link href="/issues" className="text-xs text-blue-300 hover:underline">
+          <Link href="/issues" className="text-xs text-primary hover:underline">
             Open in /issues →
           </Link>
         </div>

@@ -72,14 +72,14 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
     status === "COMPLETED"
       ? { label: "Completed", cls: "bg-success/15 text-success" }
       : status === "RUNNING"
-        ? { label: "Running", cls: "bg-blue-500/15 text-blue-300" }
+        ? { label: "Running", cls: "bg-primary/15 text-primary" }
         : status === "FAILED"
           ? { label: "Failed", cls: "bg-destructive/15 text-destructive" }
           : { label: "Pending", cls: "bg-warn/15 text-warn" }
   const directionChip =
     m.direction === "outgoing"
       ? { label: "Sent", cls: "bg-purple/15 text-purple", icon: "→" }
-      : { label: "Received", cls: "bg-blue-500/15 text-blue-300", icon: "←" }
+      : { label: "Received", cls: "bg-info/15 text-info", icon: "←" }
   const peer = m.direction === "outgoing"
     ? (m.to_agent_name ?? "unknown")
     : m.from_agent_name
@@ -106,7 +106,7 @@ function PeerMessageCard({ m }: { m: PeerMessage }) {
           {m.duration_ms != null && ` · ${(m.duration_ms / 1000).toFixed(1)}s`}
         </span>
       </div>
-      <div className="text-blue-300 font-medium text-[11px]">
+      <div className="text-info font-medium text-[11px]">
         {m.direction === "outgoing"
           ? <>→ <span className="text-foreground/85">{peer}</span></>
           : <><span className="text-foreground/85">{peer}</span> →</>}

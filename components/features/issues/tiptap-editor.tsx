@@ -102,7 +102,7 @@ function getEditorClasses(compact?: boolean) {
     // Lists
     "[&_ul]:pl-4 [&_ul]:mb-2 [&_ol]:pl-4 [&_ol]:mb-2",
     "[&_li]:mb-0.5 [&_li]:text-sm [&_li]:text-foreground/80",
-    "[&_a]:text-blue-400 [&_a]:underline",
+    "[&_a]:text-primary [&_a]:underline",
     // Tables
     "[&_table]:w-full [&_table]:text-xs [&_table]:my-2",
     "[&_th]:text-left [&_th]:font-semibold [&_th]:py-1.5 [&_th]:px-2 [&_th]:border [&_th]:border-white/[0.08] [&_th]:bg-white/[0.02]",
@@ -175,7 +175,7 @@ export function TiptapEditor({
         openOnClick: false,
         autolink: true,
         HTMLAttributes: {
-          class: "text-blue-400 underline underline-offset-2 cursor-pointer",
+          class: "text-primary underline underline-offset-2 cursor-pointer",
         },
       }),
       Underline,

@@ -27,7 +27,7 @@ export function PersonaChip({ persona, active, onClick }: PersonaChipProps) {
       className={cn(
         "shrink-0 inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border text-[12px] transition-colors",
         active
-          ? "bg-blue-500/15 border-blue-400/45 text-blue-300"
+          ? "bg-primary/15 border-primary/45 text-primary"
           : "bg-card-2 border-white/[0.08] text-foreground/85 hover:border-white/[0.15] hover:bg-white/[0.03]",
       )}
     >
@@ -39,7 +39,7 @@ export function PersonaChip({ persona, active, onClick }: PersonaChipProps) {
         />
       </span>
       <span className="font-medium">{persona.name}</span>
-      <span className={cn("text-[10.5px]", active ? "text-blue-400/75" : "text-muted-foreground")}>
+      <span className={cn("text-[10.5px]", active ? "text-primary/75" : "text-muted-foreground")}>
         {persona.roleTitle}
       </span>
     </button>
@@ -58,7 +58,7 @@ export function BlankChip({ active, onClick }: { active: boolean; onClick: () =>
       className={cn(
         "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-[12px] transition-colors",
         active
-          ? "bg-blue-500/15 border-blue-400/45 text-blue-300"
+          ? "bg-primary/15 border-primary/45 text-primary"
           : "bg-transparent border-white/[0.10] border-dashed text-muted-foreground hover:border-white/[0.20] hover:text-foreground/80",
       )}
     >

@@ -139,7 +139,7 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
 function StatusPill({ status, className }: { status: "hot" | "running" | "idle"; className?: string }) {
   const cfg = {
     hot: { label: "Hot", cls: "text-destructive border-destructive/30 bg-destructive/10" },
-    running: { label: "Running", cls: "text-blue-400 border-blue-500/30 bg-blue-500/10" },
+    running: { label: "Running", cls: "text-primary border-primary/30 bg-primary/10" },
     idle: { label: "Idle", cls: "text-muted-foreground border-border bg-muted/20" },
   }[status]
   return (

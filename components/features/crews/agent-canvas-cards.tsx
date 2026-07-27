@@ -13,7 +13,7 @@ function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: Ch
     <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Recent sessions</h3>
-        <Link href={`/chat/${encodeURIComponent(agentSlug)}`} className="text-[11px] text-blue-300 hover:underline">
+        <Link href={`/chat/${encodeURIComponent(agentSlug)}`} className="text-[11px] text-primary hover:underline">
           Open chat →
         </Link>
       </div>
@@ -55,7 +55,7 @@ function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | n
     <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Recent runs</h3>
-        <Link href={`/runs?agent_id=${encodeURIComponent(agentId)}`} className="text-[11px] text-blue-300 hover:underline">
+        <Link href={`/runs?agent_id=${encodeURIComponent(agentId)}`} className="text-[11px] text-primary hover:underline">
           View all →
         </Link>
       </div>
@@ -71,7 +71,7 @@ function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | n
                 "w-1.5 h-1.5 rounded-full shrink-0",
                 r.status === "SUCCESS" ? "bg-success" :
                 r.status === "FAILED" ? "bg-destructive" :
-                r.status === "RUNNING" ? "bg-blue-400 animate-pulse" :
+                r.status === "RUNNING" ? "bg-primary animate-pulse" :
                 "bg-muted-foreground/50",
               )} />
               <div className="flex-1 min-w-0">

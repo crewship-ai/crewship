@@ -312,7 +312,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                     <button
                       type="button"
                       onClick={() => setEditing(true)}
-                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 ml-1"
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 ml-1"
                     >
                       <Pencil className="h-3 w-3" />
                       Edit
@@ -326,7 +326,7 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
                         className={cn(
                           "flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors",
                           dirty && !saving
-                            ? "bg-blue-500 hover:bg-blue-400 text-white border-blue-400"
+                            ? "bg-primary hover:bg-primary text-white border-primary"
                             : "bg-zinc-800 text-muted-foreground border-white/10 cursor-default",
                         )}
                       >
@@ -420,7 +420,7 @@ function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFil
           }}
           className={cn(
             "w-full flex items-center gap-2 px-2 -mx-2 py-0.5 rounded text-left transition-colors",
-            isActive ? "bg-blue-500/15 text-blue-200" : "text-foreground/85 hover:bg-white/[0.03]",
+            isActive ? "bg-primary/15 text-primary" : "text-foreground/85 hover:bg-white/[0.03]",
           )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
         >

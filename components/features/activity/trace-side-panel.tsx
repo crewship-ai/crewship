@@ -269,9 +269,9 @@ function ContextLinks({
       {sessionHref && (
         <Link
           href={sessionHref}
-          className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-blue-500/40 hover:bg-blue-500/5"
+          className="flex items-center gap-2 rounded border border-white/[0.08] bg-background px-2 py-1.5 text-[11px] transition-colors hover:border-primary/40 hover:bg-primary/5"
         >
-          <ExternalLink className="h-3 w-3 shrink-0 text-blue-300" />
+          <ExternalLink className="h-3 w-3 shrink-0 text-primary" />
           <span>Open the agent session</span>
           <span className="ml-auto truncate font-mono text-muted-foreground/50">
             {agentSlug}
@@ -339,7 +339,7 @@ function InputEntry({ entry }: { entry: ResolvedInputEntry }) {
         </span>
         {hasRefs && (
           <span
-            className="rounded border border-blue-500/30 px-1 text-[9px] text-blue-300"
+            className="rounded border border-info/30 px-1 text-[9px] text-info"
             title="Resolved from upstream step output / run inputs"
           >
             resolved
@@ -549,7 +549,7 @@ function FileRow({
     <li
       className={cn(
         "rounded border border-white/[0.06] bg-background transition-colors",
-        active && "border-blue-500/40 bg-blue-500/5",
+        active && "border-primary/40 bg-primary/5",
       )}
     >
       <div className="flex items-center gap-2 px-2 py-1.5">

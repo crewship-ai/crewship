@@ -330,7 +330,7 @@ export function AgentCanvas({
               isRunning && "ring-2 ring-success/40",
             )}
           />
-          <span className="absolute inset-0 rounded-2xl ring-2 ring-blue-400/0 group-hover:ring-blue-400/40 transition-all pointer-events-none" />
+          <span className="absolute inset-0 rounded-2xl ring-2 ring-primary/0 group-hover:ring-primary/40 transition-all pointer-events-none" />
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -433,7 +433,7 @@ export function AgentCanvas({
           )}
           <Link
             href={`/chat/${encodeURIComponent(agent.slug)}`}
-            className="px-3.5 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-sm font-medium flex items-center gap-2"
+            className="px-3.5 py-2 rounded-lg bg-primary hover:bg-primary text-white text-sm font-medium flex items-center gap-2"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             Chat

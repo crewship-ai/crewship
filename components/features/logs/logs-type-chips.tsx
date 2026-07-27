@@ -50,7 +50,7 @@ export function LogsTypeChips({ counts, muted, onToggle, onResetAll }: LogsTypeC
               "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-mono transition-colors",
               off
                 ? "bg-card border-border/40 text-muted-foreground/50 line-through hover:text-muted-foreground"
-                : "bg-sky-500/10 border-sky-500/30 text-sky-200 hover:bg-sky-500/20",
+                : "bg-primary/10 border-primary/30 text-primary hover:bg-primary/20",
             )}
           >
             <span

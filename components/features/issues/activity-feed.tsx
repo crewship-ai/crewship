@@ -29,7 +29,7 @@ export function ActivityIcon({ action }: { action: string }) {
     case "review_changes_requested":
       return <MessageSquareWarning className={cn(size, "text-destructive")} />
     case "priority_changed":
-      return <ChartColumn className={cn(size, "text-blue-400")} />
+      return <ChartColumn className={cn(size, "text-info")} />
     default:
       return <Circle className={cn(size, "text-muted-foreground/40")} />
   }

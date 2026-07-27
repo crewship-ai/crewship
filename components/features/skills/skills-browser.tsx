@@ -745,7 +745,7 @@ export function SkillsBrowser() {
                 role="separator"
                 aria-label="Resize detail panel"
                 aria-orientation="vertical"
-                className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+                className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-primary/40 active:bg-primary/60 transition-colors"
                 onMouseDown={onDetailDragStart}
               />
               <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />

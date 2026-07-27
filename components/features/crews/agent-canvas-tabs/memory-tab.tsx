@@ -216,7 +216,7 @@ function MemoryTierEditor({
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">{title}</h3>
             {badge && (
-              <span className="rounded bg-blue-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-blue-300">
+              <span className="rounded bg-info/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-info">
                 {badge}
               </span>
             )}

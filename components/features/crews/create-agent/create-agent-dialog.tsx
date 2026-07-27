@@ -55,7 +55,7 @@ export interface CreateAgentDialogProps {
  *  Crews dialogs use; small enough to inline rather than carve out a
  *  separate component. */
 const INPUT_CLASS =
-  "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
+  "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
@@ -313,7 +313,7 @@ export function CreateAgentDialog({
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      className="text-[11.5px] text-blue-400 hover:text-blue-300 inline-flex items-center gap-1"
+                      className="text-[11.5px] text-primary hover:text-primary/80 inline-flex items-center gap-1"
                     >
                       <Layers className="h-3 w-3" />
                       All {BUILTIN_PERSONAS.length} templates
@@ -365,10 +365,10 @@ export function CreateAgentDialog({
                   aria-label="Customize avatar"
                   aria-haspopup="dialog"
                   aria-expanded={pickerOpen}
-                  className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 hover:border-blue-400/50 transition-colors"
+                  className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 hover:border-primary/50 transition-colors"
                 >
                   <img src={avatarUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
-                  <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
+                  <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
                     <Pencil className="h-2.5 w-2.5" />
                   </span>
                 </button>
@@ -469,7 +469,7 @@ export function CreateAgentDialog({
                   <button
                     type="button"
                     onClick={handleResetPrompt}
-                    className="text-[11.5px] text-blue-400 hover:text-blue-300"
+                    className="text-[11.5px] text-primary hover:text-primary/80"
                   >
                     Reset
                     {draft.selectedPersona ? ` to ${draft.selectedPersona.name}` : ""}
@@ -491,7 +491,7 @@ PERSONALITY: …
 RESPONSIBILITIES: …
 WORK STYLE: …`}
                 spellCheck={false}
-                className="w-full min-h-[140px] max-h-[260px] resize-y bg-zinc-950 border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
+                className="w-full min-h-[140px] max-h-[260px] resize-y bg-zinc-950 border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
               <p className="text-[10.5px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
                 {isPromptFromTemplate && draft.selectedPersona ? (
@@ -540,7 +540,7 @@ WORK STYLE: …`}
                     className={cn(
                       "relative w-[30px] h-[18px] rounded-full transition-colors shrink-0 border",
                       draft.memoryEnabled
-                        ? "bg-blue-500 border-transparent"
+                        ? "bg-primary border-transparent"
                         : "bg-white/[0.04] border-white/[0.08]",
                     )}
                   >
@@ -698,7 +698,7 @@ WORK STYLE: …`}
             type="button"
             onClick={() => void submit()}
             disabled={!valid || submitting}
-            className="text-[12.5px] px-3.5 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 text-white font-medium disabled:opacity-50 flex items-center gap-1.5"
+            className="text-[12.5px] px-3.5 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white font-medium disabled:opacity-50 flex items-center gap-1.5"
           >
             {submitting ? (
               <Spinner className="h-3.5 w-3.5" />
@@ -870,7 +870,7 @@ function ChipRow<T extends string>({
           className={cn(
             "px-2.5 py-1 rounded-md text-[11.5px] font-mono border transition-colors",
             active === v
-              ? "bg-blue-500/15 border-blue-400/45 text-blue-300"
+              ? "bg-primary/15 border-primary/45 text-primary"
               : "bg-card-2 border-white/[0.08] text-foreground/80 hover:border-white/[0.15]",
           )}
         >

@@ -73,7 +73,7 @@ const TYPE_CONFIG: Record<FeedType, {
 }> = {
   assignment: {
     label: "Task",
-    className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+    className: "bg-info/15 text-info dark:bg-info/40 dark:text-info",
     icon: ClipboardList,
   },
   peer_conversation: {

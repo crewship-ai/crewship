@@ -283,7 +283,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                   aria-pressed={window === wv}
                   className={cn(
                     "h-7 px-2.5 text-[10px] font-mono uppercase tracking-wider transition-colors border-r border-border/60 last:border-r-0",
-                    window === wv ? "bg-blue-500/15 text-blue-300" : "text-muted-foreground hover:text-foreground",
+                    window === wv ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {wv}
@@ -312,7 +312,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
             label={`Runs (${window})`}
             value={t ? t.total.toLocaleString() : "—"}
             icon={Zap}
-            iconTone="bg-blue-500/20 text-blue-400"
+            iconTone="bg-info/20 text-info"
             split={t ? { ok: t.succeeded, failed: t.failed } : undefined}
             sub={t ? `${t.succeeded.toLocaleString()} ok · ${t.failed.toLocaleString()} failed` : undefined}
           />
@@ -400,7 +400,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                         : s === "RUNNING"
                           ? "bg-success/15 text-success"
                           : s === "COMPLETED"
-                            ? "bg-sky-500/15 text-sky-300"
+                            ? "bg-info/15 text-info"
                             : s === "TIMEOUT"
                               ? "bg-warn/15 text-warn"
                               : s === "CANCELLED"

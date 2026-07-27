@@ -51,7 +51,7 @@ function IssueNodeBase({ data: d }: NodeProps<Node<OverviewIssueNodeData>>) {
       tabIndex={0}
       aria-label={`Issue ${d.identifier}: ${d.title}`}
       onKeyDown={activateOnEnterOrSpace}
-      className="relative w-[200px] rounded-lg border border-blue-500/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
+      className="relative w-[200px] rounded-lg border border-blue-500/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80"
     >
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-blue-400/40" isConnectable={false} />
       <div className="flex items-center gap-1.5">
@@ -115,7 +115,7 @@ function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
       aria-label={accessibleLabel}
       onKeyDown={activateOnEnterOrSpace}
       className={cn(
-        "relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
+        "relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
         isWait && "ring-1 ring-warn/40",
       )}
     >
@@ -147,7 +147,7 @@ function StatusChip({ status }: { status: string }) {
   const s = status.toLowerCase()
   const cls =
     s === "in_progress" || s === "running"
-      ? "bg-blue-500/15 text-blue-300"
+      ? "bg-primary/15 text-primary"
       : s === "review"
         ? "bg-purple/15 text-purple"
         : s === "completed" || s === "done"

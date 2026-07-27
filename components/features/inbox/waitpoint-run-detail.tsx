@@ -241,7 +241,7 @@ export function WaitpointRunDetail({
           ) : isFailed ? (
             <AlertCircle className="h-4 w-4 text-destructive" />
           ) : run.current_step_id && completedSteps.includes(run.current_step_id) ? (
-            <Spinner className="h-4 w-4 text-blue-400" />
+            <Spinner className="h-4 w-4 text-primary" />
           ) : (
             <PauseCircle className="h-4 w-4 text-warn" />
           )}
@@ -249,13 +249,13 @@ export function WaitpointRunDetail({
             <div className="text-xs font-medium">{pipeline?.name || run.pipeline_slug}</div>
             <div className="font-mono text-[10px] text-muted-foreground">
               {run.id} · {run.status}
-              {isLive && <span className="ml-1 text-blue-400/70">· live</span>}
+              {isLive && <span className="ml-1 text-primary/70">· live</span>}
             </div>
           </div>
         </div>
         <a
           href={`/activity?run=${encodeURIComponent(run.id)}`}
-          className="rounded bg-blue-500/10 px-2 py-1 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20"
+          className="rounded bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/20"
         >
           Open in Activity →
         </a>

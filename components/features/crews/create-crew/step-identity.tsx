@@ -34,7 +34,7 @@ export function StepIdentity({ state, setState }: Props) {
           <button
             type="button"
             onClick={() => setPickerOpen(true)}
-            className="group relative outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-2xl"
+            className="group relative outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-2xl"
             aria-label="Pick icon and color"
           >
             <CrewIcon
@@ -43,7 +43,7 @@ export function StepIdentity({ state, setState }: Props) {
               size="xl"
               className="border border-white/10 group-hover:border-white/25 transition-colors scale-110"
             />
-            <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center ring-2 ring-card shadow-lg group-hover:bg-blue-400 transition-colors">
+            <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center ring-2 ring-card shadow-lg group-hover:bg-primary transition-colors">
               <Pencil className="h-3 w-3" />
             </span>
           </button>
@@ -67,7 +67,7 @@ export function StepIdentity({ state, setState }: Props) {
                 onChange={(e) => onNameChange(e.target.value)}
                 autoFocus
                 placeholder="Engineering"
-                className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-shadow"
+                className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
               />
             </div>
             <div>
@@ -77,7 +77,7 @@ export function StepIdentity({ state, setState }: Props) {
                 value={state.slug}
                 onChange={(e) => setState({ slug: e.target.value, slugTouched: true })}
                 placeholder="engineering"
-                className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-shadow"
+                className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
               />
             </div>
           </div>
@@ -94,12 +94,12 @@ export function StepIdentity({ state, setState }: Props) {
               value={state.description}
               onChange={(e) => setState({ description: e.target.value })}
               placeholder="What does this crew do, in one line?"
-              className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-shadow"
+              className="mt-1.5 w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-shadow"
             />
           </div>
 
-          <div className="rounded-md border border-blue-500/25 bg-blue-500/[0.05] px-3 py-2.5 text-xs text-foreground/80 flex gap-2.5 items-start">
-            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/90 text-blue-950 mt-0.5">
+          <div className="rounded-md border border-info/25 bg-info/[0.05] px-3 py-2.5 text-xs text-foreground/80 flex gap-2.5 items-start">
+            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-info/90 text-info mt-0.5">
               TIP
             </span>
             <span className="leading-relaxed">

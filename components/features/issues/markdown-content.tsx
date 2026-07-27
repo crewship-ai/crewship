@@ -43,7 +43,7 @@ export const MarkdownContent = memo(function MarkdownContent({ children, classNa
         "[&_th]:text-left [&_th]:text-foreground/90 [&_th]:font-semibold [&_th]:py-1.5 [&_th]:px-2 [&_th]:border-b [&_th]:border-white/[0.1] [&_th]:bg-white/[0.02]",
         "[&_td]:py-1.5 [&_td]:px-2 [&_td]:border-b [&_td]:border-white/[0.04] [&_td]:text-foreground/70",
         // Links
-        "[&_a]:text-blue-400 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-blue-300",
+        "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-primary/80",
         // Blockquotes — amber accent
         "[&_blockquote]:border-l-2 [&_blockquote]:border-warn/40 [&_blockquote]:pl-3 [&_blockquote]:text-foreground/60 [&_blockquote]:italic [&_blockquote]:my-2",
         // HR

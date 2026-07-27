@@ -626,7 +626,7 @@ function ConnectionBadge({ status }: { status: string }) {
 function OriginChip({ origin }: { origin?: string | null }) {
   if (!origin) return null
   const map: Record<string, { label: string; className: string }> = {
-    UI:      { label: "UI",      className: "bg-blue-500/15 text-blue-300" },
+    UI:      { label: "UI",      className: "bg-info/15 text-info" },
     CLI:     { label: "CLI",     className: "bg-purple/15 text-purple" },
     WEBHOOK: { label: "Hook",    className: "bg-warn/15 text-warn" },
     CRON:    { label: "Cron",    className: "bg-warn/15 text-warn" },

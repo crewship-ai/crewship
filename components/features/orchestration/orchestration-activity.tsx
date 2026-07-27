@@ -104,7 +104,7 @@ type StatusFilter = (typeof statusFilters)[number]
 
 const statusColors: Record<string, { dot: string; pulse?: string; pill: string }> = {
   COMPLETED:   { dot: "bg-success", pill: "bg-success/15 text-success border-success/20" },
-  IN_PROGRESS: { dot: "bg-blue-500", pulse: "bg-blue-400", pill: "bg-blue-500/15 text-blue-400 border-blue-500/20" },
+  IN_PROGRESS: { dot: "bg-primary", pulse: "bg-primary", pill: "bg-primary/15 text-primary border-primary/20" },
   FAILED:      { dot: "bg-destructive", pill: "bg-destructive/15 text-destructive border-destructive/20" },
   BLOCKED:     { dot: "bg-warn", pill: "bg-warn/15 text-warn border-warn/20" },
   CANCELLED:   { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },

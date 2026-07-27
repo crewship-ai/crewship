@@ -487,7 +487,7 @@ function HeatmapButton({
       className={cn(
         "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
         active
-          ? "bg-blue-500/15 text-blue-300"
+          ? "bg-primary/15 text-primary"
           : "text-muted-foreground/70 hover:text-foreground/80",
       )}
     >

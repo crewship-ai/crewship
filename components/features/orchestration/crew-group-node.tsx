@@ -87,7 +87,7 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
         {collapsed && d.taskCount > 0 && (
           <div className="flex items-center gap-1.5 text-[10px]">
             {d.activeCount > 0 && (
-              <span className="text-blue-400">{d.activeCount} running</span>
+              <span className="text-primary">{d.activeCount} running</span>
             )}
             {d.completedCount > 0 && (
               <span className="text-success">{d.completedCount} done</span>

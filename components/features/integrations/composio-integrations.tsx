@@ -335,7 +335,7 @@ export function ComposioIntegrations() {
                 className={cn(
                   "whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] transition-colors",
                   tab === t.key
-                    ? "border-blue-400 text-foreground"
+                    ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground/80",
                 )}
               >
@@ -502,7 +502,7 @@ function ApiKeyModal({
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="ak_…"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-sm focus:border-blue-400/50 focus:outline-none"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
             />
           </div>
           <div>
@@ -511,7 +511,7 @@ function ApiKeyModal({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="Crewship_dev_1"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-blue-400/50 focus:outline-none"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
             />
           </div>
         </div>
@@ -625,7 +625,7 @@ function ConnectModal({
                 value={toolkitSlug}
                 onChange={(e) => setToolkitSlug(e.target.value)}
                 placeholder="e.g. gmail, github, slack"
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-blue-400/50 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
               />
             </div>
           )}
@@ -635,7 +635,7 @@ function ConnectModal({
               <select
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
               >
                 <option value="">— new user —</option>
                 {users.map((u) => (
@@ -652,7 +652,7 @@ function ConnectModal({
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               placeholder="e.g. alice@acme.com or a stable user id"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-blue-400/50 focus:outline-none"
+              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
             />
           </div>
         </div>
@@ -681,11 +681,11 @@ function NotConfigured({ onAddKey }: { onAddKey: () => void }) {
     <div
       className={cn(
         "mx-auto mt-8 max-w-xl rounded-xl border border-white/10 bg-card p-8 text-center",
-        "shadow-lg shadow-blue-500/5",
+        "shadow-lg shadow-primary/5",
       )}
     >
-      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
-        <Plug className="h-6 w-6 text-blue-400" />
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+        <Plug className="h-6 w-6 text-primary" />
       </div>
       <h2 className="text-base font-semibold text-foreground">Connect Composio to get started</h2>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -700,14 +700,14 @@ function NotConfigured({ onAddKey }: { onAddKey: () => void }) {
       </div>
       <div className="mt-6 grid gap-3 text-left sm:grid-cols-2">
         <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-          <ShieldCheck className="h-4 w-4 text-blue-400" />
+          <ShieldCheck className="h-4 w-4 text-info" />
           <div className="mt-2 text-xs font-medium text-foreground/90">Per-user OAuth</div>
           <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
             Each agent acts on behalf of the connected user — no shared secrets.
           </div>
         </div>
         <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-          <Plug className="h-4 w-4 text-blue-400" />
+          <Plug className="h-4 w-4 text-info" />
           <div className="mt-2 text-xs font-medium text-foreground/90">Hundreds of apps</div>
           <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
             A single managed catalog replaces hand-configured MCP endpoints.
@@ -717,7 +717,7 @@ function NotConfigured({ onAddKey }: { onAddKey: () => void }) {
       <div className="mt-6 flex items-center justify-center">
         <Link
           href="/credentials"
-          className="inline-flex items-center gap-1.5 text-xs text-blue-400 transition-all hover:gap-2.5"
+          className="inline-flex items-center gap-1.5 text-xs text-primary transition-all hover:gap-2.5"
         >
           <KeyRound className="h-3.5 w-3.5" />
           Manage credentials in the meantime

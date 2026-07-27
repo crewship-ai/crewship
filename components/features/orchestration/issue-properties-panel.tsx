@@ -106,7 +106,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
                         <StatusIcon status={s} className="h-3.5 w-3.5" />
                         <span>{statusLabel[s] || s}</span>
                         {s === issue.status && (
-                          <span className="ml-auto text-blue-400 text-[10px]">current</span>
+                          <span className="ml-auto text-primary text-[10px]">current</span>
                         )}
                       </CommandItem>
                     ))}
@@ -143,7 +143,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
                         <PriorityIcon priority={p} className="h-3.5 w-3.5" />
                         <span>{priorityLabel[p]}</span>
                         {p === (issue.priority || "none") && (
-                          <span className="ml-auto text-blue-400 text-[10px]">current</span>
+                          <span className="ml-auto text-primary text-[10px]">current</span>
                         )}
                       </CommandItem>
                     ))}
@@ -260,7 +260,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
                   onClick={() => patchIssue({ estimate: pts })}
                   className={cn(
                     "w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06]",
-                    issue.estimate === pts && "bg-blue-500/10 text-blue-400",
+                    issue.estimate === pts && "bg-primary/10 text-primary",
                   )}
                 >
                   {pts} points
@@ -297,7 +297,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
                       onClick={() => patchIssue({ milestone_id: m.id })}
                       className={cn(
                         "w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06] flex items-center gap-2",
-                        issue.milestone_id === m.id && "bg-blue-500/10 text-blue-400",
+                        issue.milestone_id === m.id && "bg-primary/10 text-primary",
                       )}
                     >
                       <Flag className="h-3 w-3 shrink-0" />

@@ -310,7 +310,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
 function RunStatusIcon({ status }: { status: "running" | "completed" | "failed" | "unknown" }) {
   if (status === "completed") return <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
   if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-destructive" />
-  if (status === "running") return <Spinner className="h-4 w-4 shrink-0 text-blue-400" />
+  if (status === "running") return <Spinner className="h-4 w-4 shrink-0 text-primary" />
   return <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
 }
 

@@ -59,7 +59,7 @@ export function TrustTierBadge({ tier, size = "sm", className }: TrustTierBadgeP
           <p className="text-xs">{m.tooltip}</p>
           <a
             href="/docs/mcp-trust-tiers"
-            className="text-[11px] text-blue-300 hover:underline mt-1 inline-block"
+            className="text-[11px] text-primary hover:underline mt-1 inline-block"
           >
             Read trust tier criteria →
           </a>

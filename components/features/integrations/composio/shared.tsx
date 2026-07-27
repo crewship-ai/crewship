@@ -41,7 +41,7 @@ export function ToolkitIcon({ toolkit, size = 20 }: { toolkit: Toolkit; size?: n
   }
   return (
     <span
-      className="flex items-center justify-center rounded bg-blue-500/10 text-[10px] font-semibold uppercase text-blue-400"
+      className="flex items-center justify-center rounded bg-primary/10 text-[10px] font-semibold uppercase text-primary"
       style={{ width: size, height: size }}
     >
       {toolkit.slug.slice(0, 2)}

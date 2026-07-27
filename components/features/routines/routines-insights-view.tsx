@@ -197,7 +197,7 @@ export function RoutinesInsightsView({
 const KPI_TONE = {
   default: "bg-muted text-muted-foreground",
   success: "bg-success/20 text-success",
-  blue: "bg-blue-500/20 text-blue-400",
+  blue: "bg-info/20 text-info",
   purple: "bg-purple/20 text-purple",
   destructive: "bg-destructive/20 text-destructive",
   warn: "bg-warn/20 text-warn",

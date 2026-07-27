@@ -125,8 +125,8 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                           <div className="flex items-center gap-1.5">
                             {task.status === "IN_PROGRESS" && (
                               <span className="relative flex h-2 w-2 shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                               </span>
                             )}
                             <TaskStatusBadge status={task.status} />
@@ -185,7 +185,7 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
               )}
               {taskStats.in_progress > 0 && (
                 <div
-                  className="h-full bg-blue-500 animate-pulse transition-all duration-700 ease-out"
+                  className="h-full bg-info animate-pulse transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.in_progress / taskStats.total) * 100}%` }}
                 />
               )}
@@ -212,10 +212,10 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
           <div className="flex items-center gap-4 text-label text-muted-foreground">
             <span><AnimatedNumber value={taskStats.completed} /> / {taskStats.total} tasks</span>
             {taskStats.in_progress > 0 && (
-              <span className="text-blue-600 flex items-center gap-1">
+              <span className="text-primary flex items-center gap-1">
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
                 </span>
                 {taskStats.in_progress} working
               </span>

@@ -45,7 +45,7 @@ export function statusColor(status?: string | null): string {
   const s = (status ?? "").toLowerCase()
   if (s.includes("success") || s.includes("complete") || s.includes("done") || s.includes("ok")) return "text-success"
   if (s.includes("fail") || s.includes("error")) return "text-destructive"
-  if (s.includes("run") || s.includes("active") || s.includes("progress")) return "text-blue-300"
+  if (s.includes("run") || s.includes("active") || s.includes("progress")) return "text-primary"
   if (s.includes("wait") || s.includes("escalat") || s.includes("pending") || s.includes("review")) return "text-warn"
   return "text-muted-foreground"
 }

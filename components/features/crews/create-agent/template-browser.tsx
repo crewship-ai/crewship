@@ -64,7 +64,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
             onChange={(e) => setSearch(e.target.value)}
             placeholder='Search personas… (e.g. "data analyst", "test", "research")'
             aria-label="Search personas by name, role, or category"
-            className="w-full pl-8 pr-3 py-1.5 bg-zinc-950 border border-white/[0.15] rounded-md text-[12.5px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
+            className="w-full pl-8 pr-3 py-1.5 bg-zinc-950 border border-white/[0.15] rounded-md text-[12.5px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
           />
         </div>
       </div>
@@ -83,7 +83,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
               title={isDisabled ? "Coming soon" : undefined}
               className={cn(
                 "px-3 py-2 text-[12px] flex items-center gap-1.5 border-b-2 -mb-px transition-colors",
-                isActive ? "border-blue-400 text-foreground" : "border-transparent text-muted-foreground",
+                isActive ? "border-primary text-foreground" : "border-transparent text-muted-foreground",
                 !isDisabled && "hover:text-foreground/80 cursor-pointer",
                 isDisabled && "opacity-50 cursor-not-allowed",
               )}
@@ -92,7 +92,7 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
               <span
                 className={cn(
                   "text-[10px] px-1.5 rounded-full font-semibold min-w-[18px] text-center",
-                  isActive ? "bg-blue-500/15 text-blue-300" : "bg-white/[0.05] text-muted-foreground",
+                  isActive ? "bg-primary/15 text-primary" : "bg-white/[0.05] text-muted-foreground",
                 )}
               >
                 {sourceCounts[src]}
@@ -171,7 +171,7 @@ function CategoryChip({
       className={cn(
         "px-2.5 py-1 rounded-full text-[11.5px] border whitespace-nowrap flex items-center gap-1.5 transition-colors",
         active
-          ? "bg-blue-500/15 border-blue-400/45 text-blue-300"
+          ? "bg-primary/15 border-primary/45 text-primary"
           : "bg-white/[0.03] border-white/[0.08] text-foreground/80 hover:border-white/[0.15]",
       )}
     >
@@ -197,7 +197,7 @@ function PersonaRow({
       className={cn(
         "p-2.5 rounded-lg border text-left transition-all flex gap-2.5 items-start",
         active
-          ? "border-blue-400/45 bg-blue-500/10"
+          ? "border-primary/45 bg-primary/10"
           : "border-white/[0.08] bg-card hover:border-white/[0.15] hover:bg-white/[0.03]",
       )}
     >

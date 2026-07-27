@@ -802,7 +802,7 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
             type="checkbox"
             checked={selected}
             onChange={onToggleSelect}
-            className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+            className="h-3.5 w-3.5 cursor-pointer accent-primary"
             aria-label={`Select ${cred.name}`}
           />
         )}
@@ -887,7 +887,7 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
           {cred._count_agent_credentials > 0
             ? `${cred._count_agent_credentials} ${cred._count_agent_credentials === 1 ? "agent" : "agents"}`
             : <span className="text-muted-foreground-soft">—</span>}
-          {cred.mcp_used && <span className="ml-1.5 text-[9px] text-blue-300">MCP</span>}
+          {cred.mcp_used && <span className="ml-1.5 text-[9px] text-info">MCP</span>}
         </span>
       </TableCell>
       <TableCell>

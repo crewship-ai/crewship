@@ -236,7 +236,7 @@ export function CrewCanvas({
         >
           <div className="relative">
             <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="xl" />
-            <span className="absolute inset-0 rounded-2xl ring-2 ring-blue-400/0 group-hover:ring-blue-400/40 transition-all pointer-events-none" />
+            <span className="absolute inset-0 rounded-2xl ring-2 ring-primary/0 group-hover:ring-primary/40 transition-all pointer-events-none" />
           </div>
         </button>
         <CrewIconPickerDialog

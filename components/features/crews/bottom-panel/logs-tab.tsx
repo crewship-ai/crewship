@@ -84,7 +84,7 @@ export function LogsTab({ workspaceId, context }: { workspaceId: string; context
         const levelColor =
           level.includes("error") || level.includes("fatal") ? "text-destructive" :
           level.includes("warn") ? "text-warn" :
-          level.includes("info") ? "text-blue-300" :
+          level.includes("info") ? "text-info" :
           "text-muted-foreground"
         return (
           <div key={i} className="flex gap-2 hover:bg-white/[0.03] px-1 -mx-1 rounded">

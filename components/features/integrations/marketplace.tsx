@@ -247,7 +247,7 @@ function FeaturedCard({ entry, onAdd, installing }: { entry: RegistryEntry; onAd
       type="button"
       onClick={() => onAdd(entry)}
       disabled={installing}
-      className="group flex items-start gap-3 rounded-xl border border-white/10 bg-card p-4 text-left transition-all hover:border-blue-400/40 hover:bg-white/[0.02]"
+      className="group flex items-start gap-3 rounded-xl border border-white/10 bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-white/[0.02]"
     >
       <MCPLogo name={entry.icon || entry.name} transport={entry.transport} className="h-10 w-10 shrink-0 opacity-90" />
       <div className="flex-1 min-w-0 space-y-1">

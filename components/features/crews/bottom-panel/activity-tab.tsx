@@ -25,7 +25,7 @@ function actorDot(actorType: string): string {
   switch (actorType) {
     case "user": return "border-purple"
     case "agent": return "border-success"
-    case "system": return "border-blue-400"
+    case "system": return "border-info"
     default: return "border-muted-foreground"
   }
 }

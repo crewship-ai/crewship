@@ -87,7 +87,7 @@ export function IssueRoutineBinder({
               className={cn(
                 "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
                 runningRoutine
-                  ? "bg-blue-500/10 text-blue-400/60"
+                  ? "bg-primary/10 text-primary/60"
                   : "bg-success/15 text-success hover:bg-success/25",
               )}
             >
@@ -133,7 +133,7 @@ export function IssueRoutineBinder({
                         className="flex items-center gap-2 text-xs"
                       >
                         <span className="text-muted-foreground">No routine</span>
-                        {!issue.routine_id && <span className="ml-auto text-blue-400 text-[10px]">current</span>}
+                        {!issue.routine_id && <span className="ml-auto text-primary text-[10px]">current</span>}
                       </CommandItem>
                       {routines.map((r) => (
                         <CommandItem
@@ -151,7 +151,7 @@ export function IssueRoutineBinder({
                             <div className="text-[10px] text-muted-foreground truncate">{r.slug}</div>
                           </div>
                           {issue.routine_id === r.id && (
-                            <span className="ml-2 shrink-0 text-blue-400 text-[10px]">current</span>
+                            <span className="ml-2 shrink-0 text-primary text-[10px]">current</span>
                           )}
                         </CommandItem>
                       ))}

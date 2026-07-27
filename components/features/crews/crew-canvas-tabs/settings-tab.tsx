@@ -246,7 +246,7 @@ export function SettingsTab({
             Integrations
             <span className="text-muted-foreground text-sm font-normal ml-1">{integrations?.length ?? 0}</span>
           </h2>
-          <Link href="/integrations" className="text-xs text-blue-300 hover:underline">
+          <Link href="/integrations" className="text-xs text-primary hover:underline">
             Manage workspace integrations →
           </Link>
         </div>

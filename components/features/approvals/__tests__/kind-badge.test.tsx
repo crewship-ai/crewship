@@ -12,8 +12,8 @@ describe("KindBadge", () => {
     ["destructive_op", "destructive op", "text-destructive"],
     ["cost_threshold", "cost threshold", "text-warn"],
     ["target_environment", "target environment", "text-warn"],
-    ["tool_call", "tool call", "text-blue-300"],
-    ["custom", "custom", "text-slate-300"],
+    ["tool_call", "tool call", "text-info"],
+    ["custom", "custom", "text-muted-foreground"],
   ])("kind=%s renders label %q with %s class", (kind, label, classFragment) => {
     const { container } = render(<KindBadge kind={kind} />)
     expect(screen.getByText(label)).toBeInTheDocument()

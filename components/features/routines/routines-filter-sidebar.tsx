@@ -234,7 +234,7 @@ export function RoutinesFilterSidebar({
                 type="checkbox"
                 checked={filters.showEphemeral}
                 onChange={(e) => onChange({ ...filters, showEphemeral: e.target.checked })}
-                className="h-3 w-3 cursor-pointer accent-blue-500"
+                className="h-3 w-3 cursor-pointer accent-primary"
               />
             </label>
             <p className="mt-1 px-2 text-[10px] text-muted-foreground">
@@ -324,7 +324,7 @@ function FacetRow({ label, count, active, onClick, dot, avatar }: FacetRowProps)
       ) : (
         <span className="h-1.5 w-1.5 shrink-0" />
       )}
-      <span className={cn("flex-1 truncate text-xs", active ? "text-blue-300" : "text-foreground/80")}>
+      <span className={cn("flex-1 truncate text-xs", active ? "text-primary" : "text-foreground/80")}>
         {label}
       </span>
       <span className="font-mono text-[10px] tabular-nums text-muted-foreground-soft">{count}</span>

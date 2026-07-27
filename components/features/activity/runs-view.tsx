@@ -149,13 +149,13 @@ function FilterBtn({
       onClick={onClick}
       className={cn(
         "flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors",
-        active ? "bg-blue-500/15 text-blue-300" : "text-muted-foreground hover:text-foreground/80",
+        active ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground/80",
       )}
     >
       <span>{label}</span>
       <span className={cn(
         "rounded px-1 py-0.5 text-[10px] tabular-nums",
-        active ? "bg-blue-500/20 text-blue-200" : "bg-white/[0.06] text-foreground/40",
+        active ? "bg-primary/20 text-primary/90" : "bg-white/[0.06] text-foreground/40",
       )}>
         {count}
       </span>
@@ -184,7 +184,7 @@ function RunCard({
       id={`run-card-${run.id}`}
       className={cn(
         "transition-colors",
-        focused && "ring-1 ring-blue-400/40",
+        focused && "ring-1 ring-primary/40",
         expanded && "bg-card/40",
       )}
     >
@@ -261,7 +261,7 @@ function SourcePill({ run }: { run: PipelineRun }) {
       <Link
         href={`/issues/${encodeURIComponent(run.issue_identifier)}`}
         onClick={(e) => e.stopPropagation()}
-        className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-300 hover:bg-blue-500/25"
+        className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/25"
       >
         <CircleDot className="mr-1 inline h-2.5 w-2.5" />
         {run.issue_identifier}

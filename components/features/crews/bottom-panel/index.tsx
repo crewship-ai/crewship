@@ -212,8 +212,8 @@ export function BottomPanel({
             "absolute -top-[3px] left-0 right-0 h-[6px] z-10 cursor-ns-resize",
             "before:absolute before:inset-x-0 before:top-[2px] before:h-[2px] before:transition-colors",
             dragging
-              ? "before:bg-blue-400/50"
-              : "before:bg-transparent hover:before:bg-blue-400/30",
+              ? "before:bg-primary/50"
+              : "before:bg-transparent hover:before:bg-primary/30",
           )}
         />
       )}

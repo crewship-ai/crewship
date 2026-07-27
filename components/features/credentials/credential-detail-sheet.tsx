@@ -207,7 +207,7 @@ export function CredentialDetailSheet({
                   {getBrand(credential.provider).cli && (
                     <Badge
                       variant="outline"
-                      className="text-[9px] px-1 font-mono shrink-0 border-blue-400/50 text-blue-300"
+                      className="text-[9px] px-1 font-mono shrink-0 border-info/50 text-info"
                       title="Crewship uses this credential to authenticate the agent's CLI inside the container"
                     >
                       CLI
@@ -342,7 +342,7 @@ export function CredentialDetailSheet({
                   </p>
                 )}
                 {credential.mcp_used && (
-                  <div className="mt-3 rounded-md border border-blue-500/25 bg-blue-500/[0.05] px-3 py-2 text-xs">
+                  <div className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-xs">
                     Also referenced by one or more MCP server integrations.
                   </div>
                 )}
@@ -508,7 +508,7 @@ export function CredentialDetailSheet({
                             variant="outline"
                             className={cn(
                               "text-[10px] px-1.5",
-                              r.status === "ACTIVE" && "border-blue-400/40 text-blue-300",
+                              r.status === "ACTIVE" && "border-primary/40 text-primary",
                               r.status === "EXPIRED" && "border-success/30 text-success",
                               r.status === "CANCELLED" && "border-warn/30 text-warn",
                             )}
