@@ -94,6 +94,12 @@ var BackupTables = []string{
 	// no ledger to reconcile against, and VerifyChain reads every historical edit
 	// as a silent DB-level flip (i.e. as tampering).
 	"journal_entry_priorities",
+	// journal_chain_checkpoints (v152): signed mid-chain-delete records. No FK
+	// to journal_entries (it stores removed seq/hash JSON, not a row ref) and
+	// nothing references it, so it is order-independent; kept beside its sibling
+	// for readability. Direct workspace_id → generic workspaceFilterSQL default.
+	// Without it a restored chain reads every compacted gap as tampering.
+	"journal_chain_checkpoints",
 	"workspace_members",
 	"workspace_invitations",
 	"workspace_mcp_servers",
