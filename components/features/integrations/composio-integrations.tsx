@@ -231,7 +231,7 @@ export function ComposioIntegrations() {
   const configured = settings ? settings.configured : data?.enabled ?? false
 
   return (
-    <div className="p-4 md:p-6 pb-10 space-y-5 bg-background min-h-[calc(100vh-48px)]">
+    <div className="p-4 md:p-6 pb-6 space-y-5 bg-background">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Plug className="h-4 w-4 text-foreground/60" />

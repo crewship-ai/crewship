@@ -57,8 +57,13 @@ import type {
 // legacy implementation below is untouched — flipping the env var brings it
 // back, so this is a fully reversible rollback path, not a deletion.
 export default function IntegrationsPage() {
+  // The page — not either section — owns the full height. Composio used to
+  // carry min-h-[calc(100vh-48px)], which meant its EMPTY state filled the
+  // viewport and pushed notification channels a whole screen below the fold
+  // with nothing hinting they were there. A section you can only reach by
+  // scrolling past a screen of nothing has not shipped.
   return (
-    <>
+    <div className="min-h-[calc(100vh-48px)] bg-background">
       {legacyMcpIntegrations() ? <LegacyIntegrationsPage /> : <ComposioIntegrations />}
       {/* Notification channels are an integration: "connect Discord" is what
           a user comes to this page for. They used to live under Settings,
@@ -66,7 +71,7 @@ export default function IntegrationsPage() {
           of every connection impossible. Rendered outside the Composio/legacy
           switch because they have nothing to do with either. */}
       <NotificationIntegrationsPanel />
-    </>
+    </div>
   )
 }
 
@@ -76,7 +81,9 @@ function NotificationIntegrationsPanel() {
   if (loading || !workspaceId) return null
   return (
     <div className="p-4 md:p-6 pt-0 pb-10 bg-background">
-      <NotificationIntegrations workspaceId={workspaceId} />
+      <div className="border-t border-border/60 pt-6">
+        <NotificationIntegrations workspaceId={workspaceId} />
+      </div>
     </div>
   )
 }
