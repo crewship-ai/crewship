@@ -34,9 +34,9 @@ export const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [
 ]
 
 export const HEALTH_OPTIONS: { value: string; label: string; color: string }[] = [
-  { value: "on_track", label: "On Track", color: "text-green-400" },
-  { value: "at_risk", label: "At Risk", color: "text-yellow-400" },
-  { value: "off_track", label: "Off Track", color: "text-red-400" },
+  { value: "on_track", label: "On Track", color: "text-success" },
+  { value: "at_risk", label: "At Risk", color: "text-warn" },
+  { value: "off_track", label: "Off Track", color: "text-destructive" },
 ]
 
 export const PRIORITY_OPTIONS: { value: string; label: string }[] = [

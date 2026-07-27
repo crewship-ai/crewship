@@ -96,7 +96,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
         <button
           type="button"
           onClick={openPicker}
-          className="text-xs px-2.5 py-1 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 flex items-center gap-1.5"
+          className="text-xs px-2.5 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 flex items-center gap-1.5"
         >
           <Plus className="h-3 w-3" />
           Assign skill
@@ -110,7 +110,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
         ) : (
           assigned.map((row) => (
             <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
-              <div className="w-8 h-8 rounded-lg bg-zinc-800 grid place-items-center text-foreground/60 shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-muted grid place-items-center text-foreground/60 shrink-0">
                 <span className="text-xs">{(row.skill.display_name ?? row.skill.name).slice(0, 2).toUpperCase()}</span>
               </div>
               <div className="flex-1 min-w-0">
@@ -124,7 +124,7 @@ function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId:
                 type="button"
                 disabled={busy}
                 onClick={() => remove(row.id, row.skill.display_name ?? row.skill.name)}
-                className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-red-500/10 hover:text-red-300 flex items-center gap-1"
+                className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center gap-1"
                 title="Remove skill"
               >
                 <Trash2 className="h-3 w-3" />
@@ -258,7 +258,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
         <button
           type="button"
           onClick={openPicker}
-          className="text-xs px-2.5 py-1 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 flex items-center gap-1.5"
+          className="text-xs px-2.5 py-1 rounded bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30 flex items-center gap-1.5"
         >
           <Plus className="h-3 w-3" />
           Assign credential
@@ -272,14 +272,14 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
         ) : (
           assigned.map((row) => (
             <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
-              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-300 grid place-items-center shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-warn/15 text-warn grid place-items-center shrink-0">
                 <span className="text-xs">{row.credential_provider.slice(0, 2).toUpperCase()}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-foreground truncate flex items-center gap-2">
                   {row.credential_name}
                   {row.credential_type === "SECRET" && (
-                    <span className="text-[9px] px-1.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">SECRET</span>
+                    <span className="text-[9px] px-1.5 rounded bg-destructive/20 text-destructive border border-destructive/30">SECRET</span>
                   )}
                 </div>
                 <div className="text-[10px] text-muted-foreground truncate">
@@ -290,7 +290,7 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
                 type="button"
                 disabled={busy}
                 onClick={() => remove(row.id, row.credential_name)}
-                className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-red-500/10 hover:text-red-300 flex items-center gap-1"
+                className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center gap-1"
                 title="Unassign credential"
               >
                 <Trash2 className="h-3 w-3" />

@@ -25,7 +25,7 @@ export function WorkspaceTab({ agentSlug, onOpenFiles }: WorkspaceTabProps) {
           <button
             type="button"
             onClick={onOpenFiles}
-            className="text-sm px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white"
+            className="text-sm px-3 py-2 rounded-lg bg-primary hover:bg-primary text-white"
           >
             Open Files panel
           </button>

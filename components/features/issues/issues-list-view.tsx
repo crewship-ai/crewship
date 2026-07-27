@@ -196,8 +196,8 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
     <div className="rounded-lg border border-border overflow-hidden">
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border-b border-blue-500/20">
-          <span className="text-xs font-medium text-blue-400">{selectedIds.size} selected</span>
+        <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">
+          <span className="text-xs font-medium text-primary">{selectedIds.size} selected</span>
           <div className="flex gap-1 ml-2">
             <div className="relative">
               <button
@@ -258,7 +258,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                 type="checkbox"
                 checked={issues.length > 0 && selectedIds.size === issues.length}
                 onChange={toggleAll}
-                className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-blue-500"
+                className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-primary"
               />
             </TableHead>
             <TableHead
@@ -331,7 +331,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   "cursor-pointer row-hover transition-colors",
                   isDimmed && "opacity-40",
                   (isHighlighted || selectedIds.has(issue.id)) && "row-selected",
-                  issue.status === "IN_PROGRESS" && "border-l-2 border-l-blue-400 agent-active-card",
+                  issue.status === "IN_PROGRESS" && "border-l-2 border-l-primary agent-active-card",
                 )}
                 onClick={() => onIssueClick(issue)}
               >
@@ -341,7 +341,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     checked={selectedIds.has(issue.id)}
                     onClick={(e) => toggleSelect(issue.id, e)}
                     onChange={() => {}}
-                    className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-blue-500"
+                    className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-primary"
                   />
                 </TableCell>
                 <TableCell className="text-xs font-mono text-muted-foreground">

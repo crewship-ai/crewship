@@ -58,7 +58,7 @@ export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
         transition={{ duration: 0.16 }}
         className={cn(
           "flex items-center gap-2 px-3 py-2 rounded-md border text-xs",
-          "bg-green-500/5 border-green-500/20 text-green-300",
+          "bg-success/5 border-success/20 text-success",
         )}
       >
         <CheckCircle2 className="h-3.5 w-3.5" />
@@ -201,7 +201,7 @@ export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
         transition={{ duration: 0.16 }}
         className={cn(
           "flex items-center gap-2 px-3 py-2 rounded-md border text-xs",
-          "bg-amber-500/5 border-amber-500/20 text-amber-300",
+          "bg-warn/5 border-warn/20 text-warn",
         )}
       >
         <Lock className="h-3.5 w-3.5" />

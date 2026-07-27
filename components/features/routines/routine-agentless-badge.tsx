@@ -27,7 +27,7 @@ export function AgentlessBadge({
     <Badge
       variant="outline"
       className={cn(
-        "gap-1 border-emerald-500/30 bg-emerald-500/10 font-medium text-emerald-400",
+        "gap-1 border-success/30 bg-success/10 font-medium text-success",
         size === "sm" ? "px-1.5 py-0 text-[10px]" : "px-2 py-0 text-[11px]",
         className,
       )}

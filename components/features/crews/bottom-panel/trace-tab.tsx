@@ -52,7 +52,7 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
 
   if (!context) return <EmptyState>Select a run to see its trace.</EmptyState>
   if (context.kind !== "run") return <EmptyState>Trace is shown per run.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (run === null) return <EmptyState>Loading…</EmptyState>
 
   const steps = Object.entries(run.step_outputs ?? {})
@@ -71,7 +71,7 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
       </div>
 
       {run.error_message && (
-        <div className="mb-3 text-red-300 border border-red-500/20 bg-red-500/5 rounded-md px-3 py-2">
+        <div className="mb-3 text-destructive border border-destructive/20 bg-destructive/5 rounded-md px-3 py-2">
           {run.failed_at_step && <span className="font-mono mr-2">{run.failed_at_step}:</span>}
           {run.error_message}
         </div>
@@ -88,11 +88,11 @@ export function TraceTab({ workspaceId, context }: { workspaceId: string; contex
               <div key={stepId} className="relative pb-4 pl-3.5">
                 <span className={cn(
                   "absolute -left-[15px] top-0.5 h-2.5 w-2.5 rounded-full bg-card border-2",
-                  failed ? "border-red-400" : current ? "border-blue-400" : "border-emerald-400",
+                  failed ? "border-destructive" : current ? "border-primary" : "border-success",
                 )} />
                 <div className="text-foreground font-mono">
                   {stepId}
-                  {current && <span className="ml-2 text-blue-300 text-[10px]">current</span>}
+                  {current && <span className="ml-2 text-primary text-[10px]">current</span>}
                 </div>
                 {preview(out) && (
                   <div className="text-muted-foreground mt-0.5 break-all">{preview(out)}</div>

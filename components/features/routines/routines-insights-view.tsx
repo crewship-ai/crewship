@@ -30,10 +30,10 @@ interface RoutinesInsightsViewProps {
 function statusBadge(status: string | undefined) {
   const s = status?.toLowerCase()
   if (s === "succeeded" || s === "success") {
-    return <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+    return <CheckCircle2 className="h-3 w-3 text-success" />
   }
   if (s === "failed" || s === "error") {
-    return <AlertCircle className="h-3 w-3 text-rose-400" />
+    return <AlertCircle className="h-3 w-3 text-destructive" />
   }
   return <Sparkles className="h-3 w-3 text-muted-foreground" />
 }
@@ -110,7 +110,7 @@ export function RoutinesInsightsView({
             label="Last-run success"
             value={stats.passRate !== null ? `${stats.passRate}%` : "—"}
             sub={`${stats.succeeded} succeeded · ${stats.failed} failed`}
-            tone={stats.passRate !== null && stats.passRate >= 90 ? "emerald" : stats.passRate !== null && stats.passRate < 70 ? "rose" : "default"}
+            tone={stats.passRate !== null && stats.passRate >= 90 ? "success" : stats.passRate !== null && stats.passRate < 70 ? "destructive" : "default"}
             Icon={CheckCircle2}
           />
           <KpiTile
@@ -121,7 +121,7 @@ export function RoutinesInsightsView({
                 ? "Nothing failing right now"
                 : "Click a row below to investigate"
             }
-            tone={stats.recentFailures.length > 0 ? "rose" : "default"}
+            tone={stats.recentFailures.length > 0 ? "destructive" : "default"}
             Icon={AlertCircle}
           />
           <KpiTile
@@ -132,7 +132,7 @@ export function RoutinesInsightsView({
                 ? `${formatUsd(cost.avgPerRunUsd)} avg per run · last ${cost.runCount} run${cost.runCount === 1 ? "" : "s"}`
                 : "No runs recorded yet"
             }
-            tone="violet"
+            tone="purple"
             Icon={Banknote}
           />
         </section>
@@ -163,7 +163,7 @@ export function RoutinesInsightsView({
             )}
           </Card>
 
-          <Card title="Recent failures" icon={AlertCircle} subtitle={`${stats.recentFailures.length} flagged`} tone={stats.recentFailures.length > 0 ? "amber" : "default"}>
+          <Card title="Recent failures" icon={AlertCircle} subtitle={`${stats.recentFailures.length} flagged`} tone={stats.recentFailures.length > 0 ? "warn" : "default"}>
             {stats.recentFailures.length === 0 ? (
               <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
                 No failures recorded — last run of every routine is either clean or hasn&apos;t run yet.
@@ -172,7 +172,7 @@ export function RoutinesInsightsView({
               <ul className="divide-y divide-border/40">
                 {stats.recentFailures.map((r) => (
                   <RoutineLink key={r.id} onActivate={() => onSelect(r.slug)} ariaLabel={`Open routine ${r.name}`}>
-                    <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                    <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
                     <span className="flex-1 truncate text-sm">{r.name || r.slug}</span>
                     <span className="text-[11px] text-muted-foreground">
                       {r.last_invoked_at ? new Date(r.last_invoked_at).toLocaleDateString() : "—"}
@@ -196,11 +196,11 @@ export function RoutinesInsightsView({
  * ----------------------------------------------------------------- */
 const KPI_TONE = {
   default: "bg-muted text-muted-foreground",
-  emerald: "bg-emerald-500/20 text-emerald-400",
-  blue: "bg-blue-500/20 text-blue-400",
-  violet: "bg-violet-500/20 text-violet-400",
-  rose: "bg-rose-500/20 text-rose-400",
-  amber: "bg-amber-500/20 text-amber-400",
+  success: "bg-success/20 text-success",
+  blue: "bg-info/20 text-info",
+  purple: "bg-purple/20 text-purple",
+  destructive: "bg-destructive/20 text-destructive",
+  warn: "bg-warn/20 text-warn",
 } as const
 
 function KpiTile({

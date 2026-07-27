@@ -63,9 +63,9 @@ function asArrayOfObjects(v: unknown): Array<Record<string, unknown>> {
 type TriggerKey = PipelineRunRecord["triggered_via"] | "agent_tool_call" | "issue" | "unknown"
 const TRIGGER_META: Record<TriggerKey, { label: string; Icon: typeof Play; tone: string }> = {
   manual: { label: "Manual", Icon: Play, tone: "text-accent-foreground" },
-  schedule: { label: "Schedule", Icon: Calendar, tone: "text-violet-400" },
-  webhook: { label: "Webhook", Icon: Webhook, tone: "text-amber-400" },
-  call_pipeline: { label: "Called by routine", Icon: Link2, tone: "text-cyan-400" },
+  schedule: { label: "Schedule", Icon: Calendar, tone: "text-purple" },
+  webhook: { label: "Webhook", Icon: Webhook, tone: "text-warn" },
+  call_pipeline: { label: "Called by routine", Icon: Link2, tone: "text-notice" },
   agent_tool_call: { label: "Agent tool", Icon: Bot, tone: "text-pink-400" },
   issue: { label: "From issue", Icon: CircleDot, tone: "text-blue-400" },
   unknown: { label: "Unknown", Icon: Play, tone: "text-muted-foreground" },
@@ -182,7 +182,7 @@ export function RoutineOverviewTab({
         <StatCell
           label="Pass"
           value={stats.passRate !== null ? `${stats.passRate}%` : "—"}
-          tone={stats.passRate !== null && stats.passRate >= 90 ? "green" : undefined}
+          tone={stats.passRate !== null && stats.passRate >= 90 ? "success" : undefined}
         />
         <StatCell label="Avg" value={stats.avgDurMs > 0 ? formatDurationDecimal(stats.avgDurMs) : "—"} />
         <StatCell
@@ -257,7 +257,7 @@ export function RoutineOverviewTab({
           <Card
             title="Schedules"
             subtitle={schedules.length > 0 ? `${schedules.length} active` : "none"}
-            tone={schedules.length > 0 ? "violet" : "default"}
+            tone={schedules.length > 0 ? "purple" : "default"}
           >
             {schedules.length === 0 ? (
               <div className="px-3 py-4 text-center text-xs text-muted-foreground">
@@ -269,7 +269,7 @@ export function RoutineOverviewTab({
                 {schedules.slice(0, 4).map((s) => (
                   <div key={s.id} className="px-3 py-2.5">
                     <div className="flex items-center gap-2">
-                      <Calendar className={cn("h-3.5 w-3.5 shrink-0", s.enabled ? "text-violet-400" : "text-muted-foreground-soft")} />
+                      <Calendar className={cn("h-3.5 w-3.5 shrink-0", s.enabled ? "text-purple" : "text-muted-foreground-soft")} />
                       <span className="truncate text-xs font-medium">{s.name}</span>
                       {!s.enabled && (
                         <Badge variant="outline" className="px-1 py-0 text-[9px]">paused</Badge>
@@ -338,7 +338,7 @@ export function RoutineOverviewTab({
                     className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-foreground/90"
                     title={slug}
                   >
-                    <Puzzle className="h-3 w-3 text-cyan-400" aria-hidden />
+                    <Puzzle className="h-3 w-3 text-notice" aria-hidden />
                     {integrationLabel(slug)}
                   </span>
                 ))}
@@ -352,7 +352,7 @@ export function RoutineOverviewTab({
               <div className="divide-y divide-border/40">
                 {creds.map((c, i) => (
                   <div key={i} className="flex items-center gap-2.5 px-3 py-2">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/20 font-mono text-[10px] font-bold text-violet-400">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-purple/20 font-mono text-[10px] font-bold text-purple">
                       {String(c["type"]).slice(0, 2).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -388,7 +388,7 @@ function StatCell({
 }: {
   label: string
   value: string
-  tone?: "green"
+  tone?: "success"
   mono?: boolean
 }) {
   return (
@@ -397,7 +397,7 @@ function StatCell({
       <div
         className={cn(
           "mt-0.5 truncate text-[13px] font-semibold tabular-nums",
-          tone === "green" && "text-emerald-400",
+          tone === "success" && "text-success",
           mono && "font-mono text-[11px] font-medium",
         )}
         title={value}
@@ -419,7 +419,7 @@ function PlainStepRow({ step, override }: { step: PlainStep; override?: Pipeline
       <span
         className={cn(
           "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-medium",
-          isTrigger ? "bg-amber-500/15 text-amber-400" : "bg-white/[0.06] text-muted-foreground",
+          isTrigger ? "bg-warn/15 text-warn" : "bg-white/[0.06] text-muted-foreground",
         )}
       >
         {isTrigger ? <Clock className="h-3 w-3" aria-hidden /> : step.index}
@@ -433,7 +433,7 @@ function PlainStepRow({ step, override }: { step: PlainStep; override?: Pipeline
                 "ml-1.5 rounded px-1.5 py-px align-middle text-[9.5px] font-medium",
                 step.determinism === "ai"
                   ? "bg-indigo-500/15 text-indigo-300"
-                  : "bg-violet-500/15 text-violet-300",
+                  : "bg-purple/15 text-purple",
               )}
             >
               {step.determinism === "ai" ? "AI" : "script"}
@@ -538,18 +538,18 @@ function LastRunCard({
   const isFailed = run.status === "failed"
   const StatusIcon = isCompleted ? CheckCircle2 : isFailed ? XCircle : Activity
   const statusTone = isCompleted
-    ? { bg: "bg-emerald-500/20", text: "text-emerald-400" }
+    ? { bg: "bg-success/20", text: "text-success" }
     : isFailed
-      ? { bg: "bg-rose-500/20", text: "text-rose-400" }
-      : { bg: "bg-blue-500/20", text: "text-blue-400" }
+      ? { bg: "bg-destructive/20", text: "text-destructive" }
+      : { bg: "bg-primary/20", text: "text-primary" }
 
   return (
     <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
       <div
         className={cn(
           "flex items-center gap-3 border-b border-border/40 px-4 py-3",
-          isCompleted && "bg-gradient-to-r from-emerald-500/[0.04] to-transparent",
-          isFailed && "bg-gradient-to-r from-rose-500/[0.04] to-transparent",
+          isCompleted && "bg-gradient-to-r from-success/[0.04] to-transparent",
+          isFailed && "bg-gradient-to-r from-destructive/[0.04] to-transparent",
         )}
       >
         <div
@@ -601,7 +601,7 @@ function LastRunCard({
 
       <div className="space-y-3 p-4">
         {run.error_message && (
-          <div className="rounded-md border border-rose-500/30 bg-rose-500/[0.06] px-3 py-2 font-mono text-[11px] text-rose-300">
+          <div className="rounded-md border border-destructive/30 bg-destructive/[0.06] px-3 py-2 font-mono text-[11px] text-destructive">
             {run.failed_at_step && <span className="opacity-70">{run.failed_at_step}: </span>}
             {run.error_message}
           </div>
@@ -618,7 +618,7 @@ function LastRunCard({
         {workspaceId && (
           <Link
             href={`/activity?run=${encodeURIComponent(run.id)}`}
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-500/20 px-2.5 py-1.5 text-[11px] font-medium text-blue-400 transition-colors hover:bg-blue-500/30"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary/20 px-2.5 py-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/30"
           >
             <ExternalLink className="h-3 w-3" />
             Open full trace in Activity
@@ -640,13 +640,13 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
         title={run.status}
         className={cn(
           "h-2.5 w-2.5 shrink-0 rounded-full",
-          run.status === "completed" && "bg-emerald-500",
-          run.status === "failed" && "bg-rose-500",
-          run.status === "running" && "bg-blue-500",
-          run.status === "queued" && "bg-amber-500",
+          run.status === "completed" && "bg-success",
+          run.status === "failed" && "bg-destructive",
+          run.status === "running" && "bg-primary",
+          run.status === "queued" && "bg-warn",
           run.status === "cancelled" && "bg-muted-foreground/40",
-          run.status === "dry_run" && "bg-violet-500",
-          run.status === "interrupted" && "bg-amber-500",
+          run.status === "dry_run" && "bg-purple",
+          run.status === "interrupted" && "bg-warn",
         )}
       />
       <span className="truncate font-mono text-muted-foreground">{run.id.slice(0, 16)}…</span>
@@ -657,7 +657,7 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
       <span className="shrink-0 text-right tabular-nums text-muted-foreground">
         {run.duration_ms > 0 ? formatDurationDecimal(run.duration_ms) : "—"}
       </span>
-      <span className={cn("shrink-0 text-right text-muted-foreground", isFailed && "text-rose-400")}>
+      <span className={cn("shrink-0 text-right text-muted-foreground", isFailed && "text-destructive")}>
         {relTime(run.started_at)}
       </span>
     </div>

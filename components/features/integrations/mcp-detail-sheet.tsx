@@ -191,9 +191,9 @@ export function MCPDetailSheet({
             <div className="flex-1 overflow-y-auto p-4">
               <TabsContent value="overview" className="m-0 space-y-3">
                 <Field label="Status">
-                  {server.auth_status === "connected" ? <span className="text-emerald-400">Connected</span>
-                    : server.auth_status === "missing" ? <span className="text-red-400">No credential</span>
-                    : server.auth_status === "expired" ? <span className="text-amber-400">Expired</span>
+                  {server.auth_status === "connected" ? <span className="text-success">Connected</span>
+                    : server.auth_status === "missing" ? <span className="text-destructive">No credential</span>
+                    : server.auth_status === "expired" ? <span className="text-warn">Expired</span>
                     : <span className="text-muted-foreground">No auth</span>}
                 </Field>
                 <Field label="Transport">{server.transport}</Field>
@@ -215,8 +215,8 @@ export function MCPDetailSheet({
                 </div>
 
                 {overCeiling && (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] p-3 text-xs flex gap-2">
-                    <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+                  <div className="rounded-md border border-warn/30 bg-warn/[0.05] p-3 text-xs flex gap-2">
+                    <AlertTriangle className="h-4 w-4 text-warn shrink-0" />
                     <span className="text-foreground/80">
                       <strong>{enabledCount} active tools</strong> &mdash; many active tools degrade model
                       quality. Consider disabling unused tools (Cursor recommends ~40 max).
@@ -227,7 +227,7 @@ export function MCPDetailSheet({
                 {toolsLoading ? (
                   <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
                 ) : totalCount === 0 ? (
-                  <div className="rounded-md border border-white/10 bg-zinc-950 p-4 text-xs text-muted-foreground">
+                  <div className="rounded-md border border-white/10 bg-background p-4 text-xs text-muted-foreground">
                     No tools recorded yet. Click <strong>Refresh</strong> after a successful test
                     connection to populate this list. Until then the server exposes whatever
                     tools the upstream MCP server publishes (default: all enabled).
@@ -240,7 +240,7 @@ export function MCPDetailSheet({
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.1, delay: Math.min(idx, 30) * 0.01 }}
-                        className="flex items-start gap-3 rounded-md border border-white/10 bg-zinc-950 p-3"
+                        className="flex items-start gap-3 rounded-md border border-white/10 bg-background p-3"
                       >
                         <Switch
                           checked={t.enabled}
@@ -262,7 +262,7 @@ export function MCPDetailSheet({
               </TabsContent>
 
               <TabsContent value="logs" className="m-0">
-                <div className="rounded-md border border-white/10 bg-zinc-950 p-4 text-xs text-muted-foreground">
+                <div className="rounded-md border border-white/10 bg-background p-4 text-xs text-muted-foreground">
                   Tool-call logs land in a follow-up ticket. The data layer (mcp_tool_calls table from v32)
                   is already populated; the UI binding ships next.
                 </div>
@@ -278,7 +278,7 @@ export function MCPDetailSheet({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="w-full justify-start text-red-400 border-red-500/30 hover:bg-red-500/[0.05]"
+                    className="w-full justify-start text-destructive border-destructive/30 hover:bg-destructive/[0.05]"
                     onClick={() => setConfirmDelete(true)}
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />

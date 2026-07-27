@@ -83,8 +83,8 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   return (
     <div className="space-y-4">
       {error && (
-        <Card tone="amber">
-          <div className="px-4 py-3 text-sm text-amber-300">{error}</div>
+        <Card tone="warn">
+          <div className="px-4 py-3 text-sm text-warn">{error}</div>
         </Card>
       )}
 
@@ -134,7 +134,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   className={cn(
                     "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
                     w.enabled
-                      ? "bg-blue-500/20 text-blue-400"
+                      ? "bg-primary/20 text-primary"
                       : "bg-muted text-muted-foreground",
                   )}
                 >
@@ -147,7 +147,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                       {w.enabled ? "enabled" : "disabled"}
                     </Pill>
                     {w.signing_secret_set && (
-                      <Pill tone="emerald">HMAC verified</Pill>
+                      <Pill tone="success">HMAC verified</Pill>
                     )}
                   </div>
                   <div className="font-mono text-[12px] text-muted-foreground">
@@ -178,7 +178,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   size="sm"
                   variant="ghost"
                   onClick={() => del(w)}
-                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-rose-400"
+                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-destructive"
                   title="Delete"
                   aria-label={`Delete webhook ${w.name || w.id}`}
                 >
@@ -257,12 +257,12 @@ function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDis
   }
 
   return (
-    <Card tone="emerald">
+    <Card tone="success">
       <div className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-emerald-300">Webhook created — copy values now</span>
+              <span className="text-sm font-semibold text-success">Webhook created — copy values now</span>
             </div>
             <p className="mt-1 text-[12px] text-muted-foreground">
               The signing secret is only shown once. To rotate, delete and recreate.

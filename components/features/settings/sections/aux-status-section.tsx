@@ -143,7 +143,7 @@ export function AuxStatusSection() {
         </div>
       )}
       {err && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-300">{err}</div>
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{err}</div>
       )}
       {!loading && !err && slots.length === 0 && (
         <div className="rounded-xl border border-white/8 bg-card p-4 text-sm text-muted-foreground">

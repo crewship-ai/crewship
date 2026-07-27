@@ -145,7 +145,7 @@ export function MissionTimelineClient() {
             }}
             className="shrink-0"
           >
-            <Badge variant="outline" className="gap-1 text-[10px] bg-amber-500/15 text-amber-300 border-amber-500/40 cursor-pointer">
+            <Badge variant="outline" className="gap-1 text-[10px] bg-warn/15 text-warn border-warn/40 cursor-pointer">
               <Flag className="h-3 w-3" />
               {checkpoints.length} checkpoints
             </Badge>
@@ -198,7 +198,7 @@ export function MissionTimelineClient() {
                         onClick={() => openCheckpoint(cp)}
                         className="w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-accent/40 transition-colors"
                       >
-                        <Flag className="h-3 w-3 text-amber-400 shrink-0" />
+                        <Flag className="h-3 w-3 text-warn shrink-0" />
                         <span className="text-[12px] text-foreground/80 truncate flex-1">
                           {cp.summary || "Checkpoint"}
                         </span>
@@ -222,7 +222,7 @@ export function MissionTimelineClient() {
             <>
               <SheetHeader>
                 <SheetTitle className="text-sm font-medium flex items-center gap-2">
-                  <Flag className="h-3.5 w-3.5 text-amber-400" />
+                  <Flag className="h-3.5 w-3.5 text-warn" />
                   Checkpoint
                   <span className="text-[10px] font-mono text-muted-foreground tabular-nums">
                     {selectedCheckpoint.id.slice(0, 8)}

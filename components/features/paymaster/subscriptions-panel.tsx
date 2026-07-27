@@ -49,7 +49,7 @@ export function SubscriptionsPanel({
     <Card className="py-3">
       <CardHeader className="px-4 pb-2">
         <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-          <Sparkles className="h-3 w-3 text-amber-400" />
+          <Sparkles className="h-3 w-3 text-warn" />
           Subscription plans
           <span className="text-[10px] font-normal text-muted-foreground/60 normal-case tracking-normal">
             · flat-rate, no per-call $ tracking
@@ -58,7 +58,7 @@ export function SubscriptionsPanel({
       </CardHeader>
       <CardContent className="px-3">
         {showError ? (
-          <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-3 text-[11px] text-red-300">
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-3 text-[11px] text-destructive">
             Couldn&apos;t load subscription usage ({error}). The list below is
             unavailable; metered totals above are unaffected.
           </div>
@@ -88,7 +88,7 @@ export function SubscriptionsPanel({
               >
                 <Badge
                   variant="outline"
-                  className="bg-amber-500/10 text-amber-300 border-amber-500/30 text-[10px]"
+                  className="bg-warn/10 text-warn border-warn/30 text-[10px]"
                 >
                   {r.subscription_plan}
                 </Badge>

@@ -300,7 +300,7 @@ export function ProjectSidebar({
                 />
                 {project.start_date && (
                   <div className="border-t border-border px-3 py-2">
-                    <button className="text-[11px] text-red-400 hover:underline" onClick={() => { patchProject({ start_date: null }); setStartDateOpen(false) }}>
+                    <button className="text-[11px] text-destructive hover:underline" onClick={() => { patchProject({ start_date: null }); setStartDateOpen(false) }}>
                       Remove date
                     </button>
                   </div>
@@ -335,7 +335,7 @@ export function ProjectSidebar({
                 />
                 {project.target_date && (
                   <div className="border-t border-border px-3 py-2">
-                    <button className="text-[11px] text-red-400 hover:underline" onClick={() => { patchProject({ target_date: null }); setTargetDateOpen(false) }}>
+                    <button className="text-[11px] text-destructive hover:underline" onClick={() => { patchProject({ target_date: null }); setTargetDateOpen(false) }}>
                       Remove date
                     </button>
                   </div>
@@ -435,7 +435,7 @@ export function ProjectSidebar({
                       if (e.key === "Enter") handleRenameMilestone(m.id)
                       if (e.key === "Escape") setEditingMilestoneId(null)
                     }}
-                    className="bg-transparent text-[12px] text-foreground/80 font-medium outline-none w-full border-b border-blue-400/40 pb-0.5"
+                    className="bg-transparent text-[12px] text-foreground/80 font-medium outline-none w-full border-b border-primary/40 pb-0.5"
                   />
                 ) : (
                   <button
@@ -462,7 +462,7 @@ export function ProjectSidebar({
                 {(m.issue_count ?? 0) > 0 && (
                   <div className="mt-1.5 h-1 bg-white/[0.06] rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-green-500/70 rounded-full transition-all"
+                      className="h-full bg-success/70 rounded-full transition-all"
                       style={{ width: `${progress}%` }}
                     />
                   </div>
@@ -479,13 +479,13 @@ export function ProjectSidebar({
                 value={newMilestoneName}
                 onChange={(e) => setNewMilestoneName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleAddMilestone() }}
-                className="w-full bg-transparent border border-white/[0.1] rounded px-2 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-blue-400/40"
+                className="w-full bg-transparent border border-white/[0.1] rounded px-2 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-primary/40"
               />
               <input
                 type="date"
                 value={newMilestoneDate}
                 onChange={(e) => setNewMilestoneDate(e.target.value)}
-                className="w-full bg-transparent border border-white/[0.1] rounded px-2 py-1 text-[11px] text-foreground outline-none focus:border-blue-400/40"
+                className="w-full bg-transparent border border-white/[0.1] rounded px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/40"
               />
               <div className="flex gap-1.5">
                 <button
@@ -494,7 +494,7 @@ export function ProjectSidebar({
                   className={cn(
                     "flex-1 h-6 rounded text-[11px] font-medium transition-colors",
                     newMilestoneName.trim()
-                      ? "bg-blue-600 text-white hover:bg-blue-500"
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
                       : "bg-white/[0.04] text-muted-foreground/30 cursor-not-allowed",
                   )}
                 >
@@ -532,7 +532,7 @@ export function ProjectSidebar({
             </div>
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
               <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Completed</div>
-              <div className="text-[18px] font-semibold text-green-400 tabular-nums">
+              <div className="text-[18px] font-semibold text-success tabular-nums">
                 {stats?.completed_issues ?? project.done_count}
               </div>
             </div>
@@ -579,7 +579,7 @@ export function ProjectSidebar({
               className={cn(
                 "text-[11px] px-2 py-1.5 border-b-2 transition-colors",
                 progressTab === "assignees"
-                  ? "border-blue-500 text-foreground"
+                  ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
               )}
             >
@@ -590,7 +590,7 @@ export function ProjectSidebar({
               className={cn(
                 "text-[11px] px-2 py-1.5 border-b-2 transition-colors",
                 progressTab === "labels"
-                  ? "border-blue-500 text-foreground"
+                  ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
               )}
             >

@@ -503,7 +503,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 variant="outline"
                 onClick={() => governanceAction("enable")}
                 disabled={!!busyGov || !!busyAction}
-                className="h-9 gap-2 rounded-md px-3 text-sm text-emerald-400 hover:text-emerald-300"
+                className="h-9 gap-2 rounded-md px-3 text-sm text-success hover:text-success"
                 title="Re-enable this routine so it can run again"
               >
                 {busyGov === "enable" ? <Spinner className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
@@ -514,7 +514,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 variant="outline"
                 onClick={() => governanceAction("disable")}
                 disabled={!!busyGov || !!busyAction}
-                className="h-9 gap-2 rounded-md px-3 text-sm text-rose-400 hover:text-rose-300"
+                className="h-9 gap-2 rounded-md px-3 text-sm text-destructive hover:text-destructive"
                 title="Disable (kill) this routine — it cannot run until re-enabled"
               >
                 {busyGov === "disable" ? <Spinner className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
@@ -535,7 +535,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           >
             <Button
               variant="ghost"
-              className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-rose-400"
+              className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-destructive"
               onClick={cancelActiveRun}
               disabled={cancelling || activeRuns.length === 0}
             >
@@ -551,10 +551,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           active; Reject → discarded. Only rendered for MANAGER+ when the
           routine is in the proposed state. */}
       {showApprovalBanner && (
-        <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/[0.07] px-6 py-3">
+        <div className="flex items-center gap-3 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-amber-300">This routine is awaiting approval</div>
-            <p className="mt-0.5 text-[12px] text-amber-200/70">
+            <div className="text-sm font-medium text-warn">This routine is awaiting approval</div>
+            <p className="mt-0.5 text-[12px] text-warn/70">
               It was proposed for review and can&apos;t run until a manager approves it.
             </p>
           </div>
@@ -562,7 +562,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             size="sm"
             onClick={() => governanceAction("approve")}
             disabled={!!busyGov}
-            className="h-8 gap-1.5 bg-amber-500 px-3 text-sm font-semibold text-amber-950 hover:bg-amber-400"
+            className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-warn hover:bg-warn"
           >
             {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
             Approve
@@ -572,7 +572,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             variant="outline"
             onClick={() => governanceAction("reject")}
             disabled={!!busyGov}
-            className="h-8 gap-1.5 border-amber-500/40 px-3 text-sm text-amber-200 hover:text-amber-100"
+            className="h-8 gap-1.5 border-warn/40 px-3 text-sm text-warn hover:text-warn"
           >
             {busyGov === "reject" ? <Spinner className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
             Reject
@@ -631,7 +631,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           </TabBar>
 
           {error && (
-            <div className="m-4 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-400">
+            <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           )}

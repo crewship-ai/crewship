@@ -205,9 +205,9 @@ export function CredentialPicker({
             <>
               <span className={cn(
                 "h-1.5 w-1.5 rounded-full shrink-0",
-                selectedCredential?.status === "ACTIVE" ? "bg-emerald-500" :
-                selectedCredential?.status === "PENDING" ? "bg-amber-500" :
-                selectedCredential ? "bg-red-500" : "bg-muted-foreground",
+                selectedCredential?.status === "ACTIVE" ? "bg-success" :
+                selectedCredential?.status === "PENDING" ? "bg-warn" :
+                selectedCredential ? "bg-destructive" : "bg-muted-foreground",
               )} />
               <span className="truncate font-mono">{triggerLabel}</span>
               {selectedCredential && (
@@ -310,7 +310,7 @@ export function CredentialPicker({
                       onClick={() => handleSelectCredential(cred.name)}
                     >
                       {isSelected ? (
-                        <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                        <Check className="h-3 w-3 text-success shrink-0" />
                       ) : (
                         <KeyRound className="h-3 w-3 text-muted-foreground shrink-0" />
                       )}
@@ -318,8 +318,8 @@ export function CredentialPicker({
                       {cred.status && cred.status !== "ACTIVE" && (
                         <Badge variant="outline" className={cn(
                           "h-4 text-[10px] px-1 shrink-0",
-                          cred.status === "PENDING" && "border-amber-500/50 text-amber-600",
-                          cred.status === "EXPIRED" && "border-red-500/50 text-red-600",
+                          cred.status === "PENDING" && "border-warn/50 text-warn",
+                          cred.status === "EXPIRED" && "border-destructive/50 text-destructive",
                         )}>
                           {cred.status}
                         </Badge>

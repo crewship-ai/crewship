@@ -73,12 +73,12 @@ export const MessageContent = ({
       // messages read as a hint of brand colour without going full
       // iMessage saturation.
       "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm",
-      "group-[.is-user]:bg-blue-500/10 group-[.is-user]:border group-[.is-user]:border-blue-400/20",
+      "group-[.is-user]:bg-primary/10 group-[.is-user]:border group-[.is-user]:border-primary/20",
       "group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
       "group-[.is-user]:shadow-sm",
       // Assistant bubble — anchored left with bottom-left tail.
       "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-bl-sm",
-      "group-[.is-assistant]:bg-zinc-800/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
+      "group-[.is-assistant]:bg-muted/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
       "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3 group-[.is-assistant]:text-foreground",
       "group-[.is-assistant]:shadow-sm",
       className

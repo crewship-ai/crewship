@@ -89,7 +89,7 @@ export function IssuesExplorerPanel({
               onClick={() => onProjectSelect(p.id)}
               className={cn(
                 "flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-white/[0.04] transition-colors",
-                selectedProjectId === p.id && "bg-blue-500/10 border-l-2 border-blue-500",
+                selectedProjectId === p.id && "bg-primary/10 border-l-2 border-primary",
                 selectedProjectId !== p.id && "border-l-2 border-transparent",
               )}
             >
@@ -97,7 +97,7 @@ export function IssuesExplorerPanel({
               <span className="text-[12px] text-foreground/80 truncate flex-1">{p.name}</span>
               <span className="text-[10px] text-muted-foreground/50 tabular-nums">{p.issue_count}</span>
               <div className="w-8 h-1 bg-white/[0.06] rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500/60 rounded-full" style={{ width: `${p.progress}%` }} />
+                <div className="h-full bg-primary/60 rounded-full" style={{ width: `${p.progress}%` }} />
               </div>
             </button>
           ))}
@@ -121,14 +121,14 @@ export function IssuesExplorerPanel({
                 className={cn(
                   "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
                   "hover:bg-white/[0.04]",
-                  isSelected && "bg-blue-500/10 border-l-2 border-l-blue-400",
+                  isSelected && "bg-primary/10 border-l-2 border-l-primary",
                   !isSelected && "border-l-2 border-l-transparent",
                 )}
               >
                 <div className="relative shrink-0">
                   <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
                   {issue.status === "IN_PROGRESS" && (
-                    <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-green-500 agent-active-dot" />
+                    <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-success agent-active-dot" />
                   )}
                 </div>
                 <span className="text-[10px] font-mono text-muted-foreground/60 shrink-0 w-[48px] truncate">

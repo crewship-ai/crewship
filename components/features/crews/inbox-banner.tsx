@@ -28,17 +28,17 @@ export function InboxBanner({ agentId, count, summary }: InboxBannerProps) {
   if (count <= 0) return null
 
   return (
-    <section className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
-      <Inbox className="h-4 w-4 text-amber-300 shrink-0" />
+    <section className="rounded-xl border border-warn/30 bg-warn/5 px-4 py-3 flex items-center gap-3">
+      <Inbox className="h-4 w-4 text-warn shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-amber-200">
+        <div className="text-sm text-warn">
           {count} item{count === 1 ? "" : "s"} waiting in inbox
         </div>
         {summary && <div className="text-xs text-muted-foreground truncate">{summary}</div>}
       </div>
       <Link
         href={`/journal?agent_id=${encodeURIComponent(agentId)}&entry_type=escalation,approval.requested,peer.message`}
-        className="text-xs px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 shrink-0"
+        className="text-xs px-3 py-1.5 rounded bg-warn/20 hover:bg-warn/30 text-warn border border-warn/30 shrink-0"
       >
         Open inbox
       </Link>

@@ -142,7 +142,7 @@ export function EgressAllowlistAction({ entry }: { entry: JournalEntry }) {
   // rests on an admin trusting the string they see in the button label.
   if (isConfusableHost(host)) {
     return (
-      <p className="text-[10px] text-amber-400 flex items-start gap-1">
+      <p className="text-[10px] text-warn flex items-start gap-1">
         <ShieldX className="h-3 w-3 shrink-0 mt-px" />
         <span>
           Blocked host <code className="font-mono text-foreground/80">{host}</code> contains
@@ -169,7 +169,7 @@ export function EgressAllowlistAction({ entry }: { entry: JournalEntry }) {
         type="button"
         onClick={onAdd}
         disabled={state !== "idle"}
-        className="inline-flex items-center gap-1 h-6 px-2 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-60 disabled:hover:bg-emerald-500/10"
+        className="inline-flex items-center gap-1 h-6 px-2 rounded border border-success/40 bg-success/10 text-[10px] text-success hover:bg-success/20 disabled:opacity-60 disabled:hover:bg-success/10"
       >
         <ShieldCheck className="h-3 w-3" />
         {state === "saving"

@@ -128,7 +128,7 @@ export function RotationDialog({
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="Paste the new token..."
-                className="w-full bg-zinc-950 border border-white/15 rounded-md px-3 py-2 pr-10 text-sm font-mono outline-none focus:border-blue-400"
+                className="w-full bg-background border border-white/15 rounded-md px-3 py-2 pr-10 text-sm font-mono outline-none focus:border-primary"
               />
               <button
                 type="button"
@@ -146,13 +146,13 @@ export function RotationDialog({
                 </span>
               )}
               {!testing && testResult?.valid && (
-                <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                <span className="inline-flex items-center gap-1.5 text-success">
                   <CheckCircle2 className="h-3 w-3" />
                   Valid
                 </span>
               )}
               {!testing && testResult && !testResult.valid && (
-                <span className="inline-flex items-center gap-1.5 text-amber-400">
+                <span className="inline-flex items-center gap-1.5 text-warn">
                   <XCircle className="h-3 w-3" />
                   {testResult.error || "Could not validate (will rotate anyway)"}
                 </span>
@@ -171,9 +171,9 @@ export function RotationDialog({
                   type="button"
                   onClick={() => setGrace(m)}
                   className={cn(
-                    "rounded-md border bg-zinc-950 p-2.5 text-left text-xs transition-all",
+                    "rounded-md border bg-background p-2.5 text-left text-xs transition-all",
                     grace === m
-                      ? "border-blue-400 ring-2 ring-blue-400/20"
+                      ? "border-primary ring-2 ring-primary/20"
                       : "border-white/10 hover:border-white/25",
                   )}
                 >
@@ -199,14 +199,14 @@ export function RotationDialog({
                   aria-label="Grace period in hours"
                   value={customHours}
                   onChange={(e) => setCustomHours(Number(e.target.value))}
-                  className="w-24 bg-zinc-950 border border-white/15 rounded-md px-2 py-1 text-sm outline-none focus:border-blue-400"
+                  className="w-24 bg-background border border-white/15 rounded-md px-2 py-1 text-sm outline-none focus:border-primary"
                 />
                 <span className="text-xs text-muted-foreground">hours (max 168 = 7 days)</span>
               </div>
             )}
           </div>
 
-          <div className="rounded-md border border-blue-500/25 bg-blue-500/[0.05] px-3 py-2.5 text-xs space-y-1">
+          <div className="rounded-md border border-info/25 bg-info/[0.05] px-3 py-2.5 text-xs space-y-1">
             <p className="font-medium">After grace expires:</p>
             <ul className="list-disc list-inside text-foreground/80 space-y-0.5">
               <li>Old value is permanently scrubbed from the rotation row</li>
@@ -216,7 +216,7 @@ export function RotationDialog({
           </div>
 
           {error && (
-            <div className="rounded-md border border-red-500/30 bg-red-500/[0.05] p-2 text-xs text-red-400 flex items-center gap-1.5">
+            <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] p-2 text-xs text-destructive flex items-center gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5" />
               {error}
             </div>

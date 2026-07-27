@@ -68,7 +68,7 @@ function ImageFeaturesSection({ state, setState }: { state: WizardState; setStat
   return (
     <section className="rounded-lg border border-white/10 bg-card/60 backdrop-blur-sm overflow-hidden">
       <header className="px-3.5 py-3 flex items-center gap-3 border-b border-white/5 bg-white/[0.02]">
-        <div className="h-7 w-7 rounded-md bg-blue-500/15 text-blue-300 flex items-center justify-center shrink-0">
+        <div className="h-7 w-7 rounded-md bg-info/15 text-info flex items-center justify-center shrink-0">
           <Box className="h-3.5 w-3.5" />
         </div>
         <div className="min-w-0 flex-1">
@@ -84,7 +84,7 @@ function ImageFeaturesSection({ state, setState }: { state: WizardState; setStat
           </div>
         </div>
         {isCustomized && (
-          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 font-semibold shrink-0">
+          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-info/15 text-info font-semibold shrink-0">
             customized
           </span>
         )}
@@ -122,7 +122,7 @@ function MCPSection({ state, setState, workspaceId }: { state: WizardState; setS
   return (
     <section className="rounded-lg border border-white/10 bg-card/60 backdrop-blur-sm overflow-hidden">
       <header className="px-3.5 py-3 flex items-center gap-3 border-b border-white/5 bg-white/[0.02]">
-        <div className="h-7 w-7 rounded-md bg-violet-500/15 text-violet-300 flex items-center justify-center shrink-0">
+        <div className="h-7 w-7 rounded-md bg-purple/15 text-purple flex items-center justify-center shrink-0">
           <Plug className="h-3.5 w-3.5" />
         </div>
         <div className="min-w-0 flex-1">
@@ -134,7 +134,7 @@ function MCPSection({ state, setState, workspaceId }: { state: WizardState; setS
           </div>
         </div>
         {serverCount > 0 && (
-          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 font-semibold shrink-0">
+          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-purple/15 text-purple font-semibold shrink-0">
             configured
           </span>
         )}

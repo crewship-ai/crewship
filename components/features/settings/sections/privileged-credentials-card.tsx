@@ -148,7 +148,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
       <SettingsRow
         label={
           <span className="inline-flex items-center gap-2">
-            <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />
+            <ShieldAlert className="h-3.5 w-3.5 text-warn" />
             Load credentials into privileged crews
           </span>
         }

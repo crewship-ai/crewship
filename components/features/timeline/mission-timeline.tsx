@@ -40,8 +40,8 @@ export function MissionTimeline({ missionId, entries, loading, error }: MissionT
   if (error && entries.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-16 text-center">
-        <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
-          <AlertCircle className="h-4 w-4 text-red-400" />
+        <div className="w-10 h-10 rounded-lg bg-destructive/10 flex items-center justify-center">
+          <AlertCircle className="h-4 w-4 text-destructive" />
         </div>
         <div className="text-sm text-foreground/80">Couldn&apos;t load timeline</div>
         <div className="text-[11px] text-muted-foreground max-w-sm">{error}</div>

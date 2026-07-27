@@ -70,12 +70,12 @@ export interface AgentCanvasProps {
 }
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
-  RUNNING: { label: "running", className: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", pulse: true },
-  IDLE: { label: "idle", className: "bg-zinc-700/40 text-muted-foreground border-white/10" },
-  ERROR: { label: "error", className: "bg-red-500/15 text-red-300 border-red-500/30" },
-  STOPPED: { label: "stopped", className: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
-  PENDING_REVIEW: { label: "pending review", className: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
-  EXPIRED: { label: "expired", className: "bg-slate-500/15 text-slate-400 border-slate-500/30" },
+  RUNNING: { label: "running", className: "bg-success/15 text-success border-success/30", pulse: true },
+  IDLE: { label: "idle", className: "bg-muted/40 text-muted-foreground border-white/10" },
+  ERROR: { label: "error", className: "bg-destructive/15 text-destructive border-destructive/30" },
+  STOPPED: { label: "stopped", className: "bg-warn/15 text-warn border-warn/30" },
+  PENDING_REVIEW: { label: "pending review", className: "bg-warn/15 text-warn border-warn/30" },
+  EXPIRED: { label: "expired", className: "bg-muted-foreground/15 text-muted-foreground border-border/30" },
 }
 
 /**
@@ -327,10 +327,10 @@ export function AgentCanvas({
             avatarUrl={agent.avatar_url}
             className={cn(
               "w-20 h-20 rounded-2xl transition-transform group-hover:scale-[1.03]",
-              isRunning && "ring-2 ring-emerald-500/40",
+              isRunning && "ring-2 ring-success/40",
             )}
           />
-          <span className="absolute inset-0 rounded-2xl ring-2 ring-blue-400/0 group-hover:ring-blue-400/40 transition-all pointer-events-none" />
+          <span className="absolute inset-0 rounded-2xl ring-2 ring-primary/0 group-hover:ring-primary/40 transition-all pointer-events-none" />
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -338,12 +338,12 @@ export function AgentCanvas({
               <EditableField value={agent.name} onSave={(v) => patch({ name: v })} ariaLabel="Agent name" placeholder="Name…" />
             </h1>
             <span className={cn("text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full border shrink-0", status.className)}>
-              <span className={cn("w-1.5 h-1.5 rounded-full", isRunning ? "bg-emerald-400 animate-pulse" : "bg-current")} />
+              <span className={cn("w-1.5 h-1.5 rounded-full", isRunning ? "bg-success animate-pulse" : "bg-current")} />
               {status.label}
             </span>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap mb-3">
-            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-zinc-900 border border-white/8">
+            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-muted border border-white/8">
               {agent.slug}
             </code>
             {agent.role_title && (
@@ -358,7 +358,7 @@ export function AgentCanvas({
                 <button
                   type="button"
                   onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="text-fuchsia-300 hover:underline text-xs"
+                  className="text-purple hover:underline text-xs"
                 >
                   {agent.crew.name}
                 </button>
@@ -369,7 +369,7 @@ export function AgentCanvas({
           {agent.ephemeral && (
             <div className="mb-3 text-xs">
               {isPendingHire ? (
-                <div className="inline-flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200/90">
+                <div className="inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
                   <Clock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span>
                     Requesting to join <span className="font-medium">{agent.crew?.name ?? "this crew"}</span> — approve to add it.
@@ -380,7 +380,7 @@ export function AgentCanvas({
               ) : ghost ? (
                 <span className="text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-cyan-300/80">
+                <span className="inline-flex items-center gap-1.5 text-notice/80">
                   <Clock className="h-3 w-3" /> Ephemeral hire{ttl && <span className="text-muted-foreground"> · TTL {ttl}</span>}
                 </span>
               )}
@@ -402,7 +402,7 @@ export function AgentCanvas({
             <button
               type="button"
               onClick={handleApproveHire}
-              className="px-3.5 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-sm font-medium flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg bg-success/20 hover:bg-success/30 text-success border border-success/30 text-sm font-medium flex items-center gap-1.5"
               title="Approve this ephemeral hire — the agent joins the crew and any waiting work resumes"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -424,7 +424,7 @@ export function AgentCanvas({
             <button
               type="button"
               onClick={handleStop}
-              className="px-3 py-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-sm font-medium flex items-center gap-1.5"
+              className="px-3 py-2 rounded-lg bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/30 text-sm font-medium flex items-center gap-1.5"
               title="Stop running agent"
             >
               <Square className="h-3 w-3 fill-current" />
@@ -433,7 +433,7 @@ export function AgentCanvas({
           )}
           <Link
             href={`/chat/${encodeURIComponent(agent.slug)}`}
-            className="px-3.5 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-sm font-medium flex items-center gap-2"
+            className="px-3.5 py-2 rounded-lg bg-primary hover:bg-primary text-white text-sm font-medium flex items-center gap-2"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             Chat

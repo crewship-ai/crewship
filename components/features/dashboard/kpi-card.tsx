@@ -32,8 +32,8 @@ export function KpiCard({
 }: KpiCardProps) {
   const deltaArrow = deltaDirection === "up" ? "▲" : deltaDirection === "down" ? "▼" : ""
   const deltaClass =
-    deltaDirection === "up" ? "text-emerald-400"
-      : deltaDirection === "down" ? "text-red-400"
+    deltaDirection === "up" ? "text-success"
+      : deltaDirection === "down" ? "text-destructive"
       : "text-muted-foreground"
 
   return (

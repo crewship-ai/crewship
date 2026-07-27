@@ -76,7 +76,7 @@ export function ToolsTab({
           value={toolkit}
           onChange={(e) => setToolkit(e.target.value)}
           placeholder="Toolkit slug (gmail, github…)"
-          className="w-52 rounded-lg border border-white/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+          className="w-52 rounded-lg border border-white/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
         />
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -84,7 +84,7 @@ export function ToolsTab({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tools…"
-            className="w-56 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-blue-400/50 focus:outline-none"
+            className="w-56 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
           />
         </div>
       </div>
@@ -106,7 +106,7 @@ export function ToolsTab({
         </div>
       )}
 
-      {err && <div className="text-[11px] text-red-400">{err}</div>}
+      {err && <div className="text-[11px] text-destructive">{err}</div>}
 
       {!toolkit.trim() ? (
         <EmptyHint text="Enter a toolkit slug (or pick a connected one) to list its tools." />

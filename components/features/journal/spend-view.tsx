@@ -215,7 +215,7 @@ export function SpendView() {
             </div>
 
             {crewSpend.error && (
-              <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-[12px] text-red-300 flex items-center justify-between gap-2">
+              <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-[12px] text-destructive flex items-center justify-between gap-2">
                 <span>Couldn&apos;t load spend ({crewSpend.error}).</span>
                 <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setReloadKey((k) => k + 1)}>
                   Retry

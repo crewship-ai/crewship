@@ -95,15 +95,15 @@ export function CrewNetworkPolicy({
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           {isFree ? (
-            <Globe className="h-4 w-4 text-emerald-600" />
+            <Globe className="h-4 w-4 text-success" />
           ) : (
-            <Shield className="h-4 w-4 text-amber-600" />
+            <Shield className="h-4 w-4 text-warn" />
           )}
           <CardTitle className="text-base">Network Policy</CardTitle>
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
             isFree
-              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
-              : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+              ? "bg-success text-success dark:bg-success dark:text-success"
+              : "bg-warn text-warn dark:bg-warn dark:text-warn"
           }`}>
             {isFree ? "Unrestricted" : "Restricted"}
           </span>
@@ -231,7 +231,7 @@ export function CrewNetworkPolicy({
               />
             </div>
             {privateEndpoints && (
-              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              <p className="text-[11px] text-warn dark:text-warn">
                 Also requires the instance ceiling{" "}
                 <code className="font-mono">CREWSHIP_ALLOW_PRIVATE_ENDPOINTS</code> on the
                 server — without it the crew flag alone will not unblock a private target.

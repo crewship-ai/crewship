@@ -245,7 +245,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
               className={cn(
                 "inline-flex items-center gap-1.5 px-3 py-2 text-xs border-b-2 -mb-px transition-colors",
                 isActive
-                  ? "border-emerald-500 text-emerald-300 font-medium"
+                  ? "border-success text-success font-medium"
                   : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
@@ -255,7 +255,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
               {count > 0 && (
                 <span className={cn(
                   "ml-1 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full text-[10px] font-mono",
-                  isActive ? "bg-emerald-500/20 text-emerald-200" : "bg-muted text-muted-foreground",
+                  isActive ? "bg-success/20 text-success/70" : "bg-muted text-muted-foreground",
                 )}>
                   {count}
                 </span>
@@ -268,7 +268,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
       {/* ── Body ── */}
       <div id={`p2-panel-${active}`} role="tabpanel">
         {err && (
-          <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300 mb-3">
+          <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive mb-3">
             {err}
           </div>
         )}

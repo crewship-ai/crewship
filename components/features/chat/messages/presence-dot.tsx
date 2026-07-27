@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils"
 export type PresenceStatus = "online" | "busy" | "blocked" | "offline"
 
 const COLORS: Record<PresenceStatus, string> = {
-  online: "bg-emerald-500",
-  busy: "bg-amber-500",
-  blocked: "bg-red-500",
+  online: "bg-success",
+  busy: "bg-warn",
+  blocked: "bg-destructive",
   offline: "bg-muted-foreground/30",
 }
 

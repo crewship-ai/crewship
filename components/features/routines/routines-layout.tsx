@@ -442,7 +442,7 @@ function ImportRoutineDialog({
             placeholder='{"slug":"…","definition":{…},"versions":[…]}'
             className="h-64 w-full resize-none rounded-md border border-white/10 bg-background p-2 font-mono text-[11px]"
           />
-          {err && <div className="text-xs text-red-400">Error: {err}</div>}
+          {err && <div className="text-xs text-destructive">Error: {err}</div>}
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="ghost" onClick={onClose} disabled={busy}>
               Cancel

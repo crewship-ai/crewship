@@ -60,8 +60,8 @@ export function CrewProvisioningCard({
     // crew has no devcontainer config.
     if (enqueueStatus === "failed") {
       return (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 flex items-start gap-3">
-          <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 flex items-start gap-3">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-foreground mb-0.5">
               {crewSlug ? `Could not start build for ${crewSlug}` : "Could not start build"}
@@ -70,7 +70,7 @@ export function CrewProvisioningCard({
               {message || "Provisioning was not enqueued."}
             </div>
             {enqueueError ? (
-              <pre className="text-[11px] text-red-500/90 dark:text-red-400/90 font-mono whitespace-pre-wrap break-words mt-1 max-h-[80px] overflow-hidden">
+              <pre className="text-[11px] text-destructive/90 dark:text-destructive/90 font-mono whitespace-pre-wrap break-words mt-1 max-h-[80px] overflow-hidden">
                 {enqueueError.slice(0, 320)}
               </pre>
             ) : null}
@@ -82,8 +82,8 @@ export function CrewProvisioningCard({
     // Otherwise: warm-up state — a build was kicked off but the WS hasn't
     // replayed the plan yet. Show a placeholder spinner.
     return (
-      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
-        <Spinner className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+      <div className="rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 flex items-start gap-3">
+        <Spinner className="h-4 w-4 text-warn shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-foreground mb-0.5">
             {crewSlug ? `Building ${crewSlug}…` : "Building crew image…"}
@@ -110,16 +110,16 @@ export function CrewProvisioningCard({
         : Package
 
   const tone = crew.status === "failed"
-    ? "border-red-500/30 bg-red-500/5"
+    ? "border-destructive/30 bg-destructive/5"
     : crew.status === "completed" || recentCompleted
-      ? "border-emerald-500/30 bg-emerald-500/5"
-      : "border-amber-500/30 bg-amber-500/5"
+      ? "border-success/30 bg-success/5"
+      : "border-warn/30 bg-warn/5"
 
   const iconTone = crew.status === "failed"
-    ? "text-red-500"
+    ? "text-destructive"
     : crew.status === "completed" || recentCompleted
-      ? "text-emerald-500"
-      : "text-amber-500"
+      ? "text-success"
+      : "text-warn"
 
   const label = crew.status === "failed"
     ? `Build failed for ${crew.name}`

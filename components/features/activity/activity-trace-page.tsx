@@ -402,7 +402,7 @@ export function ActivityTracePage() {
             </div>
           )}
           {traceError && (
-            <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-300">
+            <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-destructive/30 bg-destructive/10 px-3 py-1 text-xs text-destructive">
               Trace unavailable: {traceError}
             </div>
           )}
@@ -412,7 +412,7 @@ export function ActivityTracePage() {
             * its step.completed events anymore. Without this hint
             * the user thinks the toggle is broken. */}
           {heatmapMode !== "off" && run !== null && stepMetrics.size === 0 && (
-            <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-200">
+            <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-warn/30 bg-warn/10 px-3 py-1 text-[11px] text-warn">
               Heatmap data not available for this run — older runs may have
               rolled out of the metrics window
             </div>
@@ -487,7 +487,7 @@ function HeatmapButton({
       className={cn(
         "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
         active
-          ? "bg-blue-500/15 text-blue-300"
+          ? "bg-primary/15 text-primary"
           : "text-muted-foreground/70 hover:text-foreground/80",
       )}
     >

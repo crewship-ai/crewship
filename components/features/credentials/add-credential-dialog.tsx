@@ -361,12 +361,12 @@ export function AddCredentialDialog({
           )}
 
           {type === "AI_CLI_TOKEN" && (
-            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-label text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200 space-y-1">
+            <div className="rounded-md border border-info bg-info/10 p-3 text-label text-info dark:border-info dark:bg-info/20 dark:text-info space-y-1">
               <p className="font-medium">How to get a setup token:</p>
               <ol className="list-decimal list-inside space-y-0.5">
                 <li>Open terminal on your computer</li>
                 <li>
-                  Run: <code className="rounded bg-blue-100 px-1 font-mono dark:bg-blue-900">claude setup-token</code>
+                  Run: <code className="rounded bg-info/15 px-1 font-mono dark:bg-info/25">claude setup-token</code>
                 </li>
                 <li>Copy the entire output and paste below</li>
               </ol>
@@ -418,7 +418,7 @@ export function AddCredentialDialog({
                   Test Key
                 </Button>
                 {testResult && (
-                  <span className={`flex items-center gap-1 text-label ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                  <span className={`flex items-center gap-1 text-label ${testResult.valid ? "text-success dark:text-success" : "text-destructive"}`}>
                     {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
                     {testResult.valid ? "Valid" : testResult.error || "Invalid"}
                   </span>

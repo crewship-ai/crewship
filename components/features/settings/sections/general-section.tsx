@@ -239,7 +239,7 @@ export function GeneralSection({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
               Crews
             </span>
           }
@@ -251,7 +251,7 @@ export function GeneralSection({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-purple" />
               Members
             </span> as unknown as string
           }

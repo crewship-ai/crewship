@@ -146,7 +146,7 @@ describe("JournalEntryCard — keeper.decision denied", () => {
       />,
     )
     // The denial path applies a red border class — render shouldn't crash.
-    expect(container.querySelector(".border-red-500\\/50")).toBeTruthy()
+    expect(container.querySelector(".border-destructive\\/50")).toBeTruthy()
   })
 
   it("'denied' also flagged", () => {
@@ -158,7 +158,7 @@ describe("JournalEntryCard — keeper.decision denied", () => {
         })}
       />,
     )
-    expect(container.querySelector(".border-red-500\\/50")).toBeTruthy()
+    expect(container.querySelector(".border-destructive\\/50")).toBeTruthy()
   })
 
   it("'approve' is NOT flagged red", () => {
@@ -170,7 +170,7 @@ describe("JournalEntryCard — keeper.decision denied", () => {
         })}
       />,
     )
-    expect(container.querySelector(".border-red-500\\/50")).toBeFalsy()
+    expect(container.querySelector(".border-destructive\\/50")).toBeFalsy()
   })
 })
 

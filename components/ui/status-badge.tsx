@@ -49,7 +49,7 @@ interface StatusDotProps extends React.ComponentProps<"span"> {
  * sidebar rails, toolbar strips). Uses STATUS_DOT_CLASSES from lib/colors.
  */
 export function StatusDot({ status, live = false, className, ...props }: StatusDotProps) {
-  const dotClass = STATUS_DOT_CLASSES[status] ?? "bg-slate-400"
+  const dotClass = STATUS_DOT_CLASSES[status] ?? "bg-muted-foreground"
   return (
     <span
       className={cn(

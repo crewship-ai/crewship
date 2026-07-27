@@ -127,7 +127,7 @@ function LogRow({
       }}
       className={cn(
         "group grid gap-2 px-2 py-[3px] items-start cursor-pointer text-[12px] leading-[18px] border-b border-border/30 hover:bg-accent/20",
-        expanded && "bg-sky-500/5",
+        expanded && "bg-primary/5",
       )}
       style={{ gridTemplateColumns: "3px 96px 110px minmax(0,1fr) 70px 14px" }}
     >
@@ -240,7 +240,7 @@ function Detail({
                 <button
                   type="button"
                   onClick={jump}
-                  className="text-sky-300 hover:text-sky-200 hover:underline underline-offset-2 transition-colors"
+                  className="text-primary hover:text-primary/80 hover:underline underline-offset-2 transition-colors"
                   title={`Filter timeline to this ${key.replace("_id", "")}`}
                 >
                   {value}

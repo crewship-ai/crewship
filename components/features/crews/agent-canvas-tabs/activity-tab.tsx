@@ -13,7 +13,7 @@ export function ActivityTab({ workspaceId, agentId }: ActivityTabProps) {
     <section className="space-y-3">
       <div className="flex items-baseline justify-between">
         <h2 className="text-lg font-semibold">Activity</h2>
-        <Link href={`/journal?agent_id=${encodeURIComponent(agentId)}`} className="text-xs text-blue-300 hover:underline">
+        <Link href={`/journal?agent_id=${encodeURIComponent(agentId)}`} className="text-xs text-primary hover:underline">
           View all →
         </Link>
       </div>

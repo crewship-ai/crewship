@@ -15,10 +15,10 @@ import { useJournalStream } from "@/hooks/use-journal-stream"
 import { apiFetch } from "@/lib/api-fetch"
 
 const SEVERITY_PILL: Record<string, string> = {
-  info: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  notice: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
-  warn: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  error: "bg-red-500/15 text-red-300 border-red-500/30",
+  info: "bg-info/15 text-info border-info/30",
+  notice: "bg-notice/15 text-notice border-notice/30",
+  warn: "bg-warn/15 text-warn border-warn/30",
+  error: "bg-destructive/15 text-destructive border-destructive/30",
 }
 
 interface CrewJournalProps {

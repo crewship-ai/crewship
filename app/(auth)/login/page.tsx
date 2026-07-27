@@ -153,7 +153,7 @@ function LoginForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {registered && (
               <div
-                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+                className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
                 role="status"
                 aria-live="polite"
               >
@@ -162,7 +162,7 @@ function LoginForm() {
             )}
             {signupSubmitted && !registered && (
               <div
-                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+                className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
                 role="status"
                 aria-live="polite"
               >
@@ -172,7 +172,7 @@ function LoginForm() {
             )}
             {expired && !error && (
               <div
-                className="rounded-md border border-amber-200/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                className="rounded-md border border-warn/40 bg-warn/10 p-3 text-sm text-warn"
                 role="status"
                 aria-live="polite"
               >

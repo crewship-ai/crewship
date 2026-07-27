@@ -207,7 +207,7 @@ export function CredentialDetailSheet({
                   {getBrand(credential.provider).cli && (
                     <Badge
                       variant="outline"
-                      className="text-[9px] px-1 font-mono shrink-0 border-blue-400/50 text-blue-300"
+                      className="text-[9px] px-1 font-mono shrink-0 border-info/50 text-info"
                       title="Crewship uses this credential to authenticate the agent's CLI inside the container"
                     >
                       CLI
@@ -281,8 +281,8 @@ export function CredentialDetailSheet({
                   )}
                 </Field>
                 {credential.last_error && (
-                  <div className="rounded-md border border-red-500/30 bg-red-500/[0.05] p-3">
-                    <div className="flex items-center gap-1.5 text-xs text-red-400 font-medium">
+                  <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] p-3">
+                    <div className="flex items-center gap-1.5 text-xs text-destructive font-medium">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       Last error
                     </div>
@@ -298,7 +298,7 @@ export function CredentialDetailSheet({
                     <ul className="space-y-1">
                       {credential.last_used_ips.map((ip) => (
                         <li key={ip} className="text-xs font-mono text-foreground/80 flex items-center gap-2">
-                          <span className="h-1 w-1 rounded-full bg-emerald-500/60" />
+                          <span className="h-1 w-1 rounded-full bg-success/60" />
                           {ip}
                         </li>
                       ))}
@@ -317,7 +317,7 @@ export function CredentialDetailSheet({
                     Test now
                   </Button>
                   {testResult && (
-                    <span className={cn("text-xs inline-flex items-center gap-1.5", testResult.valid ? "text-emerald-400" : "text-red-400")}>
+                    <span className={cn("text-xs inline-flex items-center gap-1.5", testResult.valid ? "text-success" : "text-destructive")}>
                       {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
                       {testResult.valid ? "Valid" : (testResult.error || "Invalid")}
                     </span>
@@ -330,7 +330,7 @@ export function CredentialDetailSheet({
                 {credential.agent_names.length > 0 ? (
                   <ul className="space-y-1.5">
                     {credential.agent_names.map((name) => (
-                      <li key={name} className="rounded-md border border-white/10 bg-zinc-950 px-3 py-2 text-sm flex items-center gap-2">
+                      <li key={name} className="rounded-md border border-white/10 bg-background px-3 py-2 text-sm flex items-center gap-2">
                         <Users className="h-3.5 w-3.5 text-muted-foreground" />
                         {name}
                       </li>
@@ -342,7 +342,7 @@ export function CredentialDetailSheet({
                   </p>
                 )}
                 {credential.mcp_used && (
-                  <div className="mt-3 rounded-md border border-blue-500/25 bg-blue-500/[0.05] px-3 py-2 text-xs">
+                  <div className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-xs">
                     Also referenced by one or more MCP server integrations.
                   </div>
                 )}
@@ -361,7 +361,7 @@ export function CredentialDetailSheet({
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.12, delay: idx * 0.015 }}
-                        className="rounded-md border border-white/10 bg-zinc-950 px-3 py-2 text-xs"
+                        className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <Badge variant="outline" className="text-[10px] px-1.5 font-mono">{e.event_type}</Badge>
@@ -477,13 +477,13 @@ export function CredentialDetailSheet({
                       </Button>
                     )}
                     {valueSaved && (
-                      <span className="text-[11px] text-emerald-400 inline-flex items-center gap-1">
+                      <span className="text-[11px] text-success inline-flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" />
                         Saved
                       </span>
                     )}
                     {valueError && (
-                      <span className="text-[11px] text-red-400 inline-flex items-center gap-1">
+                      <span className="text-[11px] text-destructive inline-flex items-center gap-1">
                         <XCircle className="h-3 w-3" />
                         {valueError}
                       </span>
@@ -503,14 +503,14 @@ export function CredentialDetailSheet({
                     </div>
                     <ul className="space-y-1">
                       {rotations.slice(0, 5).map((r) => (
-                        <li key={r.id} className="text-xs flex items-center gap-2 px-2 py-1 rounded border border-white/10 bg-zinc-950">
+                        <li key={r.id} className="text-xs flex items-center gap-2 px-2 py-1 rounded border border-white/10 bg-background">
                           <Badge
                             variant="outline"
                             className={cn(
                               "text-[10px] px-1.5",
-                              r.status === "ACTIVE" && "border-blue-400/40 text-blue-300",
-                              r.status === "EXPIRED" && "border-emerald-400/30 text-emerald-300",
-                              r.status === "CANCELLED" && "border-amber-400/30 text-amber-300",
+                              r.status === "ACTIVE" && "border-primary/40 text-primary",
+                              r.status === "EXPIRED" && "border-success/30 text-success",
+                              r.status === "CANCELLED" && "border-warn/30 text-warn",
                             )}
                           >
                             {r.status}
@@ -530,7 +530,7 @@ export function CredentialDetailSheet({
                   <Button
                     size="sm"
                     variant="outline"
-                    className="w-full justify-start text-red-400 border-red-500/30 hover:bg-red-500/[0.05]"
+                    className="w-full justify-start text-destructive border-destructive/30 hover:bg-destructive/[0.05]"
                     onClick={() => setConfirmDelete(true)}
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />

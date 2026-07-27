@@ -580,7 +580,7 @@ export function SettingsPageClient() {
         )}
         {success && (
           <div className="flex items-center gap-2 rounded-md border border-border bg-surface-subtle px-3 py-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <CheckCircle2 className="h-4 w-4 text-success" />
             <p className="text-body">{success}</p>
           </div>
         )}

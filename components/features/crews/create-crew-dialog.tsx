@@ -215,7 +215,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             type="button"
             onClick={advance}
             disabled={!stepValid || busy}
-            className="text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+            className="text-sm px-3.5 py-1.5 rounded bg-primary hover:bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
             {busy && <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />}
             {step === 5 ? (busy ? "Creating…" : "✓ Create crew") : "Continue"}
@@ -245,9 +245,9 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
               className={cn(
                 "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center transition-all shrink-0",
                 n < step
-                  ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300 hover:scale-110 cursor-pointer"
+                  ? "bg-success/20 border-success/50 text-success hover:scale-110 cursor-pointer"
                   : n === step
-                    ? "bg-blue-500/20 border-blue-400 text-blue-300 ring-2 ring-blue-400/20"
+                    ? "bg-primary/20 border-primary text-primary ring-2 ring-primary/20"
                     : "bg-card border-white/10 text-muted-foreground cursor-default",
               )}
               aria-label={`Step ${n}: ${STEP_LABELS[n].title}`}
@@ -264,7 +264,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
               aria-hidden="true"
               className={cn(
                 "flex-1 h-px min-w-[16px] transition-colors",
-                n < step ? "bg-emerald-400/40" : "bg-white/10",
+                n < step ? "bg-success/40" : "bg-white/10",
               )}
             />
           )}

@@ -617,7 +617,7 @@ export function ProfileSection({
       <SettingsCard title="Session" description="Your current login session on this device">
         <SettingsRow label="Status">
           <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
             Active
           </span>
         </SettingsRow>
@@ -969,7 +969,7 @@ function TokenListItem({
             used {timeAgo(token.last_used_at)}
           </span>
         )}
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+        <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>

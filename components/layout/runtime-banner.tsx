@@ -38,9 +38,9 @@ export function RuntimeBanner() {
   if (!visible || dismissed) return null
 
   return (
-    <div className="flex items-center gap-2 bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs">
-      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-      <span className="text-amber-800">
+    <div className="flex items-center gap-2 bg-warn border-b border-warn px-4 py-2 text-xs">
+      <AlertTriangle className="h-3.5 w-3.5 text-warn shrink-0" />
+      <span className="text-warn">
         No container runtime detected. Agents cannot run.{" "}
         <a
           href="https://docs.docker.com/get-docker/"
@@ -57,7 +57,7 @@ export function RuntimeBanner() {
       </span>
       <button
         onClick={() => setDismissed(true)}
-        className="ml-auto text-amber-600 hover:text-amber-800"
+        className="ml-auto text-warn hover:text-warn"
         aria-label="Dismiss"
       >
         <X className="h-3.5 w-3.5" />

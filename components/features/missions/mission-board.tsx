@@ -125,8 +125,8 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                           <div className="flex items-center gap-1.5">
                             {task.status === "IN_PROGRESS" && (
                               <span className="relative flex h-2 w-2 shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                               </span>
                             )}
                             <TaskStatusBadge status={task.status} />
@@ -179,31 +179,31 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
             <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
               {taskStats.completed > 0 && (
                 <div
-                  className="h-full bg-emerald-500 transition-all duration-700 ease-out"
+                  className="h-full bg-success transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.completed / taskStats.total) * 100}%` }}
                 />
               )}
               {taskStats.in_progress > 0 && (
                 <div
-                  className="h-full bg-blue-500 animate-pulse transition-all duration-700 ease-out"
+                  className="h-full bg-info animate-pulse transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.in_progress / taskStats.total) * 100}%` }}
                 />
               )}
               {taskStats.failed > 0 && (
                 <div
-                  className="h-full bg-red-500 transition-all duration-700 ease-out"
+                  className="h-full bg-destructive transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.failed / taskStats.total) * 100}%` }}
                 />
               )}
               {taskStats.awaiting_approval > 0 && (
                 <div
-                  className="h-full bg-violet-500 transition-all duration-700 ease-out"
+                  className="h-full bg-purple transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.awaiting_approval / taskStats.total) * 100}%` }}
                 />
               )}
               {taskStats.blocked > 0 && (
                 <div
-                  className="h-full bg-orange-500 transition-all duration-700 ease-out"
+                  className="h-full bg-warn transition-all duration-700 ease-out"
                   style={{ width: `${(taskStats.blocked / taskStats.total) * 100}%` }}
                 />
               )}
@@ -212,22 +212,22 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
           <div className="flex items-center gap-4 text-label text-muted-foreground">
             <span><AnimatedNumber value={taskStats.completed} /> / {taskStats.total} tasks</span>
             {taskStats.in_progress > 0 && (
-              <span className="text-blue-600 flex items-center gap-1">
+              <span className="text-primary flex items-center gap-1">
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary" />
                 </span>
                 {taskStats.in_progress} working
               </span>
             )}
             {taskStats.awaiting_approval > 0 && (
-              <span className="text-violet-600">{taskStats.awaiting_approval} awaiting approval</span>
+              <span className="text-purple">{taskStats.awaiting_approval} awaiting approval</span>
             )}
             {taskStats.blocked > 0 && (
-              <span className="text-orange-600">{taskStats.blocked} blocked</span>
+              <span className="text-warn">{taskStats.blocked} blocked</span>
             )}
             {taskStats.failed > 0 && (
-              <span className="text-red-600">{taskStats.failed} failed</span>
+              <span className="text-destructive">{taskStats.failed} failed</span>
             )}
           </div>
         </div>

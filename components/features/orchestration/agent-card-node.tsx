@@ -26,27 +26,27 @@ export interface AgentCardData {
 
 const statusConfig = {
   active: {
-    dot: "bg-green-500",
+    dot: "bg-success",
     pulse: true,
-    border: "border-green-500/20",
+    border: "border-success/20",
     bg: "bg-[#0a1f0f]/60",
   },
   idle: {
-    dot: "bg-slate-400",
+    dot: "bg-muted-foreground",
     pulse: false,
     border: "border-border",
     bg: "bg-[#0f1115]/60",
   },
   blocked: {
-    dot: "bg-amber-500",
+    dot: "bg-warn",
     pulse: false,
-    border: "border-amber-500/20",
+    border: "border-warn/20",
     bg: "bg-[#1f1a0a]/60",
   },
   error: {
-    dot: "bg-red-500",
+    dot: "bg-destructive",
     pulse: false,
-    border: "border-red-500/20",
+    border: "border-destructive/20",
     bg: "bg-[#1f0a0a]/60",
   },
 } as const
@@ -96,7 +96,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
 
           {/* Lead badge */}
           {d.isLead && (
-            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30 text-[8px] font-semibold text-violet-400 uppercase tracking-wider shrink-0">
+            <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-purple/20 border border-purple/30 text-[8px] font-semibold text-purple uppercase tracking-wider shrink-0">
               <Crown className="h-2.5 w-2.5" />
               Lead
             </span>
@@ -104,7 +104,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
 
           {/* Memory icon */}
           {d.memoryEnabled && (
-            <Brain className="h-3 w-3 text-cyan-400/60 shrink-0" />
+            <Brain className="h-3 w-3 text-notice/60 shrink-0" />
           )}
         </div>
 
@@ -150,7 +150,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
         {/* Current task */}
         {d.currentTask && (
           <div className="mt-1.5 pt-1.5 border-t border-border pl-11">
-            <p className="text-[9px] text-blue-300/50 italic truncate">
+            <p className="text-[9px] text-info/50 italic truncate">
               {d.currentTask}
             </p>
           </div>

@@ -31,7 +31,7 @@ describe("routineStatusBadge", () => {
     // hand-rolled amber map — matches the approval pills everywhere else.
     expect(b!.className).toBe(STATUS_BADGE_CLASSES.AWAITING_APPROVAL)
     expect(b!.dot).toBe(STATUS_DOT_CLASSES.AWAITING_APPROVAL)
-    expect(b!.className).toContain("violet")
+    expect(b!.className).toContain("purple")
   })
   it("maps a disabled routine to the shared muted (SKIPPED) palette", () => {
     const b = routineStatusBadge("disabled")

@@ -54,7 +54,7 @@ function ToolbarButton({
         "p-1.5 rounded transition-colors",
         "hover:bg-white/[0.08] disabled:opacity-30 disabled:pointer-events-none",
         active
-          ? "bg-blue-500/20 text-blue-400"
+          ? "bg-primary/20 text-primary"
           : "text-muted-foreground/60 hover:text-muted-foreground",
       )}
     >
@@ -85,7 +85,7 @@ function BubbleButton({
       className={cn(
         "p-1 rounded transition-colors",
         "hover:bg-white/[0.12]",
-        active ? "text-blue-400 bg-blue-500/20" : "text-white/70",
+        active ? "text-primary bg-primary/20" : "text-white/70",
       )}
     >
       {children}
@@ -156,7 +156,7 @@ function LanguageSelector({
                   "w-full text-left px-3 py-1.5 text-[11px] font-mono",
                   "hover:bg-white/[0.08] transition-colors",
                   lang.value === language
-                    ? "text-blue-400 bg-blue-500/10"
+                    ? "text-primary bg-primary/10"
                     : "text-muted-foreground",
                 )}
               >

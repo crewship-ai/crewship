@@ -98,7 +98,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
   if (error) {
     return (
       <Card title="Version history">
-        <div className="px-4 py-3 text-sm text-rose-400">Error: {error}</div>
+        <div className="px-4 py-3 text-sm text-destructive">Error: {error}</div>
       </Card>
     )
   }
