@@ -157,6 +157,38 @@ const BUILTIN: Record<string, { label: string; color: string; Icon: typeof Mail 
 }
 
 /**
+ * Relative luminance (Rec. 709). Good enough for the two-way choices below.
+ */
+function luma(hex: string): number {
+  const h = hex.replace("#", "")
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+}
+
+/**
+ * The colour a monochrome mark is actually drawn in.
+ *
+ * Some official brand colours are black — Matrix is #000000 — and the app is
+ * dark-first, so drawing them faithfully means drawing them invisible. Matrix's
+ * own brand guidance is white-on-dark for exactly this reason, so a near-black
+ * silhouette is lifted rather than rendered as a smudge. Everything else keeps
+ * its real hex, which is the whole point of vendoring the artwork.
+ */
+function glyphColour(brand: BrandMark): string {
+  return luma(brand.color) < 0.12 ? "#E8E8EC" : brand.color
+}
+
+/**
+ * The tile's tint. Derived from the same lift, so a near-black brand does not
+ * get an invisible tile under a visible mark.
+ */
+function tintColour(brand: BrandMark): string {
+  return luma(brand.color) < 0.12 ? "#9AA0AA" : brand.color
+}
+
+/**
  * Foreground that stays legible on `hex`.
  *
  * Needed because the tiles span nearly the full lightness range — Opsgenie is
@@ -164,13 +196,7 @@ const BUILTIN: Record<string, { label: string; color: string; Icon: typeof Mail 
  * unreadable on half of them.
  */
 function readableOn(hex: string): string {
-  const h = hex.replace("#", "")
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const bl = parseInt(h.slice(4, 6), 16)
-  // Rec. 709 luma, good enough for a two-way choice.
-  const luma = (0.2126 * r + 0.7152 * g + 0.0722 * bl) / 255
-  return luma > 0.6 ? "#0B0B0F" : "#FFFFFF"
+  return luma(hex) > 0.6 ? "#0B0B0F" : "#FFFFFF"
 }
 
 /** Does this service have artwork (as opposed to a lettermark)? */
@@ -181,6 +207,17 @@ export function hasBrandMark(provider: string): boolean {
 /** The brand colour for a service, for dots and accents. */
 export function brandColor(provider: string): string | undefined {
   return BRANDS[provider]?.color ?? LETTERMARKS[provider]?.color ?? BUILTIN[provider]?.color
+}
+
+/**
+ * The colour a service is actually DRAWN in — brandColor with the near-black
+ * lift applied. They differ only for Matrix today; asserting on this is what
+ * catches "faithful to the brand, invisible to the user".
+ */
+export function displayColor(provider: string): string | undefined {
+  const brand = BRANDS[provider]
+  if (brand) return brand.fullColour ? brand.color : glyphColour(brand)
+  return LETTERMARKS[provider]?.color ?? BUILTIN[provider]?.color
 }
 
 function initials(label: string): string {
@@ -221,7 +258,7 @@ export function ProviderMark({ provider, label, className, bare }: ProviderMarkP
         aria-label={brand.label}
         className={cn("h-[62%] w-[62%]", bare && "h-full w-full")}
         fill={brand.fullColour ? undefined : "currentColor"}
-        style={brand.fullColour ? undefined : { color: brand.color }}
+        style={brand.fullColour ? undefined : { color: glyphColour(brand) }}
       >
         {brand.body}
       </svg>
@@ -238,8 +275,8 @@ export function ProviderMark({ provider, label, className, bare }: ProviderMarkP
         // the tile is tinted with the brand colour at low alpha and a hairline
         // of the same hue — enough separation without inventing a new colour.
         style={{
-          backgroundColor: `color-mix(in oklab, ${brand.color} 18%, transparent)`,
-          boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${brand.color} 35%, transparent)`,
+          backgroundColor: `color-mix(in oklab, ${tintColour(brand)} 18%, transparent)`,
+          boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${tintColour(brand)} 35%, transparent)`,
         }}
       >
         {glyph}

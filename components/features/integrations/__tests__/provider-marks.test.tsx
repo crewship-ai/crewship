@@ -1,7 +1,14 @@
 import { render } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
-import { brandColor, hasBrandMark, ProviderMark } from "../provider-marks"
+import { brandColor, displayColor, hasBrandMark, ProviderMark } from "../provider-marks"
+
+/** Rec. 709 luma of a #rrggbb string, 0–1. */
+function luma(hex: string): number {
+  const h = hex.replace("#", "")
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16))
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+}
 
 /**
  * Every service the catalog can render must resolve to *something* visible.
@@ -44,6 +51,23 @@ describe("ProviderMark", () => {
     // other way round.
     const withoutArt = PROVIDERS.filter((p) => !hasBrandMark(p))
     expect(withoutArt).toEqual(["gotify"])
+  })
+
+  it.each(PROVIDERS)("draws %s in something visible on a dark surface", (provider) => {
+    // Matrix's official brand colour is #000000. Rendering it faithfully means
+    // rendering it invisible on a dark-first UI — which is what shipped once,
+    // as a smudge on a near-black tile. Any brand whose real hex is near-black
+    // must be lifted for display; this asserts the LIFT, not the brand value.
+    const drawn = displayColor(provider)
+    expect(drawn).toBeDefined()
+    expect(luma(drawn!)).toBeGreaterThan(0.12)
+  })
+
+  it("keeps every other brand's real hex for display", () => {
+    // Only the near-black case may diverge; a lift applied more widely would
+    // quietly repaint brands we went to the trouble of vendoring accurately.
+    const diverging = PROVIDERS.filter((p) => brandColor(p) !== displayColor(p))
+    expect(diverging).toEqual(["matrix"])
   })
 
   it("tints the built-in transports rather than leaving them grey", () => {
