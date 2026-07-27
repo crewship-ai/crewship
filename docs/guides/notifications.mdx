@@ -15,6 +15,10 @@ icon: "bell"
 
 Everything else is a **section inside a tab**, in the left panel — not another top-level tab. Both panels are the same component with different inputs: the same toolbar (search + **Filter**), the same popover, the same section rows, the same active-filter chips. A page with five top tabs and two differently-behaving rails is not simpler for having more entry points.
 
+Under the sections, each panel **lists the things themselves** — your connections, your connected tool accounts — the way `/routines` lists routines. A rail that only holds section links makes you open a section to find out what is in it. Search and the Filter popover narrow that list, so what the panel shows is what the main column is showing.
+
+Picking one opens its **detail**: for a connection, which categories it may carry, which agents may post to it, and its own recent deliveries; for a tool account, whose it is, whether its authorisation still works, and which agents can act through it. Those answers used to be spread across a row, an admin-only overview and the delivery log, so nobody could see one connection whole.
+
 The **Filter** popover is the one every faceted page in the app uses (`sidebar-kit`'s `SidebarFilterButton`, as on /issues and /routines). Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers a filter that comes back empty — and a facet never narrows its own counts to zero.
 
 Managed tool accounts are **not** in the Notifications connection list. They were, and it was the most confusing thing on the page: a Discord webhook and a Gmail tool account sat in one table under one word, with different owners, different lifecycles and different meanings of "connected".
@@ -39,7 +43,7 @@ Each service carries its own brand mark in its own colour: you recognise Slack b
 
 ### Tools (MCP)
 
-Composio's six views are rows in the **left panel**, not a second tab strip inside the page's own. Its facets are Toolkit and User — Kind/Status/Scope/Service filter nothing here. The page owns the heading, the KPI row and the actions; the **API key** button appears in the sub-bar only while this tab is open, the same rule the *Everyone's connections* toggle follows.
+Composio's six views are rows in the **left panel**, not a second tab strip inside the page's own. Its facets are Toolkit and User — Kind/Status/Scope/Service filter nothing here. The page owns the heading, the KPI row and the actions. The **API key** sits at the foot of the left panel, showing which key is in use rather than being a button in the action bar — it configures the instance once, and does not belong beside *Add integration*.
 
 Its four reads — inventory, the app catalog, settings and every agent's bindings — are cached for 30 s with stale-while-revalidate (`lib/stale-cache.ts`). Leaving and re-entering the tab used to pay the full round trip again and show skeletons for it, including an N+1 fan-out over every agent. A cached surface now paints immediately and refreshes behind; **Refresh** drops the cache first, so it means refresh.
 

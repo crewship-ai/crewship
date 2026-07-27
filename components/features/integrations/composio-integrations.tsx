@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { invalidate, readThrough } from "@/lib/stale-cache"
 
 import type {
+  ConnectedAccount,
   Inventory,
   ToolkitInfo,
   ToolkitsResp,
@@ -74,6 +75,11 @@ export interface ComposioStatus {
   toolkits: { slug: string; count: number }[]
   /** Composio user id -> connected account count, for the User facet. */
   users: { id: string; count: number }[]
+  /** Every connected account, flattened — the host lists and details these. */
+  accounts: ConnectedAccount[]
+  /** Agents + their bindings, so a detail can answer "who can act through it". */
+  agents: AgentLite[]
+  bindings: AgentBindingsMap
 }
 
 export interface ComposioIntegrationsProps {
@@ -356,6 +362,11 @@ export function ComposioIntegrations({
       .sort((a, b) => b.count - a.count || a.slug.localeCompare(b.slug))
   }, [data])
 
+  const allAccounts = React.useMemo(
+    () => (data?.users ?? []).flatMap((u) => u.connected_accounts),
+    [data],
+  )
+
   const userCounts = React.useMemo(
     () =>
       (data?.users ?? [])
@@ -391,6 +402,9 @@ export function ComposioIntegrations({
       },
       toolkits: toolkitCounts,
       users: userCounts,
+      accounts: allAccounts,
+      agents,
+      bindings,
     })
   }, [
     onStatus,
@@ -401,7 +415,9 @@ export function ComposioIntegrations({
     connectedCount,
     userCount,
     agentsBound,
-    agents.length,
+    agents,
+    bindings,
+    allAccounts,
     endpointCount,
     toolkitCounts,
     userCounts,

@@ -50,6 +50,8 @@ interface ConnectionsViewProps {
   onToggleEnabled: (row: ConnectionRow, next: boolean) => Promise<void>
   onTest: (row: ConnectionRow) => Promise<void>
   onDelete: (row: ConnectionRow) => Promise<void>
+  /** Opens a row's detail. The left panel selects the same thing. */
+  onSelect: (id: string) => void
   /** Services matching the current search — the "not here, but addable" hint. */
   catalogMatches: number
 }
@@ -66,6 +68,7 @@ export function ConnectionsView({
   onToggleEnabled,
   onTest,
   onDelete,
+  onSelect,
   catalogMatches,
 }: ConnectionsViewProps) {
   const [busyId, setBusyId] = React.useState<string | null>(null)
@@ -183,7 +186,15 @@ export function ConnectionsView({
                       className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
                     >
                       <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2.5">
+                        {/* The whole identity cell opens the detail. The action
+                            cell stays outside it so Test and Delete are not
+                            nested inside a row-sized button. */}
+                        <button
+                          type="button"
+                          onClick={() => onSelect(row.id)}
+                          className="flex w-full items-center gap-2.5 text-left"
+                          title={`Open ${row.name}`}
+                        >
                           {/* The service's own mark, not the KIND icon: you
                               recognise Slack by its colour long before you
                               read the row. The kind stays its own column. */}
@@ -198,7 +209,7 @@ export function ConnectionsView({
                               {row.detail}
                             </div>
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="px-4 py-2.5 text-[11px] text-muted-foreground">
                         <span className="inline-flex items-center gap-1.5">

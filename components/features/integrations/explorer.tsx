@@ -52,6 +52,23 @@ export interface FacetOption {
   dot?: string
 }
 
+/**
+ * One thing in the list under the sections — a connection, a connected
+ * account. The panel lists them for the same reason /routines lists routines:
+ * a rail that only holds section links makes you open a section to find out
+ * what is in it, and then the list you wanted is somewhere else on screen.
+ */
+export interface ExplorerItem {
+  id: string
+  label: string
+  /** Second line: provider, user, whatever identifies this one. */
+  sublabel?: string
+  /** Provider key — renders that service's brand mark. */
+  mark?: string
+  /** Tailwind background class for a status dot. */
+  dot?: string
+}
+
 export interface FacetGroup {
   key: string
   label: string
@@ -74,8 +91,16 @@ interface ExplorerProps<K extends string> {
   facets: FacetGroup[]
   onClearFilters: () => void
 
+  /** The things this tab holds, listed under the sections. */
+  items: ExplorerItem[]
+  itemsLabel: string
+  selectedItemId: string | null
+  onItemSelect: (id: string | null) => void
+  /** Shown in place of the list when it is empty. */
+  itemsEmpty?: React.ReactNode
+
   onToggleCollapse: () => void
-  /** Rendered under the sections — an empty-state nudge, usually. */
+  /** Rendered at the very bottom — instance-level controls, usually. */
   footer?: React.ReactNode
 }
 
@@ -97,6 +122,11 @@ export function IntegrationsExplorer<K extends string>({
   searchAriaLabel,
   facets,
   onClearFilters,
+  items,
+  itemsLabel,
+  selectedItemId,
+  onItemSelect,
+  itemsEmpty,
   onToggleCollapse,
   footer,
 }: ExplorerProps<K>) {
@@ -231,6 +261,46 @@ export function IntegrationsExplorer<K extends string>({
             )
           })}
         </SidebarSection>
+
+        <SidebarSection label={itemsLabel} count={items.length}>
+          {items.length === 0
+            ? itemsEmpty
+            : items.map((item) => (
+                <SidebarRow
+                  key={item.id}
+                  selected={selectedItemId === item.id}
+                  onSelect={() => onItemSelect(selectedItemId === item.id ? null : item.id)}
+                >
+                  {item.mark ? (
+                    <ProviderMark
+                      provider={item.mark}
+                      label={item.label}
+                      className="h-4 w-4 rounded-[4px]"
+                    />
+                  ) : item.dot ? (
+                    <span
+                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", item.dot)}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{item.label}</span>
+                    {item.sublabel && (
+                      <span className="block truncate font-mono text-[10px] text-muted-foreground/60">
+                        {item.sublabel}
+                      </span>
+                    )}
+                  </span>
+                  {item.dot && item.mark && (
+                    <span
+                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", item.dot)}
+                      aria-hidden="true"
+                    />
+                  )}
+                </SidebarRow>
+              ))}
+        </SidebarSection>
+
         {footer}
       </div>
     </div>

@@ -49,6 +49,8 @@ import { IntegrationsExplorer, type ExplorerSection } from "./explorer"
 import { mcpFacets, notificationFacets } from "./facets"
 import { EMPTY_MCP_FILTERS, type McpFilters } from "./mcp-filters"
 import { ConnectionsView } from "./views/connections-view"
+import { ConnectionDetail } from "./views/connection-detail"
+import { ToolAccountDetail } from "./views/tool-account-detail"
 import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
 import { DeliveriesView } from "./views/deliveries-view"
 import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
@@ -133,6 +135,15 @@ const SETUP_ONLY_SECTION: ExplorerSection<TabKey>[] = [
   { key: "catalog", label: "Setup", icon: KeyRound, hint: "Add a Composio API key" },
 ]
 
+/** Dot colour per connection status, shared by the list and the facets. */
+const STATUS_DOT: Record<string, string> = {
+  delivering: "bg-emerald-400",
+  failing: "bg-red-400",
+  never_used: "bg-amber-400",
+  disabled: "bg-muted-foreground/40",
+  unknown: "bg-sky-400",
+}
+
 /** How far back the "Sent · 24h" column and the status column look. */
 const DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000
 /** Enough rows for the log view without paging; the API caps server-side too. */
@@ -152,6 +163,11 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
 
   const [tab, setTab] = React.useState<IntegrationsTab>("notifications")
   const [notifySection, setNotifySection] = React.useState<NotifySection>("connections")
+  // Which item the left panel has open — a connection, or a tool account.
+  // Selecting one takes over the main column, exactly as picking a routine
+  // does on /routines.
+  const [selectedConnectionId, setSelectedConnectionId] = React.useState<string | null>(null)
+  const [selectedAccountId, setSelectedAccountId] = React.useState<string | null>(null)
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<ConnectionFilters>(EMPTY_FILTERS)
   const [collapsed, setCollapsed] = React.useState(false)
@@ -171,6 +187,9 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     counts: { apps: 0, accounts: 0, users: 0, agentsBound: 0, agentsTotal: 0, endpoints: 0 },
     toolkits: [],
     users: [],
+    accounts: [],
+    agents: [],
+    bindings: {},
   })
 
   const {
@@ -402,6 +421,56 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     [composioStatus, mcpFilters],
   )
 
+  // The panel lists the actual connections, not just section links — the
+  // /routines rail lists routines for the same reason. Search and the Filter
+  // popover narrow this list, so what you see on the left is what the main
+  // column is showing.
+  const connectionItems = React.useMemo(
+    () =>
+      visibleRows.map((r) => ({
+        id: r.id,
+        label: r.name,
+        sublabel: r.providerLabel,
+        mark: r.provider,
+        dot: STATUS_DOT[r.status],
+      })),
+    [visibleRows],
+  )
+
+  const accountItems = React.useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return composioStatus.accounts
+      .filter((a) => {
+        if (mcpFilters.toolkit && a.toolkit.slug !== mcpFilters.toolkit) return false
+        if (mcpFilters.user && a.user_id !== mcpFilters.user) return false
+        if (q && !a.toolkit.slug.toLowerCase().includes(q) && !a.user_id.toLowerCase().includes(q))
+          return false
+        return true
+      })
+      .map((a) => ({
+        id: a.id,
+        label: a.toolkit.slug,
+        sublabel: a.user_id,
+        mark: a.toolkit.slug,
+        dot: a.status.toUpperCase() === "ACTIVE" ? "bg-emerald-400" : "bg-amber-400",
+      }))
+  }, [composioStatus.accounts, mcpFilters, search])
+
+  const selectedConnection = React.useMemo(
+    () => rows.find((r) => r.id === selectedConnectionId) ?? null,
+    [rows, selectedConnectionId],
+  )
+  const selectedAccount = React.useMemo(
+    () => composioStatus.accounts.find((a) => a.id === selectedAccountId) ?? null,
+    [composioStatus.accounts, selectedAccountId],
+  )
+
+  /** This connection's slice of the log; null when the caller may not read it. */
+  const selectedDeliveries = React.useMemo(() => {
+    if (!canSeeDeliveries || !selectedConnectionId) return null
+    return deliveries.filter((d) => d.channel_id === selectedConnectionId)
+  }, [canSeeDeliveries, deliveries, selectedConnectionId])
+
   const notifySearchPlaceholder =
     notifySection === "deliveries" ? "Search deliveries…" : "Search connections…"
 
@@ -461,18 +530,6 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         }
         actions={
           <>
-            {/* Contextual: the API key belongs to Composio, so it appears only
-                where Composio does — the same rule the Everyone's-connections
-                toggle already follows. */}
-            {tab === "tools" && (
-              <SubBarSecondary
-                icon={KeyRound}
-                onClick={() => setApiKeyOpen(true)}
-                title="Composio project API key"
-              >
-                API key
-              </SubBarSecondary>
-            )}
             <SubBarSecondary icon={RefreshCw} onClick={refreshAll} title="Reload every list">
               Refresh
             </SubBarSecondary>
@@ -515,12 +572,35 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               searchAriaLabel="Search apps, tools and agents"
               facets={composioStatus.configured ? mcpFacetGroups : []}
               onClearFilters={() => setMcpFilters(EMPTY_MCP_FILTERS)}
+              items={composioStatus.configured ? accountItems : []}
+              itemsLabel="Connected accounts"
+              selectedItemId={selectedAccountId}
+              onItemSelect={setSelectedAccountId}
+              itemsEmpty={
+                <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  {composioStatus.configured
+                    ? "No accounts match. Connect one from the app catalog."
+                    : "The sections and accounts appear once an API key is saved."}
+                </p>
+              }
               onToggleCollapse={() => setCollapsed(true)}
               footer={
-                !composioStatus.configured && !composioStatus.loading ? (
-                  <p className="px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-                    The sections appear once an API key is saved.
-                  </p>
+                /* The API key configures the instance; it is not something you
+                   reach for beside "Add integration". It sits at the foot of
+                   the panel it configures, showing its state rather than just
+                   a button. */
+                composioStatus.configured ? (
+                  <button
+                    type="button"
+                    onClick={() => setApiKeyOpen(true)}
+                    className="mx-1.5 mt-2 flex w-[calc(100%-0.75rem)] items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-white/[0.03] hover:text-foreground"
+                  >
+                    <KeyRound className="h-3 w-3 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      API key{composioStatus.keyLabel ? ` · ${composioStatus.keyLabel}` : ""}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground/50">change</span>
+                  </button>
                 ) : undefined
               }
             />
@@ -536,16 +616,24 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               searchAriaLabel="Search connections and deliveries"
               facets={notifyFacetGroups}
               onClearFilters={() => setFilters(EMPTY_FILTERS)}
-              onToggleCollapse={() => setCollapsed(true)}
-              footer={
-                rows.length === 0 ? (
-                  <p className="px-3 py-4 text-[11px] leading-relaxed text-muted-foreground">
-                    Nothing connected yet. Use{" "}
-                    <span className="text-foreground/70">Add integration</span> to see every service
-                    this instance can reach.
-                  </p>
-                ) : undefined
+              items={connectionItems}
+              itemsLabel="Connections"
+              selectedItemId={selectedConnectionId}
+              onItemSelect={(id) => {
+                setSelectedConnectionId(id)
+                // A connection's detail belongs to the Connections view; picking
+                // one while the preference matrix is showing should take you to
+                // the thing you picked.
+                if (id) setNotifySection("connections")
+              }}
+              itemsEmpty={
+                <p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">
+                  {rows.length === 0
+                    ? "Nothing connected yet. Use Add integration to see every service this instance can reach."
+                    : "Nothing matches the current search and filters."}
+                </p>
               }
+              onToggleCollapse={() => setCollapsed(true)}
             />
           )}
         </aside>
@@ -553,13 +641,36 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         <div className="relative flex-1 overflow-y-auto bg-background">
           <AnimatePresence mode="wait">
             <motion.div
-              key={`${tab}:${tab === "tools" ? mcpSection : notifySection}`}
+              key={
+                tab === "tools"
+                  ? `tools:${selectedAccountId ?? mcpSection}`
+                  : `notify:${selectedConnectionId ?? notifySection}`
+              }
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
             >
-              {tab === "notifications" && notifySection === "connections" && (
+              {tab === "notifications" &&
+                notifySection === "connections" &&
+                selectedConnection && (
+                  <ConnectionDetail
+                    workspaceId={workspaceId}
+                    row={selectedConnection}
+                    deliveries={selectedDeliveries}
+                    onBack={() => setSelectedConnectionId(null)}
+                    onToggleEnabled={handleToggle}
+                    onTest={handleTest}
+                    onDelete={async (row) => {
+                      await handleDelete(row)
+                      setSelectedConnectionId(null)
+                    }}
+                  />
+                )}
+
+              {tab === "notifications" &&
+                notifySection === "connections" &&
+                !selectedConnection && (
                 <ConnectionsView
                   rows={visibleRows}
                   totalRows={rows.length}
@@ -573,10 +684,20 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   onToggleEnabled={handleToggle}
                   onTest={handleTest}
                   onDelete={handleDelete}
+                  onSelect={setSelectedConnectionId}
                 />
               )}
 
-              {tab === "tools" && (
+              {tab === "tools" && selectedAccount && (
+                <ToolAccountDetail
+                  account={selectedAccount}
+                  agents={composioStatus.agents}
+                  bindings={composioStatus.bindings}
+                  onBack={() => setSelectedAccountId(null)}
+                />
+              )}
+
+              {tab === "tools" && !selectedAccount && (
                 <div className="space-y-4 p-4 md:p-6">
                   {composioStatus.configured && (
                     <>
