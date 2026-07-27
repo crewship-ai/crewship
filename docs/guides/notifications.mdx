@@ -11,24 +11,39 @@ icon: "bell"
 | Tab | Answers |
 | --- | --- |
 | **Connections** | What is hooked up, and is it working? |
-| **Catalog** | What *could* I hook up? |
 | **Tools (MCP)** | Which managed tool accounts can agents call? |
 | **Notifications** | Which categories reach me, on which connection? |
 | **Deliveries** | Why didn't that notification arrive? |
 
 Notifications and managed tools are two different kinds of integration — one is where Crewship reaches a *human*, the other is what an *agent* may call — so they keep separate tabs rather than being interleaved. What they share is the page: "what is this instance wired into" has one answer, not two screens that drift apart. Connected tool accounts still appear in the **Connections** list under the `tools` kind, read-only, because that list is the one place that question gets asked; their lifecycle stays on the Tools tab that owns it.
 
-It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart.
+It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart. **Notifications** and **Deliveries** stay here rather than moving back: the preference matrix is a grid *over these connections*, and "why didn't it arrive" is a question about them — splitting either from the list it refers to is the same two-places-for-one-thing this page was built to undo.
+
+### Adding something: one door
+
+There is no Catalog tab. Browsing what you *could* connect is a question you ask while adding, not a place you work in, and as a tab it sat at the same weight as the four you actually use.
+
+**+ Add integration** asks the kind first — **Notifications** (somewhere Crewship reaches a person) or **Tools & MCP** (something an agent can act through) — then the service, then its form. The kinds are a list in the code, so a third one later is one entry rather than a new tab and a second grid to reconcile with the first.
+
+Picking Tools jumps straight to that tab's app catalog, or to the API-key dialog when no key is set yet: browsing a catalog you cannot connect from is a dead end.
 
 The sidebar's search and its **Kind / Status / Scope / Service** facets apply to the whole page. Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers you a filter that comes back empty.
 
 ### Finding a service you have not connected yet
 
-Search on **Connections** only searches what exists. When it comes back empty but the catalog has matches, the empty state says so and links straight there — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
+Search on **Connections** only searches what exists. When it comes back empty but a service matches, the empty state says how many and opens **Add integration** — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
 
-**Catalog** is the full list, grouped into **Chat**, **Push**, **Incident**, **E-mail & webhook** and **Tools (MCP)**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out with an `off` badge — visible, and visibly unavailable, rather than missing. Picking the Composio card opens the Tools tab, which owns that connect flow.
+The service list inside that flow is grouped into **Chat**, **Push**, **Incident** and **E-mail & webhook**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out and unpickable — visible, and visibly unavailable, rather than missing.
 
-Each service carries its own brand mark in its own colour: you recognise Slack by its aubergine long before you read the label, and eleven identical grey glyphs are not a catalog you can scan. The artwork is vendored from permissively-licensed sources (CC0 SVG Logos, CC0 Simple Icons, MIT Tabler). Gotify is the one exception — no permissively-licensed mark exists for it, so it gets a lettermark in its real brand colour rather than an invented logo.
+Each service carries its own brand mark in its own colour: you recognise Slack by its aubergine long before you read the label, and a column of identical grey glyphs is not something you can scan. The artwork is vendored — CC0 SVG Logos for the full-colour marks, CC0 Simple Icons and MIT Tabler for the monochrome ones, and CC BY-SA Arcticons for Gotify, which exists nowhere under a more permissive licence. A brand whose official colour is black (Matrix) is lifted for display, because rendering it faithfully on a dark-first UI means rendering it invisible.
+
+### Tools (MCP)
+
+Composio's six views — app catalog, connected accounts, agent access, tools, triggers, MCP endpoints — are rows in the **left panel**, not a second tab strip inside the page's own. Vertical space is free, the counts fit, and a section sits next to the facets that narrow it (Toolkit, User). The page owns the heading, the KPI row and the actions; the **API key** button appears in the sub-bar only while this tab is open, the same rule the *Everyone's connections* toggle follows.
+
+The search box in the left panel drives this tab too — Composio's own three inner search boxes are suppressed while it is, so one list never has two inputs where only one works.
+
+Before a key is saved the panel shows a single **Setup** row and says the sections appear once there is a key. Six empty sections would be six dead ends.
 
 ### Seeing everyone's connections (admins)
 

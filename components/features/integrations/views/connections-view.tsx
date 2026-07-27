@@ -45,11 +45,12 @@ interface ConnectionsViewProps {
   canSeeDeliveries: boolean
   canManageWorkspace: boolean
   search: string
-  onOpenCatalog: () => void
+  /** Opens the Add-integration flow — there is no catalog tab to send them to. */
+  onOpenAdd: () => void
   onToggleEnabled: (row: ConnectionRow, next: boolean) => Promise<void>
   onTest: (row: ConnectionRow) => Promise<void>
   onDelete: (row: ConnectionRow) => Promise<void>
-  /** Catalog matches for the current search — the "not here, but there" hint. */
+  /** Services matching the current search — the "not here, but addable" hint. */
   catalogMatches: number
 }
 
@@ -61,7 +62,7 @@ export function ConnectionsView({
   canSeeDeliveries,
   canManageWorkspace,
   search,
-  onOpenCatalog,
+  onOpenAdd,
   onToggleEnabled,
   onTest,
   onDelete,
@@ -146,7 +147,7 @@ export function ConnectionsView({
           search={search}
           totalRows={totalRows}
           catalogMatches={catalogMatches}
-          onOpenCatalog={onOpenCatalog}
+          onOpenAdd={onOpenAdd}
         />
       ) : (
         <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-card">
@@ -323,12 +324,13 @@ function EmptyConnections({
   search,
   totalRows,
   catalogMatches,
-  onOpenCatalog,
+  onOpenAdd,
 }: {
   search: string
   totalRows: number
   catalogMatches: number
-  onOpenCatalog: () => void
+  /** Opens the Add-integration flow — there is no catalog tab to send them to. */
+  onOpenAdd: () => void
 }) {
   const filtered = totalRows > 0
   return (
@@ -341,7 +343,7 @@ function EmptyConnections({
       </div>
       <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
         {filtered
-          ? "Clear a facet in the sidebar, or look in the catalog for a service you have not connected yet."
+          ? "Clear a facet in the sidebar, or add a service you have not connected yet."
           : "A connection is where Crewship reaches you — a chat room, a phone, an on-call rota, an inbox or your own endpoint."}
       </p>
       {/* The honest answer to "I searched for telegram and got nothing": say
@@ -349,12 +351,12 @@ function EmptyConnections({
       {search.trim() && catalogMatches > 0 && (
         <p className="mt-3 text-xs text-muted-foreground">
           {catalogMatches} {catalogMatches === 1 ? "service matches" : "services match"}{" "}
-          <span className="font-medium text-foreground/80">“{search.trim()}”</span> in the catalog.
+          <span className="font-medium text-foreground/80">“{search.trim()}”</span> and can be added.
         </p>
       )}
-      <Button variant="soft" size="sm" className="mt-4 h-7 gap-1.5 text-xs" onClick={onOpenCatalog}>
+      <Button variant="soft" size="sm" className="mt-4 h-7 gap-1.5 text-xs" onClick={onOpenAdd}>
         <Plug className="h-3 w-3" />
-        Browse the catalog
+        Add an integration
       </Button>
     </div>
   )

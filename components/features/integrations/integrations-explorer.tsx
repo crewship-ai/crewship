@@ -229,8 +229,8 @@ export function IntegrationsExplorer({
 
         {rows.length === 0 && (
           <p className="px-3 py-4 text-[11px] leading-relaxed text-muted-foreground">
-            Nothing connected yet. Open <span className="text-foreground/70">Catalog</span> to see
-            every service this instance can deliver to.
+            Nothing connected yet. Use <span className="text-foreground/70">Add integration</span>{" "}
+            to see every service this instance can reach.
           </p>
         )}
       </div>

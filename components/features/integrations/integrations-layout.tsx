@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { Bell, Blocks, Clock, Link2, Plug, RefreshCw, Wrench } from "lucide-react"
+import { Bell, Clock, KeyRound, Link2, Plug, Plus, RefreshCw, Wrench } from "lucide-react"
 import { toast } from "sonner"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -15,9 +15,10 @@ import { useSession } from "@/hooks/use-auth"
 import { useNotificationChannels } from "@/hooks/use-notification-channels"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
 import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
+import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { NotificationPrefsSection } from "@/components/features/settings/sections/notification-prefs-section"
-import { ComposioIntegrations } from "./composio-integrations"
-import type { Inventory } from "./composio/types"
+import { ComposioIntegrations, type ComposioStatus } from "./composio-integrations"
+import type { Inventory, TabKey } from "./composio/types"
 
 import {
   applyFilters,
@@ -30,10 +31,12 @@ import {
   type ConnectionRow,
 } from "./connection-model"
 import { IntegrationsExplorer } from "./integrations-explorer"
+import { McpExplorer, mcpSectionMeta, EMPTY_MCP_FILTERS, type McpFilters } from "./mcp-explorer"
 import { ConnectionsView } from "./views/connections-view"
-import { CatalogView, catalogSize, TOOLS_SECTION } from "./views/catalog-view"
+import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
 import { DeliveriesView } from "./views/deliveries-view"
 import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
+import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dialog"
 
 /**
  * /integrations — one page, the same chrome as Routines.
@@ -57,11 +60,16 @@ import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
 // screens that drift apart.
 const TABS = [
   { id: "connections" as const, label: "Connections", icon: Link2 },
-  { id: "catalog" as const, label: "Catalog", icon: Blocks },
   { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
   { id: "notifications" as const, label: "Notifications", icon: Bell },
   { id: "deliveries" as const, label: "Deliveries", icon: Clock },
 ] as const
+
+// Catalog is deliberately NOT a tab. Browsing what you could connect is a
+// question you ask while adding something, not a place you work in, and as a
+// tab it sat at the same weight as the four that are. It is the first step of
+// "Add integration" instead — which also lets that flow ask the question the
+// old grid could not: WHICH KIND of integration, notifications or tools.
 
 type IntegrationsTab = (typeof TABS)[number]["id"]
 
@@ -87,6 +95,22 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const [filters, setFilters] = React.useState<ConnectionFilters>(EMPTY_FILTERS)
   const [collapsed, setCollapsed] = React.useState(false)
   const [addTarget, setAddTarget] = React.useState<AddChannelTarget | null>(null)
+  const [addOpen, setAddOpen] = React.useState(false)
+
+  // Tools tab: which of Composio's six views is showing, and the facets that
+  // narrow it. Held here because the left panel renders them and the main
+  // column obeys them — the same split every other tab already uses.
+  const [mcpSection, setMcpSection] = React.useState<TabKey>("accounts")
+  const [mcpFilters, setMcpFilters] = React.useState<McpFilters>(EMPTY_MCP_FILTERS)
+  const [apiKeyOpen, setApiKeyOpen] = React.useState(false)
+  const [composioStatus, setComposioStatus] = React.useState<ComposioStatus>({
+    loading: true,
+    configured: false,
+    keyLabel: null,
+    counts: { apps: 0, accounts: 0, users: 0, agentsBound: 0, agentsTotal: 0, endpoints: 0 },
+    toolkits: [],
+    users: [],
+  })
 
   const {
     channels,
@@ -105,7 +129,6 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const {
     providers,
     categories: providerCategories,
-    loading: providersLoading,
     refresh: refreshProviders,
   } = useNotificationProviders(workspaceId)
 
@@ -276,28 +299,45 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  const handlePick = (entry: { key: string; section: string; label: string }) => {
-    if (entry.section === TOOLS_SECTION) {
-      // Composio owns its own connect flow (OAuth per toolkit), so the card is
-      // a doorway to that surface rather than a dead end — which is what it
-      // was when this tab did not exist.
-      setTab("tools")
-      return
-    }
+  const handlePickService = (service: ServiceOption) => {
     setAddTarget(
-      entry.key === "email" || entry.key === "webhook"
-        ? { kind: entry.key, label: entry.label }
-        : { kind: "shoutrrr", provider: entry.key, label: entry.label },
+      service.key === "email" || service.key === "webhook"
+        ? { kind: service.key, label: service.label }
+        : { kind: "shoutrrr", provider: service.key, label: service.label },
     )
   }
 
+  /**
+   * Tools chosen in the wizard. Composio owns its own connect flow (OAuth per
+   * toolkit), so this is a doorway rather than a form — straight to the app
+   * catalog, or to the key dialog when there is no key yet, because browsing
+   * a catalog you cannot connect from is a dead end.
+   */
+  const handlePickTools = () => {
+    setTab("tools")
+    if (composioStatus.configured) {
+      setMcpSection("catalog")
+    } else {
+      setApiKeyOpen(true)
+    }
+  }
+
+  const services = React.useMemo(
+    () => buildServiceOptions(providers, usage),
+    [providers, usage],
+  )
+  const serviceSections = React.useMemo(
+    () => catalogSections(providerCategories),
+    [providerCategories],
+  )
+
   const searchPlaceholder =
-    tab === "catalog" ? "Search services…" : tab === "deliveries" ? "Search deliveries…" : "Search connections…"
+    tab === "deliveries" ? "Search deliveries…" : "Search connections…"
 
   const failing = rows.filter((r) => r.status === "failing").length
-  // Same number the Catalog tab renders — see catalogSize's comment.
+  // The number the Add-integration wizard will offer — see catalogSize.
   const serviceCount = providers.length > 0 ? catalogSize(providers.length) : 0
-  const toolCount = rows.filter((r) => r.kind === "tools").length
+  const toolCount = composioStatus.counts.accounts
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -305,11 +345,23 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         icon={Plug}
         title="Integrations"
         description={
-          <>
-            {rows.length} {rows.length === 1 ? "connection" : "connections"} ·{" "}
-            {serviceCount} {serviceCount === 1 ? "service" : "services"} available
-            {failing > 0 && ` · ${failing} failing`}
-          </>
+          tab === "tools" ? (
+            composioStatus.configured ? (
+              <>
+                {composioStatus.counts.accounts} connected ·{" "}
+                {composioStatus.counts.apps || "…"} apps available
+                {composioStatus.keyLabel && ` · key ${composioStatus.keyLabel}`}
+              </>
+            ) : (
+              <>Tools (MCP) — not configured</>
+            )
+          ) : (
+            <>
+              {rows.length} {rows.length === 1 ? "connection" : "connections"} ·{" "}
+              {serviceCount} {serviceCount === 1 ? "service" : "services"} available
+              {failing > 0 && ` · ${failing} failing`}
+            </>
+          )
         }
         ariaLabel="Integrations"
         tabs={TABS.map((t) => ({
@@ -319,11 +371,9 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           badge:
             t.id === "connections"
               ? rows.length || undefined
-              : t.id === "catalog"
-                ? serviceCount || undefined
-                : t.id === "tools"
-                  ? toolCount || undefined
-                  : undefined,
+              : t.id === "tools"
+                ? toolCount || undefined
+                : undefined,
         }))}
         activeTab={tab}
         onTabChange={setTab}
@@ -342,15 +392,27 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         }
         actions={
           <>
+            {/* Contextual: the API key belongs to Composio, so it appears only
+                where Composio does — the same rule the Everyone's-connections
+                toggle already follows. */}
+            {tab === "tools" && (
+              <SubBarSecondary
+                icon={KeyRound}
+                onClick={() => setApiKeyOpen(true)}
+                title="Composio project API key"
+              >
+                API key
+              </SubBarSecondary>
+            )}
             <SubBarSecondary icon={RefreshCw} onClick={refreshAll} title="Reload every list">
               Refresh
             </SubBarSecondary>
             <SubBarPrimary
-              icon={Plug}
-              onClick={() => setTab("catalog")}
-              title="Browse every service this instance can deliver to"
+              icon={Plus}
+              onClick={() => setAddOpen(true)}
+              title="Connect a notification service, or managed tools for agents"
             >
-              Add connection
+              Add integration
             </SubBarPrimary>
           </>
         }
@@ -367,6 +429,21 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             <div className="flex h-full flex-col items-center pt-1.5">
               <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
             </div>
+          ) : tab === "tools" ? (
+            /* The notification facets (Kind / Status / Scope / Service) mean
+               nothing for managed tools, so the panel swaps rather than
+               showing filters that filter nothing. */
+            <McpExplorer
+              status={composioStatus}
+              section={mcpSection}
+              onSectionChange={setMcpSection}
+              search={search}
+              onSearchChange={setSearch}
+              filters={mcpFilters}
+              onFiltersChange={setMcpFilters}
+              onToggleCollapse={() => setCollapsed(true)}
+              onAddApiKey={() => setApiKeyOpen(true)}
+            />
           ) : (
             <IntegrationsExplorer
               rows={rows}
@@ -399,27 +476,61 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
                   canManageWorkspace={canManageWorkspace}
                   search={search}
                   catalogMatches={catalogMatches}
-                  onOpenCatalog={() => setTab("catalog")}
+                  onOpenAdd={() => setAddOpen(true)}
                   onToggleEnabled={handleToggle}
                   onTest={handleTest}
                   onDelete={handleDelete}
                 />
               )}
 
-              {tab === "catalog" && (
-                <CatalogView
-                  providers={providers}
-                  categories={providerCategories}
-                  usage={usage}
-                  loading={providersLoading && providers.length === 0}
-                  search={search}
-                  onPick={handlePick}
-                  composioConfigured={composio.inventory?.enabled ?? false}
-                />
-              )}
-
               {tab === "tools" && (
-                <ComposioIntegrations />
+                <div className="space-y-4 p-4 md:p-6">
+                  {composioStatus.configured && (
+                    <>
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <h2 className="text-sm font-medium text-foreground/90">
+                          {mcpSectionMeta(mcpSection, composioStatus).title}
+                        </h2>
+                        <span className="text-xs text-muted-foreground">
+                          {mcpSectionMeta(mcpSection, composioStatus).subtitle}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                        <KpiCard
+                          label="Connectable apps"
+                          value={composioStatus.counts.apps || "—"}
+                          subtitle="Composio catalog"
+                        />
+                        <KpiCard
+                          label="Connected"
+                          value={composioStatus.counts.accounts}
+                          valueColor={
+                            composioStatus.counts.accounts > 0 ? "rgb(52, 211, 153)" : undefined
+                          }
+                          subtitle={`across ${composioStatus.counts.users} ${composioStatus.counts.users === 1 ? "user" : "users"}`}
+                        />
+                        <KpiCard
+                          label="Agents bound"
+                          value={composioStatus.counts.agentsBound}
+                          subtitle={`of ${composioStatus.counts.agentsTotal} agents`}
+                        />
+                        <KpiCard
+                          label="MCP endpoints"
+                          value={composioStatus.counts.endpoints}
+                          subtitle="one per bound agent"
+                        />
+                      </div>
+                    </>
+                  )}
+                  <ComposioIntegrations
+                    embedded
+                    section={composioStatus.configured ? mcpSection : undefined}
+                    search={search}
+                    apiKeyOpen={apiKeyOpen}
+                    onApiKeyOpenChange={setApiKeyOpen}
+                    onStatus={setComposioStatus}
+                  />
+                </div>
               )}
 
               {tab === "notifications" && (
@@ -441,6 +552,16 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           </AnimatePresence>
         </div>
       </div>
+
+      <AddIntegrationDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        services={services}
+        sections={serviceSections}
+        onPickService={handlePickService}
+        onPickTools={handlePickTools}
+        toolsConfigured={composioStatus.configured}
+      />
 
       <AddChannelDialog
         target={addTarget}
