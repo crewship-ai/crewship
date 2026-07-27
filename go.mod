@@ -21,7 +21,7 @@ require (
 	github.com/grafana/pyroscope-go v1.4.1
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/klauspost/compress v1.19.1
-	github.com/mattn/go-isatty v0.0.23
+	github.com/mattn/go-isatty v0.0.24
 	github.com/moby/moby/api v1.55.0
 	github.com/moby/moby/client v0.5.0
 	github.com/nicholas-fedor/shoutrrr v0.16.2
