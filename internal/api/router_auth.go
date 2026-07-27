@@ -64,13 +64,18 @@ func (r *Router) registerAuthRoutes() {
 	// new ones; the predicate there still has to handle the accounts real
 	// deployments already created.
 	//
-	// auth_google.go is left in the tree rather than deleted so turning
-	// this back on is re-registering two lines, not recovering a file from
-	// git — but nothing references it while these stay commented.
+	// auth_google.go is left in the tree rather than deleted so turning this
+	// back on is re-registering NewGoogleAuthHandler against the redirect and
+	// callback handlers, not recovering a file from git — but nothing
+	// references it while nothing is registered here.
 	//
-	//	googleAuth := NewGoogleAuthHandler(r.db, r.logger, r.authMw.validator, r.sessionsStore, r.googleClientID, r.googleSecret, r.authBaseURL)
-	//	r.mux.HandleFunc("GET /api/v1/auth/google/redirect", googleAuth.Redirect)
-	//	r.mux.HandleFunc("GET /api/v1/auth/google/callback", googleAuth.Callback)
+	// The registrations are NOT kept here commented out. cmd/gen-openapi is a
+	// regex scan over this file's source and does not strip comments, so a
+	// commented-out mux registration still lands in openapi.gen.json —
+	// publishing routes that answer 404 to anyone generating a client or
+	// fuzzing the spec. (Nor can this comment quote the call shape it is
+	// warning about: doing so put the redirect route straight back into the
+	// generated spec.)
 	//
 	// The status route stays and answers a flat false. 404ing it would
 	// leave an older frontend build waiting on a request that errors; the

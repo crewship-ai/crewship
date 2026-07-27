@@ -3115,46 +3115,6 @@
         ]
       }
     },
-    "/api/v1/auth/google/callback": {
-      "get": {
-        "operationId": "get_api_v1_auth_google_callback",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/api/v1/auth/google/redirect": {
-      "get": {
-        "operationId": "get_api_v1_auth_google_redirect",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          }
-        },
-        "tags": [
-          "auth"
-        ]
-      }
-    },
     "/api/v1/auth/google/status": {
       "get": {
         "operationId": "get_api_v1_auth_google_status",
@@ -12621,6 +12581,45 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/provision": {
+      "post": {
+        "operationId": "post_api_v1_workspaces_workspaceId_members_provision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
