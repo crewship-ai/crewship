@@ -315,6 +315,47 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
       }
     }
 
+    // Outbound notifications. The target (slack / discord / the channel type)
+    // is the useful bit at a glance — "Notified" alone doesn't tell you where
+    // it went, which is the whole reason these rows exist.
+    case "notification.delivered": {
+      const target = str(p, "target", "channel_type")
+      return {
+        ...base,
+        tone: "success",
+        title: target ? `Notified via ${target}` : "Notification sent",
+        meta: joinMeta(str(p, "category")),
+      }
+    }
+
+    case "notification.failed": {
+      const target = str(p, "target", "channel_type")
+      return {
+        ...base,
+        tone: "error",
+        title: target ? `Notification to ${target} failed` : "Notification failed",
+        detail: str(p, "detail"),
+        meta: joinMeta(str(p, "category")),
+      }
+    }
+
+    case "notification.dropped": {
+      const target = str(p, "target", "channel_type")
+      return {
+        ...base,
+        tone: "warn",
+        title: target ? `Notification to ${target} dropped` : "Notification dropped",
+        detail: str(p, "detail"),
+        meta: joinMeta(str(p, "category")),
+      }
+    }
+
+    case "mission.created":
+      return { ...base, tone: "default", title: "Issue created", detail: str(p, "details") ?? undefined }
+
+    case "mission.assigned":
+      return { ...base, tone: "default", title: "Issue assigned", detail: str(p, "details") ?? undefined }
+
     case "keeper.request":
       return { ...base, tone: "warn", title: "Requested credential", detail: e.summary || undefined }
 

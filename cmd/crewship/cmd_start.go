@@ -345,6 +345,24 @@ var startCmd = &cobra.Command{
 			notifyRouter := notifyroute.NewRouter(
 				deps.DB, notifyRouterDispatcher, srv.WSHub(), notifyRateLimiter, logger)
 			inbox.SetExternalNotifier(notifyRouter)
+			// The journal is the router's SECOND producer. The inbox above
+			// covers actionable items (approvals, escalations, failed runs);
+			// the journal covers observational ones (issue activity, budget
+			// limits, container errors, guardrail hits, migrations) that
+			// nobody wants as an inbox card but many people want in Slack.
+			// Before this, the four categories those feed were switchable
+			// rows in the preference matrix that nothing could ever deliver.
+			//
+			// AddCommitObserver, not SetCommitObserver: internal/server
+			// already registers the journal→WebSocket bridge, and replacing
+			// it would silently kill the realtime journal feed.
+			if jw := srv.JournalWriter(); jw != nil {
+				jw.AddCommitObserver(notifyRouter.ObserveJournal)
+				// Also lets the router record each outbound delivery on the
+				// journal, so "this went to Slack" appears on the Activity
+				// timeline next to the event that caused it.
+				notifyRouter.SetJournal(jw)
+			}
 			// Delivery-outbox recovery sweep (#1412): re-attempt rows a crash
 			// left 'pending' between InsertPending and the terminal mark, plus
 			// transient 'failed' rows — this is what makes the persistent

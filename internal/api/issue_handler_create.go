@@ -285,6 +285,13 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		resp.AuthoredVia = &via
 	}
 
+	// Record the creation on the journal (via the shared activity chokepoint)
+	// so it is visible on the Activity timeline and can reach a notification
+	// channel. Until now an issue appearing left no journal trace at all —
+	// only a mission_activity row and a WebSocket event that nothing outside
+	// an open browser tab could see.
+	h.logActivity(r.Context(), id, "user", callerID, "created", req.Title)
+
 	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)

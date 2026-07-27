@@ -70,41 +70,69 @@ type Writer struct {
 	notifyMu sync.Mutex
 	notifyCh chan struct{}
 
-	// commitMu guards commitObs, an optional observer invoked with the
-	// entries that just durably committed. The journal→WebSocket bridge
-	// (internal/server) registers one to forward feed-relevant entries onto
-	// the opt-in journal WS channel. The observer MUST be cheap and
-	// non-blocking (it runs on the write path) and MUST consume its slice
-	// synchronously — the backing array is reused after it returns.
+	// commitMu guards commitObs, the observers invoked with the entries that
+	// just durably committed. Two are registered in production: the
+	// journal→WebSocket bridge (internal/server) forwarding feed-relevant
+	// entries onto the opt-in journal WS channel, and the journal→notify
+	// bridge (internal/notifyroute) turning observational events into
+	// external notifications.
+	//
+	// Every observer MUST be cheap and non-blocking (they run on the write
+	// path) and MUST consume the slice synchronously — the backing array is
+	// reused after they return.
 	commitMu  sync.RWMutex
-	commitObs func([]Entry)
+	commitObs []func([]Entry)
 }
 
-// SetCommitObserver registers fn to be called after each durable commit
-// with the entries that landed. Pass nil to clear. Safe to call at any
-// time. The observer runs inline on the persist path, so it must not block
-// or retain the slice past the call.
-func (w *Writer) SetCommitObserver(fn func([]Entry)) {
+// AddCommitObserver registers fn to be called after each durable commit with
+// the entries that landed. Safe to call at any time; observers run in
+// registration order.
+//
+// This is additive on purpose. It was a single slot until the journal→notify
+// bridge needed one too, and a second SetCommitObserver call would have
+// silently unregistered the WebSocket bridge — the realtime journal feed
+// would have gone quiet with nothing to indicate why.
+//
+// Each observer runs inline on the persist path, so it must not block or
+// retain the slice past the call.
+func (w *Writer) AddCommitObserver(fn func([]Entry)) {
+	if fn == nil {
+		return
+	}
 	w.commitMu.Lock()
-	w.commitObs = fn
+	w.commitObs = append(w.commitObs, fn)
 	w.commitMu.Unlock()
 }
 
-// notifyObserver hands the just-committed entries to the registered
-// observer, if any. A panic in a third-party observer must never corrupt
-// the journal write path, so it is contained here.
+// SetCommitObserver replaces every registered observer with fn (nil clears
+// them all). Kept for tests that need a known-empty observer set; production
+// wiring uses AddCommitObserver.
+func (w *Writer) SetCommitObserver(fn func([]Entry)) {
+	w.commitMu.Lock()
+	if fn == nil {
+		w.commitObs = nil
+	} else {
+		w.commitObs = []func([]Entry){fn}
+	}
+	w.commitMu.Unlock()
+}
+
+// notifyObserver hands the just-committed entries to every registered
+// observer. A panic in one must never corrupt the journal write path NOR
+// prevent the others from running, so each call is contained separately.
 func (w *Writer) notifyObserver(committed []Entry) {
 	if len(committed) == 0 {
 		return
 	}
 	w.commitMu.RLock()
-	fn := w.commitObs
+	obs := w.commitObs
 	w.commitMu.RUnlock()
-	if fn == nil {
-		return
+	for _, fn := range obs {
+		func() {
+			defer func() { _ = recover() }()
+			fn(committed)
+		}()
 	}
-	defer func() { _ = recover() }()
-	fn(committed)
 }
 
 // afterCommit is the single post-commit fan-out: wake the SSE Notify

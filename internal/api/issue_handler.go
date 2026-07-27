@@ -89,7 +89,7 @@ func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, ac
 		WorkspaceID: workspaceID,
 		CrewID:      crewID,
 		MissionID:   missionID,
-		Type:        journal.EntryMissionStatus,
+		Type:        journalTypeForIssueAction(action),
 		Severity:    journal.SeverityInfo,
 		ActorType:   actor,
 		ActorID:     actorID,
@@ -97,6 +97,29 @@ func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, ac
 		Payload:     map[string]any{"action": action, "details": details},
 		Refs:        map[string]any{"mission_id": missionID, "activity_id": actID},
 	})
+}
+
+// journalTypeForIssueAction picks the journal entry type for an issue
+// activity action. Everything used to land as mission.status_change, which
+// made "was assigned" and "was created" indistinguishable from "moved to In
+// Review" — both on the Activity timeline (one icon for all three) and to the
+// notification router, which routes per entry type. Splitting them is what
+// lets a user subscribe to assignments without also getting every status
+// change.
+//
+// Unrecognised actions keep the historical type: it stays the honest
+// catch-all for "something about this issue changed".
+func journalTypeForIssueAction(action string) journal.EntryType {
+	switch action {
+	case "created":
+		return journal.EntryMissionCreated
+	case "assignee_changed":
+		return journal.EntryMissionAssigned
+	case "commented":
+		return journal.EntryMissionComment
+	default:
+		return journal.EntryMissionStatus
+	}
 }
 
 // broadcastIssueEvent sends a workspace-scoped WebSocket event.

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
 )
 
@@ -31,6 +32,10 @@ type Router struct {
 	presence   PresenceChecker // nil = no presence gate (never suppress)
 	limiter    *RateLimiter    // nil = no rate limiting
 	logger     *slog.Logger
+	// journal records outbound delivery attempts so they show up on the
+	// Activity timeline. nil = deliveries stay invisible there (test rigs).
+	// See journal_bridge.go.
+	journal journalEmitter
 }
 
 // NewRouter wires a Router. presence and limiter may be nil (both degrade
@@ -69,10 +74,22 @@ func (r *Router) NotifyInboxItem(ctx context.Context, item inbox.Item) {
 	if category == "" {
 		return // this inbox kind has no external-notification mapping (yet)
 	}
-	// Detach from the request/step context (which may be cancelled the
-	// instant the caller returns) but keep it as a value-source is
-	// unnecessary here — a fresh background context is correct: delivery
-	// must outlive the triggering request.
+	r.notifyItem(ctx, category, item)
+}
+
+// notifyItem is the shared fan-out entry point for BOTH producers — the
+// inbox write-through (NotifyInboxItem) and the journal commit observer
+// (ObserveJournal). Having one funnel is the point: the presence gate,
+// preference matrix, allowlist, priority floor, rate gate and delivery log
+// are applied in exactly one place, so a change to any of them can never
+// apply to one producer and silently miss the other.
+//
+// Detaches onto its own goroutine with a fresh background context — both
+// call sites are on a hot path (an HTTP handler, the journal write path) and
+// delivery must outlive the request that triggered it. Panic recovery
+// mirrors cmd_start.go's terminal-notifier wiring: a delivery-path bug must
+// never take the caller down with it.
+func (r *Router) notifyItem(ctx context.Context, category string, item inbox.Item) {
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
@@ -223,6 +240,8 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedRate); err != nil {
 			r.logger.Warn("notifyroute: log dropped_rate", "error", err)
 		}
+		r.emitDeliveryJournal(ctx, journal.EntryNotificationDropped, journal.SeverityNotice,
+			ch, category, item.Title, "rate limit")
 		return
 	}
 
@@ -253,9 +272,13 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 			r.logger.Warn("notifyroute: mark delivery failed", "error", merr)
 		}
 		r.logger.Warn("notifyroute: delivery failed", "error", err, "channel_id", ch.ID, "category", category)
+		r.emitDeliveryJournal(ctx, journal.EntryNotificationFailed, journal.SeverityError,
+			ch, category, item.Title, err.Error())
 		return
 	}
 	if err := r.deliveries.MarkSent(ctx, id); err != nil {
 		r.logger.Warn("notifyroute: mark delivery sent", "error", err)
 	}
+	r.emitDeliveryJournal(ctx, journal.EntryNotificationDelivered, journal.SeverityInfo,
+		ch, category, item.Title, "")
 }

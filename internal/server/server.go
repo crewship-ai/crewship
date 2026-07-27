@@ -407,7 +407,11 @@ func (s *Server) mountAPIRouter(
 	// slow/full hub (best-effort: it drops under sustained backpressure;
 	// subscribers reconcile via the SSE replay / a /api/v1/journal refetch).
 	journalBridge := newJournalWSBridge(wsHub, logger)
-	s.journalWriter.SetCommitObserver(journalBridge.observe)
+	// AddCommitObserver, not Set: the journal→notify bridge registers a
+	// second observer during boot (cmd_start.go), and a Set from either side
+	// would silently unregister the other — this feed would go quiet, or
+	// external notifications would stop, with nothing to say why.
+	s.journalWriter.AddCommitObserver(journalBridge.observe)
 
 	// Wire the journal into the orchestrator so Docker exec, network,
 	// and filesystem hook points inside the orchestrator can emit

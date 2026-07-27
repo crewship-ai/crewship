@@ -44,7 +44,9 @@ import {
   TrendingDown,
   Unplug,
   UserCheck,
+  UserPlus,
   Wand2,
+  Webhook,
   XCircle,
   Zap,
   type LucideIcon,
@@ -64,6 +66,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
 
   // Mission / task
   "mission.status_change": Flag,
+  "mission.created": ClipboardList,
+  "mission.assigned": UserPlus,
   "mission.comment": ClipboardList,
   "assignment.created": ClipboardList,
   "assignment.running": Play,
@@ -135,6 +139,15 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "system.hook_toggled": Zap,
   "system.consolidation_triggered": Wand2,
   "system.consolidation_completed": CheckCircle,
+
+  // Outbound notifications. All three share the Webhook glyph on purpose:
+  // the thing worth spotting at a glance is "something left this instance
+  // and went somewhere else", and the row's tone (success / error / warn)
+  // carries whether it landed. A distinct icon per outcome would make the
+  // three read as three unrelated kinds of event.
+  "notification.delivered": Webhook,
+  "notification.failed": Webhook,
+  "notification.dropped": Webhook,
 }
 
 /**

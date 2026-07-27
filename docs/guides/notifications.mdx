@@ -198,6 +198,20 @@ crewship notifychannel deliveries --category approvals --channel nch_abc123
 
 Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller.
 
+### On the Activity timeline
+
+Every outbound send also lands on the [Activity](/guides/activity) timeline with its own webhook icon, so "this left the instance and went to Slack" sits next to the event that caused it rather than only in the admin-only log above:
+
+| Entry type | Shown as |
+| --- | --- |
+| `notification.delivered` | Notified via *provider* |
+| `notification.failed` | Notification to *provider* failed, with the error |
+| `notification.dropped` | Notification to *provider* dropped, with the reason (rate limit) |
+
+<Note>
+These entries never themselves trigger a notification. Delivery records commit through the same journal the notification router watches, so routing one would notify about having notified — and that notification would emit another record. The mapping refuses them explicitly.
+</Note>
+
 ## CLI
 
 ```bash
