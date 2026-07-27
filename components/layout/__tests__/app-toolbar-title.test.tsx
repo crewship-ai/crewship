@@ -98,15 +98,18 @@ describe("AppToolbar — the top bar never repeats the page name", () => {
     },
   )
 
+  // Settings is NOT a detail view — its section nav never leaves the page — so
+  // its identity belongs in the sub-bar next to Admin's, not in a top-bar
+  // breadcrumb. Holding a section here would make /settings the only route
+  // whose top bar isn't plain "Crewship".
+  it("shows Crewship on settings even with a section selected", () => {
+    const header = renderToolbarAt("/settings", "audit")
+    expect(header.firstElementChild).toHaveTextContent(/^Crewship$/)
+  })
+
   // Deep pages are the exception: their top-bar text is a *breadcrumb*, a
   // click-path back out of the detail view, not a restatement of the sub-bar.
   // Removing it would strand the user, so it stays.
-  it("keeps the settings tab breadcrumb as a way back to Settings", () => {
-    const header = renderToolbarAt("/settings", "audit")
-    expect(header).toHaveTextContent("Settings")
-    expect(header).toHaveTextContent("Audit Log")
-  })
-
   it("keeps the chat breadcrumb pointing back at the agent's crew", () => {
     const header = renderToolbarAt("/chat/riley")
     expect(header).toHaveTextContent("Crews")

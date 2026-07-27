@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   TrendingUp, Target, Banknote, Gem, Box, Activity, HeartPulse,
-  FolderOpen, Radio, Inbox as InboxIcon, ListChecks,
+  FolderOpen, Radio, Inbox as InboxIcon, ListChecks, LayoutDashboard,
 } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { SubBar } from "@/components/layout/sub-bar"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 
@@ -415,23 +416,37 @@ export default function DashboardPage() {
   }, [missions])
 
   // ── Render ──────────────────────────────────────────────────────────
+  // The dashboard was the one page with no sub-bar, so when the global top bar
+  // stopped naming pages it was left with no on-screen name at all. It gets the
+  // same identity strip as everywhere else — rendered in the loading branch too,
+  // so the chrome doesn't pop in once the queries resolve.
   if (isLoading) {
     return (
-      <div className="p-4 md:p-6 space-y-4">
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[112px] rounded-xl" />)}
+      <div className="flex flex-col min-h-[calc(100vh-48px)]">
+        <SubBar icon={LayoutDashboard} title="Dashboard" description="Loading…" ariaLabel="Dashboard" />
+        <div className="flex-1 p-4 md:p-6 space-y-4">
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[112px] rounded-xl" />)}
+          </div>
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+            <Skeleton className="h-[260px] rounded-xl lg:col-span-2" />
+            <Skeleton className="h-[260px] rounded-xl" />
+          </div>
+          <Skeleton className="h-[200px] rounded-xl" />
         </div>
-        <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-          <Skeleton className="h-[260px] rounded-xl lg:col-span-2" />
-          <Skeleton className="h-[260px] rounded-xl" />
-        </div>
-        <Skeleton className="h-[200px] rounded-xl" />
       </div>
     )
   }
 
   return (
-    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+    <div className="flex flex-col min-h-[calc(100vh-48px)] bg-background">
+      <SubBar
+        icon={LayoutDashboard}
+        title="Dashboard"
+        description={`${crews.length} crew${crews.length === 1 ? "" : "s"} · ${totalAgents} agent${totalAgents === 1 ? "" : "s"}`}
+        ariaLabel="Dashboard"
+      />
+      <div className="flex-1 p-4 md:p-6 pb-10 space-y-4">
       {/* Post-onboarding welcome — self-gates on a localStorage flag
           set at the end of the wizard, dismisses persistently. The
           firstAgentId state is hydrated in an effect (above) so we
@@ -580,6 +595,7 @@ export default function DashboardPage() {
       >
         <RecentMissionsTable missions={recentMissions} />
       </DashboardCard>
+      </div>
     </div>
   )
 }

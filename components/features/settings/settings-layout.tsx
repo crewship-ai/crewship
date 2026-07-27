@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Menu } from "lucide-react"
+import { Menu, Settings as SettingsIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -11,8 +11,8 @@ import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
+import { SubBar } from "@/components/layout/sub-bar"
 import { SettingsNav } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
@@ -72,16 +72,17 @@ export function SettingsLayout() {
   const { abilities } = useAbilities()
 
   const isMobile = useIsMobile()
-  const setSettingsTab = useAppStore((s) => s.setSettingsTab)
   const [activeTab, _setActiveTab] = useState(() =>
     typeof window === "undefined" ? "profile" : initialSettingsTab(window.location.search),
   )
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
-  // Sync active tab to global store for toolbar breadcrumb
+  // The active tab used to be mirrored into the zustand store on every change
+  // (plus an initial-set / clear-on-unmount effect) for one reader: the global
+  // top bar's "Settings / <tab>" breadcrumb. The sub-bar above reads local
+  // state directly, so the store round-trip is gone along with the breadcrumb.
   const setActiveTab = useCallback((tab: string) => {
     _setActiveTab(tab)
-    setSettingsTab(tab)
     // Keep the URL in sync so the active tab is shareable/bookmarkable and
     // the back button works, without triggering a route navigation.
     if (typeof window !== "undefined") {
@@ -89,13 +90,7 @@ export function SettingsLayout() {
       url.searchParams.set("tab", tab)
       window.history.replaceState(null, "", url.toString())
     }
-  }, [setSettingsTab])
-
-  // Set initial tab and cleanup on unmount
-  useEffect(() => {
-    setSettingsTab(activeTab)
-    return () => setSettingsTab(null)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const [org, setOrg] = useState<Org | null>(null)
   const [members, setMembers] = useState<Member[]>([])
@@ -244,7 +239,32 @@ export function SettingsLayout() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-48px)]">
+    <div className="flex flex-col h-[calc(100vh-48px)]">
+      {/* Settings was the last page with no sub-bar: its identity lived in the
+          global top bar as a "Settings / Profile" breadcrumb, which made it the
+          one page whose top bar was not plain "Crewship". The identity belongs
+          here, in the same shape Admin uses — page name, then active section. */}
+      <SubBar
+        icon={SettingsIcon}
+        title="Settings"
+        section={section?.title}
+        ariaLabel="Settings"
+        leading={
+          isMobile ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-7 w-7 -ml-1"
+              aria-label="Open settings navigation"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu className="h-3.5 w-3.5" />
+            </Button>
+          ) : undefined
+        }
+      />
+
+      <div className="flex flex-1 min-h-0">
       {/* Desktop sidebar nav */}
       {!isMobile && (
         <SettingsNav
@@ -276,20 +296,8 @@ export function SettingsLayout() {
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="max-w-3xl mx-auto p-4 md:p-6 space-y-4">
-            {/* Mobile nav trigger */}
-            {isMobile && (
-              <div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 text-muted-foreground text-xs"
-                  onClick={() => setMobileNavOpen(true)}
-                >
-                  <Menu className="h-3.5 w-3.5" />
-                  {section?.title ?? "Settings"}
-                </Button>
-              </div>
-            )}
+            {/* The mobile nav trigger used to live here, above the content, and
+                doubled as the section label. Both jobs moved to the sub-bar. */}
 
             {/* Section content */}
             <AnimatePresence mode="wait">
@@ -305,6 +313,7 @@ export function SettingsLayout() {
             </AnimatePresence>
           </div>
         </ScrollArea>
+      </div>
       </div>
     </div>
   )

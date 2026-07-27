@@ -92,17 +92,13 @@ const mobileNavSections = [
 // on-screen name here. The fix for that belongs on the dashboard page —
 // give it the SubBar every other page has — not in a map of exceptions.
 //
-// Deep pages keep their breadcrumb (agent detail, chat, settings tab) — that
-// is a click-path back out of a detail view, not a restatement of the SubBar.
-
-const settingsTabTitles: Record<string, string> = {
-  profile: "Profile",
-  general: "General",
-  crews: "Crews & Containers",
-  connections: "Connections",
-  members: "Members",
-  audit: "Audit Log",
-}
+// Deep pages keep their breadcrumb (agent detail, chat) — that is a click-path
+// back out of a detail view, not a restatement of the SubBar.
+//
+// Settings used to be a third exception: a "Settings / <tab>" breadcrumb fed
+// by a settingsTab mirror in the zustand store. It is not a detail view — its
+// section nav never leaves the page — so the identity moved into the Settings
+// sub-bar (title + section, same shape as Admin) and the mirror is gone.
 
 
 function getInitials(name: string): string {
@@ -184,7 +180,6 @@ export function AppToolbar() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
-  const settingsTab = useAppStore((s) => s.settingsTab)
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   useEffect(() => {
@@ -280,22 +275,6 @@ export function AppToolbar() {
           </Link>
           <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
           <span className="text-sm font-semibold">Chat</span>
-        </>
-      )
-    }
-
-    // Settings breadcrumb: Settings / Profile
-    if (pathname === "/settings" && settingsTab) {
-      const tabTitle = settingsTabTitles[settingsTab]
-      return (
-        <>
-          <span className="text-sm text-muted-foreground">Settings</span>
-          {tabTitle && (
-            <>
-              <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-              <span className="text-sm font-semibold truncate">{tabTitle}</span>
-            </>
-          )}
         </>
       )
     }

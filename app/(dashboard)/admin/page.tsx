@@ -331,6 +331,7 @@ export default function AdminPage() {
       <SubBar
         icon={Shield}
         title="Admin Console"
+        section={activeItem?.label}
         ariaLabel="Admin Console"
         meta={
           <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">{role ?? ""}</span>
