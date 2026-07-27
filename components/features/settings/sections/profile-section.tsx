@@ -15,6 +15,7 @@ import {
   EyeOff,
   AlertTriangle,
   Shield,
+  ChevronRight,
 } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAuth } from "@/hooks/use-auth"
@@ -347,6 +348,7 @@ export function ProfileSection({
   const [tokenCopied, setTokenCopied] = useState(false)
   const [tokenVisible, setTokenVisible] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<CLIToken | null>(null)
+  const [showRevokedTokens, setShowRevokedTokens] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -908,12 +910,32 @@ export function ProfileSection({
         ) : (
           <>
             {activeTokens.map((token) => <TokenListItem key={token.id} token={token} onRevoke={() => setRevokeTarget(token)} />)}
-            {revokedTokens.map((token) => (
-              <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
-                <span className="text-xs text-muted-foreground line-through">{token.name}</span>
-                <span className="text-[10px] text-muted-foreground font-mono">revoked</span>
-              </div>
-            ))}
+
+            {/* Revoked tokens are collapsed. The card says "everything that
+                can sign in as you right now" — a revoked token cannot, and
+                on a real account a run of struck-through rows pushed the
+                live ones out of view, on the one screen whose job is
+                spotting live access. Still reachable, because "did my
+                revoke actually stick?" should not need the audit log. */}
+            {revokedTokens.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowRevokedTokens((v) => !v)}
+                  aria-expanded={showRevokedTokens}
+                  className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-muted-foreground hover:text-foreground/80 transition-colors border-b border-border/40 last:border-b-0"
+                >
+                  <ChevronRight className={cn("size-3 transition-transform", showRevokedTokens && "rotate-90")} />
+                  {revokedTokens.length} revoked
+                </button>
+                {showRevokedTokens && revokedTokens.map((token) => (
+                  <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
+                    <span className="text-xs text-muted-foreground line-through">{token.name}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">revoked</span>
+                  </div>
+                ))}
+              </>
+            )}
           </>
         )}
       </SettingsCard>

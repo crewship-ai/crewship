@@ -229,3 +229,65 @@ describe("ProfileSection — revoking a CLI token", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
   })
 })
+
+// The card promises "everything that can sign in as you right now". A
+// revoked token cannot, so listing them inline contradicted the heading —
+// and on a real account seven struck-through rows pushed the two live ones
+// out of view, on a screen whose entire job is spotting live access.
+describe("ProfileSection — revoked CLI tokens", () => {
+  const ACTIVE = { id: "a1", name: "ci-deploy", created_at: "2026-07-20T10:00:00Z", tier: "STANDARD" as const }
+  const REVOKED = [
+    { id: "r1", name: "old-laptop", created_at: "2026-07-01T10:00:00Z", revoked_at: "2026-07-10T10:00:00Z", tier: "STANDARD" as const },
+    { id: "r2", name: "stale-ci", created_at: "2026-07-02T10:00:00Z", revoked_at: "2026-07-11T10:00:00Z", tier: "STANDARD" as const },
+  ]
+
+  function mockWith(tokens: unknown[]) {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/api/v1/auth/cli-tokens")) return jsonResponse({ data: tokens })
+      if (url.includes("/api/v1/auth/sessions")) return jsonResponse([])
+      return jsonResponse({})
+    })
+  }
+
+  it("keeps revoked tokens out of the list by default", async () => {
+    mockWith([ACTIVE, ...REVOKED])
+    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
+
+    expect(await screen.findByText("ci-deploy")).toBeTruthy()
+    expect(screen.queryByText("old-laptop")).toBeNull()
+    expect(screen.queryByText("stale-ci")).toBeNull()
+  })
+
+  it("still admits they exist, with a count", async () => {
+    mockWith([ACTIVE, ...REVOKED])
+    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
+    // Hiding is not the same as pretending — "did my revoke stick?" has to
+    // stay answerable without a trip to the audit log.
+    expect(await screen.findByRole("button", { name: /2 revoked/i })).toBeTruthy()
+  })
+
+  it("reveals them on request", async () => {
+    mockWith([ACTIVE, ...REVOKED])
+    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
+
+    fireEvent.click(await screen.findByRole("button", { name: /2 revoked/i }))
+    expect(await screen.findByText("old-laptop")).toBeTruthy()
+    expect(screen.getByText("stale-ci")).toBeTruthy()
+  })
+
+  it("shows no disclosure when nothing has been revoked", async () => {
+    mockWith([ACTIVE])
+    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
+
+    await screen.findByText("ci-deploy")
+    expect(screen.queryByRole("button", { name: /revoked/i })).toBeNull()
+  })
+
+  it("does not call an all-revoked account empty", async () => {
+    mockWith(REVOKED)
+    render(<ProfileSection userName="Ada" userEmail="ada@example.com" />)
+    // "No tokens yet" would be wrong: there are tokens, they are just dead.
+    await waitFor(() => expect(screen.queryByText(/no tokens yet/i)).toBeNull())
+    expect(await screen.findByRole("button", { name: /2 revoked/i })).toBeTruthy()
+  })
+})
