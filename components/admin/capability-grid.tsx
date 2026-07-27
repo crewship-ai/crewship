@@ -115,7 +115,7 @@ export function CapabilityGrid({ members, workspaceId, currentUserId }: Capabili
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="border-b border-border/60">
-              <th className="text-left pl-3 py-2 font-medium text-muted-foreground sticky left-0 bg-background z-10 min-w-[180px]">
+              <th className="text-left pl-3 py-2 font-medium text-muted-foreground sticky left-0 bg-card z-10 min-w-[180px] border-r border-border/40">
                 Member
               </th>
               <th className="text-left py-2 font-medium text-muted-foreground min-w-[80px]">
@@ -243,8 +243,15 @@ function CapabilityRow({
   })
 
   return (
-    <tr className="border-b border-border/40 hover:bg-muted/30">
-      <td className="pl-3 py-2 sticky left-0 bg-background z-10">
+    <tr className="group border-b border-border/40 hover:bg-muted/30">
+      {/* Pinned column. It needs an opaque background to cover cells
+          scrolling underneath, but that background must be the SURFACE the
+          grid sits on (bg-card) — bg-background is the page behind the card,
+          and the mismatch drew a visible box around this column that stopped
+          at Role. Being opaque also blocks the row's hover tint, so it opts
+          into it explicitly; a hairline border, not a colour change, is what
+          should signal "this column is pinned". */}
+      <td className="pl-3 py-2 sticky left-0 bg-card group-hover:bg-muted/30 z-10 border-r border-border/40">
         <div className="flex items-center gap-2">
           <UserAvatar
             name={member.user.full_name}
@@ -303,7 +310,11 @@ function CapabilityRow({
                 "inline-flex h-5 w-5 items-center justify-center rounded border transition-colors",
                 isGranted
                   ? "bg-primary border-primary text-primary-foreground"
-                  : "bg-background border-border",
+                  // Translucent, matching components/ui/checkbox. bg-background
+                  // is the page colour, so on this card it rendered as a dark
+                  // square rather than an empty box. A translucent fill sits
+                  // correctly on whatever surface the grid is dropped onto.
+                  : "bg-input/30 border-border",
                 cellLocked && "opacity-60 cursor-not-allowed",
                 !cellLocked && "cursor-pointer hover:border-primary/60",
               )}
