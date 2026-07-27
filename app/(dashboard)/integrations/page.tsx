@@ -34,8 +34,7 @@ import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
-import { ComposioIntegrations } from "@/components/features/integrations/composio-integrations"
-import { NotificationIntegrations } from "@/components/features/integrations/notification-integrations"
+import { IntegrationsLayout } from "@/components/features/integrations/integrations-layout"
 import { legacyMcpIntegrations } from "@/lib/feature-flags"
 import type {
   AgentBinding,
@@ -57,35 +56,39 @@ import type {
 // legacy implementation below is untouched — flipping the env var brings it
 // back, so this is a fully reversible rollback path, not a deletion.
 export default function IntegrationsPage() {
-  // The page — not either section — owns the full height. Composio used to
-  // carry min-h-[calc(100vh-48px)], which meant its EMPTY state filled the
-  // viewport and pushed notification channels a whole screen below the fold
-  // with nothing hinting they were there. A section you can only reach by
-  // scrolling past a screen of nothing has not shipped.
-  return (
-    <div className="min-h-[calc(100vh-48px)] bg-background">
-      {legacyMcpIntegrations() ? <LegacyIntegrationsPage /> : <ComposioIntegrations />}
-      {/* Notification channels are an integration: "connect Discord" is what
-          a user comes to this page for. They used to live under Settings,
-          which reads as personal preferences and made a workspace-wide view
-          of every connection impossible. Rendered outside the Composio/legacy
-          switch because they have nothing to do with either. */}
-      <NotificationIntegrationsPanel />
-    </div>
-  )
+  // The page is built on the canonical chrome (SubBar + sidebar-kit), the same
+  // one Routines and seven other pages use. It previously stacked two
+  // unrelated panels — Composio, then notification channels — each with its
+  // own header, tabs and layout, which is why the same question ("is Slack
+  // connected?") had two places to look and neither was searchable.
+  //
+  // The legacy self-hosted MCP connector UI stays behind its flag, untouched:
+  // flipping the env var is still a complete rollback path.
+  if (legacyMcpIntegrations()) return <LegacyIntegrationsPage />
+  return <IntegrationsWorkspaceGate />
 }
 
-/** Thin wrapper so the panel can resolve the workspace itself. */
-function NotificationIntegrationsPanel() {
+/** Thin wrapper so the layout can be handed a resolved workspace id. */
+function IntegrationsWorkspaceGate() {
   const { workspaceId, loading } = useWorkspace()
-  if (loading || !workspaceId) return null
-  return (
-    <div className="p-4 md:p-6 pt-0 pb-10 bg-background">
-      <div className="border-t border-border/60 pt-6">
-        <NotificationIntegrations workspaceId={workspaceId} />
+  if (loading) {
+    return (
+      <div className="flex h-[calc(100vh-48px)] flex-col gap-4 bg-background p-4 md:p-6">
+        <Skeleton className="h-9 rounded-lg" />
+        <Skeleton className="flex-1 rounded-xl" />
       </div>
-    </div>
-  )
+    )
+  }
+  if (!workspaceId) {
+    return (
+      <div className="flex h-[calc(100vh-48px)] items-center justify-center bg-background">
+        <p className="text-xs text-muted-foreground">
+          Pick a workspace to see its integrations.
+        </p>
+      </div>
+    )
+  }
+  return <IntegrationsLayout workspaceId={workspaceId} />
 }
 
 function LegacyIntegrationsPage() {

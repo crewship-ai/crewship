@@ -80,8 +80,24 @@ export interface NotificationProvider {
   provider: string
   label: string
   blurb: string
+  /**
+   * Catalog section — "chat" | "push" | "incident". Served by
+   * GET /api/v1/notification-providers rather than mapped from the provider
+   * name here, so a provider added on the backend lands in the right section
+   * without a matching frontend change. Optional because an older server
+   * omits it; the catalog falls back to an "Other" section rather than
+   * dropping the provider.
+   */
+  category?: string
   fields: ProviderField[]
   enabled: boolean
+}
+
+/** One catalog section, as named by the server. */
+export interface NotificationProviderCategory {
+  key: string
+  label: string
+  hint?: string
 }
 
 export interface ChannelPatchBody {
@@ -102,7 +118,24 @@ export interface CreatedChannel extends NotificationChannel {
  * MANAGER+ server-side; failed writes surface as thrown errors with the
  * server's message so the section can toast them verbatim.
  */
-export function useNotificationChannels(workspaceId: string | null | undefined) {
+export interface UseChannelsOptions {
+  /**
+   * true = ask for `?scope=all`: every connection in the workspace, including
+   * other members' personal ones. ADMIN/OWNER only — the server silently
+   * degrades to the caller's own scope for anyone else rather than 403ing, so
+   * passing this from a member view is safe, not a bug waiting to happen.
+   *
+   * Other people's destinations come back redacted (a Telegram chat id is a
+   * contact detail, not workspace configuration); see `isRedacted` below.
+   */
+  includeEveryone?: boolean
+}
+
+export function useNotificationChannels(
+  workspaceId: string | null | undefined,
+  options: UseChannelsOptions = {},
+) {
+  const { includeEveryone = false } = options
   const [channels, setChannels] = useState<NotificationChannel[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -119,10 +152,11 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(
-        `/api/v1/notification-channels?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { signal: ctrl.signal },
-      )
+      const q = new URLSearchParams({ workspace_id: workspaceId })
+      if (includeEveryone) q.set("scope", "all")
+      const res = await apiFetch(`/api/v1/notification-channels?${q.toString()}`, {
+        signal: ctrl.signal,
+      })
       if (ctrl.signal.aborted) return
       if (!res.ok) {
         setError(`notification channels: ${res.status}`)
@@ -137,7 +171,7 @@ export function useNotificationChannels(workspaceId: string | null | undefined) 
     } finally {
       if (!ctrl.signal.aborted) setLoading(false)
     }
-  }, [workspaceId])
+  }, [workspaceId, includeEveryone])
 
   useEffect(() => {
     refresh()

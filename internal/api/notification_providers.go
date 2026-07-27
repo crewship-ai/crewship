@@ -44,10 +44,14 @@ func providerSettingKey(p string) string {
 // delivery library's URL scheme is an implementation detail a client has no
 // use for: clients send field values, the server composes the URL.
 type providerInfo struct {
-	Provider string                 `json:"provider"`
-	Scheme   string                 `json:"scheme"`
-	Label    string                 `json:"label"`
-	Blurb    string                 `json:"blurb"`
+	Provider string `json:"provider"`
+	Scheme   string `json:"scheme"`
+	Label    string `json:"label"`
+	Blurb    string `json:"blurb"`
+	// Category is the catalog section (chat | push | incident). Served rather
+	// than mapped client-side so a new provider lands in the right section
+	// without a matching frontend change — see notify.ProviderCategories.
+	Category string                 `json:"category"`
 	Fields   []notify.ProviderField `json:"fields"`
 	Enabled  bool                   `json:"enabled"`
 }
@@ -68,11 +72,18 @@ func (h *NotifyProvidersHandler) List(w http.ResponseWriter, r *http.Request) {
 			Scheme:   spec.Name,
 			Label:    spec.Label,
 			Blurb:    spec.Blurb,
+			Category: string(spec.Category),
 			Fields:   spec.Fields,
 			Enabled:  enabled,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+	// `categories` ships alongside so a client renders sections in OUR order
+	// with OUR labels instead of inferring them from the providers it happens
+	// to have received.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"providers":  out,
+		"categories": notify.ProviderCategories(),
+	})
 }
 
 // patchProviderRequest is the PATCH body.

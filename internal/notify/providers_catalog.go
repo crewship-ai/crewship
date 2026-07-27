@@ -54,6 +54,41 @@ type ProviderField struct {
 	HelpURL string `json:"help_url,omitempty"`
 }
 
+// ProviderCategory is the section a provider appears under in the catalog.
+type ProviderCategory string
+
+const (
+	// CategoryChat — team chat rooms. Someone is expected to be reading.
+	CategoryChat ProviderCategory = "chat"
+	// CategoryPush — a notification on a device. Reaches one person, now.
+	CategoryPush ProviderCategory = "push"
+	// CategoryIncident — on-call routing. Escalates and pages until ack'd.
+	CategoryIncident ProviderCategory = "incident"
+)
+
+// CategoryInfo names a catalog section for display.
+type CategoryInfo struct {
+	Key   ProviderCategory `json:"key"`
+	Label string           `json:"label"`
+	// Hint is the one-line "what is this bucket for" the section header
+	// carries — the difference between chat and incident is a routing
+	// decision, not a cosmetic one.
+	Hint string `json:"hint"`
+}
+
+// ProviderCategories returns the catalog sections in display order.
+//
+// Order is deliberate and matches how teams adopt them: chat first (what most
+// workspaces already have), then push (reaches an individual), then incident
+// (the escalation path you set up once and hope never fires).
+func ProviderCategories() []CategoryInfo {
+	return []CategoryInfo{
+		{Key: CategoryChat, Label: "Chat", Hint: "Posts into a team room — good for anything a group should see"},
+		{Key: CategoryPush, Label: "Push", Hint: "A notification on someone's device — reaches one person immediately"},
+		{Key: CategoryIncident, Label: "Incident", Hint: "On-call routing that escalates until someone acknowledges"},
+	}
+}
+
 // ProviderSpec is one destination type a channel can deliver to: its form
 // fields and how they compose into a delivery URL.
 type ProviderSpec struct {
@@ -64,6 +99,10 @@ type ProviderSpec struct {
 	Label string `json:"label"`
 	// Blurb is a one-line description for the picker.
 	Blurb string `json:"blurb"`
+	// Category groups the provider in the catalog. Assigned here rather than
+	// in the frontend so adding a provider cannot silently land it in a
+	// default bucket — see providers_category_test.go.
+	Category ProviderCategory `json:"category"`
 	// Scheme is the delivery library's URL scheme. Internal — never shown.
 	Scheme string `json:"-"`
 	// Fields are the form inputs, in display order.
@@ -87,10 +126,11 @@ func (p ProviderSpec) FieldByKey(key string) *ProviderField {
 // picker: the destinations teams most commonly connect come first.
 var providerCatalog = []ProviderSpec{
 	{
-		Name:   ProviderDiscord,
-		Label:  "Discord",
-		Blurb:  "Post to a Discord channel through a webhook",
-		Scheme: "discord",
+		Name:     ProviderDiscord,
+		Label:    "Discord",
+		Blurb:    "Post to a Discord channel through a webhook",
+		Scheme:   "discord",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "webhook_url", Label: "Webhook URL", Type: FieldURL, Required: true, Secret: true,
@@ -107,10 +147,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeDiscord,
 	},
 	{
-		Name:   ProviderSlack,
-		Label:  "Slack",
-		Blurb:  "Post to a Slack channel through an incoming webhook",
-		Scheme: "slack",
+		Name:     ProviderSlack,
+		Label:    "Slack",
+		Blurb:    "Post to a Slack channel through an incoming webhook",
+		Scheme:   "slack",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "webhook_url", Label: "Incoming webhook URL", Type: FieldURL, Required: true, Secret: true,
@@ -127,10 +168,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeSlack,
 	},
 	{
-		Name:   ProviderTelegram,
-		Label:  "Telegram",
-		Blurb:  "Send to a Telegram chat, group, or channel",
-		Scheme: "telegram",
+		Name:     ProviderTelegram,
+		Label:    "Telegram",
+		Blurb:    "Send to a Telegram chat, group, or channel",
+		Scheme:   "telegram",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "bot_token", Label: "Bot token", Type: FieldPassword, Required: true, Secret: true,
@@ -147,10 +189,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeTelegram,
 	},
 	{
-		Name:   ProviderNtfy,
-		Label:  "ntfy",
-		Blurb:  "Publish to an ntfy topic (self-hosted or ntfy.sh)",
-		Scheme: "ntfy",
+		Name:     ProviderNtfy,
+		Label:    "ntfy",
+		Blurb:    "Publish to an ntfy topic (self-hosted or ntfy.sh)",
+		Scheme:   "ntfy",
+		Category: CategoryPush,
 		Fields: []ProviderField{
 			{
 				Key: "topic", Label: "Topic", Type: FieldText, Required: true,
@@ -175,10 +218,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeNtfy,
 	},
 	{
-		Name:   ProviderGotify,
-		Label:  "Gotify",
-		Blurb:  "Push to a self-hosted Gotify server",
-		Scheme: "gotify",
+		Name:     ProviderGotify,
+		Label:    "Gotify",
+		Blurb:    "Push to a self-hosted Gotify server",
+		Scheme:   "gotify",
+		Category: CategoryPush,
 		Fields: []ProviderField{
 			{
 				Key: "server", Label: "Server", Type: FieldText, Required: true,
@@ -195,10 +239,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeGotify,
 	},
 	{
-		Name:   ProviderPushover,
-		Label:  "Pushover",
-		Blurb:  "Push to your phone via Pushover",
-		Scheme: "pushover",
+		Name:     ProviderPushover,
+		Label:    "Pushover",
+		Blurb:    "Push to your phone via Pushover",
+		Scheme:   "pushover",
+		Category: CategoryPush,
 		Fields: []ProviderField{
 			{
 				Key: "user_key", Label: "User key", Type: FieldText, Required: true, Secret: true,
@@ -216,10 +261,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composePushover,
 	},
 	{
-		Name:   ProviderMattermost,
-		Label:  "Mattermost",
-		Blurb:  "Post to a Mattermost channel through a webhook",
-		Scheme: "mattermost",
+		Name:     ProviderMattermost,
+		Label:    "Mattermost",
+		Blurb:    "Post to a Mattermost channel through a webhook",
+		Scheme:   "mattermost",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "server", Label: "Server", Type: FieldText, Required: true,
@@ -241,10 +287,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeMattermost,
 	},
 	{
-		Name:   ProviderMatrix,
-		Label:  "Matrix",
-		Blurb:  "Send to a Matrix room",
-		Scheme: "matrix",
+		Name:     ProviderMatrix,
+		Label:    "Matrix",
+		Blurb:    "Send to a Matrix room",
+		Scheme:   "matrix",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "server", Label: "Homeserver", Type: FieldText, Required: true,
@@ -265,10 +312,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeMatrix,
 	},
 	{
-		Name:   ProviderTeams,
-		Label:  "Microsoft Teams",
-		Blurb:  "Post to a Teams channel through a Power Automate workflow",
-		Scheme: "teams",
+		Name:     ProviderTeams,
+		Label:    "Microsoft Teams",
+		Blurb:    "Post to a Teams channel through a Power Automate workflow",
+		Scheme:   "teams",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "webhook_url", Label: "Workflow URL", Type: FieldURL, Required: true, Secret: true,
@@ -280,10 +328,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeTeams,
 	},
 	{
-		Name:   ProviderGoogleChat,
-		Label:  "Google Chat",
-		Blurb:  "Post to a Google Chat space through a webhook",
-		Scheme: "googlechat",
+		Name:     ProviderGoogleChat,
+		Label:    "Google Chat",
+		Blurb:    "Post to a Google Chat space through a webhook",
+		Scheme:   "googlechat",
+		Category: CategoryChat,
 		Fields: []ProviderField{
 			{
 				Key: "webhook_url", Label: "Webhook URL", Type: FieldURL, Required: true, Secret: true,
@@ -295,10 +344,11 @@ var providerCatalog = []ProviderSpec{
 		compose: composeGoogleChat,
 	},
 	{
-		Name:   ProviderOpsgenie,
-		Label:  "Opsgenie",
-		Blurb:  "Raise an Opsgenie alert",
-		Scheme: "opsgenie",
+		Name:     ProviderOpsgenie,
+		Label:    "Opsgenie",
+		Blurb:    "Raise an Opsgenie alert",
+		Scheme:   "opsgenie",
+		Category: CategoryIncident,
 		Fields: []ProviderField{
 			{
 				Key: "api_key", Label: "API key", Type: FieldPassword, Required: true, Secret: true,

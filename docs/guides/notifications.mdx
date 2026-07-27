@@ -6,11 +6,32 @@ icon: "bell"
 
 ## Where this lives
 
-**Integrations** (`/integrations`) — channels, your own preference matrix, and, for an admin, every connection in the workspace, all as tabs on one page.
+**Integrations** (`/integrations`) — one page, four tabs, each answering a question you actually arrive with:
+
+| Tab | Answers |
+| --- | --- |
+| **Connections** | What is hooked up, and is it working? |
+| **Catalog** | What *could* I hook up? |
+| **Notifications** | Which categories reach me, on which connection? |
+| **Deliveries** | Why didn't that notification arrive? |
 
 It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart.
 
-The **All connections** tab is ADMIN/OWNER only. It lists every channel including other members' personal ones, with the number of agents allowed to post to each — but it shows *that* a member has a channel, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration.
+The sidebar's search and its **Kind / Status / Scope / Service** facets apply to the whole page. Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers you a filter that comes back empty.
+
+### Finding a service you have not connected yet
+
+Search on **Connections** only searches what exists. When it comes back empty but the catalog has matches, the empty state says so and links straight there — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
+
+**Catalog** is the full list, grouped into **Chat**, **Push**, **Incident** and **E-mail & webhook**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out with an `off` badge — visible, and visibly unavailable, rather than missing.
+
+### Seeing everyone's connections (admins)
+
+On **Connections**, ADMIN/OWNER get an **Everyone's connections** toggle in the tab row. It widens the list to include other members' personal channels — but it shows *that* a member has a channel and of what kind, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration. Those rows are read-only; only their owner can test, disable or delete them.
+
+### Delivery status
+
+The **Status** column is derived from the delivery log, which is ADMIN/OWNER-only. A member sees `Enabled` rather than `Delivering` — the page does not claim to know something it cannot read. Ordering matters: a channel's most recent *failure* outranks an older success, and deliveries that were muted or rate-gated never count as delivering, so a silenced channel cannot look healthy.
 
 ## Two systems, one page
 
@@ -127,6 +148,8 @@ An email channel sends via the instance mailer. **Email delivery must be configu
 ### Chat and push
 
 A chat channel delivers to Discord, Slack, Telegram, ntfy, Gotify, Pushover, Mattermost, Matrix, Microsoft Teams, Google Chat, or Opsgenie.
+
+Each destination carries a **category** — `chat`, `push` or `incident` — which is the one piece of routing advice the list can give you: chat posts into a room somebody is expected to be reading, push reaches one person's device now, and incident escalates through an on-call rota until someone acknowledges. It is a column in `crewship notifychannel providers` and the section heading in the dashboard catalog; both read the same field from the server.
 
 Each one asks for **what that service actually gives you** — Discord for the webhook URL you copy out of Server Settings, Telegram for a bot token and a chat ID — with a line under each field saying where to find it. You never construct or see a delivery URL: the server composes one from your answers and stores it encrypted, in the same `secret_enc` column the webhook signing secret uses. It is never returned by any read endpoint.
 
@@ -272,7 +295,11 @@ crewship notifychannel deliveries --status failed
 crewship notifychannel deliveries --category approvals --channel nch_abc123
 ```
 
-Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller.
+Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller. The **Deliveries** tab on `/integrations` renders the same rows, with each status translated into a reason — `dropped_pref` reads as *recipient has this category muted*, `dropped_rate` as *folded into a digest* — because the whole point is telling a quiet channel apart from a broken one.
+
+<Note>
+The API serves this log with snake_case keys (`channel_id`, `created_at`, …). Until 2026-07 the fields carried no JSON tags at all, so the server emitted Go field names and any client asking for `channel_id` got nothing: `crewship notifychannel deliveries` printed blank CHANNEL, USER and CREATED columns. If you are scripting against an older instance, that is why.
+</Note>
 
 ### On the Activity timeline
 

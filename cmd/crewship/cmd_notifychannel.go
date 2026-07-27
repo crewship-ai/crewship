@@ -404,6 +404,9 @@ what each one is, and where to find the value. Those field keys are what
 				}
 				return f.AutoHuman(p, func() {
 					fmt.Printf("%s — %s\n", p.Label, p.Blurb)
+					if p.Category != "" {
+						fmt.Printf("category: %s\n", p.Category)
+					}
 					if !p.Enabled {
 						fmt.Println("(disabled on this instance)")
 					}
@@ -428,7 +431,7 @@ what each one is, and where to find the value. Those field keys are what
 			return fmt.Errorf("unknown provider %q (run 'crewship notifychannel providers' to list them)", want)
 		}
 
-		headers := []string{"PROVIDER", "NAME", "ENABLED", "FIELDS"}
+		headers := []string{"PROVIDER", "NAME", "CATEGORY", "ENABLED", "FIELDS"}
 		rows := make([][]string, 0, len(body.Providers))
 		for _, p := range body.Providers {
 			keys := make([]string, 0, len(p.Fields))
@@ -437,7 +440,9 @@ what each one is, and where to find the value. Those field keys are what
 					keys = append(keys, fl.Key)
 				}
 			}
-			rows = append(rows, []string{p.Provider, p.Label, fmt.Sprintf("%v", p.Enabled), strings.Join(keys, ", ")})
+			rows = append(rows, []string{
+				p.Provider, p.Label, p.Category, fmt.Sprintf("%v", p.Enabled), strings.Join(keys, ", "),
+			})
 		}
 		return f.Auto(body.Providers, headers, rows)
 	},
@@ -450,6 +455,10 @@ type notifyProviderRow struct {
 	Provider string `json:"provider"`
 	Label    string `json:"label"`
 	Blurb    string `json:"blurb"`
+	// Category is the catalog section: chat | push | incident. It is the one
+	// piece of routing advice the list can give — Opsgenie pages an on-call
+	// rota, Discord posts into a room — so it is a column, not a footnote.
+	Category string `json:"category"`
 	Enabled  bool   `json:"enabled"`
 	Fields   []struct {
 		Key      string `json:"key"`

@@ -2,7 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
-import type { NotificationProvider } from "@/hooks/use-notification-channels"
+import type {
+  NotificationProvider,
+  NotificationProviderCategory,
+} from "@/hooks/use-notification-channels"
+
+/**
+ * Section order used when the server does not send one (older instance).
+ * Deliberately the same order the Go catalog declares, so the page does not
+ * silently reorder itself against a server one version behind.
+ */
+const FALLBACK_CATEGORIES: NotificationProviderCategory[] = [
+  { key: "chat", label: "Chat" },
+  { key: "push", label: "Push" },
+  { key: "incident", label: "Incident" },
+]
 
 /**
  * The chat/push provider registry: which destinations this instance supports,
@@ -15,6 +29,7 @@ import type { NotificationProvider } from "@/hooks/use-notification-channels"
  */
 export function useNotificationProviders(workspaceId: string | null | undefined) {
   const [providers, setProviders] = useState<NotificationProvider[]>([])
+  const [categories, setCategories] = useState<NotificationProviderCategory[]>(FALLBACK_CATEGORIES)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,6 +47,13 @@ export function useNotificationProviders(workspaceId: string | null | undefined)
       if (!res.ok) throw new Error(`load providers: ${res.status}`)
       const body = await res.json()
       setProviders(Array.isArray(body?.providers) ? body.providers : [])
+      // An older server sends no `categories`; keep the built-in order rather
+      // than collapsing every provider into one unnamed section.
+      setCategories(
+        Array.isArray(body?.categories) && body.categories.length > 0
+          ? body.categories
+          : FALLBACK_CATEGORIES,
+      )
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load providers")
@@ -45,5 +67,5 @@ export function useNotificationProviders(workspaceId: string | null | undefined)
     void refresh()
   }, [refresh])
 
-  return { providers, loading, error, refresh }
+  return { providers, categories, loading, error, refresh }
 }
