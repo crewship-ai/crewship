@@ -7,7 +7,7 @@ import { Check, Lock, ArrowRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { UserAvatar } from "@/components/ui/user-avatar"
+import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import {
   Dialog,
   DialogContent,
@@ -253,9 +253,9 @@ function CapabilityRow({
           />
           <div className="min-w-0">
             <div className="text-xs truncate">
-              {member.user.full_name ?? member.user.email}
+              {personLabel(member.user.full_name, member.user.email)}
             </div>
-            {member.user.full_name && (
+            {(member.user.full_name ?? "").trim() && (
               <div className="text-[10px] text-muted-foreground/80 font-mono truncate">
                 {member.user.email}
               </div>
@@ -272,7 +272,7 @@ function CapabilityRow({
         const isChat = cap === Capability.Chat
         const isGranted = isChat || grantedSet.has(cap)
         const cellLocked = locked || isChat
-        const memberLabel = member.user.full_name ?? member.user.email
+        const memberLabel = personLabel(member.user.full_name, member.user.email)
         // title attribute is unreliable for screen
         // readers / keyboard users. aria-label provides the
         // accessible name; aria-pressed exposes the toggle state so
@@ -476,7 +476,7 @@ function PresetDiffDialog({
                 <div key={d.member.user.id} className="px-3 py-2 space-y-1.5">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="font-medium">
-                      {d.member.user.full_name ?? d.member.user.email}
+                      {personLabel(d.member.user.full_name, d.member.user.email)}
                     </span>
                     <Badge variant="outline" className="text-[10px]">
                       {d.member.role}

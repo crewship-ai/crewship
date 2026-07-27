@@ -132,9 +132,16 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		// link. email_verified stays NULL too — we cannot verify an address
 		// we never mailed, and claiming otherwise would be a lie in the
 		// audit trail.
+		// NULL, not "": the UI falls back with `full_name ?? email`, and ??
+		// does not fire on an empty string — storing "" rendered member rows
+		// with no name AND no email, which is how this was found.
+		var fullName any
+		if n := strings.TrimSpace(req.FullName); n != "" {
+			fullName = n
+		}
 		if _, err := tx.ExecContext(r.Context(),
 			`INSERT INTO users (id, email, full_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-			userID, email, strings.TrimSpace(req.FullName), createdAt, createdAt); err != nil {
+			userID, email, fullName, createdAt, createdAt); err != nil {
 			replyInternalError(w, h.logger, "provision: insert user", err)
 			return
 		}

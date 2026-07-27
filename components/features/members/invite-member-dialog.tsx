@@ -52,6 +52,7 @@ interface ProvisionResult {
 export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialogProps) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
+  const [fullName, setFullName] = useState("")
   const [role, setRole] = useState("MEMBER")
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle")
   const [error, setError] = useState<string | null>(null)
@@ -60,6 +61,7 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
 
   function reset() {
     setEmail("")
+    setFullName("")
     setRole("MEMBER")
     setStatus("idle")
     setError(null)
@@ -85,7 +87,14 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: email.trim(), role }),
+          // full_name is omitted rather than sent blank: the server stores
+          // NULL for an absent name so the UI can fall back to the email,
+          // and "" would defeat that fallback.
+          body: JSON.stringify({
+            email: email.trim(),
+            role,
+            ...(fullName.trim() ? { full_name: fullName.trim() } : {}),
+          }),
         },
       )
       if (!res.ok) {
@@ -177,6 +186,20 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="invite-name">
+                Name <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="invite-name"
+                placeholder="Ada Lovelace"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                They can change this later. Without it the roster shows their email.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="invite-role">Role</Label>

@@ -136,3 +136,49 @@ describe("MembersSection — disclosure", () => {
     expect(screen.queryByTestId("capability-grid")).toBeNull()
   })
 })
+
+// Provisioned accounts arrive with no name. The roster rendered
+// `full_name ?? email`, and ?? does not fall back on the empty string the
+// endpoint used to store — so those rows showed neither a name nor an email,
+// just an anonymous circle and a role.
+describe("MembersSection — members without a name", () => {
+  beforeEach(() => cleanup())
+
+  const noName = [
+    { id: "m1", role: "MEMBER", created_at: new Date().toISOString(),
+      user: { id: "u1", email: "kolega@example.com", full_name: "", avatar_url: null } },
+    { id: "m2", role: "MANAGER", created_at: new Date().toISOString(),
+      user: { id: "u2", email: "pablo@example.com", full_name: null, avatar_url: null } },
+  ]
+
+  function renderNoName() {
+    return render(
+      <MembersSection
+        members={noName}
+        workspaceId="ws1"
+        currentUserId="u-caller"
+        callerRole="OWNER"
+        onRefresh={vi.fn()}
+      />,
+    )
+  }
+
+  it("identifies a member by email when the name is an empty string", () => {
+    renderNoName()
+    expect(screen.getAllByText("kolega@example.com").length).toBeGreaterThan(0)
+  })
+
+  it("identifies a member by email when the name is null", () => {
+    renderNoName()
+    expect(screen.getAllByText("pablo@example.com").length).toBeGreaterThan(0)
+  })
+
+  it("never renders a row with no identifying text at all", () => {
+    const { container } = renderNoName()
+    // The failure mode was a row carrying only a coloured circle and a role
+    // dropdown — unusable for deciding who to remove.
+    for (const email of ["kolega@example.com", "pablo@example.com"]) {
+      expect(container.textContent).toContain(email)
+    }
+  })
+})

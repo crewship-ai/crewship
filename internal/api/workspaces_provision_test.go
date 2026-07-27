@@ -203,3 +203,33 @@ func TestProvision_ConfiguredPublicURLWins(t *testing.T) {
 		t.Errorf("setup_url = %q, want the configured origin", out.SetupURL)
 	}
 }
+
+func TestProvision_BlankNameIsStoredAsNull(t *testing.T) {
+	h, userID, wsID := provisionRig(t)
+	provisionReq(t, h, userID, wsID, "OWNER", `{"email":"noname@example.com","role":"MEMBER"}`)
+
+	var name sql.NullString
+	if err := h.db.QueryRow(`SELECT full_name FROM users WHERE email = ?`, "noname@example.com").Scan(&name); err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	// An empty string is not "no name": the UI falls back to the email with
+	// `full_name ?? email`, and ?? does not fire on "". Storing "" produced
+	// member rows that rendered blank — no name AND no email.
+	if name.Valid {
+		t.Errorf("full_name = %q, want NULL for a blank name", name.String)
+	}
+}
+
+func TestProvision_KeepsAGivenName(t *testing.T) {
+	h, userID, wsID := provisionRig(t)
+	provisionReq(t, h, userID, wsID, "OWNER",
+		`{"email":"ada@example.com","role":"MEMBER","full_name":"  Ada Lovelace  "}`)
+
+	var name sql.NullString
+	if err := h.db.QueryRow(`SELECT full_name FROM users WHERE email = ?`, "ada@example.com").Scan(&name); err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if !name.Valid || name.String != "Ada Lovelace" {
+		t.Errorf("full_name = %#v, want trimmed \"Ada Lovelace\"", name)
+	}
+}

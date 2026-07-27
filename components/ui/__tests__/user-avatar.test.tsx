@@ -48,3 +48,21 @@ describe("UserAvatar", () => {
     expect(screen.getByRole("img", { name: "ada@x.io" })).toBeTruthy()
   })
 })
+
+// The provisioning endpoint used to write full_name as "" rather than NULL,
+// so rows already in the wild carry an empty string. `name ?? email` does
+// not fall back on "" — every one of those members rendered with no name and
+// no email, an anonymous coloured circle. Treat blank as absent.
+describe("UserAvatar — a blank name is no name", () => {
+  beforeEach(() => cleanup())
+
+  it.each(["", "   "])("falls back to the email for name=%p", (blank) => {
+    render(<UserAvatar name={blank} email="newjoiner@x.io" />)
+    expect(screen.getByText("NE")).toBeTruthy()
+  })
+
+  it("labels the image with the email when the name is blank", () => {
+    render(<UserAvatar name="  " email="ada@x.io" src="/a.png" />)
+    expect(screen.getByRole("img", { name: "ada@x.io" })).toBeTruthy()
+  })
+})

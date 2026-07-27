@@ -35,6 +35,16 @@ export function personInitials(name: string | null | undefined, email: string): 
   return email.slice(0, 2).toUpperCase()
 }
 
+/**
+ * How to name a person in a list. Blank is treated as absent, not as a name:
+ * the provisioning endpoint used to store full_name as "" rather than NULL,
+ * and `full_name ?? email` does not fall back on an empty string — those rows
+ * rendered with no name AND no email.
+ */
+export function personLabel(name: string | null | undefined, email: string): string {
+  return (name ?? "").trim() || email
+}
+
 export function UserAvatar({
   name,
   email,

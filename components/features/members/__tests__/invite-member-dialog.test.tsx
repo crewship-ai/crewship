@@ -102,3 +102,39 @@ describe("InviteMemberDialog", () => {
     expect(await screen.findByText(/CREWSHIP_PUBLIC_URL/i)).toBeTruthy()
   })
 })
+
+// A provisioned account has no name until the person sets one, so the
+// roster showed them by email alone. The admin usually knows the name at
+// the moment they add someone — asking then costs one optional field and
+// saves a stranger-looking row.
+describe("InviteMemberDialog — optional name", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+  })
+
+  it("sends the name when one is given", async () => {
+    apiFetch.mockResolvedValue(jsonResponse({ setup_url: SETUP_URL, created_user: true, email: "ada@example.com" }, 201))
+    render(<InviteMemberDialog workspaceId="ws1" onInvited={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /add member/i }))
+    fireEvent.change(await screen.findByLabelText(/email/i), { target: { value: "ada@example.com" } })
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Ada Lovelace" } })
+    fireEvent.click(screen.getByRole("button", { name: /^add member$/i }))
+
+    await waitFor(() => {
+      const body = JSON.parse(String(apiFetch.mock.calls.at(-1)?.[1]?.body))
+      expect(body.full_name).toBe("Ada Lovelace")
+    })
+  })
+
+  it("stays optional — an empty name is not sent as a blank string", async () => {
+    apiFetch.mockResolvedValue(jsonResponse({ setup_url: SETUP_URL, created_user: true, email: "x@example.com" }, 201))
+    await submit("x@example.com")
+    await waitFor(() => {
+      const body = JSON.parse(String(apiFetch.mock.calls.at(-1)?.[1]?.body))
+      // "" would be stored as a name and defeat the email fallback — the
+      // exact bug this pair of changes fixes.
+      expect(body.full_name ?? "").toBe("")
+    })
+  })
+})

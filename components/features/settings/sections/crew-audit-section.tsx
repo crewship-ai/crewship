@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { formatDateTime } from "@/lib/time"
+import { personLabel } from "@/components/ui/user-avatar"
 import { SettingsCard, SettingsEmpty } from "../shared"
 
 interface AuditLog {
@@ -213,7 +214,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         action: log.action,
         entity_type: log.entity_type,
         entity_id: log.entity_id,
-        user: log.user?.full_name ?? log.user?.email ?? "",
+        user: personLabel(log.user?.full_name, log.user?.email ?? ""),
         ip_address: log.ip_address ?? "",
       }))
       // Neutralise spreadsheet-formula prefixes (=, +, -, @) so an
@@ -269,7 +270,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         (log) =>
           log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
           log.entity_type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (log.user?.full_name ?? log.user?.email ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
+          personLabel(log.user?.full_name, log.user?.email ?? "").toLowerCase().includes(searchQuery.toLowerCase()),
       )
     : logs
 
@@ -440,7 +441,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                       {formatDateTime(log.created_at)}
                     </span>
                     <span className="text-xs text-foreground/80 truncate">
-                      {log.user?.full_name ?? log.user?.email ?? (
+                      {personLabel(log.user?.full_name, log.user?.email ?? "") || (
                         <span className="text-muted-foreground">System</span>
                       )}
                     </span>

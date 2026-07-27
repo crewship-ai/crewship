@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { CapabilityGrid } from "@/components/admin/capability-grid"
-import { UserAvatar } from "@/components/ui/user-avatar"
+import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
@@ -225,7 +225,7 @@ function MemberRoleControl({
       >
         <SelectTrigger
           className="h-6 w-[104px] text-[10px] px-2"
-          aria-label={`Change role for ${member.user.full_name ?? member.user.email}`}
+          aria-label={`Change role for ${personLabel(member.user.full_name, member.user.email)}`}
         >
           <SelectValue />
         </SelectTrigger>
@@ -243,7 +243,7 @@ function MemberRoleControl({
             <AlertDialogDescription className="text-xs">
               Change{" "}
               <span className="font-medium text-foreground">
-                {member.user.full_name ?? member.user.email}
+                {personLabel(member.user.full_name, member.user.email)}
               </span>{" "}
               from <span className="font-medium">{member.role}</span> to{" "}
               <span className="font-medium">{pendingRole}</span>?
@@ -345,9 +345,9 @@ export function MembersSection({
                 />
                 <div className="min-w-0">
                   <div className="text-xs text-foreground truncate">
-                    {member.user.full_name ?? member.user.email}
+                    {personLabel(member.user.full_name, member.user.email)}
                   </div>
-                  {member.user.full_name && (
+                  {(member.user.full_name ?? "").trim() && (
                     <div className="text-[10px] text-muted-foreground/80 font-mono truncate mt-0.5">
                       {member.user.email}
                     </div>
@@ -387,7 +387,7 @@ export function MembersSection({
                           <AlertDialogDescription className="text-xs">
                             Are you sure you want to remove{" "}
                             <span className="font-medium text-foreground">
-                              {member.user.full_name ?? member.user.email}
+                              {personLabel(member.user.full_name, member.user.email)}
                             </span>{" "}
                             from this workspace? This action cannot be undone.
                           </AlertDialogDescription>
