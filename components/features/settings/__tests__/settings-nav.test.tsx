@@ -11,7 +11,9 @@ import { SettingsNav, isSettingsSectionVisible } from "../settings-nav"
 // Everything else stays visible and renders read-only, because "the workspace
 // has 3 crews and 12 members" is information a MEMBER is entitled to.
 
-const ACCOUNT_ITEMS = ["Profile", "Privacy", "Notification Prefs"]
+// Privacy is deliberately absent — it is `enabled: false` until peer-card
+// extraction stops being a no-op. See the dedicated test below.
+const ACCOUNT_ITEMS = ["Profile", "Notification Prefs"]
 const WORKSPACE_ITEMS = [
   "General",
   "Crews & Containers",
@@ -108,6 +110,16 @@ describe("isSettingsSectionVisible", () => {
     // Unknown keys are the URL parser's problem, not the gate's.
     expect(isSettingsSectionVisible("profile", null)).toBe(true)
     expect(isSettingsSectionVisible("does-not-exist", "MEMBER")).toBe(true)
+  })
+
+  // Peer-card extraction runs NoopExtractor in production, so the Privacy
+  // pane can only ever be empty. `enabled: false` outranks role entirely —
+  // an OWNER must not see it either, or the "nothing yet, check back"
+  // reading of the empty state simply moves up the org chart.
+  it("hides a section whose backing feature is not built, at every role", () => {
+    for (const role of ["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER", null]) {
+      expect(isSettingsSectionVisible("privacy", role), `privacy for ${role}`).toBe(false)
+    }
   })
 })
 

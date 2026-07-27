@@ -161,3 +161,31 @@ func TestExchangeCredentials_PlainHTTP(t *testing.T) {
 		t.Fatalf("expected session token, got %q", tok)
 	}
 }
+
+// The credentials POST is what creates the user_sessions row, and that row's
+// user_agent is what Settings → Sessions shows an operator deciding whether a
+// login is theirs. This leg builds its request by hand rather than through
+// cli.Client.NewRequest, so it is the one place the shared header can be
+// missed — leaving every CLI login on every machine as an identical,
+// unattributable "Go-http-client/2.0".
+func TestExchangeCredentials_SendsUserAgent(t *testing.T) {
+	var gotUA string
+	inner := csrfLoginServer(t, "authjs.csrf-token", "correct-password", "authjs.session-token")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/callback/credentials" {
+			gotUA = r.UserAgent()
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	if _, err := exchangeCredentialsForSession(clientFor(srv), srv.URL, "demo@crewship.ai", "correct-password"); err != nil {
+		t.Fatalf("login should succeed: %v", err)
+	}
+	if want := cli.UserAgent(); gotUA != want {
+		t.Errorf("credentials POST User-Agent = %q, want %q", gotUA, want)
+	}
+	if strings.HasPrefix(gotUA, "Go-http-client") {
+		t.Errorf("credentials POST still sends Go's default User-Agent")
+	}
+}

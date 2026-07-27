@@ -721,6 +721,13 @@ func exchangeCredentialsForSession(client *cli.Client, serverURL, email, passwor
 		return "", fmt.Errorf("create login request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	// This is the POST that creates the user_sessions row, and the row's
+	// user_agent column is what Settings → Sessions shows the operator when
+	// they are deciding whether a login is theirs. It bypasses
+	// cli.Client.NewRequest (raw http.Client.Do below), so it needs the
+	// header set explicitly — without it every CLI login on every machine
+	// shows up as an identical, unattributable "Go-http-client/2.0".
+	httpReq.Header.Set("User-Agent", cli.UserAgent())
 	if csrfCookieName != "" {
 		// Client-side AddCookie on an outgoing request; Secure/HttpOnly are
 		// response-only attributes and meaningless here. Re-send under the

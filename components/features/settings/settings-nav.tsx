@@ -33,6 +33,14 @@ interface NavItem {
   // Gate on lib/permissions/tiers, never on CASL: CASL disagrees with the
   // server's route tiers on crews and members (see that module's header).
   visibleTo?: (role: string | null | undefined) => boolean
+  /**
+   * Set false for a section whose backing feature is not built yet. Unlike
+   * `visibleTo` this is not about the caller — nobody sees it, at any role.
+   * Hiding beats shipping a screen that can only ever be empty: an empty
+   * state reads as "nothing yet, check back", which is a promise the
+   * backend cannot keep.
+   */
+  enabled?: boolean
 }
 
 interface NavSection {
@@ -46,7 +54,15 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
-      { key: "privacy", label: "Privacy", icon: Shield },
+      // Hidden until peer-card extraction actually exists. The routine runs
+      // daily and the endpoints are real, but the extractor wired in
+      // production is consolidate.NoopExtractor (cmd/crewship/cmd_start.go)
+      // — it returns empty content, which SyncPeerCard skips rather than
+      // writes. So the card list can never be non-empty, and "No peer cards
+      // on file" tells the user to wait for something that will not come.
+      // Flip to true in the same PR that wires the aux-LLM extractor; the
+      // section, its endpoints and its tests are all kept working.
+      { key: "privacy", label: "Privacy", icon: Shield, enabled: false },
       { key: "notification-prefs", label: "Notification Prefs", icon: BellRing },
     ],
   },
@@ -87,6 +103,7 @@ const sections: NavSection[] = [
  */
 export function isSettingsSectionVisible(key: string, role: string | null | undefined): boolean {
   const item = sections.flatMap((s) => s.items).find((i) => i.key === key)
+  if (item?.enabled === false) return false
   return item?.visibleTo?.(role) ?? true
 }
 

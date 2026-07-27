@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import {
-  LogOut,
   Copy,
   Check,
   Key,
@@ -35,6 +34,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
+import { DeviceSessions } from "./device-sessions"
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -630,31 +630,6 @@ export function ProfileSection({
         )}
       </SettingsCard>
 
-      {/* ── Session ── */}
-      <SettingsCard title="Session" description="Your current login session on this device">
-        <SettingsRow label="Status">
-          <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Active
-          </span>
-        </SettingsRow>
-        {expiresIn && (
-          <SettingsRow label="Expires">
-            <span className="text-[11px] text-muted-foreground font-mono tabular-nums">{expiresIn}</span>
-          </SettingsRow>
-        )}
-        <SettingsRow label="Sign out of this device" border={false}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={onSignOut}
-          >
-            <LogOut className="h-3 w-3 mr-1.5" />
-            Sign out
-          </Button>
-        </SettingsRow>
-      </SettingsCard>
 
       {/* ── New token reveal ── */}
       <AnimatePresence>
@@ -707,18 +682,31 @@ export function ProfileSection({
         )}
       </AnimatePresence>
 
-      {/* ── CLI Tokens ── */}
+      {/* ── Sessions & access ──
+          One card answering one question: who can act as me right now?
+          Browser sessions and CLI tokens live in separate tables and behave
+          differently — a session is discovered (unnamed, carries UA + IP,
+          expires on its own), a token is minted (you named it, chose a tier
+          and scopes, saw the secret once) — so they render as two labelled
+          groups rather than one flat list. Splitting them across two cards
+          made someone hunting a compromise have to know to look twice. */}
       <SettingsCard
-        title="CLI Tokens"
-        description="Authenticate the crewship CLI against this workspace"
-        actions={
-          !showCreateForm && (
-            <Button size="sm" variant="outline" className="h-7 px-2.5 gap-1.5 text-xs" onClick={() => setShowCreateForm(true)}>
-              <Plus className="h-3 w-3" />New token
-            </Button>
-          )
-        }
+        title="Sessions &amp; access"
+        description="Everything that can sign in as you right now. Don't recognise something? End it."
       >
+        <DeviceSessions onSignOut={onSignOut} currentExpiresIn={expiresIn} />
+
+        <div className="flex items-center justify-between px-4 pt-3 pb-1.5 border-t border-border/40">
+          <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground/70 font-semibold">
+            CLI tokens
+          </span>
+          {!showCreateForm && (
+            <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-[11px]" onClick={() => setShowCreateForm(true)}>
+              <Plus className="size-3" />New token
+            </Button>
+          )}
+        </div>
+
         {/* Create form — full token issuance dialog with tier, scopes,
             expiry. Animates open inline rather than via modal so the
             generated token reveal (below) sits next to the form. */}
