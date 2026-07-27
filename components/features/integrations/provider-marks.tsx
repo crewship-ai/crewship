@@ -15,15 +15,16 @@ import { cn } from "@/lib/utils"
  * before you read the label — so the full-colour mark is the point, not a
  * decoration.
  *
- * Sources, all permissively licensed:
+ * Sources and licences — these differ, so keep the per-mark attribution:
  *   · SVG Logos (github.com/gilbarbara/logos) — CC0. Full-colour marks;
  *     rendered verbatim, so they carry their own fills and are never tinted.
  *   · Simple Icons — CC0. Monochrome; tinted with the brand's official hex.
  *   · Tabler Icons — MIT. Monochrome; same treatment.
- *
- * Gotify is the one gap: no permissively-licensed mark exists for it anywhere
- * (its own logo repo carries no license statement), so it falls back to a
- * lettermark tile in its real brand colour rather than an invented glyph.
+ *   · Arcticons (github.com/Donnnno/Arcticons) — CC BY-SA 4.0. Used for the
+ *     Gotify mark only, which exists nowhere under a more permissive licence.
+ *     SHARE-ALIKE: that one glyph carries a copyleft obligation the rest of
+ *     this repo does not. It is called out here rather than blended into the
+ *     list so a future reader does not assume the whole file is CC0/MIT.
  */
 
 interface BrandMark {
@@ -35,6 +36,12 @@ interface BrandMark {
    * rendered untouched. false = a monochrome silhouette we tint with `color`.
    */
   fullColour: boolean
+  /**
+   * true = the artwork is drawn with strokes, not fills. Forcing
+   * fill="currentColor" onto one of these floods the glyph into a solid blob,
+   * so the renderer must leave `fill` to the paths and tint via `color`.
+   */
+  stroke?: boolean
   viewBox: string
   body: React.ReactNode
 }
@@ -94,13 +101,24 @@ const BRANDS: Record<string, BrandMark> = {
       <><defs><linearGradient id="SVGeY8NEnFa" x1="50%" x2="50%" y1="16.62%" y2="119.283%"><stop offset="0%" stopColor="#2684ff"/><stop offset="82%" stopColor="#0052cc"/></linearGradient><linearGradient id="SVGoXiXXbjr" x1="41.18%" x2="67.714%" y1="31.16%" y2="78.678%"><stop offset="0%" stopColor="#2684ff"/><stop offset="62%" stopColor="#0052cc"/></linearGradient></defs><circle cx="127.996" cy="76.058" r="76.058" fill="url(#SVGeY8NEnFa)"/><path fill="url(#SVGoXiXXbjr)" d="M121.516 302.953A366.9 366.9 0 0 1 1.076 177.056a8.527 8.527 0 0 1 3.71-11.81l57.597-28.265a8.527 8.527 0 0 1 11.128 3.41a284.75 284.75 0 0 0 123.636 111.913a368.8 368.8 0 0 1-62.67 50.649a12.24 12.24 0 0 1-12.961 0"/><path fill="#2684ff" d="M134.476 302.953a366.65 366.65 0 0 0 120.44-125.897a8.527 8.527 0 0 0-3.667-11.81l-57.64-28.265a8.527 8.527 0 0 0-11.127 3.41A284.6 284.6 0 0 1 58.845 252.305a366.7 366.7 0 0 0 62.67 50.649a12.24 12.24 0 0 0 12.961 0"/></>
     ),
   },
+  gotify: {
+    label: "Gotify",
+    color: "#71CAEE",
+    fullColour: false,
+    stroke: true,
+    viewBox: "0 0 48 48",
+    body: (
+      <><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M32.632 35.406c-1.59 2.423-3.29 5.035-7.064 6.175c-3.782 1.13-9.758.967-13.407-.719c-3.658-1.695-4.99-4.922-4.31-7.422c.67-2.508 3.343-4.3 4.55-6.224c1.197-1.935.929-4.003.613-5.918a28 28 0 0 1-.613-5.095a10.3 10.3 0 0 1 1.029-3.737"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M14.555 12.612c-6.943-.48-1.436-6.704.958-1.916"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M15.181 10.13c4.55-5.266 21.4-6.74 23.076 6.666"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M19.822 7.273c.185-1.999 1.217-2.154 2.616-.672m15.819 10.196a1.214 1.214 0 0 1 1.312 1.082a1.345 1.345 0 0 1-2.633 0a1.217 1.217 0 0 1 1.321-1.082"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M37.06 18.358c-5.507 3.954 5.381 4.123 2.509-.386M28.68 11.175a5.746 5.746 0 1 1-5.745 5.746a5.744 5.744 0 0 1 5.746-5.746"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M30.596 15.724a1.323 1.323 0 1 1-1.197 1.312a1.257 1.257 0 0 1 1.197-1.312m7.901 5.424v1.785M36.29 11.294c2.227-.738 4.476 2.871 3.03 5.951m-12.392 8.209l13.14-2.864a1.4 1.4 0 0 1 1.664 1.067l.001.006l1.734 7.948a1.4 1.4 0 0 1-1.063 1.666l-13.149 2.864a1.4 1.4 0 0 1-1.665-1.066l-.001-.006l-1.733-7.949a1.4 1.4 0 0 1 1.066-1.665ZM8.884 31.378c-5.77-2.452-1.072-5.023.829-1.03M4.5 37.99q3.112 2.872 5.028-.719m21.454.497c1.676-.389 2.225.73 1.53 3.334"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="M23.174 26.498q1.197 2.288 3.83.134"/><path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" d="m26.047 26.976l9.098 3.965l6.294-7.882M28.479 36.09l4.74-5.988m3.341-.932l6.691 3.508"/></>
+    ),
+  },
   webhook: {
     label: "Webhook",
     color: "#C73A63",
-    fullColour: true,
-    viewBox: "0 0 256 239",
+    fullColour: false,
+    stroke: true,
+    viewBox: "0 0 24 24",
     body: (
-      <><path fill="#c73a63" d="M119.54 100.503c-10.61 17.836-20.775 35.108-31.152 52.25c-2.665 4.401-3.984 7.986-1.855 13.58c5.878 15.454-2.414 30.493-17.998 34.575c-14.697 3.851-29.016-5.808-31.932-21.543c-2.584-13.927 8.224-27.58 23.58-29.757c1.286-.184 2.6-.205 4.762-.367l23.358-39.168C73.612 95.465 64.868 78.39 66.803 57.23c1.368-14.957 7.25-27.883 18-38.477c20.59-20.288 52.002-23.573 76.246-8.001c23.284 14.958 33.948 44.094 24.858 69.031c-6.854-1.858-13.756-3.732-21.343-5.79c2.854-13.865.743-26.315-8.608-36.981c-6.178-7.042-14.106-10.733-23.12-12.093c-18.072-2.73-35.815 8.88-41.08 26.618c-5.976 20.13 3.069 36.575 27.784 48.967"/><path fill="#4b4b4b" d="M149.841 79.41c7.475 13.187 15.065 26.573 22.587 39.836c38.02-11.763 66.686 9.284 76.97 31.817c12.422 27.219 3.93 59.457-20.465 76.25c-25.04 17.238-56.707 14.293-78.892-7.851c5.654-4.733 11.336-9.487 17.407-14.566c21.912 14.192 41.077 13.524 55.305-3.282c12.133-14.337 11.87-35.714-.615-49.75c-14.408-16.197-33.707-16.691-57.035-1.143c-9.677-17.168-19.522-34.199-28.893-51.491c-3.16-5.828-6.648-9.21-13.77-10.443c-11.893-2.062-19.571-12.275-20.032-23.717c-.453-11.316 6.214-21.545 16.634-25.53c10.322-3.949 22.435-.762 29.378 8.014c5.674 7.17 7.477 15.24 4.491 24.083c-.83 2.466-1.905 4.852-3.07 7.774"/><path fill="#4a4a4a" d="M167.707 187.21h-45.77c-4.387 18.044-13.863 32.612-30.19 41.876c-12.693 7.2-26.373 9.641-40.933 7.29c-26.808-4.323-48.728-28.456-50.658-55.63c-2.184-30.784 18.975-58.147 47.178-64.293c1.947 7.071 3.915 14.21 5.862 21.264c-25.876 13.202-34.832 29.836-27.59 50.636c6.375 18.304 24.484 28.337 44.147 24.457c20.08-3.962 30.204-20.65 28.968-47.432c19.036 0 38.088-.197 57.126.097c7.434.117 13.173-.654 18.773-7.208c9.22-10.784 26.191-9.811 36.121.374c10.148 10.409 9.662 27.157-1.077 37.127c-10.361 9.62-26.73 9.106-36.424-1.26c-1.992-2.136-3.562-4.673-5.533-7.298"/></>
+      <><g fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.062 13A4 4 0 1 0 11 16.5h6"/><path strokeLinecap="round" strokeLinejoin="round" d="m12 7.5l3.057 5.503a4 4 0 1 1-.557 6.62"/><path d="M12 8.5a1 1 0 1 0 0-2m0 2a1 1 0 1 1 0-2m0 2v-2m-5 11a1 1 0 1 0 0-2m0 2a1 1 0 1 1 0-2m0 2v-2m10 2a1 1 0 1 0 0-2m0 2a1 1 0 1 1 0-2m0 2v-2"/><path strokeLinecap="round" strokeLinejoin="round" d="M16 7.5a4 4 0 1 0-5.943 3.497L7 16.5"/></g></>
     ),
   },
   ntfy: {
@@ -144,11 +162,10 @@ const BRANDS: Record<string, BrandMark> = {
 /**
  * Brands with no usable mark. A lettermark in the brand's real colour is
  * honest — it says "we don't have their artwork" rather than dressing up a
- * generic glyph as their logo.
+ * generic glyph as their logo. Empty today; kept because the next provider
+ * added to the Go catalog may well arrive without artwork.
  */
-const LETTERMARKS: Record<string, { label: string; color: string }> = {
-  gotify: { label: "Gotify", color: "#71CAEE" },
-}
+const LETTERMARKS: Record<string, { label: string; color: string }> = {}
 
 /** Non-brand entries: our own transports and the managed-tools surface. */
 const BUILTIN: Record<string, { label: string; color: string; Icon: typeof Mail }> = {
@@ -257,7 +274,7 @@ export function ProviderMark({ provider, label, className, bare }: ProviderMarkP
         role="img"
         aria-label={brand.label}
         className={cn("h-[62%] w-[62%]", bare && "h-full w-full")}
-        fill={brand.fullColour ? undefined : "currentColor"}
+        fill={brand.fullColour || brand.stroke ? undefined : "currentColor"}
         style={brand.fullColour ? undefined : { color: glyphColour(brand) }}
       >
         {brand.body}

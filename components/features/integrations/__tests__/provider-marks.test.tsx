@@ -45,12 +45,12 @@ describe("ProviderMark", () => {
     expect(brandColor(provider)).toMatch(/^#[0-9A-Fa-f]{6}$/)
   })
 
-  it("renders real artwork for every brand except the one with no licensed mark", () => {
-    // Gotify has no permissively-licensed mark anywhere, so it is a lettermark
-    // on purpose. If that ever changes, this test should be updated — not the
-    // other way round.
-    const withoutArt = PROVIDERS.filter((p) => !hasBrandMark(p))
-    expect(withoutArt).toEqual(["gotify"])
+  it("renders real artwork for every service — no lettermark fallbacks left", () => {
+    // Gotify was the last holdout (nothing under a permissive licence); it is
+    // now the Arcticons mark, CC BY-SA. A provider added to the Go catalog
+    // without artwork fails here rather than shipping a grey initials tile
+    // that looks deliberate.
+    expect(PROVIDERS.filter((p) => !hasBrandMark(p))).toEqual([])
   })
 
   it.each(PROVIDERS)("draws %s in something visible on a dark surface", (provider) => {
