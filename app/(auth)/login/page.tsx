@@ -61,11 +61,6 @@ function LoginForm() {
   const expired = searchParams.get("reason") === "expired"
   const redirectTarget = safeRedirectPath(searchParams.get("redirect"))
   const { signIn } = useAuth()
-  // Track the status discovery as its own state so we can distinguish
-  // "configured and disabled" from "network hiccup" — the previous boolean
-  // collapsed both into "disabled" and surfaced the "set GOOGLE_CLIENT_ID"
-  // copy during transient outages.
-  const [googleStatus, setGoogleStatus] = useState<"loading" | "enabled" | "disabled" | "error">("loading")
   // First-run gate: on an empty Crewship install the visitor should
   // never see the login form — they should land on /bootstrap to
   // create the initial admin. `gateChecked` lets us render nothing
@@ -97,18 +92,9 @@ function LoginForm() {
         if (!cancelled) setGateChecked(true)
       })
 
-     
-    void serverFetch("/api/v1/auth/google/status")
-      .then(async (r) => {
-        if (!r.ok) throw new Error("google status check failed")
-        const data: { enabled?: boolean } = await r.json()
-        if (!cancelled) {
-          setGoogleStatus(data.enabled === true ? "enabled" : "disabled")
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setGoogleStatus("error")
-      })
+    // The /auth/google/status probe went with the button. The endpoint
+    // still answers false for older frontend builds, but this one has
+    // nothing to render from it.
 
     return () => {
       cancelled = true
@@ -220,41 +206,10 @@ function LoginForm() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">or continue with</span>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              disabled={googleStatus !== "enabled"}
-              title={
-                googleStatus === "enabled"
-                  ? "Sign in with your Google account"
-                  : googleStatus === "disabled"
-                    ? "Google sign-in not configured"
-                    : googleStatus === "loading"
-                      ? "Checking Google sign-in availability…"
-                      : "Google sign-in is temporarily unavailable"
-              }
-              onClick={() => {
-                // Carry the sanitized redirect through Google sign-in so a
-                // session-expired user lands back on the page they were on
-                // (matching the credentials flow). CodeRabbit flagged the
-                // missing case on PR #233.
-                const target = redirectTarget && redirectTarget !== "/"
-                  ? `/api/v1/auth/google/redirect?redirect=${encodeURIComponent(redirectTarget)}`
-                  : "/api/v1/auth/google/redirect"
-                window.location.href = target
-              }}
-            >
-              Sign in with Google
-            </Button>
+            {/* "or continue with" + the Google button lived here. Google
+                sign-in is switched off (2026-07-27) and its routes are no
+                longer registered, so a divider promising an alternative and
+                a button that cannot work are both worse than nothing. */}
             {signupAllowed && (
               <p className="text-center text-xs text-muted-foreground">
                 Don&apos;t have an account?{" "}

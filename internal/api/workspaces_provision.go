@@ -122,10 +122,11 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	defer tx.Rollback() //nolint:errcheck
 
 	var userID string
-	var existingPassword sql.NullString
+	var existingPassword, existingVerified sql.NullString
 	createdUser := false
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT id, hashed_password FROM users WHERE email = ?`, email).Scan(&userID, &existingPassword)
+		`SELECT id, hashed_password, email_verified FROM users WHERE email = ?`,
+		email).Scan(&userID, &existingPassword, &existingVerified)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		userID = uuid.NewString()
@@ -185,7 +186,29 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	//
 	// An account with no password yet is different: nobody controls it, and
 	// re-issuing is the legitimate "the link went astray" case.
-	claimed := existingPassword.Valid && existingPassword.String != ""
+	// "Has a password" is NOT the same question as "is controlled by
+	// somebody", and the difference is a live takeover. A Google-only
+	// account has hashed_password NULL forever (auth_google.go never sets
+	// it) while being fully in use — so the first version of this check
+	// happily minted a reset token for it. Google sign-in is now switched
+	// off, but every deployment that ever had it enabled still holds
+	// accounts of that shape, so the predicate has to cover them.
+	//
+	// Three signals, any one of which means hands off:
+	//   · a password         — classic credential login
+	//   · a linked OAuth row — someone signs in through a provider
+	//   · a verified email   — the address was proven at some point
+	// Only an account with none of them is genuinely unclaimed, which is
+	// exactly what this endpoint creates and may legitimately re-issue for.
+	var oauthLinks int
+	if err := tx.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM accounts WHERE userId = ?`, userID).Scan(&oauthLinks); err != nil {
+		replyInternalError(w, h.logger, "provision: oauth link check", err)
+		return
+	}
+	claimed := (existingPassword.Valid && existingPassword.String != "") ||
+		oauthLinks > 0 ||
+		(existingVerified.Valid && existingVerified.String != "")
 	if claimed {
 		if err := tx.Commit(); err != nil {
 			replyInternalError(w, h.logger, "provision: commit", err)

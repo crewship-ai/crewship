@@ -47,6 +47,13 @@ func TestProvision_RefusesToMintForAnAccountThatHasAPassword(t *testing.T) {
 	seedTestUserWithPassword(t, h.db, "victim@example.com", "victims-own-password")
 
 	rr := provisionReq(t, h, userID, wsID, "OWNER", `{"email":"victim@example.com","role":"MEMBER"}`)
+	// Assert the status FIRST. Without this the two checks below pass
+	// vacuously on any regression that errors before the mint — a 500 also
+	// yields an empty SetupURL and no token row, so the test would keep
+	// reporting green while the feature was broken.
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body %s", rr.Code, rr.Body.String())
+	}
 	out := decodeProvision(t, rr)
 
 	// The whole primitive is the token coming back to the caller.
@@ -62,6 +69,18 @@ func TestProvision_RefusesToMintForAnAccountThatHasAPassword(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("minted %d account_setup token(s) for an account that already has a password", n)
+	}
+
+	// And the useful half still has to happen: withholding the token must
+	// not mean withholding the membership.
+	var members int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ? AND user_id = (SELECT id FROM users WHERE email = ?)`,
+		wsID, "victim@example.com").Scan(&members); err != nil {
+		t.Fatalf("membership count: %v", err)
+	}
+	if members != 1 {
+		t.Errorf("membership rows = %d, want 1 — the person should still have been added", members)
 	}
 }
 
@@ -119,5 +138,59 @@ func TestProvisionedAccount_CanActuallySignIn(t *testing.T) {
 	if _, _, err := checkAndLockoutOnFail(context.Background(), h.db,
 		"fresh@example.com", "ChosenByThem123", nowForTest()); err != nil {
 		t.Fatalf("a freshly provisioned member could not sign in: %v", err)
+	}
+}
+
+func TestProvision_RefusesToMintForAnOAuthAccount(t *testing.T) {
+	h, userID, wsID := provisionRig(t)
+	// Google sign-in created users with email_verified set and NO
+	// hashed_password (auth_google.go). Disabling that flow stops new ones,
+	// but every deployment that ever had it enabled still holds accounts of
+	// this shape — and "has no password" must not read as "nobody owns it".
+	if _, err := h.db.Exec(
+		`INSERT INTO users (id, email, full_name, email_verified, created_at, updated_at)
+		 VALUES ('u-oauth', 'oauth@example.com', 'OAuth Person', ?, ?, ?)`,
+		"2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if _, err := h.db.Exec(
+		`INSERT INTO accounts (id, userId, type, provider, providerAccountId)
+		 VALUES ('acc-1', 'u-oauth', 'oauth', 'google', 'google-uid-1')`); err != nil {
+		t.Fatalf("seed account: %v", err)
+	}
+
+	rr := provisionReq(t, h, userID, wsID, "OWNER", `{"email":"oauth@example.com","role":"MEMBER"}`)
+	out := decodeProvision(t, rr)
+
+	if out.SetupURL != "" {
+		t.Errorf("setup_url returned for a linked OAuth account: %q — redeeming it sets a password on an account someone signs into with Google", out.SetupURL)
+	}
+	var n int
+	if err := h.db.QueryRow(
+		`SELECT COUNT(*) FROM verification_tokens WHERE identifier = ? AND purpose = 'account_setup'`,
+		"oauth@example.com").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("minted %d token(s) for an OAuth-backed account", n)
+	}
+}
+
+func TestProvision_RefusesToMintForAVerifiedAccount(t *testing.T) {
+	h, userID, wsID := provisionRig(t)
+	// email_verified means the address was proven at some point, so somebody
+	// has been through a flow with it. Belt to the OAuth braces above: it
+	// catches any future path that verifies an address without setting a
+	// password.
+	if _, err := h.db.Exec(
+		`INSERT INTO users (id, email, full_name, email_verified, created_at, updated_at)
+		 VALUES ('u-verified', 'verified@example.com', NULL, ?, ?, ?)`,
+		"2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	rr := provisionReq(t, h, userID, wsID, "OWNER", `{"email":"verified@example.com","role":"MEMBER"}`)
+	if out := decodeProvision(t, rr); out.SetupURL != "" {
+		t.Errorf("setup_url returned for a verified account: %q", out.SetupURL)
 	}
 }
