@@ -161,11 +161,14 @@ spec:
         # result and a chat reply land in the same row of everyone's
         # preference matrix and cannot be tuned apart.
         category: routines.completed
+        # An http step's output IS the response body — there is no
+        # `.status` and no `.body` to reference. Getting that wrong used
+        # to render as an empty string, so this notice went out reading
+        # "→ HTTP" with nothing after it while the run reported success.
         body: |-
           GET {{ inputs.url }}
-          → HTTP {{ steps.fetch.status }}
 
-          {{ steps.fetch.body }}
+          {{ steps.fetch.output }}
         priority: low
 
 ---

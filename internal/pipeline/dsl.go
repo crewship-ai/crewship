@@ -431,6 +431,29 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 		walk(base+"/transform/expression", st.Transform.Expression)
 	}
 
+	// Notify step fields. Missing from this walk until now, so a notify
+	// template referencing a typo'd step or a field that does not exist
+	// passed save and rendered as an empty string at run time — the run
+	// succeeded and the notification went out with a hole in it. Notify is
+	// the one step whose entire output is text a person reads, which makes
+	// it the worst place to skip this check.
+	if st.Notify != nil {
+		walk(base+"/notify/to", st.Notify.To)
+		walk(base+"/notify/title", st.Notify.Title)
+		walk(base+"/notify/body", st.Notify.Body)
+	}
+
+	// Script step fields — args and env are documented as
+	// template-substituted and were unchecked for the same reason.
+	if st.Script != nil {
+		for k, v := range st.Script.Env {
+			walk(base+"/script/env/"+k, v)
+		}
+		for ai, a := range st.Script.Args {
+			walk(fmt.Sprintf("%s/script/args/%d", base, ai), a)
+		}
+	}
+
 	// foreach: the items template resolves against this step's own inputs/
 	// earlier-steps context; the body steps additionally see the loop
 	// variable (inputs.<as>) and each other in source order (#1419).
@@ -491,10 +514,18 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 			hint := didYouMean(stepID, sortedSetKeys(earlier))
 			return fmt.Errorf("template ref %q points at step %q which hasn't run yet at this point%s", ref, stepID, hint)
 		}
-		// parts[2] = "output" or "output.path"; we don't enforce
-		// shape here. The renderer will produce an empty string if
-		// the path is missing; the executor's validation gate will
-		// catch the resulting empty input as a downstream issue.
+		// parts[2] must be "output" or "output.<path>" — the only two
+		// shapes resolveRef handles; it returns not-found for anything
+		// else. The PATH is deliberately not checked (it is a JSON walk
+		// into a value nobody has yet), but the segment in front of it is
+		// knowable now, and getting it wrong is silent in the worst way:
+		// `steps.fetch.status` renders as an empty string, so the run
+		// succeeds, the notification is delivered, and the only evidence
+		// is a message that reads "→ HTTP" with nothing after it.
+		if parts[2] != "output" && !strings.HasPrefix(parts[2], "output.") {
+			return fmt.Errorf("template ref %q: a step exposes only %q (or %q to walk into JSON) — "+
+				"there is no %q", ref, "output", "output.<path>", parts[2])
+		}
 	case "env":
 		// env.* allowlist enforced at render time, not parse time —
 		// the allowed set may differ between dry-run and live run.
