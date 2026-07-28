@@ -404,3 +404,45 @@ func TestCrewCredentialReadinessHandler_Errors(t *testing.T) {
 		}
 	})
 }
+
+// TestCrewCredentialReadiness_SeesBindingOnlyCredential closes the reader gap
+// the merge review found. A credential delivered to a crew ONLY through a
+// CREW-scoped binding — not WORKSPACE scope, no credential_crews row, no
+// agent_credentials grant — was invisible to readiness, because the query knew
+// the three pre-binding delivery sources and not bindings. The container gets
+// the credential, may lack the tool, and the report that exists to catch
+// exactly that said nothing.
+func TestCrewCredentialReadiness_SeesBindingOnlyCredential(t *testing.T) {
+	// Crew has terraform, so an AWS credential (needs aws-cli) is a gap — but
+	// only if readiness sees the credential at all.
+	db, userID, wsID, crewID := ccrSeed(t, `{"features":{"ghcr.io/devcontainers/features/terraform:1":{}}}`)
+
+	// CREW-scoped, reachable by NONE of the three legacy sources: not WORKSPACE
+	// scope, and no credential_crews / agent_credentials row.
+	if _, err := db.Exec(
+		`INSERT INTO credentials (id, workspace_id, name, encrypted_value, provider, scope, created_by)
+		 VALUES ('cred-aws', ?, 'aws-key', 'enc', 'AWS', 'CREW', ?)`, wsID, userID); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	// Its only path to the crew is a CREW binding.
+	if _, err := db.Exec(
+		`INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, crew_id, slot)
+		 VALUES ('bind-aws', ?, 'cred-aws', 'CREW', ?, 'AWS_ACCESS_KEY_ID')`, wsID, crewID); err != nil {
+		t.Fatalf("seed binding: %v", err)
+	}
+
+	res, err := resolveCrewCredentialReadiness(context.Background(), db, wsID, crewID)
+	if err != nil {
+		t.Fatalf("resolveCrewCredentialReadiness: %v", err)
+	}
+	found := false
+	for _, g := range res.Gaps {
+		if g.CredentialID == "cred-aws" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a credential delivered only via a binding was invisible to readiness — the "+
+			"container gets it and may lack aws, and the report is silent. Gaps: %+v", res.Gaps)
+	}
+}

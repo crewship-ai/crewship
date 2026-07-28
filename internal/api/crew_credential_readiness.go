@@ -97,11 +97,12 @@ func resolveCrewCredentialReadiness(ctx context.Context, db *sql.DB, workspaceID
 		out.Tools = append(out.Tools, tc.Type)
 	}
 
-	// Which credentials this crew can actually use. Same three-way grant
-	// idiom as credentialVisibilityFilter and internal_credentials.go
-	// (#1031): workspace-wide, directly crew-scoped, or assigned to one
-	// of the crew's agents. A sibling crew's CREW-scoped credential
-	// matches none of the three and is correctly absent.
+	// Which credentials this crew can actually use — the four delivery
+	// sources, matching loadDeliveredCredentials: workspace-wide, directly
+	// crew-scoped (credential_crews), assigned to one of the crew's agents,
+	// or reachable through a binding scoped to the crew / one of its agents /
+	// the workspace. A sibling crew's CREW-scoped credential with no binding
+	// into this crew matches none and is correctly absent.
 	//
 	// Lease gate (#1373): a per-agent grant may carry a TTL. Once it
 	// lapses the container no longer holds the credential, so it must
@@ -123,9 +124,22 @@ func resolveCrewCredentialReadiness(ctx context.Context, db *sql.DB, workspaceID
 			           WHERE ac.credential_id = c.id
 			             AND a.crew_id = ? AND a.deleted_at IS NULL
 			             AND (ac.expires_at IS NULL OR ac.expires_at > ?))
+			-- Bindings, the fourth delivery source. A credential reachable ONLY
+			-- through a CREW/AGENT binding — not workspace-scoped, no
+			-- credential_crews link, no per-agent grant — is still delivered to
+			-- this crew's containers, so its missing tool is still a real gap.
+			-- Omitting this made the readiness report exactly the false green it
+			-- exists to prevent: the vault looks fine, the agent gets
+			-- command-not-found.
+			OR EXISTS (SELECT 1 FROM credential_bindings b
+			           WHERE b.credential_id = c.id AND b.workspace_id = ?
+			             AND (   b.scope = 'WORKSPACE'
+			                  OR (b.scope = 'CREW'  AND b.crew_id = ?)
+			                  OR (b.scope = 'AGENT' AND b.agent_id IN (
+			                        SELECT id FROM agents WHERE crew_id = ? AND deleted_at IS NULL))))
 		  )
 		ORDER BY c.name, c.id`,
-		workspaceID, crewID, crewID, leaseNow)
+		workspaceID, crewID, crewID, leaseNow, workspaceID, crewID, crewID)
 	if err != nil {
 		return nil, err
 	}

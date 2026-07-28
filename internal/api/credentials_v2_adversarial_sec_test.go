@@ -286,3 +286,45 @@ func TestFieldAdversarial_CrossTenantUnreachable(t *testing.T) {
 		t.Fatalf("a field was planted on the victim credential: %d", n)
 	}
 }
+
+// A MEMBER of crew A must not learn, from the binding list, that crew B has a
+// credential called "github-prod" bound to GH_TOKEN. GET /credentials already
+// hides a crew-scoped credential from a non-member; the binding list is the one
+// credential read path that skipped credentialVisibilityFilter, so it disclosed
+// the account name, slot and crew of credentials the caller cannot otherwise
+// see. Metadata, not a value — but exactly the cross-crew confidentiality
+// crew-scoping exists to protect.
+func TestBindingAdversarial_ListRespectsCredentialVisibility(t *testing.T) {
+	_, db := newCredHandler(t)
+	owner := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, owner)
+
+	// crew B holds a CREW-scoped credential, bound to a slot.
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crewA', ?, 'A', 'a')`, ws)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crewB', ?, 'B', 'b')`, ws)
+	seedCredentialEnc(t, db, ws, owner, "cred-b", "github-prod", "secret")
+	execOrFatal(t, db, `UPDATE credentials SET scope = 'CREW' WHERE id = 'cred-b'`)
+	execOrFatal(t, db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES ('cred-b', 'crewB')`)
+	seedBinding(t, db, "b1", ws, "cred-b", "CREW", "crewB", "", "GH_TOKEN")
+
+	// A MEMBER who belongs only to crew A.
+	member := "u-member"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'm@x.io', 'M')`, member)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('mem', ?, ?, 'MEMBER')`, ws, member)
+	execOrFatal(t, db, `INSERT INTO crew_members (crew_id, user_id) VALUES ('crewA', ?)`, member)
+
+	bh := NewCredentialBindingHandler(db, newTestLogger())
+	req := httptest.NewRequest("GET", "/api/v1/credentials/bindings", nil)
+	ctx := withUser(req.Context(), &AuthUser{ID: member, Email: "m@x.io"})
+	ctx = withWorkspace(ctx, ws, "MEMBER")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	bh.List(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "github-prod") {
+		t.Fatalf("a crew-A MEMBER saw crew B's credential name in the binding list: %s", rec.Body.String())
+	}
+}

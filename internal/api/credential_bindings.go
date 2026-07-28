@@ -118,6 +118,16 @@ func (h *CredentialBindingHandler) List(w http.ResponseWriter, r *http.Request) 
 	q := r.URL.Query()
 	where := []string{"b.workspace_id = ?"}
 	args := []any{workspaceID}
+	// Crew-scope the list the same way GET /credentials does. A binding list is
+	// a map of where a tenant's secrets go, and without this a MEMBER of one
+	// crew reads the account name, slot and crew of a credential scoped to a
+	// crew they don't belong to — a cross-crew metadata leak the rest of the
+	// credential surface (List, Get, fields, reveal) is careful to prevent. The
+	// filter is a no-op for MANAGER+ (canRole "update"), matching those paths.
+	if vis, visArgs := credentialVisibilityFilter(RoleFromContext(r.Context()), UserFromContext(r.Context())); vis != "" {
+		where = append(where, "1=1"+vis) // vis begins " AND (...)"
+		args = append(args, visArgs...)
+	}
 	// A slice and not a map: map iteration is randomised, so the same request
 	// would produce a different SQL string every call — different plan cache
 	// entry, and a query that cannot be recognised in a slow-query log.
