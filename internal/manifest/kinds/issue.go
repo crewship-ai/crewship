@@ -184,6 +184,12 @@ type IssueSpec struct {
 	// slug == name) to attach. The Create handler accepts an array
 	// of label IDs in `labels`; Plan resolves slug → id before POST.
 	Labels []string `yaml:"labels,omitempty" json:"labels,omitempty"`
+
+	// RoutineSlug binds this issue to a saved routine (missions.routine_id,
+	// migration v84). A slug rather than an id, like every other cross-
+	// resource reference here: ids are server-minted, so a manifest carrying
+	// one would not survive being applied to a second instance.
+	RoutineSlug string `yaml:"routine_slug,omitempty" json:"routine_slug,omitempty"`
 }
 
 // IssueDocument is the YAML envelope produced/consumed by the
@@ -219,6 +225,7 @@ type IssueRemote struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	ProjectID    *string `json:"project_id"`
+	RoutineID    *string `json:"routine_id"`
 	// Labels arrives as a denormalised array; we only need each
 	// label's name for round-trip (Label kind keys on name).
 	Labels []issueRemoteLabel `json:"labels"`
@@ -336,6 +343,12 @@ func (d *IssueDocument) Validate(wsCtx internalapi.WorkspaceContext) error {
 		return fmt.Errorf("issue %q: spec.project_slug %q does not reference any declared or remote project",
 			d.Metadata.Slug, d.Spec.ProjectSlug)
 	}
+	if d.Spec.RoutineSlug != "" &&
+		(len(wsCtx.DeclaredRoutines) > 0 || len(wsCtx.RemoteRoutines) > 0) &&
+		!wsCtx.HasRoutine(d.Spec.RoutineSlug) {
+		return fmt.Errorf("issue %q: spec.routine_slug %q does not reference any declared or remote routine",
+			d.Metadata.Slug, d.Spec.RoutineSlug)
+	}
 	if d.Spec.AssigneeSlug != "" &&
 		(len(wsCtx.DeclaredAgents) > 0 || len(wsCtx.RemoteAgents) > 0) &&
 		!wsCtx.HasAgent(d.Spec.AssigneeSlug) {
@@ -432,8 +445,12 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 		if err != nil {
 			return nil, fmt.Errorf("issue %q: resolve labels: %w", d.Metadata.Slug, err)
 		}
+		routineID, err := issueResolveOptionalRoutineID(ctx, c, d.Spec.RoutineSlug)
+		if err != nil {
+			return nil, fmt.Errorf("issue %q: resolve routine_slug: %w", d.Metadata.Slug, err)
+		}
 
-		body := d.toCreateBody(projectID, assigneeID, labelIDs)
+		body := d.toCreateBody(projectID, assigneeID, labelIDs, routineID)
 		slug := d.Metadata.Slug
 		title := d.resolvedTitle()
 
@@ -465,8 +482,12 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 	if err != nil {
 		return nil, fmt.Errorf("issue %q: resolve assignee_slug: %w", d.Metadata.Slug, err)
 	}
+	routineID, err := issueResolveOptionalRoutineID(ctx, c, d.Spec.RoutineSlug)
+	if err != nil {
+		return nil, fmt.Errorf("issue %q: resolve routine_slug: %w", d.Metadata.Slug, err)
+	}
 
-	patch, labelsChanged, err := d.diffPatch(remote, projectID, assigneeID)
+	patch, labelsChanged, err := d.diffPatch(remote, projectID, assigneeID, routineID)
 	if err != nil {
 		return nil, fmt.Errorf("issue %q: diff: %w", d.Metadata.Slug, err)
 	}
@@ -545,7 +566,7 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 // brand-new Issue document the row lands in BACKLOG and the next
 // Plan run will detect drift and PATCH it to DONE. This is a known
 // two-apply quirk and is documented in the per-kind docs page.
-func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []string) map[string]any {
+func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []string, routineID string) map[string]any {
 	body := map[string]any{
 		"title": d.resolvedTitle(),
 	}
@@ -567,6 +588,11 @@ func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []st
 	if len(labelIDs) > 0 {
 		body["labels"] = labelIDs
 	}
+	// Omitted rather than sent empty: the server reads routine_id:"" as
+	// "clear the binding", which is wrong on an update and pointless here.
+	if routineID != "" {
+		body["routine_id"] = routineID
+	}
 	return body
 }
 
@@ -581,8 +607,17 @@ func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []st
 // slugs to IDs before stuffing them into the patch — keeps the
 // concern of "did the set drift" separate from "do we have IDs to
 // send".
-func (d *IssueDocument) diffPatch(remote *IssueRemote, projectID, assigneeID string) (map[string]any, bool, error) {
+func (d *IssueDocument) diffPatch(remote *IssueRemote, projectID, assigneeID, routineID string) (map[string]any, bool, error) {
 	patch := map[string]any{}
+
+	// Only when the manifest declares one, and only when it differs — an
+	// omitted routine_slug means "leave the server value alone", the same
+	// rule every other optional field here follows. Re-patching an already
+	// correct binding on every apply would make the plan noisy and its
+	// "unchanged" count meaningless.
+	if routineID != "" && routineID != deref(remote.RoutineID) {
+		patch["routine_id"] = routineID
+	}
 
 	if t := d.resolvedTitle(); t != "" && t != remote.Title {
 		patch["title"] = t
@@ -751,6 +786,67 @@ func issueResolveOptionalAgentID(ctx context.Context, c internalapi.Client, slug
 	return "", fmt.Errorf("agent with slug %q not found", slug)
 }
 
+// issueResolveOptionalRoutineID is the routine-slug analogue of
+// issueResolveOptionalAgentID. Resolved during Plan so a dangling reference
+// fails before anything is written — a bad slug that only surfaced at Exec
+// would leave half a manifest applied.
+func issueResolveOptionalRoutineID(ctx context.Context, c internalapi.Client, slug string) (string, error) {
+	if strings.TrimSpace(slug) == "" {
+		return "", nil
+	}
+	routines, err := issueListRoutines(ctx, c)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range routines {
+		if r.Slug == slug {
+			return r.ID, nil
+		}
+	}
+	return "", fmt.Errorf("routine with slug %q not found", slug)
+}
+
+// issueRoutineStub is the trimmed pipeline row the resolver needs.
+type issueRoutineStub struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+}
+
+// issueListRoutines fetches the workspace's saved routines.
+func issueListRoutines(ctx context.Context, c internalapi.Client) ([]issueRoutineStub, error) {
+	resp, err := c.Get(ctx, "/api/v1/pipelines")
+	if err != nil {
+		return nil, fmt.Errorf("GET /api/v1/pipelines: %w", err)
+	}
+	if err := checkStatus(resp, "list routines"); err != nil {
+		return nil, err
+	}
+	body, err := readAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read /api/v1/pipelines body: %w", err)
+	}
+	if len(body) == 0 {
+		return nil, nil
+	}
+	var rows []issueRoutineStub
+	if err := json.Unmarshal(body, &rows); err == nil {
+		return rows, nil
+	}
+	// The list endpoint has been seen wrapping rows in an envelope; accept
+	// both rather than failing the whole apply on a shape difference.
+	var wrapped struct {
+		Pipelines []issueRoutineStub `json:"pipelines"`
+		Data      []issueRoutineStub `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err != nil {
+		return nil, fmt.Errorf("decode /api/v1/pipelines: %w", err)
+	}
+	if wrapped.Pipelines != nil {
+		return wrapped.Pipelines, nil
+	}
+	return wrapped.Data, nil
+}
+
 // issueResolveLabelIDs maps each declared slug (== name) to a label
 // ID via one GET /api/v1/labels. Returns an error mentioning the
 // offending slug on the first miss so the user can fix the typo
@@ -816,6 +912,15 @@ func ExportIssues(ctx context.Context, c internalapi.Client) ([]*IssueDocument, 
 	for _, a := range agents {
 		agentSlugByID[a.ID] = a.Slug
 	}
+	// Routines are best-effort: an instance where /pipelines is unreadable
+	// should still export its issues, just without the binding, rather than
+	// failing the whole export over one optional field.
+	routineSlugByID := map[string]string{}
+	if routines, err := issueListRoutines(ctx, c); err == nil {
+		for _, r := range routines {
+			routineSlugByID[r.ID] = r.Slug
+		}
+	}
 
 	var out []*IssueDocument
 	for _, crew := range crews {
@@ -848,6 +953,11 @@ func ExportIssues(ctx context.Context, c internalapi.Client) ([]*IssueDocument, 
 			if row.ProjectID != nil {
 				if slug, ok := projectSlugByID[*row.ProjectID]; ok {
 					doc.Spec.ProjectSlug = slug
+				}
+			}
+			if row.RoutineID != nil {
+				if slug, ok := routineSlugByID[*row.RoutineID]; ok {
+					doc.Spec.RoutineSlug = slug
 				}
 			}
 			if row.AssigneeID != nil && deref(row.AssigneeType) == "agent" {

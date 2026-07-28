@@ -36,6 +36,7 @@ type issueFakeClient struct {
 	projects map[string]issueProjectStub // keyed by slug
 	agents   map[string]issueAgentStub   // keyed by slug
 	labels   map[string]issueLabelStub   // keyed by name (== slug)
+	routines map[string]issueRoutineStub // keyed by slug
 
 	// issuesByCrewID is the in-memory store the list endpoint
 	// returns for ?crew_id=<id>. Tests pre-populate with the rows
@@ -59,6 +60,7 @@ func newIssueFake() *issueFakeClient {
 		projects:       map[string]issueProjectStub{},
 		agents:         map[string]issueAgentStub{},
 		labels:         map[string]issueLabelStub{},
+		routines:       map[string]issueRoutineStub{},
 		issuesByCrewID: map[string][]IssueRemote{},
 	}
 }
@@ -101,6 +103,12 @@ func (f *issueFakeClient) Get(_ context.Context, path string) (*internalapi.Resp
 			out = append(out, a)
 		}
 		return issueJSONResp(200, out), nil
+	case path == "/api/v1/pipelines":
+		rows := make([]issueRoutineStub, 0, len(f.routines))
+		for _, r := range f.routines {
+			rows = append(rows, r)
+		}
+		return jsonResp(200, rows), nil
 	case path == "/api/v1/labels":
 		out := make([]issueLabelStub, 0, len(f.labels))
 		for _, l := range f.labels {

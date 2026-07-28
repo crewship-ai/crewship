@@ -757,7 +757,7 @@ func TestIssueCov_DiffPatch(t *testing.T) {
 			Status:      "done",
 		},
 	}
-	patch, labelsChanged, err := doc.diffPatch(remote, "p2", "a2")
+	patch, labelsChanged, err := doc.diffPatch(remote, "p2", "a2", "")
 	if err != nil {
 		t.Fatalf("diffPatch: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestIssueCov_DiffPatch(t *testing.T) {
 		Metadata: internalapi.Metadata{Slug: "s", Name: "Old title"},
 		Spec:     IssueSpec{CrewSlug: "eng", Description: "old desc", Priority: "none", Status: "backlog"},
 	}
-	patch, labelsChanged, err = same.diffPatch(remote, "p1", "a1")
+	patch, labelsChanged, err = same.diffPatch(remote, "p1", "a1", "")
 	if err != nil {
 		t.Fatalf("diffPatch: %v", err)
 	}
