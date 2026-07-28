@@ -2,6 +2,7 @@
 
 import { CredentialsManager, SkillsManager } from "../agent-canvas-managers"
 import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
+import { AgentChannelsCard } from "../agent-channels-card"
 
 export interface SkillsTabProps {
   agentId: string
@@ -35,6 +36,17 @@ export function SkillsTab({
           agentCrew={agentCrew}
           workspaceId={workspaceId}
         />
+        {/* The other half of "what can this agent reach": apps it can act
+            through, and channels it may post to. Both are access, so both
+            belong on the access tab — a channel grant shown only on the
+            channel's own page is invisible from the side people audit. */}
+        {workspaceId && (
+          <AgentChannelsCard
+            agentId={agentId}
+            agentName={agentName}
+            workspaceId={workspaceId}
+          />
+        )}
       </section>
       <CredentialsManager agentId={agentId} agentSlug={agentSlug} workspaceId={workspaceId} onChange={onAgentChanged} />
     </div>

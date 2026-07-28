@@ -55,10 +55,8 @@ Before a key is saved the panel shows a single **Setup** row and says the sectio
 
 The connections are configured here, but the two questions they raise are asked elsewhere, so the answers appear there too:
 
-- **An agent's Overview** (Crews) has a **Reach** card: the apps it can act through, and the channels it may post to. Both facts existed only from the other end — you could open Gmail and see Riley, or open a channel and see who may post to it. Standing in front of Riley there was nowhere that said *Gmail, full access*, which is the direction a reviewer reads it in.
-- **A routine's Overview** extends *What it touches* with **Reach through its agents**: the routine runs Riley, Riley is granted Gmail, therefore this routine can send mail. That hop is invisible in the DSL, because the grant lives on the agent.
-
-Both are read-only. Granting an app belongs to **Agent access**, granting a channel belongs to the channel — in both cases the authority sits with whoever owns the destination, not with whoever is looking at the agent.
+- **An agent's Skills & Tools tab** (Crews) — under **Integrations**, beside Connectors, a **Notifications** card lists the channels the agent may post to, with **Manage access** to grant or revoke. It sits there rather than on Overview because that tab is the agent's access surface, and a channel grant is access. Each pairing is still gated on the *channel* — MANAGER+ for a workspace channel, ownership for a personal one — so a refusal comes from the server in its own words rather than being guessed at in the UI.
+- **A routine's Overview** extends *What it touches* with **Reach through its agents**: the routine runs Riley, Riley is granted Gmail, therefore this routine can send mail. That hop is invisible in the DSL, because the grant lives on the agent. Read-only — it is a summary of grants made elsewhere.
 
 ```bash
 # What can this agent reach?  (the mirror of `notifychannel agents list`)
