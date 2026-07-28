@@ -717,6 +717,19 @@ Dnes `logCredentialExposures` (`exec_env.go:574`) plaintext expozici jen loguje
 | **P7** | Reveal — jádro (L0, L1, L2, L3.3, L4, L8, L9). Testy T-R1…T-R6, T-R14…T-R16, T-R20. | P6 |
 | **P8** | Harness `test-secretless-github.sh` — T-H1…T-H9 bez zero-disk částí. | P5 |
 
+### P9 — model-scoped credentials
+
+Vlastní dokument: `PRD-MODEL-SCOPED-CREDENTIALS-2026.md`. Credential přestane
+odpovídat „smí mluvit s Anthropic?" a začne odpovídat „smí mluvit s Anthropic
+**jako claude-haiku-4-5**?". Nákladová páka 10×, zároveň omezení schopností
+kompromitovaného agenta.
+
+**Až za P3, ne dřív.** Je to další per-credential policy pole, tedy druhá
+migrace na tabulku `credentials`. A hlavně: vynucení při přiřazení modelu
+agentovi (to jediné, co dělá z runtime 403 záchytnou síť místo primárního UX)
+potřebuje vědět, který credential se agentovi vyhodnotí — což definuje teprve
+binding z P3.
+
 ### Později — až se ukáže reálná potřeba
 
 Recipe katalog · varianty · probe per značka · readiness verify smyčka ·
