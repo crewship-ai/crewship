@@ -314,3 +314,50 @@ func decodeBindingList(t *testing.T, rr *httptest.ResponseRecorder) []credential
 	}
 	return out.Bindings
 }
+
+// TestMultiAccount_CrossTenantGuardHoldsWithoutTheTriggers covers the one
+// predicate on the binding arm that nothing else reaches:
+// c.workspace_id = rb.workspace_id.
+//
+// trg_credential_bindings_workspace_check ABORTs any binding whose credential
+// and scope live in different workspaces, so the SQL predicate is pure defence
+// in depth — and defence in depth with no test is a line deleted in a refactor
+// as obviously redundant, after which the only thing between two tenants is a
+// trigger nobody is watching either. Verified by mutation: removing the
+// predicate breaks NO test in this package, including
+// TestMultiAccount_CrossTenantBindingNeverDelivers, which the triggers already
+// satisfy before delivery is ever consulted.
+//
+// This is the same hole the crew arm had (see
+// TestCrewDelivery_CrossTenantGuardHoldsWithoutTheTrigger) — the pattern is
+// worth recognising: a guard the schema makes unreachable is a guard no
+// ordinary test can fail on.
+func TestMultiAccount_CrossTenantGuardHoldsWithoutTheTriggers(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+
+	// A second tenant holding a credential of its own. Seeded directly:
+	// seedTestUser uses a fixed email, so a second call collides.
+	execOrFatal(t, db,
+		`INSERT INTO workspaces (id, name, slug) VALUES ('ma-ws-other', 'Other', 'other')`)
+	seedCredentialEnc(t, db, "ma-ws-other", e.userID, "ma-foreign", "FOREIGN_TOKEN", "other-tenant-secret")
+
+	// Drop the guards, then bind the foreign credential into THIS tenant's crew
+	// under a slot its agents read — precisely the row the triggers reject.
+	execOrFatal(t, db, `DROP TRIGGER IF EXISTS trg_credential_bindings_workspace_check`)
+	execOrFatal(t, db, `DROP TRIGGER IF EXISTS trg_credential_bindings_workspace_check_upd`)
+	seedBinding(t, db, "ma-bind-foreign", e.wsID, "ma-foreign", "CREW", e.crewA, "", "GH_TOKEN")
+
+	for _, tc := range []struct {
+		name string
+		got  map[string]string
+	}{
+		{"boot", bootEnvValues(bootCreds(t, db, e.agentA))},
+		{"delegation", delegationEnvValues(delegationCreds(t, db, e.agentA))},
+		{"peer query", delegationEnvValues(peerQueryCreds(t, db, e.agentA))},
+	} {
+		if tc.got["GH_TOKEN"] == "other-tenant-secret" {
+			t.Errorf("%s: another tenant's credential was delivered through a binding: %v", tc.name, tc.got)
+		}
+	}
+}
