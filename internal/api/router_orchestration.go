@@ -241,6 +241,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// only the handler can tell which it is looking at.
 	nca := NewNotifyChannelAgentsHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/notification-channels/{id}/agents", authed(wsCtx(http.HandlerFunc(nca.List))))
+	// The mirror: what can THIS agent reach? Same read bar as the line above —
+	// the response says that a channel exists and of what kind, never where it
+	// points, so it carries no more than the channel-side view already does.
+	anc := NewAgentNotifyChannelsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/notification-channels", authed(wsCtx(http.HandlerFunc(anc.List))))
 	r.authedMut("POST", "/api/v1/notification-channels/{id}/agents", roleInline, nca.Allow)
 	r.authedMut("DELETE", "/api/v1/notification-channels/{id}/agents/{agentId}", roleInline, nca.Deny)
 

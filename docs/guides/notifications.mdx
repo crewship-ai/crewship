@@ -51,6 +51,20 @@ The search box in the left panel drives this tab too — Composio's own three in
 
 Before a key is saved the panel shows a single **Setup** row and says the sections appear once there is a key. Six empty sections would be six dead ends.
 
+### Where else this shows up
+
+The connections are configured here, but the two questions they raise are asked elsewhere, so the answers appear there too:
+
+- **An agent's Overview** (Crews) has a **Reach** card: the apps it can act through, and the channels it may post to. Both facts existed only from the other end — you could open Gmail and see Riley, or open a channel and see who may post to it. Standing in front of Riley there was nowhere that said *Gmail, full access*, which is the direction a reviewer reads it in.
+- **A routine's Overview** extends *What it touches* with **Reach through its agents**: the routine runs Riley, Riley is granted Gmail, therefore this routine can send mail. That hop is invisible in the DSL, because the grant lives on the agent.
+
+Both are read-only. Granting an app belongs to **Agent access**, granting a channel belongs to the channel — in both cases the authority sits with whoever owns the destination, not with whoever is looking at the agent.
+
+```bash
+# What can this agent reach?  (the mirror of `notifychannel agents list`)
+crewship agent channels <agent-id>
+```
+
 ### Seeing everyone's connections (admins)
 
 On **Connections**, ADMIN/OWNER get an **Everyone's connections** toggle in the tab row. It widens the list to include other members' personal channels — but it shows *that* a member has a channel and of what kind, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration. Those rows are read-only; only their owner can test, disable or delete them.

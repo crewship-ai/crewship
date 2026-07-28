@@ -3,6 +3,7 @@
 import { EditableField } from "@/components/shared/editable-field"
 import { InboxBanner } from "@/components/features/crews/inbox-banner"
 
+import { AgentReachCard } from "../agent-reach-card"
 import { PeersCard, RecentRunsCard, RecentSessionsCard } from "../agent-canvas-cards"
 import { CanvasRow as Row } from "../canvas-base"
 import type {
@@ -98,6 +99,16 @@ export function OverviewTab({
           )}
         </div>
       </section>
+
+      {/* What this agent can reach outside itself — connected apps and the
+          notification channels it may post to. Both facts lived only on the
+          Integrations page and only from the other end, so standing in front
+          of an agent there was nowhere that said "Gmail, full access". */}
+      <AgentReachCard
+        workspaceId={agent.workspace_id}
+        agentId={agent.id}
+        agentName={agent.name}
+      />
 
       {/* Recent sessions + Recent runs */}
       <section className="grid md:grid-cols-2 gap-4">
