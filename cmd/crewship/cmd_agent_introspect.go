@@ -336,6 +336,12 @@ var agentCredentialsCmd = &cobra.Command{
 			// approved an agent-proposed credential). Empty on a standing grant
 			// and on pre-v165 leases.
 			LeaseSource string `json:"lease_source,omitempty"`
+			// GrantSource says WHERE the grant came from: "explicit" (an
+			// assignment an operator made and can revoke by id) or "crew" (the
+			// agent has it by belonging to a crew the credential is linked to,
+			// with no assignment row to revoke). Distinct from LeaseSource,
+			// which explains why a grant EXPIRES.
+			GrantSource string `json:"grant_source,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &creds); err != nil {
 			return err
@@ -347,7 +353,7 @@ var agentCredentialsCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR", "LEASE", "SOURCE"}
+		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR", "GRANT", "LEASE", "SOURCE"}
 		var rows [][]string
 		for _, c := range creds {
 			lease := "standing"
@@ -364,7 +370,19 @@ var agentCredentialsCmd = &cobra.Command{
 			if c.LeaseSource != "" {
 				source = c.LeaseSource
 			}
-			rows = append(rows, []string{c.ID[:min(12, len(c.ID))], c.CredentialName, c.Provider, c.Type, c.EnvVarName, lease, source})
+			// A crew-derived grant has no assignment row, so no id to print and
+			// nothing for `credential unassign` to remove — it goes away by
+			// unlinking the credential from the crew. Showing a dash rather than
+			// a blank makes that a stated fact instead of a rendering glitch.
+			grant := c.GrantSource
+			id := c.ID[:min(12, len(c.ID))]
+			if c.GrantSource == "crew" {
+				id = "-"
+			}
+			if grant == "" {
+				grant = "explicit"
+			}
+			rows = append(rows, []string{id, c.CredentialName, c.Provider, c.Type, c.EnvVarName, grant, lease, source})
 		}
 		return f.Auto(creds, headers, rows)
 	},

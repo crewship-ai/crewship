@@ -68,6 +68,32 @@ const (
 	EntryApprovalTimeout   EntryType = "approval.timeout"
 	EntryApprovalCancelled EntryType = "approval.cancelled"
 
+	// Credential reveal (PRD-CREDENTIALS-V2-2026 §2.6 L4). These three
+	// are the only journal entries written via EmitSync as a
+	// PRECONDITION — the action they describe does not happen unless
+	// the chained write commits first.
+	//
+	// EntryCredentialRevealed records a secret being disclosed to a
+	// human. Payload: credential_id, credential_name, classification,
+	// reason, actor_role, ip. It carries NEITHER the value NOR a hash
+	// of it — a hash would turn the tamper-evident audit log into an
+	// offline dictionary-attack target for every short secret in the
+	// vault, which is the exact opposite of what an audit log is for.
+	EntryCredentialRevealed EntryType = "credential.revealed"
+
+	// EntryCredentialRevealPolicy records the workspace-level reveal
+	// switch being turned on or off (L1). Turning it ON is the moment a
+	// tenant stops being default-deny, so it is an event in its own
+	// right, not a settings diff. Payload: enabled, previous.
+	EntryCredentialRevealPolicy EntryType = "credential.reveal_policy_changed"
+
+	// EntryCredentialSensitivityLowered records a classification being
+	// WEAKENED (L0) — SEALED→RESTRICTED, RESTRICTED→STANDARD. Raising a
+	// classification is not journaled: it only ever removes reach, so
+	// it needs no ceremony. Lowering hands someone a key that did not
+	// exist a moment ago. Payload: credential_id, from, to.
+	EntryCredentialSensitivityLowered EntryType = "credential.sensitivity_lowered"
+
 	// Cost
 	EntryLLMCall       EntryType = "llm.call"
 	EntryLLMCacheHit   EntryType = "llm.cache_hit"

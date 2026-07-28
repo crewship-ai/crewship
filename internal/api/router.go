@@ -132,13 +132,21 @@ type Router struct {
 	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
 	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
-	// authRL/apiRL/credTestRL are the underlying limiters behind the wrapped
-	// muxes above, retained so a runtime override from the admin Rate Limiters
-	// console (ratelimitStore.OnChange) can retune them in place — SetReqPerMin
-	// — without rebuilding the handler chain.
+	// credRevealRateLimitedMux wraps the ONE route that returns a stored
+	// secret in plaintext (PRD-CREDENTIALS-V2-2026 §2.6 L6). Far tighter
+	// than every other bucket, and it must be selected BEFORE the general
+	// branch below: authenticated CLI tokens are exempt from the general
+	// per-IP bucket (#1333), so a reveal that fell through to it would be
+	// unthrottled for exactly the caller shape we care most about.
+	credRevealRateLimitedMux http.Handler
+	// authRL/apiRL/credTestRL/credRevealRL are the underlying limiters behind
+	// the wrapped muxes above, retained so a runtime override from the admin
+	// Rate Limiters console (ratelimitStore.OnChange) can retune them in place
+	// — SetReqPerMin — without rebuilding the handler chain.
 	authRL                *RateLimiter
 	apiRL                 *RateLimiter
 	credTestRL            *RateLimiter
+	credRevealRL          *RateLimiter
 	ratelimitStore        *ratelimitcfg.Store // runtime-tunable limiter values; nil → shipped defaults
 	cappedMux             http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
 	cliExemptNeg          *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
@@ -500,17 +508,21 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authPM, apiPM, credPM := ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin),
 		ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAPIPerMin),
 		ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPCredTestPerMin)
+	revealPM := ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPCredRevealPerMin)
 	if r.ratelimitStore != nil {
 		authPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAuthPerMin)
 		apiPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAPIPerMin)
 		credPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPCredTestPerMin)
+		revealPM = r.ratelimitStore.Value(ratelimitcfg.KeyHTTPCredRevealPerMin)
 	}
 	r.authRL = NewRateLimiter(authPM)
 	r.apiRL = NewRateLimiter(apiPM)
 	r.credTestRL = NewRateLimiter(credPM)
+	r.credRevealRL = NewRateLimiter(revealPM)
 	r.authRateLimitedMux = r.authRL.Middleware(capped)
 	r.apiRateLimitedMux = r.apiRL.Middleware(capped)
 	r.credTestRateLimitedMux = r.credTestRL.Middleware(capped)
+	r.credRevealRateLimitedMux = r.credRevealRL.Middleware(capped)
 
 	// Push runtime overrides onto the live limiters the moment an admin
 	// changes one — no restart, no dropped in-flight buckets.
@@ -519,6 +531,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 			r.authRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAuthPerMin))
 			r.apiRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPAPIPerMin))
 			r.credTestRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPCredTestPerMin))
+			r.credRevealRL.SetReqPerMin(r.ratelimitStore.Value(ratelimitcfg.KeyHTTPCredRevealPerMin))
 		})
 	}
 
@@ -578,6 +591,12 @@ func (r *Router) Shutdown() {
 // future `/credentials/{id}/audit/test` doesn't accidentally fall under
 // the tighter rate limiter as a forward-compat snag.
 var credTestStoredPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/test$`)
+
+// credRevealPathRe matches `/api/v1/credentials/{id}/reveal` exactly.
+// Anchored for the same forward-compat reason as credTestStoredPathRe, and
+// narrow on purpose: the reveal-policy and sensitivity routes are ordinary
+// settings writes and belong on the general bucket.
+var credRevealPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/reveal$`)
 
 // isSelfServiceAuthPath reports whether path is an authenticated caller
 // listing or revoking their OWN sessions / CLI tokens, as opposed to the
@@ -654,6 +673,17 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 	// oracle for stolen secrets.
 	if path == "/api/v1/credentials/test" || credTestStoredPathRe.MatchString(path) {
 		r.credTestRateLimitedMux.ServeHTTP(w, req)
+		return
+	}
+
+	// Tightest bucket in the system, for the only route that hands back a
+	// stored secret in plaintext (PRD-CREDENTIALS-V2-2026 §2.6 L6). It has
+	// to be matched HERE, above the general branch: that branch exempts
+	// authenticated CLI tokens from the per-IP bucket entirely (#1333), and
+	// an unthrottled reveal for token-bearing callers is precisely the hole
+	// this limiter exists to close.
+	if credRevealPathRe.MatchString(path) {
+		r.credRevealRateLimitedMux.ServeHTTP(w, req)
 		return
 	}
 

@@ -300,7 +300,10 @@ func TestCredTestStoredCmd(t *testing.T) {
 
 	t.Run("valid", func(t *testing.T) {
 		stub := covStub(t)
-		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{"valid": true}))
+		// supported:true — this subtest is about a probe that ran and passed.
+		// Without it the command takes the "not checked" branch instead, which
+		// also returns nil and would leave this case silently unexercised.
+		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{"valid": true, "supported": true}))
 		if err := credTestStoredCmd.RunE(credTestStoredCmd, []string{covCredIDCli3}); err != nil {
 			t.Fatalf("RunE: %v", err)
 		}
@@ -383,6 +386,61 @@ func TestCredDefaultEnvVarCmd(t *testing.T) {
 		err := credDefaultEnvVarCmd.RunE(credDefaultEnvVarCmd, nil)
 		if err == nil || !strings.Contains(err.Error(), "no default env var") {
 			t.Fatalf("expected no-default error, got %v", err)
+		}
+	})
+}
+
+// TestCredTestStoredCmd_UnsupportedProviderIsNotReportedValid pins the CLI half
+// of the probe-support fix.
+//
+// probeProvider's default branch answers an unprobeable provider with
+// {valid:true, error:"No validation available for this provider"} — literally
+// true (nothing failed) and, printed through PrintSuccess, indistinguishable
+// from a credential that was checked and passed. `crewship credential
+// test-stored notion-key` claimed "is valid" for a key nobody had contacted
+// Notion about.
+//
+// The server now sends `supported`, and the CLI must say which of the two
+// happened. The distinction matters most in exactly the situation the command
+// exists for: an operator checking whether a credential still works before
+// relying on it.
+func TestCredTestStoredCmd_UnsupportedProviderIsNotReportedValid(t *testing.T) {
+	path := "/api/v1/credentials/" + covCredIDCli3 + "/test"
+
+	t.Run("unsupported provider reports not checked", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{
+			"valid":     true,
+			"supported": false,
+			"error":     "No validation available for this provider",
+		}))
+		out, err := captureStderrCov(t, func() error {
+			return credTestStoredCmd.RunE(credTestStoredCmd, []string{covCredIDCli3})
+		})
+		if err != nil {
+			t.Fatalf("an unprobeable credential is not an error, just unverified: %v", err)
+		}
+		if strings.Contains(out, "is valid") {
+			t.Errorf("CLI claimed validity for a provider it never contacted; output:\n%s", out)
+		}
+		if !strings.Contains(strings.ToLower(out), "not checked") {
+			t.Errorf("CLI must say the credential was not checked; output:\n%s", out)
+		}
+	})
+
+	t.Run("supported provider still reports valid", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{
+			"valid": true, "supported": true,
+		}))
+		out, err := captureStderrCov(t, func() error {
+			return credTestStoredCmd.RunE(credTestStoredCmd, []string{covCredIDCli3})
+		})
+		if err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+		if !strings.Contains(out, "is valid") {
+			t.Errorf("a real probe that passed must still read as valid; output:\n%s", out)
 		}
 	})
 }

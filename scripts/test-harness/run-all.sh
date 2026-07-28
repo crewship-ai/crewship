@@ -4,6 +4,7 @@
 #
 #   ./run-all.sh                      # memory, notifications, credentials, determinism
 #   WITH_GITHUB=1 ./run-all.sh        # also the GitHub real-world scenario
+#   WITH_SECRETLESS=1 ./run-all.sh    # also the secretless-GitHub proof (T-H1…T-H9)
 #   WITH_KEEPER_SECURITY=1 ./run-all.sh  # also the keeper adversarial suite
 #   WITH_NOTIFICATIONS_SHOUTRRR=1 ./run-all.sh  # also the #1412 preference-matrix suite
 #   ./run-all.sh --quick              # skip the slower determinism sweep
@@ -19,6 +20,14 @@ QUICK=0
 tests=(test-memory.sh test-delegation.sh test-notifications.sh test-orchestration.sh test-credentials.sh test-keeper.sh)
 (( QUICK == 0 )) && tests+=(test-determinism.sh)
 [[ "${WITH_GITHUB:-0}" == "1" ]] && tests+=(test-realworld-github.sh)
+# Secretless-GitHub proof (PRD-CREDENTIALS-V2 §4.3, T-H1…T-H9) — opt-in for the
+# same reasons as the red-team suite: it mints + deletes workspace credentials,
+# saves + soft-deletes a probe routine in two crews, and (only when
+# SEED_GITHUB_TEST_REPO is set) pushes a uniquely named branch to the throwaway
+# test repo and deletes it again. Every section self-SKIPs without its inputs,
+# so it is safe to enable on a slot with no GitHub account wired — you just get
+# the crew-fanout, zero-disk and cross-crew-isolation legs. Dev slots only.
+[[ "${WITH_SECRETLESS:-0}" == "1" ]] && tests+=(test-secretless-github.sh)
 # Keeper adversarial suite — opt-in (creates HARNESS_ credentials + probes the
 # internal keeper HTTP surface). Ingress-fence is read-only; toctou/audit clean
 # up after themselves.
