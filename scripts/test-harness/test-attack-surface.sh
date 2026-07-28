@@ -103,6 +103,55 @@ OTHER_WS="${CREWSHIP_ATTACK_OTHER_WS:-}"
 EDGE="${CREWSHIP_ATTACK_EDGE_URL:-}"
 EDGE="${EDGE%/}"
 
+# _is_public_url <url> — true when the host is one requireInternal would treat
+# as OUTSIDE. That gate hides /api/v1/internal/* from a non-private source, so
+# it is the only definition that matters here: a probe sent from a host the gate
+# calls private tells us nothing about the perimeter, whatever the url looks
+# like. Loopback is not the question — RFC1918 is. `http://192.168.1.201:8082`
+# is not loopback and is still inside, which is why this checks the whole
+# private space rather than just 127.0.0.1/localhost.
+#
+# The ranges mirror internal/api/internal.go's privateNetCIDRs (10/8, 172.16/12,
+# 192.168/16, 169.254/16, fc00::/7, fe80::/10) plus the loopback it handles
+# separately via IP.IsLoopback. Keep the two in step: if that list grows, a host
+# in the new range would be classified public here and B1–B6 would assert 404
+# against a surface that answers 403.
+#
+# This inspects the URL STRING, not a resolved address — it is a "did the
+# operator point us at the right layer" check, not an SSRF guard. A public name
+# with a private A record still gets probed, and would fail loudly rather than
+# silently pass.
+#
+# Bash 3.2 only (macOS ships it and this harness is run from developer laptops):
+# no ${var,,}, no associative arrays.
+_is_public_url() {
+  local host="${1#*://}"
+  host="${host%%/*}"; host="${host%%\?*}"; host="${host##*@}"
+  case "$host" in
+    \[*\]*) host="${host#\[}"; host="${host%%\]*}" ;;   # [::1]:8080
+    *:*)    host="${host%%:*}" ;;
+  esac
+  host="$(printf '%s' "$host" | /usr/bin/tr '[:upper:]' '[:lower:]')"
+  case "$host" in
+    ''|localhost|*.localhost|*.local|*.internal) return 1 ;;
+    127.*|0.0.0.0|::1|::|169.254.*) return 1 ;;
+    f[cd]??:*|fe[89ab]?:*) return 1 ;;                 # fc00::/7, fe80::/10
+    10.*|192.168.*) return 1 ;;
+    172.1[6-9].*|172.2[0-9].*|172.3[01].*) return 1 ;;
+  esac
+  return 0
+}
+
+# No edge given, but $SERVER may already BE the edge. The usage example at the
+# top of this file is exactly that — `CREWSHIP_SERVER=https://crewship-dev3…`,
+# a public url with Caddy in front — and skipping B1–B6 for someone who ran the
+# documented invocation means the perimeter goes untested for the audience most
+# likely to be reading the output. The gauntlet is the other shape: it drives
+# loopback on purpose and names the edge separately.
+if [[ -z "$EDGE" ]] && _is_public_url "$SERVER"; then
+  EDGE="${SERVER%/}"
+fi
+
 # ── http helper: prints the status code, stashes body in $_ATK_BODY ───────────
 # Per-run temp file: a fixed /tmp path is both a symlink target on a shared box
 # and a collision between two concurrent runs.
@@ -191,12 +240,19 @@ section "Tier A · Internal surface must be UNREACHABLE from the edge (#audit L0
 # property worth gating on: delete that Caddy block and the internal keeper and
 # credential surface becomes reachable by anything that can reach Caddy. So the
 # probes go to $EDGE. Any 2xx here would mean exactly that regression.
+#
+# The gate on running them is one question, asked once: is the target a host
+# requireInternal would treat as OUTSIDE? That is stricter than the "$EDGE ==
+# $SERVER" check it replaces, which only caught the operator naming the app url
+# verbatim and let `CREWSHIP_ATTACK_EDGE_URL=http://192.168.1.201:8082` — a
+# different string, the same wrong side of the fence — through to assert 404
+# against a surface that answers 403.
 if [[ -z "$EDGE" ]]; then
   skip "B1–B6 internal surface unreachable from the edge" \
-    "set CREWSHIP_ATTACK_EDGE_URL to the PUBLIC url (e.g. https://crewship-stage.unifylab.cz). Probing the app port directly cannot answer this: every host that can reach it is on a private LAN, which requireInternal treats as internal"
-elif [[ "$EDGE" == "${SERVER%/}" ]]; then
+    "no public target: \$SERVER ($SERVER) is loopback or RFC1918, and CREWSHIP_ATTACK_EDGE_URL is unset. Set it to the PUBLIC url (e.g. https://crewship-stage.unifylab.cz). Probing the app port directly cannot answer this: every host that can reach it is on a private LAN, which requireInternal treats as internal"
+elif ! _is_public_url "$EDGE"; then
   skip "B1–B6 internal surface unreachable from the edge" \
-    "CREWSHIP_ATTACK_EDGE_URL equals the app url ($SERVER) — that is not an edge, so the perimeter is not being tested"
+    "CREWSHIP_ATTACK_EDGE_URL=$EDGE is a loopback or RFC1918 address — requireInternal treats every caller from there as internal, so these probes could not tell a working fence from a deleted one"
 else
   info "edge=$EDGE"
   assert_code_edge "B1 /internal/credentials unreachable no-token"  404 GET  "/api/v1/internal/credentials?workspace_id=$WS"
