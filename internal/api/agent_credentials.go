@@ -105,8 +105,52 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		      WHERE ac2.agent_id = a.id AND ac2.credential_id = c.id
 		  )
 
+		UNION ALL
+
+		-- Bindings, the fourth source. Reported separately from a crew link
+		-- because they are removed differently: credential unbind takes this
+		-- one away, unlinking the crew takes the other. Telling an operator
+		-- only that a grant is "not explicit" leaves them guessing which.
+		--
+		-- The slot, not the credential name, is the env var here — that
+		-- separation is the entire point of a binding, and reporting the name
+		-- would show a variable no container ever sets.
+		SELECT '' AS id, a.id AS agent_id, c.id AS credential_id,
+			COALESCE(c.name, ''), COALESCE(c.type, ''), COALESCE(c.provider, ''), COALESCE(c.status, ''),
+			b.slot AS env_var_name, 0 AS priority, COALESCE(c.created_at, ''),
+			'' AS expires_at, '' AS lease_source, '' AS lease_issued_at,
+			'binding' AS grant_source
+		FROM agents a
+		JOIN credential_bindings b
+		  ON b.workspace_id = a.workspace_id
+		 AND (
+		      (b.scope = 'AGENT'     AND b.agent_id = a.id)
+		   OR (b.scope = 'CREW'      AND b.crew_id  = a.crew_id)
+		   OR (b.scope = 'WORKSPACE')
+		 )
+		JOIN credentials c ON c.id = b.credential_id
+		WHERE a.id = ? AND a.deleted_at IS NULL
+		  AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+		  AND c.workspace_id = a.workspace_id
+		  AND NOT EXISTS (
+		      SELECT 1 FROM agent_credentials ac3
+		      WHERE ac3.agent_id = a.id AND ac3.credential_id = c.id
+		  )
+		  -- Most specific scope wins, the same order delivery resolves in
+		  -- (agent > crew > workspace). Without this a workspace binding would
+		  -- be listed alongside the crew binding that actually shadows it.
+		  AND NOT EXISTS (
+		      SELECT 1 FROM credential_bindings b2
+		      WHERE b2.workspace_id = a.workspace_id AND b2.slot = b.slot
+		        AND (
+		             (b2.scope = 'AGENT' AND b2.agent_id = a.id)
+		          OR (b2.scope = 'CREW'  AND b2.crew_id  = a.crew_id AND b.scope = 'WORKSPACE')
+		        )
+		        AND b2.id != b.id
+		  )
+
 		ORDER BY env_var_name, priority DESC
-	`, agentID, agentID)
+	`, agentID, agentID, agentID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list agent credentials", err)
 		return

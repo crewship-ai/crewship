@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -607,5 +608,84 @@ func TestCrewDelivery_ListCredentialsMarksExplicitGrants(t *testing.T) {
 	if got[0].GrantSource != "explicit" || got[0].ID == "" {
 		t.Errorf("explicit assignment reported as source=%q id=%q; want source=explicit with its "+
 			"assignment id so the UI can offer to revoke it", got[0].GrantSource, got[0].ID)
+	}
+}
+
+// TestCrewDelivery_ListCredentialsShowsBindings closes the same hole a third
+// time, now for credential_bindings.
+//
+// The first time it was the delivery paths: three loaders, one missed. Then it
+// was this listing, which knew about explicit grants and nothing else. Both
+// were fixed — and then P3 added bindings as a fourth delivery source, and the
+// listing was not taught about it, so `crewship agent credentials riley`
+// reported only the Anthropic grant for an agent that demonstrably resolves
+// GH_TOKEN through its crew's binding. Found on a live server, not by a test,
+// which is the point: every one of these was invisible to the suite that
+// covered the thing next to it.
+//
+// A binding is reported with grant_source "binding": like a crew link it has
+// no assignment row to revoke, but unlike one it is removed with
+// `credential unbind` rather than by unlinking the crew, and an operator has
+// to be able to tell which.
+func TestCrewDelivery_ListCredentialsShowsBindings(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cd-bound", "github-acme", "acme-secret")
+	seedBinding(t, db, "cd-bind-1", e.wsID, "cd-bound", "CREW", e.crewA, "", "GH_TOKEN")
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+e.agentA+"/credentials", nil)
+	req.SetPathValue("agentId", e.agentA)
+	req = req.WithContext(withWorkspace(req.Context(), e.wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	NewAgentHandler(db, newTestLogger()).ListCredentials(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got []struct {
+		CredName    string `json:"credential_name"`
+		EnvVarName  string `json:"env_var_name"`
+		GrantSource string `json:"grant_source"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var row *int
+	for i := range got {
+		if got[i].CredName == "github-acme" {
+			row = &i
+		}
+	}
+	if row == nil {
+		t.Fatalf("the bound credential the agent actually receives is missing from the listing: %s",
+			rr.Body.String())
+	}
+	if got[*row].EnvVarName != "GH_TOKEN" {
+		t.Errorf("env var = %q, want the binding's slot GH_TOKEN — the whole point of a binding "+
+			"is that the slot is not the credential's name", got[*row].EnvVarName)
+	}
+	if got[*row].GrantSource != "binding" {
+		t.Errorf("grant_source = %q, want \"binding\" — an operator removes this with "+
+			"`credential unbind`, not by unlinking a crew", got[*row].GrantSource)
+	}
+}
+
+// TestCrewDelivery_ListCredentialsBindingRespectsCrewIsolation carries the
+// security property to the new source rather than assuming the join implies it.
+func TestCrewDelivery_ListCredentialsBindingRespectsCrewIsolation(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cd-bound", "github-acme", "acme-secret")
+	seedBinding(t, db, "cd-bind-1", e.wsID, "cd-bound", "CREW", e.crewA, "", "GH_TOKEN")
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+e.agentB+"/credentials", nil)
+	req.SetPathValue("agentId", e.agentB)
+	req = req.WithContext(withWorkspace(req.Context(), e.wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	NewAgentHandler(db, newTestLogger()).ListCredentials(rr, req)
+
+	if strings.Contains(rr.Body.String(), "github-acme") {
+		t.Errorf("crew B's agent was listed as holding crew A's bound credential: %s", rr.Body.String())
 	}
 }
