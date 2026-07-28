@@ -586,6 +586,11 @@ var notifyChannelDeliveriesCmd = &cobra.Command{
 				ChannelID string `json:"channel_id"`
 				UserID    string `json:"user_id"`
 				Category  string `json:"category"`
+				// The title the recipient actually saw, template included.
+				// The API has always returned it; this decoder dropped it,
+				// so "why did that message say something else?" had no
+				// answer short of a database shell.
+				Title     string `json:"title"`
 				Status    string `json:"status"`
 				Error     string `json:"error"`
 				Attempts  int    `json:"attempts"`
@@ -596,12 +601,13 @@ var notifyChannelDeliveriesCmd = &cobra.Command{
 			return err
 		}
 		f := newFormatter()
-		headers := []string{"ID", "CHANNEL", "USER", "CATEGORY", "STATUS", "ATTEMPTS", "CREATED"}
+		headers := []string{"ID", "CHANNEL", "USER", "CATEGORY", "TITLE", "STATUS", "ATTEMPTS", "CREATED"}
 		rows := make([][]string, 0, len(body.Deliveries))
 		for _, d := range body.Deliveries {
 			rows = append(rows, []string{
 				truncateString(d.ID, 20), truncateString(d.ChannelID, 20), truncateString(d.UserID, 16),
-				d.Category, d.Status, fmt.Sprintf("%d", d.Attempts), d.CreatedAt,
+				d.Category, truncateString(d.Title, 36), d.Status,
+				fmt.Sprintf("%d", d.Attempts), d.CreatedAt,
 			})
 		}
 		return f.Auto(body.Deliveries, headers, rows)
