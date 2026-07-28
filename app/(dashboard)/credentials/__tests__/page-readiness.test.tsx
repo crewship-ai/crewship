@@ -13,6 +13,24 @@ import { render, screen, fireEvent, within } from "@testing-library/react"
 import { _resetWorkspaceStoreForTests } from "@/hooks/use-workspace"
 import CredentialsPage from "../page"
 
+/** The rail now lists the same credential names as the table, so a bare text
+ *  query matches twice. Scope to the labelled list region — which is what the
+ *  assertion always meant. inList waits for the region first, for states it
+ *  has not rendered into yet. */
+function list() {
+  return within(screen.getByRole("region", { name: /credential list/i }))
+}
+async function inList(name: string) {
+  const region = await screen.findByRole("region", { name: /credential list/i })
+  return within(region).findByText(name)
+}
+/** Category, scope and tag live behind the Filter button now (the /routines
+ *  shape), so a facet click has to open the dropdown first. */
+async function openFilter() {
+  fireEvent.click(await screen.findByRole("button", { name: /filter/i }))
+}
+
+
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
   capabilities: [] as string[],
@@ -153,7 +171,7 @@ describe("Readiness column", () => {
     routeApi({ credentials: [makeCredential()], crews: [] })
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("GH_TOKEN")).toBeInTheDocument()
+    expect(await inList("GH_TOKEN")).toBeInTheDocument()
     expect(screen.queryByText("ready")).not.toBeInTheDocument()
     expect(screen.queryByText(/^needs /)).not.toBeInTheDocument()
     expect(screen.getByTitle(/no crew reported its tool inventory yet/i)).toBeInTheDocument()
@@ -175,7 +193,7 @@ describe("left rail filtering", () => {
     expect(await screen.findByRole("button", { name: /^Missing tool 1$/ })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /^Missing tool 1$/ }))
 
-    expect(screen.getByText("GH_TOKEN")).toBeInTheDocument()
+    expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
     expect(screen.queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
   })
 
@@ -188,12 +206,14 @@ describe("left rail filtering", () => {
     })
     render(<CredentialsPage />)
 
+    await openFilter()
     fireEvent.click(await screen.findByRole("button", { name: /^Source control 1$/ }))
-    expect(screen.getByText("GH_TOKEN")).toBeInTheDocument()
+    expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
     expect(screen.queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
 
+    await openFilter()
     fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
-    expect(screen.getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
+    expect(list().getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
   })
 
   it("narrows by crew scope using the crew's name, not its id", async () => {
@@ -206,8 +226,9 @@ describe("left rail filtering", () => {
     })
     render(<CredentialsPage />)
 
+    await openFilter()
     fireEvent.click(await screen.findByRole("button", { name: /crew · engineering/i }))
-    expect(screen.getByText("GH_TOKEN")).toBeInTheDocument()
+    expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
     expect(screen.queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
   })
 
@@ -223,7 +244,7 @@ describe("left rail filtering", () => {
     fireEvent.change(await screen.findByPlaceholderText(/search a secret or tool/i), {
       target: { value: "anthropic" },
     })
-    expect(screen.getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
+    expect(list().getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
     expect(screen.queryByText("GH_TOKEN")).not.toBeInTheDocument()
   })
 

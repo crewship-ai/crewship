@@ -479,6 +479,22 @@ export default function CredentialsPage() {
                 scopes={scopes}
                 tags={tagsInUse}
                 onToggleCollapse={() => setSidebarCollapsed(true)}
+                // The rail lists what the filters leave, in the order the
+                // table shows — so the two panes never disagree about which
+                // credential is "the third one".
+                credentials={sorted.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  provider: c.provider,
+                  type: c.type,
+                }))}
+                selectedCredentialId={detailOpen ? detailCredential?.id ?? null : null}
+                onSelectCredential={(id) => {
+                  const cred = sorted.find((c) => c.id === id)
+                  if (!cred) return
+                  setDetailCredential(cred)
+                  setDetailOpen(true)
+                }}
               />
             )}
           </aside>
@@ -590,7 +606,11 @@ export default function CredentialsPage() {
               No credentials match the current filters.
             </Card>
           ) : (
-            <Card className="overflow-hidden p-0">
+            // A labelled region so the credential list is addressable on its
+            // own. The rail lists the same names, so "the row for GH_TOKEN"
+            // is ambiguous without it — for a screen reader as much as for a
+            // test.
+            <Card className="overflow-hidden p-0" role="region" aria-label="Credential list">
               {/* min-w keeps the fixed-width columns intact on narrow
                   screens; the Table's built-in overflow-x-auto container
                   (see components/ui/table.tsx) turns that into horizontal

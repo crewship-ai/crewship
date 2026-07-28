@@ -17,6 +17,8 @@ function renderSidebar(
     categories?: { value: string; label: string; count: number }[]
     scopes?: { value: string; label: string; count: number }[]
     tags?: string[]
+    credentials?: { id: string; name: string; provider: string; type: string }[]
+    onSelectCredential?: (id: string) => void
   } = {},
 ) {
   const onFiltersChange = overrides.onFiltersChange ?? vi.fn()
@@ -38,10 +40,20 @@ function renderSidebar(
         ]
       }
       tags={overrides.tags ?? []}
+      credentials={overrides.credentials ?? []}
+      onSelectCredential={overrides.onSelectCredential}
       onToggleCollapse={() => {}}
     />,
   )
   return { onFiltersChange }
+}
+
+/** The facets moved behind the Filter button when the rail took the
+ *  /routines shape. These tests still assert the same promises — a facet
+ *  carries a count, selecting it filters, re-selecting clears — they just
+ *  have to open the dropdown to reach them. */
+function openFilter() {
+  fireEvent.click(screen.getByRole("button", { name: /filter/i }))
 }
 
 describe("status rows", () => {
@@ -82,6 +94,7 @@ describe("status rows", () => {
 describe("category and scope facets", () => {
   it("lists the categories the workspace actually uses, with counts", () => {
     renderSidebar()
+    openFilter()
     const section = screen.getByRole("button", { name: /^AI & inference 3$/ })
     expect(section).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^Source control 2$/ })).toBeInTheDocument()
@@ -90,29 +103,34 @@ describe("category and scope facets", () => {
   it("selects a category, and clicking the selected one clears it", () => {
     const onFiltersChange = vi.fn()
     renderSidebar({ onFiltersChange, filters: { category: "AI" } })
+    openFilter()
     fireEvent.click(screen.getByRole("button", { name: /ai & inference/i }))
     expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ category: null }))
   })
 
   it("selects a crew scope by its composite value", () => {
     const { onFiltersChange } = renderSidebar()
+    openFilter()
     fireEvent.click(screen.getByRole("button", { name: /crew · engineering/i }))
     expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ scope: "crew:c1" }))
   })
 
   it("omits an empty facet section rather than showing a bare heading", () => {
     renderSidebar({ categories: [], scopes: [] })
+    openFilter()
     expect(screen.queryByText("Category")).not.toBeInTheDocument()
     expect(screen.queryByText("Scope")).not.toBeInTheDocument()
   })
 
   it("shows the Tag section only when the workspace has tags", () => {
     renderSidebar({ tags: [] })
+    openFilter()
     expect(screen.queryByText("Tag")).not.toBeInTheDocument()
   })
 
   it("selects a tag", () => {
     const { onFiltersChange } = renderSidebar({ tags: ["prod", "billing"] })
+    openFilter()
     fireEvent.click(screen.getByRole("button", { name: /^prod$/ }))
     expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tag: "prod" }))
   })
@@ -130,12 +148,18 @@ describe("search", () => {
 
 describe("clearing", () => {
   it("offers Clear filters only while something is filtered, and resets everything but the search", () => {
-    const { onFiltersChange } = renderSidebar({ filters: { category: "AI", scope: "WORKSPACE", search: "gh" } })
-    const clear = screen.getByRole("button", { name: /clear filters/i })
-    fireEvent.click(clear)
+    const { onFiltersChange } = renderSidebar({
+      filters: { category: "AI", scope: "WORKSPACE", search: "gh", status: "attention" },
+    })
+    openFilter()
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
+    // Status survives alongside the search: both were chosen somewhere other
+    // than this dropdown, and clearing the dropdown's facets should not
+    // silently undo a selection the rail is still showing as pressed.
     expect(onFiltersChange).toHaveBeenCalledWith({
       ...EMPTY_CREDENTIAL_FILTERS,
       search: "gh",
+      status: "attention",
     })
   })
 
@@ -165,9 +189,66 @@ describe("collapse", () => {
 })
 
 describe("section headings carry their own totals", () => {
-  it("counts the facet rows, not the credentials, on the heading", () => {
-    renderSidebar()
-    const heading = screen.getByText("Category").parentElement!
-    expect(within(heading).getByText("2")).toBeInTheDocument()
+  it("counts what its own section contains — status rows, and credentials", () => {
+    renderSidebar({
+      credentials: [
+        { id: "c1", name: "GH_TOKEN", provider: "GITHUB", type: "CLI_TOKEN" },
+        { id: "c2", name: "AWS_MAIN", provider: "AWS", type: "SECRET" },
+      ],
+    })
+    const status = screen.getByText("Status").parentElement!
+    expect(within(status).getByText("3")).toBeInTheDocument()
+    const creds = screen.getByText("Credentials").parentElement!
+    expect(within(creds).getByText("2")).toBeInTheDocument()
+  })
+})
+
+// The rail was built as a stack of facet sections — Status, then Category,
+// then Scope, then Tag — which is not the house pattern. /routines puts the
+// facets behind a Filter button in the toolbar and gives the body to the
+// ROUTINES themselves, so the rail answers "which one?" and the filter
+// answers "narrow it how?". A rail that only narrows makes the reader hunt
+// for the list in the main pane, and with thirty credentials the facet stack
+// is longer than the thing it filters.
+describe("routines-shaped rail", () => {
+  const CREDS = [
+    { id: "c1", name: "GH_TOKEN", provider: "GITHUB", type: "CLI_TOKEN" },
+    { id: "c2", name: "AWS_MAIN", provider: "AWS", type: "SECRET" },
+    { id: "c3", name: "ANTHROPIC_API_KEY", provider: "ANTHROPIC", type: "API_KEY" },
+  ]
+
+  it("lists the credentials themselves, the way /routines lists routines", () => {
+    renderSidebar({ credentials: CREDS })
+    for (const c of CREDS) {
+      expect(screen.getByRole("button", { name: new RegExp(c.name) })).toBeInTheDocument()
+    }
+  })
+
+  it("selects a credential when its row is clicked", () => {
+    const onSelect = vi.fn()
+    renderSidebar({ credentials: CREDS, onSelectCredential: onSelect })
+    fireEvent.click(screen.getByRole("button", { name: /AWS_MAIN/ }))
+    expect(onSelect).toHaveBeenCalledWith("c2")
+  })
+
+  it("puts category, scope and tag behind the Filter button rather than in the body", () => {
+    renderSidebar({ credentials: CREDS, tags: ["prod"] })
+    // Closed: the facets are not on screen at all.
+    expect(screen.queryByRole("button", { name: /AI & inference/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
+    expect(screen.getByRole("button", { name: /AI & inference/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Workspace/ })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /prod/ })).toBeInTheDocument()
+  })
+
+  it("badges the Filter button with how many facets are narrowing the list", () => {
+    renderSidebar({ credentials: CREDS, filters: { category: "AI", scope: "WORKSPACE" } })
+    // Status lives in its own section, so it must not inflate the badge.
+    expect(screen.getByRole("button", { name: /filter/i })).toHaveTextContent("2")
+  })
+
+  it("keeps STATUS in the rail — it is the question asked most often", () => {
+    renderSidebar({ credentials: CREDS })
+    expect(screen.getByRole("button", { name: /^All 9$/ })).toBeInTheDocument()
   })
 })
