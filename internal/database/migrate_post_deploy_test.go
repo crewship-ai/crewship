@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -314,5 +315,72 @@ func TestPostDeploy_LimitStillCatchesRunaway(t *testing.T) {
 	err := runOnePostDeployWithLimit(context.Background(), db, m, pdLogger(), 3)
 	if err == nil || !strings.Contains(err.Error(), "not converging") {
 		t.Fatalf("err = %v, want a non-convergence refusal", err)
+	}
+}
+
+// migration-status is the tool an operator reaches for when migrations are
+// misbehaving. If the registry itself failed to build, reporting "nothing
+// outstanding" hides the one fact they came for — and migrationRegistryErr is
+// unexported, so no caller outside this package can check it themselves.
+func TestPostDeployPending_SurfacesABrokenRegistry(t *testing.T) {
+	saved := migrationRegistryErr
+	migrationRegistryErr = errors.New("synthetic: migration 20260801000000_x.sql is empty")
+	t.Cleanup(func() { migrationRegistryErr = saved })
+
+	db, _ := postDeployFixture(t, 1, convergingBackfill)
+	_, err := PostDeployPending(context.Background(), db)
+	if err == nil {
+		t.Fatal("want the registry error surfaced, got nil")
+	}
+	if !strings.Contains(err.Error(), "registry") {
+		t.Errorf("error %q should name the registry as the problem", err)
+	}
+}
+
+// Cancellation between passes was handled; cancellation DURING a pass was not.
+// A rolling restart mid-backfill would surface as an ERROR log claiming the
+// migrations did not complete, when in fact the batch rolled back safely and
+// the next boot resumes.
+//
+// There is no end-to-end test for it: a context already cancelled is caught by
+// the top-of-loop check before any pass starts, and hitting the real window —
+// cancellation landing while Exec is in flight — would mean racing the
+// scheduler. So the classifier is tested directly, and the loop is verified to
+// use it by the control case below.
+func TestIsShutdownErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"cancelled", context.Canceled, true},
+		{"deadline", context.DeadlineExceeded, true},
+		{"wrapped cancellation", fmt.Errorf("batch: %w", context.Canceled), true},
+		{"wrapped deadline", fmt.Errorf("commit batch: %w", context.DeadlineExceeded), true},
+		{"a real failure", errors.New("no such table: widgets"), false},
+		{"a real failure that mentions the word", errors.New("column \"canceled\" does not exist"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isShutdownErr(tc.err); got != tc.want {
+				t.Errorf("isShutdownErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// Control: a genuine failure inside a pass must still be an error. Without
+// this, "treat context errors as a clean stop" could be over-applied into
+// "swallow everything".
+func TestPostDeploy_AGenuineFailureIsStillAFailure(t *testing.T) {
+	db, m := postDeployFixture(t, 10, `UPDATE table_that_does_not_exist SET x = 1`)
+
+	err := runOnePostDeploy(context.Background(), db, m, pdLogger())
+	if err == nil {
+		t.Fatal("a broken statement must not be reported as a clean stop")
+	}
+	if isShutdownErr(err) {
+		t.Errorf("a SQL error was classified as a shutdown: %v", err)
 	}
 }

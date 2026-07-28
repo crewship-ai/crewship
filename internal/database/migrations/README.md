@@ -18,7 +18,8 @@ putting anything there — it is not a free performance win, it is a contract
 about what the running code must tolerate.
 
 Migrations needing Go (schema discovery at apply time, SQLite table rebuilds)
-still live in the `migrations` slice in `../migrate.go`. Everything expressible
+still live in the `legacyMigrations` slice in `../migrate.go` (`migrations` is now
+the merged registry: that slice plus every file here). Everything expressible
 as plain SQL belongs here.
 
 Nothing at or below **v169** may move here or change: those numbers are applied

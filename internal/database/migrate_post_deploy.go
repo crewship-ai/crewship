@@ -60,6 +60,15 @@ type PostDeployStatus struct {
 // PostDeployPending returns the declared post-deployment migrations that this
 // database has not recorded yet, in order.
 func PostDeployPending(ctx context.Context, db *sql.DB) ([]PostDeployStatus, error) {
+	// Checked here as well as in RunPostDeployMigrations. This is what
+	// `crewship db migration-status` calls, and that command is what an
+	// operator reaches for precisely when migrations are misbehaving —
+	// answering "nothing outstanding" would hide the one fact they came for.
+	// migrationRegistryErr is unexported, so no caller can check it themselves.
+	if migrationRegistryErr != nil {
+		return nil, fmt.Errorf("migration registry is invalid: %w", migrationRegistryErr)
+	}
+
 	declared := pendingPostDeployDeclared()
 	if len(declared) == 0 {
 		return nil, nil
@@ -163,6 +172,15 @@ func runOnePostDeployWithLimit(ctx context.Context, db *sql.DB, m migration, log
 		}
 
 		n, err := postDeployPass(ctx, db, m)
+		if isShutdownErr(err) {
+			// Cancellation landing WHILE the batch ran, rather than between
+			// batches. The batch rolled back, committed work stands, and the
+			// next start resumes — so this is the same clean stop as the check
+			// at the top of the loop, not the failure it used to be logged as.
+			logger.Info("post-deployment migration interrupted mid-batch, will resume on next start",
+				"version", m.version, "name", m.name, "passes", passes, "rows", touched)
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -322,4 +340,13 @@ func stripSQLNoise(s string) string {
 		}
 	}
 	return out.String()
+}
+
+// isShutdownErr reports whether an error is the process being asked to stop
+// rather than something being wrong. Used to keep a rolling restart during an
+// active backfill out of the ERROR log: cmd_start.go logs a non-nil return at
+// ERROR level, and paging someone for an ordinary shutdown trains them to
+// ignore the channel.
+func isShutdownErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
