@@ -130,6 +130,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// catch-all the same way "capabilities" does above, so no ordering
 	// hazard.
 	r.mux.Handle("GET /api/v1/crews/{crewId}/services", authed(wsCtx(http.HandlerFunc(crews.Services))))
+	// Read-only credential↔tool gap report: which of this crew's
+	// credentials are for a CLI its container doesn't have (a GitHub PAT
+	// with no github-cli feature, etc). Advisory only — it never edits
+	// the devcontainer config or triggers a rebuild, so it needs no more
+	// than the read role every other GET here uses.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/credential-readiness", authed(wsCtx(http.HandlerFunc(crews.CredentialReadiness))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)

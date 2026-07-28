@@ -5101,6 +5101,36 @@
         ]
       }
     },
+    "/api/v1/crews/{crewId}/credential-readiness": {
+      "get": {
+        "operationId": "get_api_v1_crews_crewId_credential-readiness",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "crews"
+        ]
+      }
+    },
     "/api/v1/crews/{crewId}/escalations": {
       "delete": {
         "operationId": "delete_api_v1_crews_crewId_escalations",

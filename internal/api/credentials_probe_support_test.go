@@ -102,11 +102,15 @@ func TestDefaultEnvVar_ExposesTestable(t *testing.T) {
 		envVar   string
 		testable bool
 	}{
-		"GITHUB":  {"GH_TOKEN", true},     // was hidden by the cli gate
-		"GITLAB":  {"GITLAB_TOKEN", true}, // was hidden by the cli gate
-		"VERCEL":  {"VERCEL_TOKEN", true}, // was hidden by the cli gate
+		"GITHUB": {"GH_TOKEN", true},     // was hidden by the cli gate
+		"GITLAB": {"GITLAB_TOKEN", true}, // was hidden by the cli gate
+		"VERCEL": {"VERCEL_TOKEN", true}, // was hidden by the cli gate
+		// The two fields are independent, and these rows are the proof: a
+		// provider can have a conventional env var and still have nothing to
+		// probe against. Knowing where a secret goes says nothing about being
+		// able to ask whether it works.
 		"AWS":     {"AWS_ACCESS_KEY_ID", false},
-		"NOTION":  {"", false},
+		"NOTION":  {"NOTION_API_KEY", false},
 		"UNKNOWN": {"", false},
 	}
 
