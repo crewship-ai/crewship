@@ -154,14 +154,22 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// and gets a partial state) outweighs the risk of carrying a
 	// row across instances. Anything that's clearly operational
 	// (audit-like, retry counters, telemetry) is excluded explicitly.
-	"agent_config_history":   IntentInclude,
-	"approvals_queue":        IntentInclude,
-	"assignments":            IntentInclude,
-	"budget_limits":          IntentInclude,
-	"captain_chats":          IntentInclude,
-	"checkpoints":            IntentInclude,
-	"cost_ledger":            IntentInclude,
-	"credential_crews":       IntentInclude,
+	"agent_config_history": IntentInclude,
+	"approvals_queue":      IntentInclude,
+	"assignments":          IntentInclude,
+	"budget_limits":        IntentInclude,
+	"captain_chats":        IntentInclude,
+	"checkpoints":          IntentInclude,
+	"cost_ledger":          IntentInclude,
+	"credential_crews":     IntentInclude,
+	// Both new with the credentials-V2 work. They hold durable user content
+	// and losing them on restore is silent: a multi-part credential comes
+	// back with its primary value and no access key id or region, and every
+	// agent loses the slot mapping that told it which account to use. The
+	// credential itself would restore fine, which is what makes the loss hard
+	// to notice.
+	"credential_bindings":    IntentInclude,
+	"credential_fields":      IntentInclude,
 	"crew_connections":       IntentInclude,
 	"crew_mcp_servers":       IntentInclude,
 	"crew_templates":         IntentInclude,

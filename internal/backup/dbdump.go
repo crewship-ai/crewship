@@ -150,6 +150,10 @@ var BackupTables = []string{
 	"crew_connections",
 	"crew_mcp_servers",
 	"credential_crews",
+	// After `credentials` (depth 1) and after `crews`/`agents`, which
+	// credential_bindings references for CREW and AGENT scope.
+	"credential_bindings",
+	"credential_fields",
 	// Depth 3+: workspace via agents
 	"agent_skills",
 	"agent_mcp_bindings",
