@@ -750,3 +750,37 @@ describe("crew picker list selection", () => {
     expect(await screen.findByText(/select crews…/i)).toBeInTheDocument()
   })
 })
+
+// The crews effect guards on `crews.length === 0 && !crewsLoading` and lists
+// both in its deps. A workspace with no crews never leaves length 0, so when
+// the request settles and `finally` clears crewsLoading, the guard is satisfied
+// again and the effect fires a second time. It converges rather than looping —
+// measured, not inferred — but the extra request is pure waste, and it lands on
+// exactly the workspaces least able to absorb it: brand-new ones, mid-onboarding,
+// against a 120/min limiter.
+describe("crews fetch", () => {
+  async function settle() {
+    for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 5))
+  }
+
+  it("requests the crew list once when the workspace has no crews", async () => {
+    h.apiFetch.mockImplementation(async (url: unknown) =>
+      String(url).includes("/crews")
+        ? { ok: true, status: 200, json: async () => [] }
+        : { ok: true, status: 200, json: async () => ({ env_var: "", testable: false }) },
+    )
+    renderForm({ initial: { scope: "CREW" } })
+    await settle()
+    expect(h.apiFetch.mock.calls.filter((c) => String(c[0]).includes("/crews"))).toHaveLength(1)
+  })
+
+  it("does not retry on failure either — a down endpoint must not become a poll", async () => {
+    h.apiFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).includes("/crews")) throw new Error("network down")
+      return { ok: true, status: 200, json: async () => ({ env_var: "", testable: false }) }
+    })
+    renderForm({ initial: { scope: "CREW" } })
+    await settle()
+    expect(h.apiFetch.mock.calls.filter((c) => String(c[0]).includes("/crews"))).toHaveLength(1)
+  })
+})

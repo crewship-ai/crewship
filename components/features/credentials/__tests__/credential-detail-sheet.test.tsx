@@ -387,10 +387,40 @@ describe("Used-by tab", () => {
   })
 })
 
-// The audit tab has no role gate in this component today — every role that
-// can open the sheet at all can see the audit trail (it's read-only history,
-// not a mutation). These tests pin that as the current, verified behaviour
-// rather than assume a gate that isn't in the code.
+// GET /credentials/{id}/audit is MANAGER+ (credential_audit.go: "Audit reveals
+// IPs of admin actions — that's forensic data, not for VIEWER/MEMBER eyes").
+// The tab used to render for every role, and because a failed fetch degrades to
+// the empty state, a MEMBER who opened it was told "No audit events yet" about a
+// credential whose history they simply were not allowed to read. Hiding the tab
+// is the honest answer; showing a false empty timeline is not.
+describe("Audit tab visibility follows the backend gate", () => {
+  it("is offered to a role that can read the timeline", () => {
+    h.role = "MANAGER"
+    renderSheet()
+    expect(screen.getByRole("tab", { name: /audit/i })).toBeInTheDocument()
+  })
+
+  for (const role of ["MEMBER", "VIEWER"]) {
+    it(`is hidden from ${role}, who would get a 403 and a false empty state`, () => {
+      h.role = role
+      renderSheet()
+      expect(screen.queryByRole("tab", { name: /audit/i })).not.toBeInTheDocument()
+    })
+  }
+
+  it("never calls the audit endpoint for a role that cannot read it", async () => {
+    h.role = "MEMBER"
+    renderSheet()
+    // The tab is gone, so there is nothing to click — but the effect is also
+    // gated, which is what keeps a stray setTab (deep link, restored state)
+    // from firing a request that can only 403.
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(
+      h.apiFetch.mock.calls.filter((c) => String(c[0]).includes("/audit")),
+    ).toHaveLength(0)
+  })
+})
+
 describe("Audit tab", () => {
   it("fetches and renders events, including the optional IP line", async () => {
     h.role = "OWNER"
@@ -459,8 +489,8 @@ describe("Audit tab", () => {
     expect(document.querySelector("svg.animate-spin")).toBeInTheDocument()
   })
 
-  it("MEMBER and VIEWER can still open the Audit tab and see its content", async () => {
-    h.role = "VIEWER"
+  it("MANAGER — the lowest role the backend serves — sees the timeline", async () => {
+    h.role = "MANAGER"
     h.apiFetch.mockImplementation((url: unknown) => {
       if (String(url).includes("/audit")) {
         return Promise.resolve({
@@ -774,10 +804,34 @@ describe("Settings tab — delete flow", () => {
 // them. This pins today's actual (and, per the #1034 comment's own stated
 // intent, likely under-scoped) behaviour rather than asserting the backend
 // contract — see the final report for why this looks like a real gap.
-describe("Capability elevation is scoped by the surrounding canUpdate gate", () => {
-  it("MEMBER with credential.rotate capability still sees no Rotate button (no baseline canUpdate)", () => {
+// credential.rotate exists so an oncall MEMBER can rotate a leaked token
+// without blanket vault reach — credential_rotation.go grants exactly that
+// ("a MANAGER/MEMBER holding an explicit credential.rotate capability also
+// passes"). The button used to live inside the `canUpdate &&` block, which a
+// MEMBER never satisfies, so the dashboard hid the action from the one tier
+// the grant was written for and told them they had no permission at all.
+describe("Capability elevation reaches MEMBER", () => {
+  it("MEMBER with credential.rotate sees Rotate, which the backend accepts from them", () => {
     h.role = "MEMBER"
     h.capabilities = ["chat", "credential.rotate"]
+    renderSheet()
+    openSettingsTab()
+    expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
+  })
+
+  it("still withholds the value-rewrite flow from that MEMBER — rotate is not update", () => {
+    h.role = "MEMBER"
+    h.capabilities = ["chat", "credential.rotate"]
+    renderSheet()
+    openSettingsTab()
+    // PATCH is MANAGER+ with no capability escape hatch, so surfacing the
+    // inline rewrite here would be the mirror-image bug: a button that 403s.
+    expect(screen.queryByText("Update value")).not.toBeInTheDocument()
+  })
+
+  it("MEMBER without the capability sees neither", () => {
+    h.role = "MEMBER"
+    h.capabilities = ["chat"]
     renderSheet()
     openSettingsTab()
     expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
