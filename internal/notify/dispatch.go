@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -152,6 +154,33 @@ type Dispatcher struct {
 	logger      *slog.Logger
 	maxAttempts int
 	baseBackoff time.Duration
+
+	// publicURL is where this instance is reachable from a browser. It is
+	// the ONE place that knows it: producers build app-relative link paths
+	// and delivery resolves them here, so no producing package has to learn
+	// about reverse proxies, hostnames or schemes. Empty = links are
+	// delivered relative, which is honest about not knowing rather than
+	// guessing a host and emitting links that 404.
+	publicURL string
+}
+
+// publicURLEnv names the browser-reachable base URL of this instance, e.g.
+// "https://crewship.example.com". Deep links in notifications are resolved
+// against it.
+//
+// It is read from the environment rather than threaded through every
+// constructor because four production sites build a Dispatcher, and a site
+// that forgot to pass it would not fail — it would quietly emit relative
+// links no chat client can open. Same reasoning, and the same shape, as
+// mailer.NewFromEnv resolving SMTP.
+const publicURLEnv = "CREWSHIP_PUBLIC_URL"
+
+// WithPublicURL overrides the browser-reachable base URL used to make deep
+// links absolute. Wiring code holding the value from config should call this;
+// it takes precedence over publicURLEnv. Returns the dispatcher for chaining.
+func (d *Dispatcher) WithPublicURL(u string) *Dispatcher {
+	d.publicURL = strings.TrimSpace(u)
+	return d
 }
 
 // NewDispatcher wires a dispatcher. A nil mailer degrades e-mail delivery
@@ -173,6 +202,7 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 		logger:      logger,
 		maxAttempts: 3,
 		baseBackoff: 200 * time.Millisecond,
+		publicURL:   strings.TrimSpace(os.Getenv(publicURLEnv)),
 	}
 }
 
@@ -227,24 +257,38 @@ func (d *Dispatcher) DispatchOne(ctx context.Context, ch Channel, ev Notificatio
 	return d.deliver(ctx, ch, ev)
 }
 
-// scrubPreview redacts secrets then caps the snippet. The cap is applied
-// on a rune boundary so a multi-byte UTF-8 character (emoji, non-Latin
-// text — common in agent output) is never sliced mid-rune into invalid
-// UTF-8.
+// scrubPreview redacts secrets then caps the snippet.
+//
+// The two halves are separate because they are separate concerns applied to
+// different scopes: EVERY field of a notification is redacted, but only the
+// body is capped — truncating a title or a link would corrupt it.
 func (d *Dispatcher) scrubPreview(s string) string {
+	return capPreview(d.scrubText(s))
+}
+
+// scrubText redacts secrets. This is the one redactor; nothing else in the
+// package (or outside it) should construct its own.
+func (d *Dispatcher) scrubText(s string) string {
 	if s == "" {
 		return ""
 	}
-	s = d.scrub.Scrub(s)
-	if len(s) > outputPreviewCap {
-		// Walk back to the last full rune at/under the byte cap.
-		cut := outputPreviewCap
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "…"
+	return d.scrub.Scrub(s)
+}
+
+// capPreview bounds a snippet so a large run deliverable can't bloat a
+// message. The cap is applied on a rune boundary so a multi-byte UTF-8
+// character (emoji, non-Latin text — common in agent output) is never sliced
+// mid-rune into invalid UTF-8.
+func capPreview(s string) string {
+	if len(s) <= outputPreviewCap {
+		return s
 	}
-	return s
+	// Walk back to the last full rune at/under the byte cap.
+	cut := outputPreviewCap
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func (d *Dispatcher) deliver(ctx context.Context, ch Channel, ev NotificationEvent) error {
@@ -416,16 +460,7 @@ func EventTypeForStatus(status string) string {
 	}
 }
 
-// ScrubText runs the shared secret scrubber over an arbitrary string.
-//
-// DeliverCategoryMessage scrubs a message's BODY, which covers everything the
-// product generates itself. Agent-authored content arrives through fields
-// that path was never asked to cover — a title, for one — and it is untrusted
-// output about to leave the instance. Exposing the scrubber directly lets a
-// caller cover those fields rather than hoping the delivery path does.
-func ScrubText(s string) string {
-	if s == "" {
-		return ""
-	}
-	return scrubber.New().Scrub(s)
-}
+// ScrubText used to live here so the agent-send handler could redact a title
+// the delivery path did not cover. DeliverCategoryMessage now scrubs the
+// whole envelope for every producer, so the workaround — and the second
+// scrubber instance it constructed per call — is gone.

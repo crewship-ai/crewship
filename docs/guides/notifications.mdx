@@ -164,6 +164,40 @@ Headers:
 | `X-Crewship-Signature` | `sha256=<hex>` — HMAC-SHA256 of the **raw request body**, keyed on the channel secret |
 | `X-Crewship-Event` | `run.completed` or `run.failed` |
 
+A **category-routed** message (the #1412 system — an approval, a failed run, a chat reply) uses a different payload on the same channel, signed the same way and carrying `X-Crewship-Category` instead of `X-Crewship-Event`:
+
+```json
+{
+  "category": "routines.failed",
+  "title": "Scheduled routine failed: nightly-report",
+  "body": "Schedule **Nightly** fired `nightly-report` and it failed — exit 1.",
+  "priority": "high",
+  "source_kind": "failed_run",
+  "source_id": "sched_run_abc",
+  "url": "https://crewship.example.com/runs",
+  "links": [
+    { "label": "Open runs", "url": "https://crewship.example.com/runs" }
+  ],
+  "vars": { "schedule_id": "sc_1", "pipeline_id": "pl_9", "run_id": "run_abc" }
+}
+```
+
+`url` is the primary link — the first entry of `links` — and keeps the meaning it had before `links` existed, so a receiver already reading it does not break. `vars` carries the source event's own facts; a producer that starts recording a new fact surfaces it here without a schema change, so treat the object as open.
+
+### Deep links
+
+Notifications carry links to the thing they are about, so a message in Discord is something you can act on rather than something you have to go look up.
+
+Set **`CREWSHIP_PUBLIC_URL`** to the address people reach this instance at:
+
+```bash
+CREWSHIP_PUBLIC_URL=https://crewship.example.com
+```
+
+Without it, links are delivered as app-relative paths (`/issues/CS-12`). Those work in the in-app inbox and are useless in a chat client, which has no origin to resolve them against. Crewship will not guess a hostname — a link that looks right and 404s costs more than an obviously relative one.
+
+Links point only where a page actually resolves. An issue, a mission timeline, a chat session and an agent's approvals have their own routes and are linked precisely; a failed run gets the runs list, because there is no per-run page to send you to yet. No notification links to an invented filter that the destination silently ignores.
+
 Verify it (Go):
 
 ```go
@@ -281,7 +315,9 @@ Agent messages are **not** routed through the per-user preference matrix. The pa
 
 ## Payload safety
 
-Every notification body — the legacy `output_preview` and the new category message's `body` — is passed through the secret **scrubber** (the same redaction the `notify` step uses) and capped before it leaves the instance — API keys and tokens in a run's output or an agent's reply never reach a webhook body, an email, or a chat message.
+Every author-influenced field of a notification — title, body, link labels and every value in `vars`, including nested ones — is passed through the secret **scrubber** (the same redaction the `notify` step uses) before it leaves the instance. Bodies are additionally capped. API keys and tokens in a run's output, a journal summary or an agent's reply never reach a webhook body, an email, or a chat message.
+
+Redaction is a property of delivering a message, applied once for every producer. It is not something a caller opts into: a producer that starts carrying a new fact is covered by default rather than when someone remembers.
 
 ## Two-layer preferences (the #1412 category system)
 

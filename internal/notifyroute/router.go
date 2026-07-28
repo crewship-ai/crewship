@@ -254,6 +254,7 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		return // coalesced: an identical (channel, dedup_key) delivery already exists
 	}
 
+	links, vars := notificationFacts(item.Kind, item.Payload)
 	msg := notify.CategoryMessage{
 		WorkspaceID: item.WorkspaceID,
 		Category:    category,
@@ -262,9 +263,8 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		Priority:    item.Priority,
 		SourceKind:  item.Kind,
 		SourceID:    item.SourceID,
-	}
-	if url, ok := item.Payload["chat_url"].(string); ok {
-		msg.URL = url
+		Links:       links,
+		Vars:        vars,
 	}
 
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {

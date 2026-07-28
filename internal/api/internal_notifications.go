@@ -183,18 +183,23 @@ func (h *AgentNotifyHandler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gate 4 — scrub. DeliverCategoryMessage scrubs the body; the TITLE is
-	// agent-authored too and would otherwise leave unscrubbed, so it is
-	// scrubbed here rather than trusting the delivery path to cover a field
-	// it was never asked to.
+	// Gate 4 — scrub. DeliverCategoryMessage now redacts the whole envelope
+	// for every producer, so this handler no longer scrubs the title itself.
+	// It used to, because the delivery path covered only the body; that
+	// workaround protected this one call site and left the three producers
+	// that did not know about it delivering unscrubbed titles.
 	msg := notify.CategoryMessage{
 		WorkspaceID: req.WorkspaceID,
 		Category:    notify.CategoryAgentsMessage,
-		Title:       notify.ScrubText(req.Title),
+		Title:       req.Title,
 		Body:        req.Body,
 		Priority:    "medium",
 		SourceKind:  "agent",
 		SourceID:    req.AgentID,
+		Vars: map[string]any{
+			"agent_id": req.AgentID,
+			"crew_id":  req.CrewID,
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
