@@ -30,6 +30,16 @@ type agentCredentialResponse struct {
 	LeaseSource string `json:"lease_source,omitempty"`
 	// LeaseIssuedAt is when the lease was minted (RFC3339 UTC), empty when unset.
 	LeaseIssuedAt string `json:"lease_issued_at,omitempty"`
+	// Source distinguishes a grant an operator made from one the agent inherits
+	// by belonging to a crew: "explicit" for an agent_credentials row, "crew"
+	// for a credential_crews link resolved through the agent's own crew.
+	//
+	// It exists because the two are revoked in different places. An explicit
+	// grant has an assignment id and DELETE /agents/{id}/credentials/{assignmentId}
+	// removes it; a crew-derived one has no assignment row at all, and the only
+	// way to take it away is to unlink the credential from the crew. Without
+	// this field the UI would offer a revoke button that silently does nothing.
+	GrantSource string `json:"grant_source"`
 }
 
 // ListCredentials returns all credentials assigned to the specified agent.
@@ -53,16 +63,50 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	// lifecycle), and ac.env_var_name/created_at can be NULL on older rows.
 	// Scanning a NULL into a Go string returns "converting NULL to string is
 	// unsupported" and 500s the whole list — so normalize to '' in SQL.
+	// The crew half mirrors agentDeliveredCredentialsSQL, and it has to: this is
+	// the only surface — API or CLI — that answers "what does this agent get?",
+	// and after the crew fanout it answered wrongly. The agent boots with the
+	// crew's credential and this endpoint reported none, which is worse than the
+	// original bug because it reads as authoritative to whoever is debugging.
+	//
+	// It is not the same query, though, and cannot be. That one returns
+	// encrypted material for injection; this one is a management listing and
+	// must never carry a value. The shared shape is the SET, not the columns —
+	// so the two are kept aligned by TestCrewDelivery_ListCredentialsShowsCrewDerived
+	// rather than by a constant.
+	//
+	// Crew rows carry no assignment id, no chosen priority and no lease: there is
+	// no agent_credentials row behind them. Empty id + source='crew' says so.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ac.id, ac.agent_id, ac.credential_id,
 			COALESCE(c.name, ''), COALESCE(c.type, ''), COALESCE(c.provider, ''), COALESCE(c.status, ''),
 			COALESCE(ac.env_var_name, ''), ac.priority, COALESCE(ac.created_at, ''),
-			COALESCE(ac.expires_at, ''), COALESCE(ac.lease_source, ''), COALESCE(ac.lease_issued_at, '')
+			COALESCE(ac.expires_at, ''), COALESCE(ac.lease_source, ''), COALESCE(ac.lease_issued_at, ''),
+			'explicit' AS grant_source
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
 		WHERE ac.agent_id = ?
-		ORDER BY ac.env_var_name, ac.priority DESC
-	`, agentID)
+
+		UNION ALL
+
+		SELECT '' AS id, a.id AS agent_id, c.id AS credential_id,
+			COALESCE(c.name, ''), COALESCE(c.type, ''), COALESCE(c.provider, ''), COALESCE(c.status, ''),
+			COALESCE(c.name, '') AS env_var_name, 0 AS priority, COALESCE(c.created_at, ''),
+			'' AS expires_at, '' AS lease_source, '' AS lease_issued_at,
+			'crew' AS grant_source
+		FROM agents a
+		JOIN credential_crews cc ON cc.crew_id = a.crew_id
+		JOIN credentials c ON c.id = cc.credential_id
+		WHERE a.id = ? AND a.deleted_at IS NULL AND a.crew_id IS NOT NULL
+		  AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+		  AND c.workspace_id = a.workspace_id
+		  AND NOT EXISTS (
+		      SELECT 1 FROM agent_credentials ac2
+		      WHERE ac2.agent_id = a.id AND ac2.credential_id = c.id
+		  )
+
+		ORDER BY env_var_name, priority DESC
+	`, agentID, agentID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list agent credentials", err)
 		return
@@ -75,7 +119,7 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.CredentialID, &c.CredName,
 			&c.CredType, &c.CredProvider, &c.CredStatus,
 			&c.EnvVarName, &c.Priority, &c.CreatedAt, &c.ExpiresAt,
-			&c.LeaseSource, &c.LeaseIssuedAt); err != nil {
+			&c.LeaseSource, &c.LeaseIssuedAt, &c.GrantSource); err != nil {
 			replyInternalError(w, h.logger, "scan agent credential", err)
 			return
 		}

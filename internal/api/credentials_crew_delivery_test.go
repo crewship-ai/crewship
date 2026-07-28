@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -65,6 +67,16 @@ func seedCrewDeliveryEnv(t *testing.T, db *sql.DB) crewDeliveryEnv {
 func linkCredToCrew(t *testing.T, db *sql.DB, credID, crewID string) {
 	t.Helper()
 	execOrFatal(t, db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES (?, ?)`, credID, crewID)
+}
+
+// assignCredToAgent writes the explicit per-agent grant — the kind an operator
+// created deliberately and can revoke on its own.
+func assignCredToAgent(t *testing.T, db *sql.DB, credID, agentID, envVar string, priority int) {
+	t.Helper()
+	execOrFatal(t, db,
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
+		 VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+		"ac-"+credID+"-"+agentID, agentID, credID, envVar, priority)
 }
 
 // bootCreds runs the BOOT delivery path.
@@ -502,5 +514,98 @@ func TestCrewDelivery_CrossTenantGuardHoldsWithoutTheTrigger(t *testing.T) {
 	}
 	if got := delegationEnvValues(peerQueryCreds(t, db, e.agentA)); got["FOREIGN_TOKEN"] != "" {
 		t.Fatalf("another tenant's credential reached the peer-query path: %v", got)
+	}
+}
+
+// TestCrewDelivery_ListCredentialsShowsCrewDerived closes the last reader that
+// still answered from agent_credentials alone.
+//
+// GET /agents/{id}/credentials is the only surface — API or CLI — that answers
+// "what does this agent get?". After the fanout it answered wrongly: the agent
+// demonstrably boots with the crew's credential and this endpoint said it had
+// none. An operator debugging a working agent would be told the thing that is
+// working isn't there, which is worse than the original bug because it looks
+// authoritative.
+//
+// Crew-derived rows have no assignment: no assignment id, no priority anyone
+// chose, no lease. They are reported with an empty id and source "crew" so the
+// caller can tell a grant it can revoke from one it must unlink at the crew.
+func TestCrewDelivery_ListCredentialsShowsCrewDerived(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cd-cred", "CREW_TOKEN", "crew-secret")
+	linkCredToCrew(t, db, "cd-cred", e.crewA)
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+e.agentA+"/credentials", nil)
+	req.SetPathValue("agentId", e.agentA)
+	req = req.WithContext(withWorkspace(req.Context(), e.wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	NewAgentHandler(db, newTestLogger()).ListCredentials(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got []struct {
+		ID          string `json:"id"`
+		CredName    string `json:"credential_name"`
+		EnvVarName  string `json:"env_var_name"`
+		GrantSource string `json:"grant_source"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	var crewRow *int
+	for i := range got {
+		if got[i].CredName == "CREW_TOKEN" {
+			crewRow = &i
+		}
+	}
+	if crewRow == nil {
+		t.Fatalf("the crew-linked credential the agent actually receives is missing from the listing: %s",
+			rr.Body.String())
+	}
+	row := got[*crewRow]
+	if row.GrantSource != "crew" {
+		t.Errorf("crew-derived row source = %q, want \"crew\" — an operator must be able to tell "+
+			"a revocable assignment from a crew link", row.GrantSource)
+	}
+	if row.ID != "" {
+		t.Errorf("crew-derived row carries assignment id %q; there is no assignment row to revoke", row.ID)
+	}
+	if row.EnvVarName != "CREW_TOKEN" {
+		t.Errorf("env var = %q, want the credential name (today's crew-derived convention)", row.EnvVarName)
+	}
+}
+
+// TestCrewDelivery_ListCredentialsMarksExplicitGrants is the other half: an
+// explicit assignment must still read as explicit, or the new field would be
+// decorative and the UI could not offer "revoke" on the one grant it applies to.
+func TestCrewDelivery_ListCredentialsMarksExplicitGrants(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cd-cred", "DIRECT_TOKEN", "direct-secret")
+	assignCredToAgent(t, db, "cd-cred", e.agentA, "DIRECT_TOKEN", 0)
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+e.agentA+"/credentials", nil)
+	req.SetPathValue("agentId", e.agentA)
+	req = req.WithContext(withWorkspace(req.Context(), e.wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	NewAgentHandler(db, newTestLogger()).ListCredentials(rr, req)
+
+	var got []struct {
+		ID          string `json:"id"`
+		CredName    string `json:"credential_name"`
+		GrantSource string `json:"grant_source"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want exactly one row, got %d: %s", len(got), rr.Body.String())
+	}
+	if got[0].GrantSource != "explicit" || got[0].ID == "" {
+		t.Errorf("explicit assignment reported as source=%q id=%q; want source=explicit with its "+
+			"assignment id so the UI can offer to revoke it", got[0].GrantSource, got[0].ID)
 	}
 }
