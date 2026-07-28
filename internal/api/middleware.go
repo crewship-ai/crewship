@@ -40,7 +40,51 @@ const (
 	// scope by crew (credential metadata listing) consult this instead of
 	// trusting the query parameter.
 	ctxInternalTokenCrew contextKey = "internal_token_crew"
+	// ctxAuthKind records WHICH credential authenticated the request:
+	// AuthKindSession (an interactive user_sessions-backed login) or
+	// AuthKindCLIToken (a long-lived bearer token — the PAT analogue an
+	// agent, CI job, or script holds).
+	//
+	// RequireAuth branches on exactly this distinction and, before
+	// PRD-CREDENTIALS-V2-2026 §2.6 L9, threw it away: both branches
+	// converged on a single ctxUser write, so nothing downstream could
+	// tell a human at a keyboard from a token in a container. The
+	// closest accidental proxy was AuthUser.SessionID == "", but that is
+	// also empty for every internal adapter that synthesizes an AuthUser
+	// (internal_credentials_mutate.go and friends), so it conflates
+	// "CLI token" with "sidecar".
+	//
+	// Recording it here rather than re-deriving it per handler is the
+	// chokepoint: RequireAuth is the ONE place that knows, so it is the
+	// one place that writes it. Absence means the request never went
+	// through RequireAuth at all — an internal/sidecar route, or a
+	// hand-built context — and every consumer must treat absence as
+	// "not interactive". Fail closed, never fail open.
+	ctxAuthKind contextKey = "auth_kind"
 )
+
+// Auth kinds stored under ctxAuthKind. Only RequireAuth writes them.
+const (
+	// AuthKindSession — a JWT backed by a live user_sessions row, i.e.
+	// a person who signed in with a password and whose session an admin
+	// can revoke. The only kind that counts as "interactive human".
+	AuthKindSession = "session"
+	// AuthKindCLIToken — crewship_cli_… / crewship_admin_… bearer token.
+	// Non-interactive by construction: it survives logout, has no
+	// session to revoke, and is exactly what a compromised agent or a
+	// leaked CI secret would present.
+	AuthKindCLIToken = "cli_token"
+)
+
+// AuthKindFromContext returns the auth kind recorded by RequireAuth, or ""
+// when the request did not pass through it (internal/sidecar routes, or a
+// synthesized context). Callers gating on interactivity MUST compare against
+// AuthKindSession rather than testing for a specific non-interactive kind —
+// the empty string has to deny too.
+func AuthKindFromContext(ctx context.Context) string {
+	s, _ := ctx.Value(ctxAuthKind).(string)
+	return s
+}
 
 // Reason codes returned in 401 bodies and WWW-Authenticate. The
 // frontend's apiFetch wrapper inspects the body to decide between
@@ -213,8 +257,13 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		var user *AuthUser
+		// authKind is decided by the branch below and stored on the
+		// context alongside the user — this is the only place in the
+		// process that can tell the two credential shapes apart.
+		var authKind string
 
 		if IsCLIToken(token) {
+			authKind = AuthKindCLIToken
 			// Pass the request ctx so the SELECT lookup respects the
 			// caller's deadline; the audit metadata feeds the per-use
 			// row written for ADMIN tokens so an incident responder
@@ -242,6 +291,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				r = r.WithContext(ctx)
 			}
 		} else {
+			authKind = AuthKindSession
 			claims, err := m.validator.ValidateAccess(token)
 			if err != nil {
 				m.logger.Debug("auth failed", "error", err)
@@ -314,6 +364,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), ctxUser, user)
+		ctx = context.WithValue(ctx, ctxAuthKind, authKind)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

@@ -141,37 +141,36 @@ type targetAgentInfo struct {
 // loadAgentCredentials queries and decrypts all credentials for an agent.
 
 func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
-	// status='ACTIVE' is load-bearing (#1051), mirroring resolveAgentCredentials
-	// in agent_config.go: PENDING rows (manifest slots, OAuth mid-handshake,
-	// rotation in progress) carry sentinel encrypted bodies. Without this filter
-	// the delegation/hire loader would decrypt and inject "pending_manifest" /
-	// "pending_oauth" as a real env value at the sub-agent boundary.
+	// The set is defined once, in loadDeliveredCredentials: explicit
+	// agent_credentials grants UNION credentials linked to the agent's own crew
+	// via credential_crews. This loader reading agent_credentials on its own was
+	// half of PRD-CREDENTIALS-V2 §1.2 — a crew-assigned credential never crossed
+	// the sub-agent boundary, so a hired agent ran without the crew's secrets
+	// even when its parent had them.
 	//
-	// #1373: also gate the grant's short-lived LEASE. This is the sub-agent
-	// boundary, so a lapsed lease handed over here is worse than at boot — the
-	// value crosses to an agent the lease was never issued to.
-	rows, err := h.db.QueryContext(ctx, `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type,
-		       COALESCE(ac.expires_at, '')
-		FROM agent_credentials ac
-		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
-		  AND `+credentialLeaseGateSQL+`
-		ORDER BY ac.priority ASC
-	`, agentID, leaseComparisonNow())
+	// The filters that were spelled out here now live in that one query:
+	//
+	//	status='ACTIVE' (#1051) — PENDING rows (manifest slots, OAuth
+	//	  mid-handshake, rotation in progress) carry sentinel encrypted bodies,
+	//	  and without the filter this loader would inject "pending_manifest" /
+	//	  "pending_oauth" as a real env value at the sub-agent boundary.
+	//	the #1373 lease gate — a lapsed lease handed over here is worse than at
+	//	  boot: the value crosses to an agent the lease was never issued to.
+	delivered, err := loadDeliveredCredentials(ctx, h.db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
-	defer rows.Close()
 
 	var creds []orchestrator.Credential
-	for rows.Next() {
-		var c orchestrator.Credential
-		var encValue string
-		if err := rows.Scan(&c.ID, &c.EnvVarName, &c.Priority, &encValue, &c.Type, &c.LeaseExpiresAt); err != nil {
-			return nil, fmt.Errorf("scan credential: %w", err)
+	for _, d := range delivered {
+		c := orchestrator.Credential{
+			ID:             d.ID,
+			EnvVarName:     d.EnvVar,
+			Priority:       d.Priority,
+			Type:           d.Type,
+			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
-		dec, err := encryption.Decrypt(encValue)
+		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {
 			h.logger.Error("decrypt credential", "id", c.ID, "error", err)
 			continue
@@ -184,7 +183,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 		c.PlainValue = dec
 		creds = append(creds, c)
 	}
-	return creds, rows.Err()
+	return creds, nil
 }
 
 // runAssignment executes the sub-agent for an assignment in a goroutine.

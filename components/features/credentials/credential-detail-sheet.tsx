@@ -60,6 +60,11 @@ interface CredentialSummary {
   agent_names: string[]
   _count_agent_credentials: number
   mcp_used: boolean
+  /** Server-declared: does Crewship maintain a real upstream probe for this
+   *  credential's (provider, type)? Gates the "Test now" action so it is never
+   *  a placebo. Optional so older payloads decode; absent reads as "no probe",
+   *  which hides the button rather than offering one that cannot answer. */
+  testable?: boolean
 }
 
 interface AuditEvent {
@@ -144,7 +149,7 @@ export function CredentialDetailSheet({
 
   React.useEffect(() => {
     if (!open || !credential) return
-    if (tab === "audit") {
+    if (tab === "audit" && canUpdate) {
       setAuditLoading(true)
       apiFetch(`/api/v1/credentials/${credential.id}/audit?workspace_id=${workspaceId}&limit=50`)
         .then((r) => r.ok ? r.json() : [])
@@ -160,7 +165,7 @@ export function CredentialDetailSheet({
         .then((data: RotationRow[]) => setRotations(Array.isArray(data) ? data : []))
         .catch(() => setRotations([]))
     }
-  }, [tab, open, credential, workspaceId, canRotate])
+  }, [tab, open, credential, workspaceId, canRotate, canUpdate])
 
   if (!credential) return null
 
@@ -247,7 +252,13 @@ export function CredentialDetailSheet({
                   <Badge variant="secondary" className="ml-1.5 h-4 text-[10px] px-1.5">{credential._count_agent_credentials}</Badge>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="audit" className="text-xs"><Activity className="h-3 w-3 mr-1" />Audit</TabsTrigger>
+              {/* GET /audit is MANAGER+ — it exposes the IPs behind admin
+                  actions. Rendering the tab for MEMBER/VIEWER meant a 403
+                  degrading to the empty state, i.e. telling them the credential
+                  has no history when they are merely not allowed to read it. */}
+              {canUpdate && (
+                <TabsTrigger value="audit" className="text-xs"><Activity className="h-3 w-3 mr-1" />Audit</TabsTrigger>
+              )}
               <TabsTrigger value="settings" className="text-xs"><SettingsIcon className="h-3 w-3 mr-1" />Settings</TabsTrigger>
             </TabsList>
 
@@ -306,11 +317,15 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
-                {/* Test now is only meaningful for CLI providers and
-                    requires update permission. Mirrors the BE gating
-                    in TestStored — hiding the button avoids a click →
-                    403 dead-end for read-only members. */}
-                {getBrand(credential.provider).cli && canUpdate && (
+                {/* Test now is only meaningful where the server maintains an
+                    upstream probe (credential.testable — see
+                    probeSupportedProviders) and requires update permission.
+                    Mirrors the BE gating in TestStored — hiding the button
+                    avoids a click → 403 dead-end for read-only members.
+                    Deliberately NOT gated on brand .cli like the badge above:
+                    that flag marks the CLIs Crewship drives in the container,
+                    which excluded GitHub/GitLab/Vercel despite real probes. */}
+                {credential.testable && canUpdate && (
                 <div className="pt-3 border-t border-white/10 flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
                     {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
@@ -379,9 +394,18 @@ export function CredentialDetailSheet({
               </TabsContent>
 
               <TabsContent value="settings" className="m-0 space-y-4">
-                {!canUpdate && (
+                {/* Only claim "no permission" when there is genuinely nothing
+                    here — a MEMBER holding credential.rotate can act on this
+                    credential, just not rewrite its value. */}
+                {!canUpdate && !canRotate && (
                   <p className="text-xs text-muted-foreground">
                     You don&apos;t have permission to modify this credential.
+                  </p>
+                )}
+                {!canUpdate && canRotate && (
+                  <p className="text-xs text-muted-foreground">
+                    You can rotate this credential. Replacing its value outright requires
+                    a workspace manager.
                   </p>
                 )}
                 {canUpdate && !canRotate && (
@@ -465,17 +489,6 @@ export function CredentialDetailSheet({
                       {savingValue && <Spinner className="h-3 w-3 mr-1.5" />}
                       Save value
                     </Button>
-                    {canRotate && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => onRotate(credential)}
-                        className="text-[11px] text-muted-foreground hover:text-foreground"
-                      >
-                        <RefreshCw className="h-3 w-3 mr-1.5" />
-                        Rotate with grace overlap…
-                      </Button>
-                    )}
                     {valueSaved && (
                       <span className="text-[11px] text-success inline-flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" />
@@ -494,6 +507,32 @@ export function CredentialDetailSheet({
                     currently running and need a 24h overlap.
                   </p>
                 </div>
+                )}
+
+                {/* Rotation is gated on canRotate ALONE, deliberately outside
+                    the canUpdate block above. The two permissions are not
+                    nested: PATCH is MANAGER+, while rotate additionally accepts
+                    any member holding credential.rotate
+                    (requireRoleOrCapabilityOrForbid, #1028) — the grant that
+                    lets an oncall MEMBER replace a leaked token without blanket
+                    vault reach. Nesting this inside canUpdate hid the action
+                    from precisely that tier. */}
+                {canRotate && (
+                  <div className="space-y-1.5">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onRotate(credential)}
+                      className="text-[11px] text-muted-foreground hover:text-foreground -ml-2"
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1.5" />
+                      Rotate with grace overlap…
+                    </Button>
+                    <p className="text-[10px] text-muted-foreground">
+                      Issues a new value and keeps the old one working for the grace window,
+                      so agents mid-run don&apos;t break.
+                    </p>
+                  </div>
                 )}
 
                 {canRotate && rotations.length > 0 && (

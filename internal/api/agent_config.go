@@ -609,6 +609,12 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 
 // resolveAgentCredentials fetches and decrypts credentials assigned to the agent.
 //
+// "Assigned" is loadDeliveredCredentials' definition, not this function's:
+// explicit agent_credentials grants UNION credentials linked to the agent's own
+// crew via credential_crews. Reading agent_credentials alone here is what made a
+// crew assignment a UI-only fact (PRD-CREDENTIALS-V2 §1.2) — the crew's agents
+// booted without the credential.
+//
 // Only credentials with status='ACTIVE' are returned. PENDING rows
 // (manifest slots awaiting a value, OAuth flows mid-handshake,
 // rotation in progress) carry sentinel encrypted bodies — letting
@@ -627,30 +633,23 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 // predicate /keeper/execute enforces (credentialLeaseGateSQL); NULL expires_at is
 // a standing grant and is unaffected.
 func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID string) ([]mcpCredEntry, error) {
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type, COALESCE(c.username, ''),
-		       COALESCE(ac.expires_at, '')
-		FROM agent_credentials ac
-		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
-		  AND `+credentialLeaseGateSQL+`
-		ORDER BY ac.priority ASC
-	`, agentID, leaseComparisonNow())
+	delivered, err := loadDeliveredCredentials(r.Context(), h.db, agentID)
 	if err != nil {
 		h.logger.Error("resolve agent credentials", "error", err)
 		return nil, err
 	}
-	defer rows.Close()
 
-	var creds []mcpCredEntry
-	for rows.Next() {
-		var ce mcpCredEntry
-		var encValue string
-		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type, &ce.Username, &ce.LeaseExpiresAt); err != nil {
-			h.logger.Error("scan credential for resolve", "error", err)
-			return nil, err
+	creds := []mcpCredEntry{}
+	for _, d := range delivered {
+		ce := mcpCredEntry{
+			ID:             d.ID,
+			EnvVar:         d.EnvVar,
+			Priority:       d.Priority,
+			Type:           d.Type,
+			Username:       d.Username,
+			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
-		dec, err := decryptCredential(encValue)
+		dec, err := decryptCredential(d.EncryptedValue)
 		if err != nil {
 			h.logger.Error("decrypt credential for resolve", "id", ce.ID, "error", err)
 			continue
@@ -664,13 +663,6 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		}
 		ce.Value = dec
 		creds = append(creds, ce)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (resolve credentials)", "error", err)
-		return nil, err
-	}
-	if creds == nil {
-		creds = []mcpCredEntry{}
 	}
 	return creds, nil
 }
@@ -1396,9 +1388,14 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	keeperBlock.WriteString("    -H \"Authorization: Bearer $CREWSHIP_AGENT_TOKEN\" \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
 	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
-	keeperBlock.WriteString("The Keeper (AI gatekeeper) will evaluate your request and respond with ALLOW or DENY.\n")
-	keeperBlock.WriteString("If ALLOW, the response contains the credential value. If DENY, do NOT retry — explain to the user why access was denied.\n\n")
-	keeperBlock.WriteString("To execute a command with a credential (without seeing the value):\n")
+	keeperBlock.WriteString("The Keeper (AI gatekeeper) evaluates the request and replies with ALLOW, DENY or ESCALATE.\n")
+	keeperBlock.WriteString("The reply is a decision only — it never carries the credential value, and no Keeper\n")
+	keeperBlock.WriteString("endpoint will ever hand you one. Do not try to parse a secret out of it.\n")
+	keeperBlock.WriteString("  ALLOW    — approved; use the credential via /keeper/execute below.\n")
+	keeperBlock.WriteString("  DENY     — do NOT retry; explain to the user why access was denied.\n")
+	keeperBlock.WriteString("  ESCALATE — a human was asked to approve; tell the user it is pending.\n\n")
+	keeperBlock.WriteString("This is how you USE an approved credential — the value is injected server-side,\n")
+	keeperBlock.WriteString("your command runs in this container, and the value is scrubbed from the output:\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
 	keeperBlock.WriteString("    -H \"Authorization: Bearer $CREWSHIP_AGENT_TOKEN\" \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")

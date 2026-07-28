@@ -1149,10 +1149,18 @@ Assign, list, and remove the credentials injected into an agent's container.
 GET /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
 ```
 
-**Response:** `200 OK` -- array of credential assignment objects.
+**Response:** `200 OK` -- array of the credentials this agent receives.
 
-Each object carries the grant's **lease** state (see
-[Short-lived leases](/guides/credentials#short-lived-leases-ttl)):
+This answers "what does this agent get?", not "what rows exist in the assignment table". A credential linked to the agent's **crew** is delivered to that agent and therefore appears here, even though no assignment row exists for it.
+
+| Field | Type | Description |
+|---|---|---|
+| `grant_source` | string | `explicit` — assigned to this agent, revocable by `id`. `crew` — inherited from a crew the credential is linked to; `id` is empty because there is nothing to revoke, and it is removed by unlinking the credential from the crew. |
+
+An explicit assignment always wins over a crew link for the same credential: it appears once, as `explicit`, carrying the env var name, priority and lease that were chosen for it.
+
+Each object also carries the grant's **lease** state (see
+[Short-lived leases](/guides/credentials#short-lived-leases-ttl)). Note that `lease_source` and `grant_source` answer different questions — the first says why a grant *expires*, the second says where it *came from*:
 
 | Field | Type | Description |
 |---|---|---|

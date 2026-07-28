@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // registerCrewsRoutes wires the entire "crews + agents + connections"
@@ -130,6 +131,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// catch-all the same way "capabilities" does above, so no ordering
 	// hazard.
 	r.mux.Handle("GET /api/v1/crews/{crewId}/services", authed(wsCtx(http.HandlerFunc(crews.Services))))
+	// Read-only credential↔tool gap report: which of this crew's
+	// credentials are for a CLI its container doesn't have (a GitHub PAT
+	// with no github-cli feature, etc). Advisory only — it never edits
+	// the devcontainer config or triggers a rebuild, so it needs no more
+	// than the read role every other GET here uses.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/credential-readiness", authed(wsCtx(http.HandlerFunc(crews.CredentialReadiness))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)
@@ -379,6 +386,68 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
+
+	// Credential reveal (PRD-CREDENTIALS-V2-2026 §2.6). Separate handler
+	// because it needs a synchronous journal emitter the other credential
+	// routes do not — the chained audit write is a precondition of the
+	// disclosure, and a batched Emit cannot express that (see
+	// internal/journal/emit_sync.go).
+	//
+	// The type assertion is the fail-closed wiring: an emitter that cannot
+	// write synchronously (the noop used in early init and in tests that
+	// skip WithJournal) is NOT wired, which leaves the handler refusing
+	// every reveal with a 500. Silently accepting an async emitter here
+	// would delete L4 at the one place nobody would look for it.
+	reveal := NewCredentialRevealHandler(r.db, r.logger)
+	if sync, ok := r.Journal().(journal.SyncEmitter); ok {
+		reveal.SetJournal(sync)
+	}
+	// roleInline on all three: each runs a layered gate the route
+	// middleware must not pre-empt (capability + crew scope +
+	// classification for reveal; OWNER-only for the policy; the
+	// raise/lower role split for sensitivity).
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/reveal", roleInline, reveal.Reveal)
+	// Literal path registered alongside /{credentialId}; Go 1.22's mux
+	// prefers the more specific literal, the same way default-env-var
+	// above coexists with the wildcard.
+	r.mux.Handle("GET /api/v1/credentials/reveal-policy", authed(wsCtx(http.HandlerFunc(reveal.GetPolicy))))
+	r.authedMut("PUT", "/api/v1/credentials/reveal-policy", roleInline, reveal.SetPolicy)
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/sensitivity", roleInline, reveal.SetSensitivity)
+
+	// Credential bindings — (scope, slot) → credential (PRD §2.5b). Literal
+	// paths, registered before the /{credentialId} wildcard for the same
+	// reason reveal-policy is: Go 1.22's mux prefers the more specific
+	// literal, so "bindings" is never read as a credential id.
+	//
+	// roleManage on the mutating pair, the same tier as deleting a credential:
+	// a binding decides which account lands in a container, which is not the
+	// create tier that lets a MANAGER add one. The handlers repeat the check
+	// rather than trust the wiring — this file is exactly the place a route
+	// gets re-registered and quietly loses its gate (#809).
+	bindings := NewCredentialBindingHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/credentials/bindings", authed(wsCtx(http.HandlerFunc(bindings.List))))
+	r.authedMut("POST", "/api/v1/credentials/bindings", roleManage, bindings.Create)
+	r.authedMut("DELETE", "/api/v1/credentials/bindings/{bindingId}", roleManage, bindings.Delete)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/credential-bindings",
+		authed(wsCtx(http.HandlerFunc(bindings.ResolveForAgent))))
+
+	// Credential custom fields (PRD-CREDENTIALS-V2-2026 §2.2). The multi-part
+	// half of a credential: AWS wants access key id + secret + region, a
+	// service account wants a blob + a filename, and one `encrypted_value`
+	// column cannot say that.
+	//
+	// The READ route registers exactly like GET /credentials/{id} — authed +
+	// wsCtx, with credentialVisibilityFilter applied inside — so the parts can
+	// never be visible to someone the whole credential is hidden from. The
+	// WRITES declare roleCreate, matching PATCH /credentials/{credentialId}
+	// above: writing a field is writing the credential, and a looser gate here
+	// would be a way around the tighter one there.
+	fields := NewCredentialFieldHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/fields", authed(wsCtx(http.HandlerFunc(fields.List))))
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/fields", roleCreate, fields.Create)
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/fields/{fieldKey}", roleCreate, fields.Update)
+	r.authedMut("DELETE", "/api/v1/credentials/{credentialId}/fields/{fieldKey}", roleCreate, fields.Delete)
+
 	// #1083: wrap in wsCtx like every other credentials route. The response
 	// carries no tenant data, but requiring workspace membership keeps this
 	// route uniform with the rest of the credentials surface.

@@ -546,10 +546,19 @@ func TestCredDefaultEnvVar(t *testing.T) {
 			t.Errorf("provider=%s status=%d", prov, rr.Code)
 			continue
 		}
-		var resp map[string]string
-		json.Unmarshal(rr.Body.Bytes(), &resp)
-		if resp["env_var"] != want {
-			t.Errorf("provider=%s env_var=%q, want %q", prov, resp["env_var"], want)
+		// Typed, not map[string]string: the response carries a bool
+		// (testable) alongside env_var, and decoding into a string map
+		// leaves this assertion passing on a partial decode it never
+		// checked. See TestDefaultEnvVar_ExposesTestable for that field.
+		var resp struct {
+			EnvVar string `json:"env_var"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Errorf("provider=%s unmarshal: %v", prov, err)
+			continue
+		}
+		if resp.EnvVar != want {
+			t.Errorf("provider=%s env_var=%q, want %q", prov, resp.EnvVar, want)
 		}
 	}
 }

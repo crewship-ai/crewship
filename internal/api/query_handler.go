@@ -531,7 +531,10 @@ func (h *QueryHandler) finishQuery(
 // loadAgentCredentials queries and decrypts all credentials for an agent, for
 // the peer-query run.
 //
-// Two filters here are load-bearing and were both missing:
+// The set is defined once, in loadDeliveredCredentials: explicit
+// agent_credentials grants UNION credentials linked to the agent's own crew via
+// credential_crews. Three filters here are load-bearing, and every one of them
+// arrived late to THIS loader specifically:
 //
 //   - status = 'ACTIVE' (#1051): PENDING rows (manifest slots, OAuth
 //     mid-handshake, rotation in progress) carry sentinel encrypted bodies.
@@ -542,29 +545,30 @@ func (h *QueryHandler) finishQuery(
 //   - the #1373 lease gate: a grant may be a short-lived lease, and a peer query
 //     is a full agent run — delivering a lapsed lease here reintroduces exactly
 //     the standing credential the TTL was meant to remove.
+//   - the crew fanout (PRD-CREDENTIALS-V2 §1.2): a peer query is a full agent
+//     run, so an agent answering one needs what it boots with. Fixing the other
+//     two loaders and leaving this one would have made a crew-assigned secret
+//     present at boot and at the sub-agent boundary and absent when a peer asks
+//     — a difference nobody could explain from the outside.
+//
+// Three arrivals, three near-misses, one shared definition now. Do not spell the
+// query out here again.
 func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
-	rows, err := h.db.QueryContext(ctx, `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type,
-		       COALESCE(ac.expires_at, '')
-		FROM agent_credentials ac
-		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
-		  AND `+credentialLeaseGateSQL+`
-		ORDER BY ac.priority ASC
-	`, agentID, leaseComparisonNow())
+	delivered, err := loadDeliveredCredentials(ctx, h.db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
-	defer rows.Close()
 
 	var creds []orchestrator.Credential
-	for rows.Next() {
-		var c orchestrator.Credential
-		var encValue string
-		if err := rows.Scan(&c.ID, &c.EnvVarName, &c.Priority, &encValue, &c.Type, &c.LeaseExpiresAt); err != nil {
-			return nil, fmt.Errorf("scan credential: %w", err)
+	for _, d := range delivered {
+		c := orchestrator.Credential{
+			ID:             d.ID,
+			EnvVarName:     d.EnvVar,
+			Priority:       d.Priority,
+			Type:           d.Type,
+			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
-		dec, err := encryption.Decrypt(encValue)
+		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {
 			return nil, fmt.Errorf("decrypt credential %s: %w", c.ID, err)
 		}
@@ -574,7 +578,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 		c.PlainValue = dec
 		creds = append(creds, c)
 	}
-	return creds, rows.Err()
+	return creds, nil
 }
 
 // ListPeerConversations handles GET /api/v1/crews/{crewId}/peer-conversations.

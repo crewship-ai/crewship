@@ -33,6 +33,7 @@ crewship crew <subcommand> [flags]
 | `connections` | List all crew connections in the workspace |
 | `mcp` | Show or set MCP server configuration for a crew |
 | `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
+| `credential-readiness` | Report credentials whose CLI is missing from the crew's container |
 | `provision` | Trigger devcontainer provisioning |
 | `provision status` | Check provisioning status |
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
@@ -298,6 +299,40 @@ crewship crew mcp <crew-slug> --set ''
 <Note>
 `--set` and `--set-file` are mutually exclusive. The JSON must contain a `"mcpServers"` top-level object.
 </Note>
+
+---
+
+## `crewship crew credential-readiness`
+
+Report which of a crew's credentials are for a CLI the crew's container does not have.
+
+The sandbox runtime image ships `git`, `curl` and `jq`. Tools like `gh`, `aws`, `az`, `gcloud`, `kubectl`, `docker`, `terraform`, `npm` and `ansible` only exist in the container when the crew's devcontainer config declares the matching feature (or mise installs the tool). A valid credential and a working agent are therefore two different things — a healthy GitHub PAT on a crew with no `github-cli` feature still gets the agent `gh: command not found`, with nothing connecting the two facts.
+
+```bash
+crewship crew credential-readiness engineering
+crewship crew credential-readiness engineering --format json
+```
+
+```
+Crew engineering: 1 of 2 credential(s) need a tool the container doesn't have.
+
+CREDENTIAL   PROVIDER   TOOL   FEATURE
+gh-pat       GITHUB     gh     ghcr.io/devcontainers/features/github-cli:1
+
+Already in the container: terraform
+
+Add the missing feature(s) to the crew's devcontainer config, then re-provision:
+  crewship crew config engineering --show
+  crewship crew config engineering --devcontainer ./devcontainer.json
+```
+
+<Note>
+This command only **reports**. It never edits the crew's devcontainer config and never triggers a rebuild — adding a feature changes what runs inside the container, so it stays your call. Apply the fix with [`crewship crew config`](#crewship-crew-config), then [`crewship crew rebuild`](#crewship-crew-rebuild).
+</Note>
+
+A provider with no known CLI (Notion, Stripe, anything unrecognised) reports nothing rather than guessing. Matching is on the tool name, not the feature ref, so an equivalent feature counts: `docker-outside-of-docker` satisfies a `DOCKER` credential and a mise `nodejs` satisfies an `NPM` one.
+
+Credentials are considered when they are workspace-scoped, scoped to this crew, or assigned to one of its agents with a live lease. Revoked and deleted credentials are ignored.
 
 ---
 

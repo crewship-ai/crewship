@@ -215,6 +215,11 @@ func TestAllCapabilities(t *testing.T) {
 		"chat",
 		"credential.create",
 		"credential.rotate",
+		// Colon-separated on purpose — PRD-CREDENTIALS-V2-2026 §2.6
+		// names it this way and a capability string is a wire
+		// identifier, not a local convention. Sorts between
+		// "credential.rotate" and "issue.create" because '.' < 's'.
+		"credentials:reveal",
 		"issue.create",
 		"memory.write",
 		"routine.create",

@@ -53,6 +53,27 @@ half of a login record for the same reason: cleartext identifiers let
 the UI search/sort without a per-row AEAD decrypt and shrink the GCM
 surface area.
 
+### Multi-part credentials (`credential_fields`)
+
+A credential may carry any number of named parts on top of the two columns
+above — `credential_fields (credential_id, key, value, encrypted_value,
+is_secret, ordinal)`, PRD-CREDENTIALS-V2-2026 §2.2. `is_secret` decides which
+value column holds the data, and a CHECK constraint makes exactly one of them
+non-NULL, so a handler bug that wrote a secret into the cleartext column is
+rejected by the engine rather than by the code under suspicion. Non-secret
+fields (`region`, `account_id`, `host`) are cleartext for the same reason
+`username` is.
+
+Nothing was backfilled: `encrypted_value` and `username` stay authoritative for
+every existing reader, and the field table holds only the *additional* parts.
+The keys `value`, `password` and `username` are refused for that reason — two
+writable copies of one datum with no owner drift apart silently. Delivery does
+not read fields yet; that is a separate change.
+
+User-facing docs: `docs/guides/credentials.mdx` → "Custom Fields".
+Code: `internal/api/credential_fields.go`, migration
+`internal/database/migrations/20260728135322_credential_fields.sql`.
+
 `agent_credentials.mount_type` discriminates env-var injection (current
 behaviour, default for backward compat) from in-container file mounts.
 The existing `env_var_name` column is reinterpreted per `mount_type`:

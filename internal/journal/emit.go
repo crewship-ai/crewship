@@ -250,8 +250,51 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 // the write degrades to synchronous so callers still get back-pressure
 // rather than silently losing events.
 func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
-	if err := e.Validate(); err != nil {
+	e, err := prepareEntry(ctx, e)
+	if err != nil {
 		return "", err
+	}
+
+	select {
+	case <-w.closed:
+		// Writer is shutting down; persist inline so we don't drop the entry.
+		perr := w.persistOne(ctx, e)
+		if perr == nil {
+			w.afterCommit([]Entry{e})
+		}
+		return e.ID, perr
+	default:
+	}
+
+	select {
+	case w.queue <- e:
+		return e.ID, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(25 * time.Millisecond):
+		// Fall back to a synchronous write so durability trumps latency.
+		w.logger.Warn("journal queue saturated, writing synchronously",
+			"entry_type", e.Type, "workspace_id", e.WorkspaceID)
+		perr := w.persistOne(ctx, e)
+		if perr == nil {
+			w.afterCommit([]Entry{e})
+		}
+		return e.ID, perr
+	}
+}
+
+// prepareEntry runs the validation + defaulting prologue every write path
+// shares: validate, mint an id, stamp the timestamp, and inherit trace /
+// mission context from ctx when the caller left them unset.
+//
+// Extracted from Emit so EmitSync (emit_sync.go) cannot drift from it. The
+// two paths differ ONLY in how the prepared entry reaches disk — batched vs.
+// inline — and a divergence in the prologue would mean an audit-critical
+// synchronous entry lands with a different shape than the same entry emitted
+// asynchronously.
+func prepareEntry(ctx context.Context, e Entry) (Entry, error) {
+	if err := e.Validate(); err != nil {
+		return Entry{}, err
 	}
 	if e.ID == "" {
 		e.ID = newID()
@@ -289,33 +332,7 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 			}
 		}
 	}
-
-	select {
-	case <-w.closed:
-		// Writer is shutting down; persist inline so we don't drop the entry.
-		perr := w.persistOne(ctx, e)
-		if perr == nil {
-			w.afterCommit([]Entry{e})
-		}
-		return e.ID, perr
-	default:
-	}
-
-	select {
-	case w.queue <- e:
-		return e.ID, nil
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case <-time.After(25 * time.Millisecond):
-		// Fall back to a synchronous write so durability trumps latency.
-		w.logger.Warn("journal queue saturated, writing synchronously",
-			"entry_type", e.Type, "workspace_id", e.WorkspaceID)
-		perr := w.persistOne(ctx, e)
-		if perr == nil {
-			w.afterCommit([]Entry{e})
-		}
-		return e.ID, perr
-	}
+	return e, nil
 }
 
 // Flush forces pending entries to disk and waits for the drain to

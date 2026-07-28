@@ -506,12 +506,31 @@ var credTestStoredCmd = &cobra.Command{
 		}
 
 		var result struct {
-			Valid  bool   `json:"valid"`
-			Status int    `json:"status"`
-			Error  string `json:"error"`
+			Valid     bool   `json:"valid"`
+			Status    int    `json:"status"`
+			Error     string `json:"error"`
+			Supported bool   `json:"supported"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
+		}
+		// A provider with no upstream probe comes back valid:true — nothing
+		// failed, because nothing was attempted. Reporting that as "is valid"
+		// answers the one question this command exists to answer with a result
+		// it never obtained. Say what actually happened instead; it is not an
+		// error, so exit 0 and let scripts carry on.
+		//
+		// Gate on valid too, not on supported alone: a real failure must stay a
+		// failure even when `supported` is absent — an older server predating
+		// the field would otherwise have every expired key reported as merely
+		// unchecked. Absent field against a passing probe degrades the other
+		// way, to "not checked", which is the safe direction: never a false
+		// green.
+		if result.Valid && !result.Supported {
+			cli.PrintWarning(fmt.Sprintf(
+				"Credential %s was not checked — Crewship has no upstream probe for this provider. "+
+					"It is stored and will be delivered to agents as configured.", args[0]))
+			return nil
 		}
 		if result.Valid {
 			cli.PrintSuccess(fmt.Sprintf("Credential %s is valid.", args[0]))
