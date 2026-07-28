@@ -265,6 +265,15 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/me/notification-prefs", authed(wsCtx(http.HandlerFunc(nprH.Get))))
 	r.authedMut("PUT", "/api/v1/me/notification-prefs", roleSelf, nprH.Put)
 
+	// Per-category message templates: what the notifications Crewship
+	// generates itself say. ADMIN+, unlike the preference matrix above — a
+	// preference is "do I want to hear about this", a template is "what
+	// everyone sees", so one person's rewording reaches every recipient.
+	ntplH := NewNotifyTemplateHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/notification-templates", authed(wsCtx(http.HandlerFunc(ntplH.List))))
+	r.authedMut("PUT", "/api/v1/notification-templates", roleManage, ntplH.Put)
+	r.authedMut("DELETE", "/api/v1/notification-templates", roleManage, ntplH.Delete)
+
 	// Delivery log (#1412) — read-only outbox history backing "why didn't
 	// my notification arrive?" Admin-only: the log spans every user's
 	// deliveries in the workspace, not just the caller's own. Enforced

@@ -133,6 +133,11 @@ func scopeForRoute(pattern string) string {
 		return "skills:write"
 	case "notification-channels":
 		return "webhooks:write"
+	case "notification-templates":
+		// What every recipient in the workspace reads, not where it goes —
+		// one person's rewording reaches everyone, so this is administration
+		// rather than a delivery-target write.
+		return "workspace:admin"
 	case "notification-providers":
 		// Instance-wide provider enable/disable toggle (#1412) — an
 		// administration action, not a webhook-delivery-target write.

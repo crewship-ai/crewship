@@ -10541,6 +10541,71 @@
         ]
       }
     },
+    "/api/v1/notification-templates": {
+      "delete": {
+        "operationId": "delete_api_v1_notification-templates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-templates"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_v1_notification-templates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-templates"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_notification-templates",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-templates"
+        ]
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "operationId": "get_api_v1_notifications",
