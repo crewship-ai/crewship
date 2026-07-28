@@ -70,11 +70,30 @@ func (r *Router) NotifyInboxItem(ctx context.Context, item inbox.Item) {
 	if r == nil || r.db == nil {
 		return
 	}
-	category := notify.CategoryForKind(item.Kind)
+	category := categoryForItem(item)
 	if category == "" {
 		return // this inbox kind has no external-notification mapping (yet)
 	}
 	r.notifyItem(ctx, category, item)
+}
+
+// categoryForItem resolves the notification category an inbox item routes
+// under: what its producer declared, else what its kind maps to.
+//
+// The kind mapping alone could not serve every producer. A routine's notify
+// step writes kind "message" whatever it is reporting, so a failure, a digest
+// and a deploy result all arrived as chat.replies and the preference matrix
+// people tune was invisible to the author who knew what the event was.
+//
+// A declared category that is not real falls back rather than being trusted.
+// inbox.Item is a leaf type that cannot import the category vocabulary to
+// validate itself, and routing into a category nothing matches would deliver
+// to nobody while every log line reported success — the expensive failure.
+func categoryForItem(item inbox.Item) string {
+	if item.Category != "" && notify.ValidCategory(item.Category) {
+		return item.Category
+	}
+	return notify.CategoryForKind(item.Kind)
 }
 
 // notifyItem is the shared fan-out entry point for BOTH producers — the

@@ -280,7 +280,8 @@ func (e *Executor) runNotifyStep(ctx context.Context, step Step, parentRender Re
 			SenderType:   "pipeline",
 			SenderName:   senderName,
 			Priority:     normalizeNotifyPriority(step.Notify.Priority),
-			Blocking:     false, // update, not a decision request
+			Category:     step.Notify.Category, // empty = the router's kind mapping decides
+			Blocking:     false,                // update, not a decision request
 			Payload: map[string]interface{}{
 				// subkind keeps routine updates in their own filterable lane
 				// so they don't drown approvals/escalations in the inbox.

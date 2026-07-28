@@ -137,6 +137,22 @@ type Item struct {
 	Priority     string                 // urgent | high | medium | low — defaults to medium
 	Blocking     bool                   // true = needs explicit action
 	Payload      map[string]interface{} // kind-specific structured data
+
+	// Category optionally names the notification category this item routes
+	// under, overriding the kind→category mapping the router would apply.
+	// It exists for producers that know what an event IS better than its
+	// inbox kind can express — a routine's notify step emits kind "message"
+	// whatever it is about, so without this every routine notice arrived as
+	// a chat reply.
+	//
+	// IN-FLIGHT ONLY: not a column, not persisted. The resolved category is
+	// stored on the delivery row, which is what the recovery sweep reads, so
+	// there is nothing for the inbox table to remember. Empty = let the
+	// router decide, which keeps that mapping in one place.
+	//
+	// This package stays a leaf and does not import internal/notify, so the
+	// value is validated where it is authored, not here.
+	Category string
 }
 
 // Insert persists a new inbox row. INSERT OR IGNORE so the

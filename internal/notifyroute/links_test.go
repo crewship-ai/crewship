@@ -39,6 +39,21 @@ func TestNotificationFacts_ChatReplyKeepsTheLinkItAlreadyHad(t *testing.T) {
 	}
 }
 
+func TestNotificationFacts_RoutineNoticeLinksToRuns(t *testing.T) {
+	// A routine's notify step writes kind "message" like a chat reply does,
+	// but carries no chat_url — so it would have been the one producer that
+	// people actually author and the only one with nowhere to click. Its
+	// payload marks itself with subkind=routine_update.
+	links, _ := factsFor(t, inbox.KindMessage, map[string]any{
+		"subkind":         "routine_update",
+		"pipeline_run_id": "run_1",
+		"step_id":         "report",
+	})
+	if links["Open runs"] != "/runs" {
+		t.Errorf("want a runs link for a routine notice, got %+v", links)
+	}
+}
+
 func TestNotificationFacts_JournalEntryOnAMissionLinksToThatMission(t *testing.T) {
 	// A journal entry has no detail route of its own, but one carrying a
 	// mission_id has something precise to point at — the mission timeline

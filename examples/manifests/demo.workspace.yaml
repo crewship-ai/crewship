@@ -54,20 +54,22 @@ spec:
       fields_from_env:
         webhook_url: DISCORD_WEBHOOK_URL
       categories:
-        - chat.replies        # what the demo routine's notify step emits
+        - routines.completed  # what the demo routine's notify step declares
         - routines.failed     # a run ended in an error
         - routines.missed     # a schedule stopped happening — the quiet failure
         - agents.approval     # an agent is blocked on a human
         - agents.escalation   # an agent escalated deliberately
+        - chat.replies        # an agent replied in a chat you were not watching
       # Allowlisting a category only permits it. Delivery is decided by the
       # per-user matrix, so a manifest that stopped at the channel would
       # leave a workspace where nothing ever arrives and nobody can see why.
       deliver_to_me:
-        - chat.replies
+        - routines.completed
         - routines.failed
         - routines.missed
         - agents.approval
         - agents.escalation
+        - chat.replies
       agents:
         - demo-riley
 
@@ -107,8 +109,9 @@ spec:
 # HTTP fetch, then say what came back. No agent, no LLM, no credential —
 # a demo you cannot run until you have bought an API key is not a demo.
 #
-# The notify step lands in the inbox as `chat.replies`, which the channel
-# above allowlists and routes to you, so the output arrives in Discord.
+# The notify step declares itself `routines.completed`, which the channel
+# above allowlists AND routes to you, so the output arrives in Discord —
+# and stays tunable apart from an agent's chat replies.
 apiVersion: crewship/v1
 kind: Routine
 metadata:
@@ -122,18 +125,23 @@ spec:
   estimated_cost_usd: 0
   # Declared, because the egress gate blocks anything not on this list.
   egress_targets:
-    - 127.0.0.1
+    - dns.google
   inputs:
     - name: url
       type: string
       required: false
       description: >-
-        Any GET endpoint returning JSON. Defaults to this instance's own
-        health check, which needs no third party and no network egress — a
-        demo that only works when some public API is up and un-rate-limited
-        is a demo that fails in front of people. Change the port if yours
-        differs, or point it anywhere and add the host to egress_targets.
-      default: http://127.0.0.1:8080/api/health
+        Any GET endpoint returning JSON. The default is Google's DNS-over-
+        HTTPS resolver: public, unauthenticated, no signup, no rate limit
+        worth worrying about, and it answers with a small JSON document
+        rather than a web page. Point it anywhere you like — add the host
+        to egress_targets above, which is the gate that decides what this
+        routine may reach.
+
+        It deliberately is NOT this instance's own health check: the egress
+        guard refuses literal private and loopback addresses, so a demo
+        pointed at 127.0.0.1 fails on a rule that exists for good reason.
+      default: https://dns.google/resolve?name=example.com&type=A
   steps:
     - id: fetch
       type: http
@@ -148,6 +156,11 @@ spec:
       notify:
         to: workspace
         title: "Fetch and report"
+        # Says what this notice IS. Without it every routine notice routes
+        # as chat.replies — the category an inbox message maps to — so a
+        # result and a chat reply land in the same row of everyone's
+        # preference matrix and cannot be tuned apart.
+        category: routines.completed
         body: |-
           GET {{ inputs.url }}
           → HTTP {{ steps.fetch.status }}

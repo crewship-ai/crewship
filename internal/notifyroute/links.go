@@ -58,10 +58,18 @@ func notificationFacts(kind string, payload map[string]any) ([]notify.Link, map[
 
 	switch kind {
 	case inbox.KindMessage:
-		// The one link that already worked. Kept reading the same key so
-		// chat replies are unchanged by this refactor.
+		// "message" covers two unrelated producers. A chat reply carries a
+		// chat_url — the one link that already worked, read from the same
+		// key so chat replies are unchanged by this refactor.
 		if chat := str("chat_url"); chat != "" {
 			return []notify.Link{{Label: "Open chat", Path: chat}}, vars
+		}
+		// A routine's notify step also writes "message", and carries no
+		// chat_url. It marks itself with subkind=routine_update. Without
+		// this it would be the only producer people actually author by
+		// hand, and the only one with nowhere to click.
+		if str("subkind") == "routine_update" {
+			return []notify.Link{{Label: "Open runs", Path: "/runs"}}, vars
 		}
 		return nil, vars
 

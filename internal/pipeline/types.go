@@ -547,6 +547,19 @@ type NotifyStep struct {
 	Body string `json:"body,omitempty"`
 	// Priority is urgent|high|medium|low. Empty defaults to medium.
 	Priority string `json:"priority,omitempty"`
+	// Category names the notification category this notice routes under —
+	// one of notify.AllCategories, e.g. "routines.failed".
+	//
+	// Without it every notify step emitted inbox kind "message", which the
+	// router labels chat.replies, so "the nightly deploy failed" and "here
+	// is your weekly digest" arrived under the same category and the
+	// preference matrix people tune was invisible to the author who knows
+	// what the event actually is.
+	//
+	// It is a ROUTING LABEL, not a privilege: it selects which row of a
+	// recipient's matrix the notice is matched against, and every row stays
+	// opt-in per user. Empty keeps the previous behaviour.
+	Category string `json:"category,omitempty"`
 }
 
 // QueryStep is a deterministic, read-only aggregate query over the run's
