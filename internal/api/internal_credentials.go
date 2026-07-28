@@ -140,6 +140,19 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		query += " AND provider = ?"
 		args = append(args, provider)
 	}
+	// KNOWN LIMITATION — binding-blind. This listing is the metadata source for
+	// the sidecar CredStore (proxy-injected API_KEY / AI_CLI_TOKEN keys) and its
+	// reaper, and it does NOT consult credential_bindings, unlike the env/file
+	// delivery path (loadDeliveredCredentials). A credential reachable ONLY
+	// through a binding is therefore absent here. This is not a reaper hazard —
+	// the reaper only drops what boot put in the store, and a binding-only key
+	// never entered it — and it is low-impact in practice: bindings are an
+	// env-var-slot mechanism (GH_TOKEN and the like), while a provider key is
+	// delivered by proxy substitution, not a slot, so binding one is already
+	// off-pattern. Left for a dedicated change rather than threaded through this
+	// #1031/#1373-sensitive query under merge pressure. Do not treat the crew
+	// scoping below as complete for the binding era without revisiting this.
+	//
 	// #1031: when the caller identifies its crew, scope the metadata listing to
 	// credentials that crew can actually use — assigned to one of the crew's
 	// agents (agent_credentials), directly crew-scoped (credential_crews), or

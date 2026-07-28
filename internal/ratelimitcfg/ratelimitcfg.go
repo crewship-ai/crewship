@@ -51,16 +51,17 @@ type Meta struct {
 // Registry keys. Exported so call sites reference a symbol, not a string
 // literal that could drift from the registry and silently read the default.
 const (
-	KeyHTTPAuthPerMin      = "http.auth_per_min"
-	KeyHTTPAPIPerMin       = "http.api_per_min"
-	KeyHTTPCredTestPerMin  = "http.cred_test_per_min"
-	KeyLoginLockoutThresh  = "login.lockout_threshold"
-	KeyLoginLockoutDurSec  = "login.lockout_duration_sec"
-	KeyNotifyBurst         = "notify.burst"
-	KeyNotifyRefillSec     = "notify.refill_interval_sec"
-	KeyProvMaxConcurrentWS = "provisioning.max_concurrent_per_ws"
-	KeyProvMaxStartsPerMin = "provisioning.max_starts_per_min"
-	KeyWebhookAgentPerMin  = "webhook.agent_per_min"
+	KeyHTTPAuthPerMin       = "http.auth_per_min"
+	KeyHTTPAPIPerMin        = "http.api_per_min"
+	KeyHTTPCredTestPerMin   = "http.cred_test_per_min"
+	KeyHTTPCredRevealPerMin = "http.cred_reveal_per_min"
+	KeyLoginLockoutThresh   = "login.lockout_threshold"
+	KeyLoginLockoutDurSec   = "login.lockout_duration_sec"
+	KeyNotifyBurst          = "notify.burst"
+	KeyNotifyRefillSec      = "notify.refill_interval_sec"
+	KeyProvMaxConcurrentWS  = "provisioning.max_concurrent_per_ws"
+	KeyProvMaxStartsPerMin  = "provisioning.max_starts_per_min"
+	KeyWebhookAgentPerMin   = "webhook.agent_per_min"
 )
 
 // hardMax is a generous shared ceiling. It exists only to reject absurd
@@ -86,6 +87,19 @@ var registry = []Meta{
 	{KeyHTTPAuthPerMin, "HTTP (per-IP)", "Auth endpoints", "Login / token-refresh / bootstrap, per client IP. Read-only session polls do NOT count against this.", "req/min", 10, 1, hardMax},
 	{KeyHTTPAPIPerMin, "HTTP (per-IP)", "General API", "Every other /api/* route, per client IP. Authenticated CLI tokens are exempt.", "req/min", 120, 1, hardMax},
 	{KeyHTTPCredTestPerMin, "HTTP (per-IP)", "Credential test", "The credential-validation test endpoints, per IP — tighter to blunt their use as a key-validation oracle.", "req/min", 60, 1, hardMax},
+	// Reveal is the only endpoint that returns a stored secret in
+	// plaintext (PRD-CREDENTIALS-V2-2026 §2.6 L6), so it gets a bucket of
+	// its own instead of sharing the general 120/min. Legitimate use is a
+	// handful of reveals a day by one or two people; anything that looks
+	// like enumeration should hit a wall long before it drains the vault.
+	//
+	// §2.6 asks for "single digits per hour". The limiter shape here is
+	// per-minute with burst == the value, so 3 is the closest honest
+	// expression: a person doing real work never notices, and a script
+	// walking the credential list stalls immediately. A true per-hour
+	// window would need a second limiter shape, which belongs with the
+	// deferred anomaly/auto-seal work rather than in the core.
+	{KeyHTTPCredRevealPerMin, "HTTP (per-IP)", "Credential reveal", "The credential reveal endpoint, per IP. The only route that returns a secret in plaintext — deliberately far tighter than the general API bucket.", "req/min", 3, 1, hardMax},
 	{KeyLoginLockoutThresh, "Login", "Account lockout threshold", "Consecutive failed sign-ins on one account before it locks. Layered on top of the per-IP auth bucket.", "attempts", 10, 1, lockoutThresholdMax},
 	{KeyLoginLockoutDurSec, "Login", "Account lockout duration", "How long a locked account stays frozen before a legitimate user can retry.", "seconds", 300, 1, 86400},
 	{KeyNotifyBurst, "Notifications", "Notification burst", "Max notifications one recipient can absorb on a single (channel, category) before throttling kicks in.", "tokens", 5, 1, hardMax},

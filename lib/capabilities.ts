@@ -23,6 +23,11 @@ export const Capability = {
   SkillCreate: "skill.create",
   CredentialCreate: "credential.create",
   CredentialRotate: "credential.rotate",
+  // Note the colon. It is spelled that way in Go
+  // (internal/api/capabilities.go: CapabilityCredentialReveal =
+  // "credentials:reveal") and the string is the wire identifier, so it is
+  // copied verbatim rather than normalised to match its neighbours.
+  CredentialReveal: "credentials:reveal",
   IssueCreate: "issue.create",
   MemoryWrite: "memory.write",
 } as const
@@ -40,6 +45,10 @@ export const ALL_CAPABILITIES: CapabilityValue[] = [
   Capability.SkillCreate,
   Capability.CredentialCreate,
   Capability.CredentialRotate,
+  // Last on purpose: it is the highest-stakes grant in the list — it is the
+  // only one that hands a person a plaintext secret — and the grid reads
+  // low-stakes → high-stakes left to right.
+  Capability.CredentialReveal,
 ]
 
 /** Human-readable labels for the Members grid column headers and
@@ -85,6 +94,12 @@ export const CAPABILITY_LABELS: Record<
     cs: "Rotovat credentials",
     description:
       "Change the value of an existing credential. Separate from create so an oncall user can rotate without vault-add reach.",
+  },
+  [Capability.CredentialReveal]: {
+    en: "Reveal secrets",
+    cs: "Odkrývat hodnoty",
+    description:
+      "Read a stored secret back in plaintext. Being an OWNER is not sufficient — this is granted per person, deliberately, and never to a whole tier. SEALED credentials stay unreadable to everyone.",
   },
 } as const
 

@@ -120,16 +120,25 @@ export function CredentialForm({
   const nameInvalid = trimmedName !== "" && !isValidEnvVarName(trimmedName)
   const nameSuggestion = nameInvalid ? suggestEnvVarName(trimmedName) : null
 
+  // Fetch the crew list once per workspace, tracked by a ref rather than by
+  // `crews.length === 0 && !crewsLoading`. That guard could not tell "not
+  // fetched yet" from "fetched, and this workspace has no crews": length stays
+  // 0 in both cases, so when the request settled and `finally` cleared
+  // crewsLoading, the condition was satisfied all over again and the effect
+  // fired a second time. Same on the failure path, where `catch` also sets [].
+  // A workspace with no crews is the common case mid-onboarding — exactly when
+  // a wasted round trip is least welcome, and against a 120/min limiter.
+  const crewsFetchedFor = React.useRef<string | null>(null)
   React.useEffect(() => {
-    if (values.scope === "CREW" && crews.length === 0 && !crewsLoading) {
-      setCrewsLoading(true)
-      apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
-        .then((r) => r.ok ? r.json() : [])
-        .then((data: Crew[]) => setCrews(Array.isArray(data) ? data : []))
-        .catch(() => setCrews([]))
-        .finally(() => setCrewsLoading(false))
-    }
-  }, [values.scope, workspaceId, crews.length, crewsLoading])
+    if (values.scope !== "CREW" || crewsFetchedFor.current === workspaceId) return
+    crewsFetchedFor.current = workspaceId
+    setCrewsLoading(true)
+    apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: Crew[]) => setCrews(Array.isArray(data) ? data : []))
+      .catch(() => setCrews([]))
+      .finally(() => setCrewsLoading(false))
+  }, [values.scope, workspaceId])
 
   const setField = <K extends keyof CredentialFormValues>(k: K, v: CredentialFormValues[K]) => {
     setValues((prev) => ({ ...prev, [k]: v }))
@@ -243,6 +252,39 @@ export function CredentialForm({
   const detected = getBrand(values.provider)
   const DetectedIcon = detected.Icon
 
+  // Whether a "Test value" button is worth showing is the server's answer, not
+  // ours. It used to be BrandEntry.cli — the brands Crewship drives inside agent
+  // containers — which is a different set from the brands the server can probe:
+  // GITHUB, GITLAB and VERCEL have real upstream probes and are not cli:true, so
+  // the button was hidden for three providers that would have answered. Keeping
+  // a second opinion here is what made them drift; ask instead.
+  const [testable, setTestable] = React.useState(false)
+  React.useEffect(() => {
+    let cancelled = false
+    if (!values.provider || values.provider === "NONE") {
+      setTestable(false)
+      return
+    }
+    void (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/v1/credentials/default-env-var?provider=${encodeURIComponent(values.provider)}` +
+            `&type=${encodeURIComponent(values.type)}`,
+        )
+        if (!res.ok) throw new Error(String(res.status))
+        const body = (await res.json()) as { testable?: boolean }
+        if (!cancelled) setTestable(Boolean(body.testable))
+      } catch {
+        // Unreachable server: hide the button. A Test that cannot run is
+        // exactly the placebo this gate exists to prevent.
+        if (!cancelled) setTestable(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [values.provider, values.type])
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Name + brand picker. The picker doubles as auto-detection
@@ -346,13 +388,13 @@ export function CredentialForm({
               {showValue ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             </Button>
           </div>
-          {/* Test button only for CLI providers — those are the brands
-              Crewship itself uses inside agent containers, where we
-              maintain real upstream HTTP probes. For passive secrets
-              (Notion, Stripe, Linear, …) the agent talks to the API
-              directly, so a "Test value" button here would be a
-              placebo that returns "no validation available". */}
-          {onTest && values.value.trim().length > 0 && detected.cli && (
+          {/* Test button only where the server maintains a real upstream probe.
+              For passive secrets (Notion, Stripe, Linear, …) the agent talks to
+              the API directly and we have nothing to check against, so a "Test
+              value" button here would be a placebo that returns "no validation
+              available". Which providers those are is decided in Go, next to the
+              probes — see probeSupportedProviders. */}
+          {onTest && values.value.trim().length > 0 && testable && (
             <div className="flex items-center gap-2 pt-1">
               <Button
                 type="button"

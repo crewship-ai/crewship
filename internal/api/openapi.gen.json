@@ -1719,6 +1719,36 @@
         ]
       }
     },
+    "/api/v1/agents/{agentId}/credential-bindings": {
+      "get": {
+        "operationId": "get_api_v1_agents_agentId_credential-bindings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
     "/api/v1/agents/{agentId}/credentials": {
       "get": {
         "operationId": "get_api_v1_agents_agentId_credentials",
@@ -4279,9 +4309,133 @@
         ]
       }
     },
+    "/api/v1/credentials/bindings": {
+      "get": {
+        "operationId": "get_api_v1_credentials_bindings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_credentials_bindings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/bindings/{bindingId}": {
+      "delete": {
+        "operationId": "delete_api_v1_credentials_bindings_bindingId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bindingId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
     "/api/v1/credentials/default-env-var": {
       "get": {
         "operationId": "get_api_v1_credentials_default-env-var",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/reveal-policy": {
+      "get": {
+        "operationId": "get_api_v1_credentials_reveal-policy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_credentials_reveal-policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -4490,6 +4644,195 @@
         ]
       }
     },
+    "/api/v1/credentials/{credentialId}/fields": {
+      "get": {
+        "operationId": "get_api_v1_credentials_credentialId_fields",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_credentials_credentialId_fields",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/fields/{fieldKey}": {
+      "delete": {
+        "operationId": "delete_api_v1_credentials_credentialId_fields_fieldKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fieldKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_credentials_credentialId_fields_fieldKey",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fieldKey",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/reveal": {
+      "post": {
+        "operationId": "post_api_v1_credentials_credentialId_reveal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
     "/api/v1/credentials/{credentialId}/rotate": {
       "post": {
         "operationId": "post_api_v1_credentials_credentialId_rotate",
@@ -4542,6 +4885,45 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/sensitivity": {
+      "put": {
+        "operationId": "put_api_v1_credentials_credentialId_sensitivity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -5074,6 +5456,36 @@
     "/api/v1/crews/{crewId}/container-status": {
       "get": {
         "operationId": "get_api_v1_crews_crewId_container-status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/credential-readiness": {
+      "get": {
+        "operationId": "get_api_v1_crews_crewId_credential-readiness",
         "parameters": [
           {
             "in": "path",

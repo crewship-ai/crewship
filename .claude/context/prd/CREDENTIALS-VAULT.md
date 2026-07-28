@@ -53,6 +53,52 @@ half of a login record for the same reason: cleartext identifiers let
 the UI search/sort without a per-row AEAD decrypt and shrink the GCM
 surface area.
 
+### Multi-part credentials (`credential_fields`)
+
+A credential may carry any number of named parts on top of the two columns
+above — `credential_fields (credential_id, key, value, encrypted_value,
+is_secret, ordinal)`, PRD-CREDENTIALS-V2-2026 §2.2. `is_secret` decides which
+value column holds the data, and a CHECK constraint makes exactly one of them
+non-NULL, so a handler bug that wrote a secret into the cleartext column is
+rejected by the engine rather than by the code under suspicion. Non-secret
+fields (`region`, `account_id`, `host`) are cleartext for the same reason
+`username` is.
+
+Nothing was backfilled: `encrypted_value` and `username` stay authoritative for
+every existing reader, and the field table holds only the *additional* parts.
+The keys `value`, `password` and `username` are refused for that reason — two
+writable copies of one datum with no owner drift apart silently.
+
+**Delivery.** A field reaches the agent as `<SLOT>_<KEY UPCASED>`, where SLOT is
+whatever the *credential* resolved to for that agent (explicit grant
+`env_var_name`, binding slot, or the legacy `credentials.name`). The prefix is
+never derived from the field, because the slot is what §2.5b uses to keep ten
+accounts of one provider apart — a field with its own prefix would collapse
+them back into one.
+
+Names are resolved once, in `loadDeliveredCredentials`, over the whole delivered
+set: every credential's slot is claimed before any field is considered, then
+fields claim in delivery order. A derived name that is already claimed, is
+reserved by the runtime (`HOME`, `PATH`, `HTTP_PROXY`, `CREWSHIP_*`,
+`CLAUDE_CODE_OAUTH_TOKEN`, provider base URLs), is not a legal env var, or has
+no slot to hang off, causes the FIELD to be dropped and a warning to be logged —
+never a rename, never an overwrite. Fail closed: a missing `AWS_REGION` is
+diagnosable, an `AWS_REGION` holding somebody else's value is not.
+
+Fields ride as a sub-list on the delivered credential rather than as synthetic
+sibling credentials. A sibling would inherit `type` and then be picked up as a
+credential in its own right by the OAuth-token selector, the `USERPASS` file
+layout and the sidecar CredStore's provider mapping. Secret fields are decrypted
+through the caller's own opener (the same one that opened the credential's
+value) and follow its channel; non-secret fields are delivered as cleartext env
+vars regardless, since no channel here can carry an identifier.
+
+User-facing docs: `docs/guides/credentials.mdx` → "Custom Fields".
+Code: `internal/api/credential_fields.go` (storage/CRUD),
+`internal/api/credential_field_delivery.go` (naming + collisions),
+`internal/api/credential_delivery.go` (the chokepoint), migration
+`internal/database/migrations/20260728135322_credential_fields.sql`.
+
 `agent_credentials.mount_type` discriminates env-var injection (current
 behaviour, default for backward compat) from in-container file mounts.
 The existing `env_var_name` column is reinterpreted per `mount_type`:

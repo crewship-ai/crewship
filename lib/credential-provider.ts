@@ -57,7 +57,13 @@ export function detectFromValue(
 // — used when the auto-detect path needs to seed the Name field
 // without a user-typed prefix. Falls back to `${KEY}_API_KEY` for
 // brands without a hard-coded convention.
-function defaultEnvVarName(brand: BrandEntry): string {
+//
+// Exported since P6: the add-credential wizard suggests a SLOT (the env var
+// the container sees) separately from the credential's name, and both paths
+// must suggest the same string. §0 item 5 is explicit that this is a hint and
+// never a gate — an unrecognised brand falls through to the convention below
+// and the user is free to overwrite either.
+export function defaultEnvVarName(brand: BrandEntry): string {
   switch (brand.key) {
     case "ANTHROPIC": return "ANTHROPIC_API_KEY"
     case "OPENAI": return "OPENAI_API_KEY"

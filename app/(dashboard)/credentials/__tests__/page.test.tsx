@@ -11,6 +11,22 @@ import type { OrgRole } from "@/lib/generated/prisma/client"
 import { _resetWorkspaceStoreForTests, useWorkspace } from "@/hooks/use-workspace"
 import CredentialsPage from "../page"
 
+/** The rail lists the same credential names as the table, so an unscoped
+ *  text query matches twice. Scope to the labelled list region — which is
+ *  what the assertion always meant. */
+function list() {
+  return within(screen.getByRole("region", { name: /credential list/i }))
+}
+
+/** Async twin of list(): waits for the region itself, so it can be used in a
+ *  state the list has not rendered into yet (a retry, a workspace switch).
+ *  list() resolves the region synchronously and would throw first. */
+async function inList(name: string) {
+  const region = await screen.findByRole("region", { name: /credential list/i })
+  return within(region).findByText(name)
+}
+
+
 // Hoisted holder so vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
@@ -142,7 +158,7 @@ describe("load error state (C1)", () => {
     // Retry recovers once the API is healthy again.
     routeApi([makeCredential()])
     fireEvent.click(screen.getByRole("button", { name: /retry/i }))
-    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.queryByText("Couldn't load credentials")).not.toBeInTheDocument()
   })
 
@@ -178,7 +194,7 @@ describe("multi-workspace (#1033)", () => {
     // credentials for whichever workspace the store selected — no longer its
     // own hardcoded orgs[0]. (Selection/persistence is use-workspace's own
     // concern and suite.)
-    expect(await screen.findByText("ALPHA_KEY")).toBeInTheDocument()
+    expect(await inList("ALPHA_KEY")).toBeInTheDocument()
     expect(requested.length).toBeGreaterThan(0)
     expect(requested.every((id) => id === "ws-alpha")).toBe(true)
   })
@@ -224,7 +240,7 @@ describe("stale response guard on workspace switch (#1156)", () => {
     fireEvent.click(screen.getByText("switch to B"))
 
     // ws-b's fetch resolves quickly and should win.
-    expect(await screen.findByText("BETA_KEY")).toBeInTheDocument()
+    expect(await inList("BETA_KEY")).toBeInTheDocument()
 
     // Now let the slow ws-a response resolve — it must NOT clobber the
     // already-displayed ws-b rows, even though it resolves later.
@@ -233,7 +249,7 @@ describe("stale response guard on workspace switch (#1156)", () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(screen.queryByText("ALPHA_KEY")).not.toBeInTheDocument()
-    expect(screen.getByText("BETA_KEY")).toBeInTheDocument()
+    expect(list().getByText("BETA_KEY")).toBeInTheDocument()
   })
 })
 
@@ -254,13 +270,13 @@ describe("selection cleared on workspace switch (#1156)", () => {
 
     renderWithSwitcher()
 
-    expect(await screen.findByText("ALPHA_KEY")).toBeInTheDocument()
+    expect(await inList("ALPHA_KEY")).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText("Select ALPHA_KEY"))
     expect(await screen.findByText("1 selected")).toBeInTheDocument()
 
     fireEvent.click(screen.getByText("switch to B"))
 
-    expect(await screen.findByText("BETA_KEY")).toBeInTheDocument()
+    expect(await inList("BETA_KEY")).toBeInTheDocument()
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument()
   })
 })
@@ -273,7 +289,7 @@ describe("RBAC-gated row actions (C2)", () => {
       routeApi([makeCredential()])
       render(<CredentialsPage />)
 
-      expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+      expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
       expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
@@ -285,7 +301,7 @@ describe("RBAC-gated row actions (C2)", () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
@@ -295,7 +311,7 @@ describe("RBAC-gated row actions (C2)", () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
     expect(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" })).toBeInTheDocument()
@@ -312,7 +328,7 @@ describe("OAuth connect entry point (#1034)", () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     const btn = screen.getByRole("button", { name: /connect via oauth/i })
     expect(screen.getByTestId("connect-oauth-dialog")).toHaveAttribute("data-open", "false")
     fireEvent.click(btn)
@@ -328,7 +344,7 @@ describe("OAuth connect entry point (#1034)", () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /connect via oauth/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
   })
@@ -339,7 +355,7 @@ describe("OAuth connect entry point (#1034)", () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("STRIPE_API_KEY")).toBeInTheDocument()
+    expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /connect via oauth/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /add secret/i })).not.toBeInTheDocument()
   })
@@ -448,7 +464,7 @@ describe("single delete 404 (#1162)", () => {
     })
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("KEY_A")).toBeInTheDocument()
+    expect(await inList("KEY_A")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Delete" }))
 
     const dialog = await screen.findByRole("alertdialog")

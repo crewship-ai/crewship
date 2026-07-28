@@ -62,6 +62,20 @@ const (
 	// resulting expiry and the authorising request id, so "why did this
 	// credential stop working at 14:32?" is answerable from the timeline.
 	AuditEventLeased CredentialAuditEvent = "LEASED"
+	// AuditEventReveal (PRD-CREDENTIALS-V2-2026 §2.6 L4): the plaintext
+	// was disclosed to a human through POST /credentials/{id}/reveal.
+	//
+	// This table is NOT the authoritative record of a reveal — it has no
+	// hash chain, so a row can be deleted without trace. The tamper-evident
+	// copy lives in internal/journal as credential.revealed and its write
+	// is a precondition of the disclosure. This row exists so the reveal
+	// shows up in the credential detail Sheet's timeline alongside every
+	// other event on the same credential, which is where an operator
+	// actually looks first.
+	//
+	// Metadata carries who/why/classification and the journal entry id that
+	// anchors it to the chain. Never the value.
+	AuditEventReveal CredentialAuditEvent = "REVEAL"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -74,6 +88,7 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventApproved: {},
 	AuditEventRejected: {},
 	AuditEventLeased:   {},
+	AuditEventReveal:   {},
 }
 
 // credentialAuditDropped counts audit events that a best-effort call

@@ -28,6 +28,7 @@ All crew endpoints require authentication and workspace context (the `workspace_
 | PUT | [`/api/v1/crews/{crewId}/policy`](#set-crew-policy) | Set the crew autonomy policy |
 | POST | [`/api/v1/crews/{crewId}/apply-avatar-style`](#apply-avatar-style) | Apply an avatar style across agents |
 | GET | [`/api/v1/crews/{crewId}/container-status`](#container-status) | Get the crew's runtime container status |
+| GET | [`/api/v1/crews/{crewId}/credential-readiness`](#credential-readiness) | Report credentials whose CLI is missing from the container |
 | GET | [`/api/v1/crew-connections`](#list-connections) | List crew connections |
 | POST | [`/api/v1/crew-connections`](#create-connection) | Create a crew connection |
 | DELETE | [`/api/v1/crew-connections/{connectionId}`](#delete-connection) | Delete a crew connection |
@@ -613,6 +614,86 @@ states rather than errors:
 
 ```
 crewship crew container-status <slug-or-id>
+```
+
+---
+
+### Credential Readiness
+
+```
+GET /api/v1/crews/{crewId}/credential-readiness?workspace_id={workspaceId}
+```
+
+Reports which of the credentials this crew can use are for a CLI the crew's
+container does not have.
+
+The sandbox runtime image ships `git`, `curl` and `jq`. Tools like `gh`, `aws`,
+`az`, `gcloud`, `kubectl`, `docker`, `terraform`, `npm` and `ansible` exist in
+the container **only** when the crew's `devcontainer_config` declares the
+matching feature (or mise installs the tool). A valid credential and a working
+agent are therefore two different things: a healthy GitHub PAT plus a crew with
+no `github-cli` feature still gets `gh: command not found`.
+
+The endpoint is **read-only and advisory**. It never edits `devcontainer_config`
+and never triggers a rebuild — adding a feature changes what runs inside the
+container, so it stays a separate, user-confirmed action
+([Update Crew](#update-crew) or `crewship crew config`).
+
+Credentials are matched using the same three-way grant rule as the rest of the
+credentials surface: workspace-scoped, crew-scoped via `credential_crews`, or
+assigned to one of this crew's agents (with any lease still live). Revoked and
+soft-deleted credentials are excluded. A provider with no known CLI (Notion,
+Stripe, an unrecognised string) reports nothing rather than guessing.
+
+Matching is on the **tool name**, not the feature ref, so an equivalent feature
+counts: `docker-outside-of-docker` satisfies a `DOCKER` credential, and a mise
+`nodejs` satisfies an `NPM` one.
+
+**Auth:** any workspace member
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "ccrew0123456789abcdefghij",
+  "crew_slug": "ops",
+  "tools": ["terraform"],
+  "checked": 2,
+  "gaps": [
+    {
+      "credential_id": "ccred0123456789abcdefghij",
+      "credential_name": "gh-pat",
+      "provider": "GITHUB",
+      "tool": "gh",
+      "feature": "ghcr.io/devcontainers/features/github-cli:1",
+      "feature_id": "github-cli"
+    }
+  ]
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `crew_id` | string | The crew's ID |
+| `crew_slug` | string | The crew's slug |
+| `tools` | string[] | CLI tools the container already has (devcontainer features + mise). Never `null` |
+| `checked` | number | Credentials examined that carry a known tool requirement. `checked - len(gaps)` are already served |
+| `gaps` | object[] | One entry per credential whose tool is absent. Never `null` |
+| `gaps[].tool` | string | The binary the credential is meant to be read by, e.g. `gh` |
+| `gaps[].feature` | string | The devcontainer feature ref that installs `tool` |
+| `gaps[].feature_id` | string | The feature's short id, e.g. `github-cli` |
+
+| Status | Condition |
+|---|---|
+| `400` | `crewId` missing |
+| `404` | Crew not found in this workspace |
+
+**CLI:**
+
+```
+crewship crew credential-readiness <slug-or-id>
 ```
 
 ---

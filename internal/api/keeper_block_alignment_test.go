@@ -70,3 +70,51 @@ func TestBuildKeeperBlock_RedactsListedValues(t *testing.T) {
 		t.Errorf("SECRET entry value must be wiped by withholdKeeperSecretValues, got %q", creds[0].Value)
 	}
 }
+
+// TestBuildKeeperBlock_DoesNotPromiseCredentialValue is the third member of the
+// prompt-vs-reality family in this file, and closes the one gap the other two
+// left open. The block correctly names WHICH credentials are withheld; this
+// pins WHAT the agent is told happens when it asks for one.
+//
+// The bug: the block told the agent "If ALLOW, the response contains the
+// credential value." No response on that path has ever carried a value.
+// keeper.RequestResult is {request_id, decision, reason, risk_score} — there is
+// no value field — and the sidecar handler says so in as many words
+// (keeper_bridge.go handleKeeperRequest: "The response is a keeper decision
+// (ALLOW/DENY/ESCALATE) — never a raw credential").
+//
+// An agent that believes the promise burns its turn parsing a value out of a
+// decision envelope, finds nothing, and reports a tool failure to the user —
+// while the path that DOES work (/keeper/execute, which runs the command
+// server-side with the credential injected and scrubs it back out of the
+// output) sits two lines below, framed as the lesser "without seeing the value"
+// alternative rather than as the way this actually works.
+func TestBuildKeeperBlock_DoesNotPromiseCredentialValue(t *testing.T) {
+	h := covCfgHandler(nil)
+	block := h.buildKeeperBlock("ada", []mcpCredEntry{
+		{Type: "SECRET", EnvVar: "PROD_DB_PASSWORD", Value: "v1"},
+	})
+	if block == "" {
+		t.Fatal("expected a keeper block for a SECRET credential")
+	}
+
+	// The claim the response envelope cannot honour, in the shapes a rewrite
+	// might plausibly reach for.
+	for _, lie := range []string{
+		"response contains the credential value",
+		"response will contain the credential",
+		"returns the credential value",
+	} {
+		if strings.Contains(strings.ToLower(block), strings.ToLower(lie)) {
+			t.Errorf("keeper block promises the agent a value the decision envelope never carries (%q).\n"+
+				"keeper.RequestResult has no value field. Block:\n%s", lie, block)
+		}
+	}
+
+	// Having removed the false promise, the block must still leave the agent
+	// with a working path — otherwise ALLOW reads as a dead end.
+	if !strings.Contains(block, "/keeper/execute") {
+		t.Errorf("keeper block must point the agent at /keeper/execute as the way to USE an approved "+
+			"credential; without it, ALLOW has no follow-up. Block:\n%s", block)
+	}
+}

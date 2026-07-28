@@ -219,13 +219,22 @@ crewship agent skills <slug-or-id>
 
 ## `crewship agent credentials`
 
-List credentials assigned to an agent.
+List every credential this agent receives — both the ones assigned to it directly and the ones it gets by belonging to a crew.
 
 ```bash
 crewship agent credentials <slug-or-id>
 ```
 
-**Output columns:** ID, NAME, PROVIDER, TYPE, ENV VAR
+**Output columns:** ID, NAME, PROVIDER, TYPE, ENV VAR, GRANT, LEASE, SOURCE
+
+`GRANT` says where the credential comes from, which decides how you take it away:
+
+| Grant | Meaning | To remove |
+|---|---|---|
+| `explicit` | assigned to this agent | `crewship credential unassign <cred> <agent>` |
+| `crew` | the credential is linked to the agent's crew | unlink it from the crew — there is no per-agent assignment to revoke |
+
+A `crew` row shows `-` for ID because no assignment row exists behind it. `SOURCE` is a different question: it names the approval that put a *lease* on the grant (`manual`, `keeper_allow`, `escalation_approve`), and is `-` for a standing grant.
 
 ---
 

@@ -28,6 +28,48 @@ type testResult struct {
 	Valid  bool   `json:"valid"`
 	Status int    `json:"status"`
 	Error  string `json:"error,omitempty"`
+	// Supported reports whether a real upstream probe ran. It exists because
+	// Valid alone cannot distinguish "we checked and it works" from "we have no
+	// way to check" — the default branch below answers the latter with
+	// Valid:true, which renders as a green tick. Valid keeps its long-standing
+	// meaning for existing callers; Supported is the honest signal, and is what
+	// the UI and CLI key off.
+	Supported bool `json:"supported"`
+}
+
+// probeSupportedProviders is the single source of truth for which providers
+// probeProvider can actually validate against an upstream API. It sits next to
+// the probes so registering one and advertising it are the same edit.
+//
+// Before this existed the frontend kept its own answer — BrandEntry.cli in
+// lib/credential-providers/registry.ts — which marked the five brands Crewship
+// drives inside agent containers. That set is not the set with probes: GITHUB,
+// GITLAB and VERCEL have real probes and are not cli:true, so the "Test value"
+// button was hidden for three providers the server could validate. Same drift
+// class as #1083 (provider→env-var), same remedy: decide in Go, tell the client.
+//
+// Keep in lockstep with the switch in probeProvider; TestProbeSupported_GoldenSet
+// fails if they part ways.
+var probeSupportedProviders = map[string]struct{}{
+	"ANTHROPIC": {},
+	"OPENAI":    {},
+	"GOOGLE":    {},
+	"CURSOR":    {},
+	"FACTORY":   {},
+	"GITHUB":    {},
+	"GITLAB":    {},
+	"VERCEL":    {},
+}
+
+// probeSupported reports whether (provider, credType) has a real upstream check.
+// Support is a function of both: an ENDPOINT_URL is probeable whatever the
+// provider, because the stored value IS the target being dialled.
+func probeSupported(provider, credType string) bool {
+	if credType == string(CredTypeEndpointURL) {
+		return true
+	}
+	_, ok := probeSupportedProviders[provider]
+	return ok
 }
 
 // probeProvider runs the provider-specific HTTP check and returns a
@@ -43,6 +85,15 @@ type testResult struct {
 // other provider dials a FIXED vendor host (api.anthropic.com, …), never a
 // user-chosen one, so they are unaffected by this flag.
 func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
+	// Stamp Supported once, from the same table the client is told about, rather
+	// than at each of the ~30 returns below — a per-return flag is a field
+	// somebody eventually forgets on a new branch.
+	res := probeProviderInner(ctx, provider, ctype, value, dialEndpoint)
+	res.Supported = probeSupported(provider, ctype)
+	return res
+}
+
+func probeProviderInner(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
 	switch provider {
 	case "ANTHROPIC":
 		// OAuth setup tokens (sk-ant-oat*) cannot be validated via standard API.

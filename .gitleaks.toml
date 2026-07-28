@@ -18,6 +18,19 @@ useDefault = true
 description = "Narrowly scoped allowlist — verified false positives only"
 
 paths = [
+  # Demo credential seed data — one inert credential of every shape, used to
+  # populate a fresh workspace. Every value is a "dummy-not-a-real-secret-…"
+  # string or a filler PEM envelope (the SSH_KEY/CERTIFICATE type validation
+  # requires a real PEM header, which trips the private-key rule). A test in
+  # the same package asserts no value carries a real credential prefix, so the
+  # "these are fake" claim is enforced, not just documented.
+  '''cmd/crewship/seeddata/credentials_demo\.go$''',
+
+  # Credential fields test — exercises the secret-field write/read paths, so it
+  # hardcodes a fake secret value to prove it never leaves the server. The
+  # value is a test vector, not a credential.
+  '''internal/api/credential_fields_test\.go$''',
+
   # Scrubber source — defines the regex patterns that DETECT secrets, which
   # gitleaks then matches against the regex source itself (the OPENSSH /
   # PEM private-key headers appear literally in the regex string at

@@ -473,3 +473,143 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 // ════════════════════════════════════════════════════════════════════════════
 // Phase 8–9: Integrations + Bindings
 // ════════════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════════════
+// Demo vault — one of every credential shape
+// ════════════════════════════════════════════════════════════════════════════
+
+// seedDemoCredentials fills the vault with one credential of every shape so a
+// fresh workspace shows what this surface does. Without them the page is a
+// single Anthropic key: the type filter has one option, the classification
+// badges never appear, the readiness column has nothing to be missing, and the
+// multi-account model is a claim in a document.
+//
+// Every value is inert and reads as such. Failures are reported and skipped
+// rather than aborting the seed — demo data is not worth failing a workspace
+// over, and a half-filled vault is still a better demo than an empty one.
+func seedDemoCredentials(ctx context.Context, client *cli.Client, crewIDs map[string]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "Seeding demo credentials (inert values)...")
+
+	ids := map[string]string{}
+	for _, dc := range seeddata.DemoCredentials() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		id, err := seedOneDemoCredential(client, dc)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", dc.Def.Name, err)
+			continue
+		}
+		ids[dc.Def.Name] = id
+
+		for _, f := range dc.Fields {
+			body := map[string]any{"key": f.Key, "value": f.Value, "is_secret": f.Secret}
+			resp, err := client.Post("/api/v1/credentials/"+id+"/fields", body)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s field %s: %v\n", dc.Def.Name, f.Key, err)
+				continue
+			}
+			// 409 means a previous run already added it — idempotent, like
+			// every other seed step.
+			if resp.StatusCode != http.StatusConflict {
+				if err := cli.CheckError(resp); err != nil {
+					fmt.Fprintf(os.Stderr, "  ! %s field %s: %v\n", dc.Def.Name, f.Key, err)
+				}
+			}
+			resp.Body.Close()
+		}
+
+		if dc.Sensitivity != "" {
+			resp, err := client.Put("/api/v1/credentials/"+id+"/sensitivity",
+				map[string]string{"sensitivity": dc.Sensitivity})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s sensitivity: %v\n", dc.Def.Name, err)
+			} else {
+				if err := cli.CheckError(resp); err != nil {
+					fmt.Fprintf(os.Stderr, "  ! %s sensitivity: %v\n", dc.Def.Name, err)
+				}
+				resp.Body.Close()
+			}
+		}
+	}
+
+	// Bindings last: they need the credentials AND the crews to exist, and a
+	// binding to a crew that failed to seed is worse than no binding.
+	for _, b := range seeddata.DemoBindings() {
+		credID, ok := ids[b.CredentialName]
+		if !ok {
+			continue
+		}
+		crewID, ok := crewIDs[b.CrewSlug]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  = Binding skipped: crew %s not seeded\n", b.CrewSlug)
+			continue
+		}
+		resp, err := client.Post("/api/v1/credentials/bindings", map[string]string{
+			"credential_id": credID,
+			"slot":          b.Slot,
+			"scope":         "CREW",
+			"crew_id":       crewID,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Binding %s→%s: %v\n", b.Slot, b.CredentialName, err)
+			continue
+		}
+		if resp.StatusCode != http.StatusConflict {
+			if err := cli.CheckError(resp); err != nil {
+				fmt.Fprintf(os.Stderr, "  ! Binding %s→%s: %v\n", b.Slot, b.CredentialName, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "  + Binding: %s → %s (crew %s)\n", b.Slot, b.CredentialName, b.CrewSlug)
+			}
+		}
+		resp.Body.Close()
+	}
+	return nil
+}
+
+// seedOneDemoCredential creates one demo credential, carrying the fields
+// seedOneCredential does not: username (USERPASS requires it) and tags.
+func seedOneDemoCredential(client *cli.Client, dc seeddata.DemoCredential) (string, error) {
+	existingID, err := resolveByName(client, "/api/v1/credentials", dc.Def.Name)
+	if err == nil && existingID != "" {
+		fmt.Fprintf(os.Stderr, "  = Credential exists: %s\n", dc.Def.Name)
+		return existingID, nil
+	}
+
+	body := map[string]any{
+		"name":        dc.Def.Name,
+		"description": dc.Def.Description,
+		"type":        dc.Def.Type,
+		"provider":    dc.Def.Provider,
+		"value":       dc.Def.Value,
+		"scope":       "WORKSPACE",
+	}
+	if dc.Username != "" {
+		body["username"] = dc.Username
+	}
+	if len(dc.Tags) > 0 {
+		body["tags"] = dc.Tags
+	}
+	resp, err := client.Post("/api/v1/credentials", body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusConflict {
+		resp.Body.Close()
+		return resolveByName(client, "/api/v1/credentials", dc.Def.Name)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := cli.ReadJSON(resp, &created); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(os.Stderr, "  + Demo credential: %s (%s)\n", dc.Def.Name, dc.Def.Type)
+	return created.ID, nil
+}
