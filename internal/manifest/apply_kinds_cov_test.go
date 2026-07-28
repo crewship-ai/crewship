@@ -125,6 +125,13 @@ func (s *kindsCovStub) Get(_ context.Context, path string) (*http.Response, erro
 func (s *kindsCovStub) Post(_ context.Context, path string, body any) (*http.Response, error) {
 	return s.respond("POST", path, body)
 }
+
+// Put routes to Patch: no fake distinguishes them, and the only
+// difference that matters here is the verb the real server sees.
+func (s *kindsCovStub) Put(ctx context.Context, path string, body any) (*http.Response, error) {
+	return s.Patch(ctx, path, body)
+}
+
 func (s *kindsCovStub) Patch(_ context.Context, path string, body any) (*http.Response, error) {
 	return s.respond("PATCH", path, body)
 }

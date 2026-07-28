@@ -189,6 +189,18 @@ func runApply(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stdout, "  - %s\n", env)
 		}
 	}
+	// Skipped channels are NOT warnings: a warning is advisory, this is a
+	// thing the manifest asked for and this run did not do. Printing it in
+	// its own block, naming the variable, is what turns "why is Discord not
+	// there?" into a one-line answer.
+	if plan != nil && len(plan.SkippedChannels) > 0 {
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintf(os.Stdout, "%sSKIPPED notification channels (no value supplied — pass --from-env or --secrets-file):%s\n",
+			cli.Yellow, cli.Reset)
+		for _, line := range plan.SkippedChannels {
+			fmt.Fprintf(os.Stdout, "  - %s\n", line)
+		}
+	}
 	printWarnings(plan)
 
 	provisionHintForCrews(bundle)

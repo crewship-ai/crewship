@@ -86,6 +86,23 @@ func (v *validator) checkWorkspaceDoc(doc *WorkspaceDocument) {
 	v.checkCredentials("workspace "+doc.Metadata.Slug, doc.Spec.Credentials)
 	v.checkSkills("workspace "+doc.Metadata.Slug, doc.Spec.Skills)
 
+	// Channels grant access to agents, so the agent slugs have to be
+	// collected before the crews are walked — a grant is checked against the
+	// whole document, not against whichever crew happens to come first.
+	agentSlugs := map[string]bool{}
+	for i := range doc.Spec.Crews {
+		for j := range doc.Spec.Crews[i].Agents {
+			agentSlugs[doc.Spec.Crews[i].Agents[j].Slug] = true
+		}
+	}
+	v.checkNotificationChannels("workspace "+doc.Metadata.Slug, doc.Spec.NotificationChannels, agentSlugs)
+	for i := range doc.Spec.Crews {
+		for j := range doc.Spec.Crews[i].Agents {
+			a := &doc.Spec.Crews[i].Agents[j]
+			v.checkComposioGrants(fmt.Sprintf("agent %q", a.Slug), a.ComposioToolkits)
+		}
+	}
+
 	seen := map[string]bool{}
 	for i := range doc.Spec.Crews {
 		crew := &doc.Spec.Crews[i]

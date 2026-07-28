@@ -114,6 +114,79 @@ type WorkspaceSpec struct {
 	Credentials []Credential `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 	Skills      []Skill      `yaml:"skills,omitempty"      json:"skills,omitempty"`
 	Crews       []CrewSpec   `yaml:"crews"                 json:"crews"`
+
+	// NotificationChannels are the workspace's outbound delivery targets.
+	// Workspace-scoped rather than per-crew because that is what the server
+	// models: a channel belongs to the workspace, and crews route to it.
+	NotificationChannels []NotificationChannel `yaml:"notification_channels,omitempty" json:"notification_channels,omitempty"`
+
+	// Composio configures the managed-tools provider for this workspace.
+	Composio *ComposioSpec `yaml:"composio,omitempty" json:"composio,omitempty"`
+}
+
+// NotificationChannel declares one outbound delivery target.
+//
+// Secrets are NEVER written here, exactly as for Credential: a Discord
+// webhook URL is a bearer token in URL clothing, and a manifest is a file
+// people commit. `fields_from_env` names the environment variable each
+// provider field is read from, and the value only materialises when the
+// operator passes --from-env or --secrets-file. Without one the channel is
+// skipped with a warning rather than created half-configured — an enabled
+// channel pointing nowhere is worse than an absent one.
+type NotificationChannel struct {
+	// Slug is the manifest-side identity. The server has no slug column for
+	// channels, so this is what makes re-applies idempotent and plan lines
+	// grep-able; the remote match is on (type, provider, destination).
+	Slug string `yaml:"slug" json:"slug"`
+
+	// Type is email | webhook | chat. "chat" covers every provider in the
+	// catalog and is stored as the delivery library's own name; the manifest
+	// uses the word a person would.
+	Type string `yaml:"type" json:"type"`
+
+	// Provider is required for type: chat — discord, slack, ntfy, …
+	// (see `crewship notifychannel providers`).
+	Provider string `yaml:"provider,omitempty" json:"provider,omitempty"`
+
+	// FieldsFromEnv maps a provider form field to the environment variable
+	// holding its value. The field names are the server's own — the CLI
+	// prints them with `notifychannel providers --provider <name>`.
+	FieldsFromEnv map[string]string `yaml:"fields_from_env,omitempty" json:"fields_from_env,omitempty"`
+
+	// To is the destination for type: email. Not a secret, so it may sit in
+	// the manifest; an address is not a credential.
+	To string `yaml:"to,omitempty" json:"to,omitempty"`
+
+	// URLFromEnv is the endpoint for type: webhook, read from the
+	// environment because a webhook URL usually carries its own token.
+	URLFromEnv string `yaml:"url_from_env,omitempty" json:"url_from_env,omitempty"`
+
+	// Categories is the admin allowlist. Empty means every category.
+	Categories []string `yaml:"categories,omitempty" json:"categories,omitempty"`
+
+	// MinPriority skips anything below it: low | medium | high | urgent.
+	MinPriority string `yaml:"min_priority,omitempty" json:"min_priority,omitempty"`
+
+	// Agents are the agent slugs allowed to post here of their own accord.
+	// Default-deny on the server, so an omitted list means no agent can.
+	Agents []string `yaml:"agents,omitempty" json:"agents,omitempty"`
+
+	// Enabled defaults to true. A pointer so "declared false" is
+	// distinguishable from "not mentioned".
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+}
+
+// ComposioSpec configures the managed-tools provider.
+//
+// Only the API key, and only by env-var name — same rule as everywhere else
+// here. The connected ACCOUNTS cannot be declared: each one is a per-user
+// OAuth grant against Composio, so a manifest can say which agent is
+// entitled to a toolkit but not perform the browser flow that creates the
+// account. Grants are declared per agent (see Agent.composio_toolkits).
+type ComposioSpec struct {
+	// APIKeyFromEnv names the environment variable holding the project API
+	// key. Applied only when a secrets source supplies it.
+	APIKeyFromEnv string `yaml:"api_key_from_env,omitempty" json:"api_key_from_env,omitempty"`
 }
 
 // CrewSpec is the shape under `spec:` for a kind=Crew document, and
@@ -478,6 +551,33 @@ type Agent struct {
 	// slugs to IDs after the underlying objects are created.
 	Skills  []string `yaml:"skills,omitempty"   json:"skills,omitempty"`
 	EnvRefs []string `yaml:"env_refs,omitempty" json:"env_refs,omitempty"`
+
+	// ComposioToolkits grants this agent access to managed apps.
+	//
+	// Declarative on purpose: the grant is workspace configuration, but the
+	// connected ACCOUNT behind it is a per-user OAuth handshake that no
+	// manifest can perform. Applying a grant for a toolkit nobody has
+	// connected yet is therefore legitimate — it takes effect the moment
+	// someone connects — so it must not be treated as an error.
+	ComposioToolkits []ComposioToolkitGrant `yaml:"composio_toolkits,omitempty" json:"composio_toolkits,omitempty"`
+}
+
+// ComposioToolkitGrant is one agent-to-app grant.
+type ComposioToolkitGrant struct {
+	// Toolkit is the Composio slug: gmail, github, googledrive, …
+	Toolkit string `yaml:"toolkit" json:"toolkit"`
+
+	// Mode is the scope of the grant: full | read | custom.
+	// Defaults to read — the least surprising thing to hand an agent
+	// implicitly is the read-only subset, not every tool on the app.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+
+	// Tools narrows a custom-mode grant to named tools. Ignored otherwise.
+	Tools []string `yaml:"tools,omitempty" json:"tools,omitempty"`
+
+	// UserID is the Composio user the agent acts as. Optional — the server
+	// picks the workspace default when omitted.
+	UserID string `yaml:"user_id,omitempty" json:"user_id,omitempty"`
 }
 
 // AgentLLM is the LLM provider/model pair. Either field may be empty

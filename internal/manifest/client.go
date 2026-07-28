@@ -25,6 +25,9 @@ type APIClient interface {
 	Get(ctx context.Context, path string) (*http.Response, error)
 	Post(ctx context.Context, path string, body any) (*http.Response, error)
 	Patch(ctx context.Context, path string, body any) (*http.Response, error)
+	// Put exists for endpoints that model their write as a full replacement
+	// rather than a merge — the Composio settings row is the first.
+	Put(ctx context.Context, path string, body any) (*http.Response, error)
 	Delete(ctx context.Context, path string) (*http.Response, error)
 	GetWorkspaceID() string
 }
@@ -44,6 +47,9 @@ func (a *cliAdapter) Post(ctx context.Context, path string, body any) (*http.Res
 }
 func (a *cliAdapter) Patch(ctx context.Context, path string, body any) (*http.Response, error) {
 	return a.inner.WithContext(ctx).Patch(path, body)
+}
+func (a *cliAdapter) Put(ctx context.Context, path string, body any) (*http.Response, error) {
+	return a.inner.WithContext(ctx).Put(path, body)
 }
 func (a *cliAdapter) Delete(ctx context.Context, path string) (*http.Response, error) {
 	return a.inner.WithContext(ctx).Delete(path)
