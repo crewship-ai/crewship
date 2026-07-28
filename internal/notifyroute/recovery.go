@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -167,7 +168,11 @@ func (r *Router) deriveJournalMessage(ctx context.Context, entryID string) (stri
 		`SELECT severity, COALESCE(payload,'{}') FROM journal_entries WHERE id = ?`,
 		entryID).Scan(&severity, &payloadJSON)
 	if err != nil {
-		return "", "", nil, err
+		// %w, not a bare return: recoverOne distinguishes sql.ErrNoRows (the
+		// entry is gone — age the row out) from a transient read failure
+		// (leave it for the next sweep), and wrapping keeps that check
+		// working while naming what was being read.
+		return "", "", nil, fmt.Errorf("read journal entry %q: %w", entryID, err)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {

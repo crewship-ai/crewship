@@ -461,7 +461,12 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 	// the one step whose entire output is text a person reads, which makes
 	// it the worst place to skip this check.
 	if st.Notify != nil {
-		walkForeign(base+"/notify/to", st.Notify.To)
+		// `to` is resolved by US — workspace | trigger | user:<id> |
+		// role:<R> | crew:<slug> — and never handed to another program, so
+		// foreign template syntax in it is meaningless and a ref like
+		// {{ typo.recipient }} is a mistake worth catching. Only the message
+		// TEXT can legitimately quote someone else's syntax.
+		walk(base+"/notify/to", st.Notify.To)
 		walkForeign(base+"/notify/title", st.Notify.Title)
 		walkForeign(base+"/notify/body", st.Notify.Body)
 	}

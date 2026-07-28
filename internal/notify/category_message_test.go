@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -166,6 +167,58 @@ func TestDeliverCategoryMessage_ScrubsTypedPayloadValues(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("payload lost %s:\n%s", want, body)
 		}
+	}
+}
+
+// Two ways a secret still slipped past the JSON normalisation.
+//
+// json.Marshal encodes a []byte as base64, so by the time scrubValue sees it
+// the value no longer matches any pattern — and base64 is not redaction, it
+// is an encoding anyone can undo. And scrubValue walked map VALUES only, so a
+// secret used as a KEY (a payload keyed by token, a header map built the
+// wrong way round) went out verbatim.
+func TestDeliverCategoryMessage_ScrubsBytesAndMapKeys(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		body []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		body = b
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	d := fastDispatcher(t, staticLister{}, nil)
+	ch := Channel{ID: "c1", Type: ChannelWebhook, URL: srv.URL, Secret: "topsecret", Enabled: true}
+
+	err := d.DeliverCategoryMessage(context.Background(), ch, CategoryMessage{
+		WorkspaceID: "w", Category: CategorySecurity, Title: "Guardrail hit",
+		Vars: map[string]any{
+			"raw":    []byte(testSecret),
+			"nested": map[string]any{"blob": []byte(testSecret)},
+			// The secret as a key rather than a value.
+			"byToken": map[string]any{testSecret: "seen 3 times"},
+			"keep":    "ordinary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	got := string(body)
+	if strings.Contains(got, testSecret) {
+		t.Errorf("a secret reached the webhook verbatim:\n%s", got)
+	}
+	if strings.Contains(got, base64.StdEncoding.EncodeToString([]byte(testSecret))) {
+		t.Errorf("a secret reached the webhook base64-encoded — an encoding is not a redaction:\n%s", got)
+	}
+	if !strings.Contains(got, "ordinary") {
+		t.Errorf("unrelated facts were lost:\n%s", got)
 	}
 }
 

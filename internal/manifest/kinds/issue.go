@@ -737,7 +737,7 @@ func LookupIssueRemoteBySlug(ctx context.Context, c internalapi.Client, slug, cr
 		// expired token during apply planned a create for every issue in the
 		// file — and issues have no unique-slug constraint to stop the
 		// duplicates landing.
-		return nil, err
+		return nil, fmt.Errorf("look up crew %q for issue %q: %w", crewSlug, slug, err)
 	}
 	rows, err := issueListForCrew(ctx, c, crewID)
 	if err != nil {

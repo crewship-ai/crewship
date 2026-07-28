@@ -93,6 +93,24 @@ func TestValidate_NotifyFieldsTreatForeignSyntaxTheSameWay(t *testing.T) {
 	}
 }
 
+func TestValidate_NotifyTargetIsAlwaysOurs(t *testing.T) {
+	// `to` is resolved by Crewship — workspace | trigger | user:<id> |
+	// role:<R> | crew:<slug> — and never handed to another program. Applying
+	// the foreign-syntax leniency to it let an unresolvable recipient
+	// template through, and a `to` that renders empty degrades to a
+	// workspace-wide notice: the message goes to everyone instead of the
+	// person it named.
+	dsl := &DSL{
+		DSLVersion: "1.0", Name: "probe",
+		Steps: []Step{{ID: "tell", Type: StepNotify, Notify: &NotifyStep{
+			To: "user:{{ typo.recipient }}", Title: "hi",
+		}}},
+	}
+	if err := Validate(dsl, nil, nil); err == nil {
+		t.Error("an unknown namespace in notify.to must be rejected — we resolve that field")
+	}
+}
+
 func TestValidate_NotifyStillCatchesOurOwnBadRefs(t *testing.T) {
 	// steps.X.status is what this whole check exists for.
 	dsl := &DSL{
