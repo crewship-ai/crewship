@@ -609,6 +609,12 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 
 // resolveAgentCredentials fetches and decrypts credentials assigned to the agent.
 //
+// "Assigned" is loadDeliveredCredentials' definition, not this function's:
+// explicit agent_credentials grants UNION credentials linked to the agent's own
+// crew via credential_crews. Reading agent_credentials alone here is what made a
+// crew assignment a UI-only fact (PRD-CREDENTIALS-V2 §1.2) — the crew's agents
+// booted without the credential.
+//
 // Only credentials with status='ACTIVE' are returned. PENDING rows
 // (manifest slots awaiting a value, OAuth flows mid-handshake,
 // rotation in progress) carry sentinel encrypted bodies — letting
@@ -627,30 +633,23 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 // predicate /keeper/execute enforces (credentialLeaseGateSQL); NULL expires_at is
 // a standing grant and is unaffected.
 func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID string) ([]mcpCredEntry, error) {
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type, COALESCE(c.username, ''),
-		       COALESCE(ac.expires_at, '')
-		FROM agent_credentials ac
-		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
-		  AND `+credentialLeaseGateSQL+`
-		ORDER BY ac.priority ASC
-	`, agentID, leaseComparisonNow())
+	delivered, err := loadDeliveredCredentials(r.Context(), h.db, agentID)
 	if err != nil {
 		h.logger.Error("resolve agent credentials", "error", err)
 		return nil, err
 	}
-	defer rows.Close()
 
-	var creds []mcpCredEntry
-	for rows.Next() {
-		var ce mcpCredEntry
-		var encValue string
-		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type, &ce.Username, &ce.LeaseExpiresAt); err != nil {
-			h.logger.Error("scan credential for resolve", "error", err)
-			return nil, err
+	creds := []mcpCredEntry{}
+	for _, d := range delivered {
+		ce := mcpCredEntry{
+			ID:             d.ID,
+			EnvVar:         d.EnvVar,
+			Priority:       d.Priority,
+			Type:           d.Type,
+			Username:       d.Username,
+			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
-		dec, err := decryptCredential(encValue)
+		dec, err := decryptCredential(d.EncryptedValue)
 		if err != nil {
 			h.logger.Error("decrypt credential for resolve", "id", ce.ID, "error", err)
 			continue
@@ -664,13 +663,6 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		}
 		ce.Value = dec
 		creds = append(creds, ce)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (resolve credentials)", "error", err)
-		return nil, err
-	}
-	if creds == nil {
-		creds = []mcpCredEntry{}
 	}
 	return creds, nil
 }
