@@ -7,12 +7,20 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 )
 
 // Migrate applies all pending schema migrations to the database in order.
 // Migrations are tracked in the _migrations table to ensure idempotency.
 // This is the sole mechanism for schema changes; Prisma is not used for migrations.
 func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	// A registry that failed to build means an embedded migration file is
+	// malformed. Applying the ones that did parse would leave the schema in a
+	// state no version number describes.
+	if migrationRegistryErr != nil {
+		return fmt.Errorf("migration registry is invalid, refusing to migrate: %w", migrationRegistryErr)
+	}
+
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
 		version INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -32,7 +40,50 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		return err
 	}
 
-	for _, m := range migrations {
+	if err := applyRegistry(ctx, db, migrations, logger); err != nil {
+		return err
+	}
+
+	// A freshly created index (e.g. v153/v154's pipeline_runs/journal_entries
+	// indexes) has no sqlite_stat1 row until something analyzes it — without
+	// one, SQLite's query planner has no row-count evidence to prefer a new
+	// narrow/partial index over an older broader one that also matches the
+	// query shape, and can keep picking the old index indefinitely. Verified
+	// empirically (internal/journal/runs_bench_test.go): a partial index
+	// perfectly matching the WHERE clause was still passed over for a
+	// broader index on the same leading columns until ANALYZE ran.
+	// PRAGMA optimize — the normally-recommended cheaper alternative — was
+	// tried first but produces coarser sampled estimates on this driver
+	// (modernc.org/sqlite) that were NOT precise enough to flip the plan in
+	// the same test; plain ANALYZE was required. Runs once per process
+	// startup (Migrate is called once at boot), which is an acceptable
+	// cost for a self-hosted SQLite instance.
+	if _, err := db.ExecContext(ctx, "ANALYZE"); err != nil {
+		logger.Warn("post-migration ANALYZE failed", "error", err)
+	}
+
+	return nil
+}
+
+// applyRegistry applies one ordered set of migrations, skipping the ones
+// already recorded and deferring the post-deployment ones. Separated from
+// Migrate so it can be exercised with a synthetic registry — the alternative
+// is testing the boot path only through the real migrations, which makes it
+// impossible to assert anything about how an individual entry is handled.
+//
+// Migrations run BEFORE the server serves anything, so a slow one is not lock
+// contention with live traffic — it is silent downtime during an upgrade.
+// Timing every one is what turns "the upgrade hung" into "v20260728143000 took
+// four minutes".
+//
+// The caller owns the _migrations table, the version-skew guard and ANALYZE.
+func applyRegistry(ctx context.Context, db *sql.DB, regs []migration, logger *slog.Logger) error {
+	runStart := time.Now()
+	applied, deferred := 0, 0
+	slowestName, slowestVersion := "", 0
+	var slowest time.Duration
+
+	for _, m := range regs {
 		var appliedName string
 		err := db.QueryRowContext(ctx, "SELECT name FROM _migrations WHERE version = ?", m.version).Scan(&appliedName)
 		if err == nil {
@@ -62,7 +113,28 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 			return fmt.Errorf("check migration %d (%s): %w", m.version, m.name, err)
 		}
 
+		// Deferred to the background runner, which batches it while the
+		// server is already serving. Skipped here, not recorded — the ledger
+		// row is written when it actually completes.
+		if m.postDeploy {
+			deferred++
+			logger.Info("deferring post-deployment migration", "version", m.version, "name", m.name)
+			continue
+		}
+
 		logger.Info("applying migration", "version", m.version, "name", m.name)
+		started := time.Now()
+		record := func() {
+			took := time.Since(started)
+			applied++
+			if took > slowest {
+				slowest, slowestName, slowestVersion = took, m.name, m.version
+			}
+			// INFO, not DEBUG: on a long upgrade this is the only evidence the
+			// operator has that progress is being made rather than hung.
+			logger.Info("applied migration",
+				"version", m.version, "name", m.name, "duration", took.Round(time.Millisecond))
+		}
 
 		// A migration that cannot live inside the wrapper transaction runs
 		// here and manages its own atomicity. See the fnNoTx field for the
@@ -77,6 +149,7 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 				"INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
 				return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
 			}
+			record()
 			continue
 		}
 
@@ -119,26 +192,23 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit migration %d (%s): %w", m.version, m.name, err)
 		}
+		record()
 	}
 
-	// A freshly created index (e.g. v153/v154's pipeline_runs/journal_entries
-	// indexes) has no sqlite_stat1 row until something analyzes it — without
-	// one, SQLite's query planner has no row-count evidence to prefer a new
-	// narrow/partial index over an older broader one that also matches the
-	// query shape, and can keep picking the old index indefinitely. Verified
-	// empirically (internal/journal/runs_bench_test.go): a partial index
-	// perfectly matching the WHERE clause was still passed over for a
-	// broader index on the same leading columns until ANALYZE ran.
-	// PRAGMA optimize — the normally-recommended cheaper alternative — was
-	// tried first but produces coarser sampled estimates on this driver
-	// (modernc.org/sqlite) that were NOT precise enough to flip the plan in
-	// the same test; plain ANALYZE was required. Runs once per process
-	// startup (Migrate is called once at boot), which is an acceptable
-	// cost for a self-hosted SQLite instance.
-	if _, err := db.ExecContext(ctx, "ANALYZE"); err != nil {
-		logger.Warn("post-migration ANALYZE failed", "error", err)
+	if deferred > 0 {
+		// Said plainly, because the schema is deliberately incomplete at this
+		// point and an operator reading the log needs to know that is intended.
+		logger.Info("post-deployment migrations pending; they run in the background once serving starts",
+			"count", deferred)
 	}
-
+	if applied > 0 {
+		logger.Info("migrations complete",
+			"applied", applied,
+			"duration", time.Since(runStart).Round(time.Millisecond),
+			"slowest", slowestName,
+			"slowest_version", slowestVersion,
+			"slowest_duration", slowest.Round(time.Millisecond))
+	}
 	return nil
 }
 
@@ -187,6 +257,12 @@ type migration struct {
 	version int
 	name    string
 	sql     string
+	// postDeploy defers this migration until AFTER the server is serving,
+	// where it runs in batches instead of blocking the boot. Only set by
+	// files under migrations/post_deploy/ — read that directory's README
+	// before adding one, because it is a contract about what the running
+	// code must tolerate, not a free speed-up.
+	postDeploy bool
 	// fn, if set, runs instead of sql. Receives the migration's transaction
 	// so its work commits atomically with the _migrations row.
 	fn func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
@@ -273,7 +349,10 @@ type migration struct {
 // part of the restore is preserved.
 type RestoreBackfillFunc func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
 
-var migrations = []migration{
+// legacyMigrations are the sequentially-numbered v1..v169 entries, plus any
+// migration that needs Go rather than SQL. New SQL migrations are files under
+// migrations/ — see migrate_registry.go for why.
+var legacyMigrations = []migration{
 	{version: 1, name: "init", sql: migrationInit},
 	{version: 2, name: "add_onboarding_completed", sql: migrationAddOnboardingCompleted},
 	{version: 3, name: "add_memory_config", sql: migrationAddMemoryConfig},

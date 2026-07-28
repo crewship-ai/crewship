@@ -1,0 +1,125 @@
+---
+title: "Migration Checklist"
+description: "What to check before adding a schema migration — and which mistakes the build already catches for you."
+icon: "list-checks"
+---
+
+# Migration Checklist
+
+Go through this before opening a PR that adds a migration. It exists because
+the same handful of mistakes account for nearly every migration that has hurt
+us, and every one of them is cheap to catch at review time and expensive to
+catch in production.
+
+Items marked **automated** are enforced by the build or CI. You do not need to
+verify them by hand; they are listed so you know what the failure means when
+you see it.
+
+## 1. Numbering and placement
+
+- [ ] **Version is a UTC timestamp.** `date -u +%Y%m%d%H%M%S`. *(automated —
+      `validateMigrationVersion`; writing `170` out of habit fails the build.)*
+- [ ] **It is a file, not a slice entry.** `internal/database/migrations/<stamp>_<name>.sql`.
+      Only migrations that genuinely need Go — schema discovery at apply time,
+      SQLite table rebuilds — go in the `legacyMigrations` slice.
+- [ ] **The stamp is newer than every committed migration.** Append, never
+      insert. *(automated — strictly-ascending test.)*
+- [ ] **Nothing at or below v169 was touched.** *(automated — CI
+      `lint-migrations` fingerprints every shipped entry, slice or file.)*
+
+## 2. Is it reversible without a rollback script?
+
+We do **not** write `down` migrations. The rollback story is the pre-migration
+snapshot plus the previous binary, and an untested `down` would be a worse
+promise than no promise. That puts the burden here instead:
+
+- [ ] **Could an operator restore the snapshot and run the old binary?** If
+      your migration deletes data the old code needs, the answer is no and the
+      change needs splitting.
+- [ ] **Nothing is dropped in the same release that stops using it.** Removing
+      a column is two releases: stop reading it in release N, drop it in N+1.
+      An instance that upgrades slowly runs the old code against the new
+      schema for as long as it takes them.
+
+## 3. Cost — will this be downtime?
+
+Migrations run **before** the server serves. Their duration is upgrade
+downtime, and it scales with the customer's data, not with our test fixtures.
+
+- [ ] **Does it rewrite every row of a table?** `UPDATE` with no narrowing
+      `WHERE`, `ALTER TABLE` that rebuilds, adding a column with a computed
+      default. If yes, keep reading; if no, skip to §4.
+- [ ] **Estimate the cost.** Measured on this schema: rewriting
+      `journal_entries` runs ~59µs/row. A million rows is a minute of
+      downtime, ten million is ten minutes. `journal_entries`, `pipeline_runs`
+      and `chats` are the tables that grow without bound.
+- [ ] **If the estimate is more than a few seconds on a large install, move
+      the data half to `migrations/post_deploy/`** and read that directory's
+      README first. The schema half (adding the column) stays in the normal
+      lane; the backfill goes post-deploy.
+
+<Note>
+Splitting is not just a performance trick — it changes what the running code
+must tolerate. A post-deployment migration has **not** run when the new code
+starts serving, so read paths must cope with the column being unfilled for
+some rows. If that is not acceptable, take the downtime honestly instead.
+</Note>
+
+## 4. Correctness
+
+- [ ] **`ADD COLUMN` has a default, or the code handles NULL.** SQLite cannot
+      add a `NOT NULL` column without one.
+- [ ] **A `CHECK` constraint change means a table rebuild.** SQLite cannot
+      alter a constraint in place. See migration v169 for the pattern:
+      create the new table, copy the rows, drop, rename — and carry live rows
+      across rather than dropping them.
+- [ ] **Foreign keys point at something that exists at this version.** A
+      migration referencing a table added later fails only on a fresh install,
+      which is the one path nobody tests locally.
+- [ ] **New index is worth its write cost.** Every index slows every insert to
+      that table. `journal_entries` takes an insert per agent action.
+
+## 5. Idempotency — only if you cannot use a transaction
+
+Almost every migration runs inside a transaction with its ledger row, so a
+failure rolls back cleanly and idempotency is not your problem.
+
+Two cases escape that, and both make it your problem:
+
+- [ ] **`fnNoTx` migrations** run outside the wrapper transaction and the
+      ledger row is written afterwards. A crash midway re-runs them. There is
+      exactly one today (v167).
+- [ ] **Post-deployment migrations** commit per batch and resume. The
+      statement must exclude rows it has already handled — `WHERE col IS NULL`,
+      not `SET counter = counter + 1`.
+
+If yours is one of these, say in the PR description *why* it is idempotent.
+"it should be fine" is how v167 nearly was not.
+
+## 6. Tests
+
+- [ ] **A migration that transforms data has a test that transforms data.** A
+      schema-only assertion passes while the rows are being mangled.
+- [ ] **Seed rows at the version *before* yours**, then migrate. Seeding after
+      means your migration never sees them.
+- [ ] **Re-running is a no-op.** Every restart re-enters `Migrate`.
+
+## What CI will tell you
+
+| Check | Catches |
+|---|---|
+| `TestMigrationsAreStrictlyIncreasing` | out-of-order or duplicate version |
+| `TestEveryMigrationFollowsTheVersionScheme` | a small integer above v169 |
+| `TestMigrationRegistryBuildsCleanly` | malformed filename, empty file, collision with the slice |
+| `TestMigrationChainStaysWithinBudget` | the whole chain becoming absurdly slow |
+| `TestMigrationChain_ScalesWithAPopulatedJournal` | a migration that goes non-linear in row count |
+| `TestUpgradePath_FromV1WithDataMigratesToHead` | a migration that breaks the oldest possible install |
+| CI `lint-migrations` | editing or deleting an already-shipped migration |
+
+## Related
+
+- [Migrations](/guides/migrations) — the numbering scheme, the collision guard,
+  and `crewship db repair-ledger`.
+- [Upgrades](/guides/upgrades) — snapshots and `crewship db restore-snapshot`.
+- `internal/database/migrations/post_deploy/README.md` — the contract for the
+  batched lane.

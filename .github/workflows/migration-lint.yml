@@ -19,6 +19,10 @@ on:
       # including the rewriteTableDefaultLiteral helper that v144, v148 and
       # v161 all share. A guard that does not run is not a guard.
       - 'internal/database/migrate*.go'
+      # The registry moved out of migrate.go: new migrations are .sql files
+      # here. A PR that only edits one of those must still trip this guard —
+      # editing a shipped migration is the violation, whichever form it takes.
+      - 'internal/database/migrations/**'
       - 'scripts/lint-migrations/**'
       - '.github/workflows/migration-lint.yml'
   push:

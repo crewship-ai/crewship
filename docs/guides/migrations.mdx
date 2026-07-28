@@ -156,9 +156,30 @@ database file).
 
 The `*.pre-migrate-*.bak` snapshot is the one Crewship takes automatically before applying pending migrations (see below) — so a bad upgrade is a one-step rollback: put the old binary back **and** restore the matching snapshot.
 
-## Authoring a migration — version numbers are timestamps now
+## Authoring a migration
 
-Versions **v1–v169** were allocated sequentially: the author took the next free integer. Everything after that is a **UTC timestamp**, `YYYYMMDDHHMMSS`:
+**One file per migration.** The registry is the directory
+`internal/database/migrations/` — there is no central list to edit, and that is
+the point: two people adding a migration add two files and cannot conflict.
+
+```
+internal/database/migrations/
+  20260728143000_add_widget_flag.sql
+  post_deploy/
+    20260729091500_backfill_widget_owner.sql
+```
+
+The v1–v169 block stays declared in the `legacyMigrations` slice in
+`migrate.go`. Those numbers are applied in databases nobody controls, so
+rewriting them buys nothing and risks a transcription error in the one part of
+the system that must never drift. The slice also still holds migrations that
+need **Go** rather than SQL — schema discovery at apply time, SQLite table
+rebuilds. Everything expressible as plain SQL is a file.
+
+### Version numbers are timestamps
+
+Versions **v1–v169** were allocated sequentially: the author took the next free
+integer. Everything after that is a **UTC timestamp**, `YYYYMMDDHHMMSS`:
 
 ```go
 {version: 20260728143000, name: "add_widget_flag", sql: migrationAddWidgetFlag},
@@ -177,6 +198,66 @@ Rules the build enforces (`internal/database/migrate_version_scheme.go`, and the
 - Versions must be **strictly ascending**, which for timestamps means chronological — so **append, never insert**.
 - Nothing new may be added **at or below v169**. That block is closed; those numbers are applied in databases nobody controls.
 - A version above the ceiling must be a plausible `YYYYMMDDHHMMSS` stamp. Writing `{version: 170, …}` out of habit fails the build with an explanation rather than shipping a collision.
+
+## Post-deployment migrations — when a migration would be downtime
+
+Migrations run **before** the server serves anything. That removes the whole
+class of problems GitLab has to solve with online DDL — nothing is contending
+with live queries — but it converts migration duration directly into **upgrade
+downtime**, and that duration scales with the customer's data.
+
+Measured on this schema (`migrate_scaling_test.go`, linear at 20k and 200k
+rows):
+
+| Journal rows | Upgrade cost of the three `journal_entries` rewrites |
+|---|---|
+| 20 000 | ~1 second |
+| 200 000 | ~12 seconds |
+| 1 000 000 | ~1 minute |
+| 10 000 000 | ~10 minutes |
+
+Ten minutes of downtime is what a *successful* customer gets. So a migration
+whose cost grows per row can go in `migrations/post_deploy/` instead, where it
+runs **after** the server starts serving, one batch per transaction:
+
+```
+internal/database/migrations/post_deploy/20260729091500_backfill_widget_owner.sql
+```
+
+The runner re-executes the statement until it stops changing rows, committing
+each pass, so no single transaction holds the write lock for the whole table
+and a restart resumes rather than starting over. The ledger row is written only
+when the backfill finishes — which is what makes an interrupted run safe to
+re-enter.
+
+<Warning>
+This is not a free speed-up. A post-deployment migration has **not** run when
+the new code starts serving, so:
+
+1. The change must be **additive** — add a column, add a table. Never drop or
+   rename something the backfill depends on.
+2. The running code must tolerate the change being **half-applied** for as long
+   as the backfill takes.
+3. The statement must be **idempotent and bounded** — `UPDATE … WHERE col IS
+   NULL LIMIT 500` converges; `SET counter = counter + 1` corrupts.
+
+If any of those is uncomfortable, the migration belongs in the normal lane and
+takes its downtime honestly. Full contract:
+`internal/database/migrations/post_deploy/README.md`.
+</Warning>
+
+Removing a column later is **two releases**, never one: release N adds and
+backfills, release N+1 — once every instance has finished — drops the old
+column in the normal lane. Skipping the gap breaks whoever upgrades slowly.
+
+### Seeing what is outstanding
+
+```bash
+crewship db migration-status
+```
+
+Reports the schema version and any post-deployment migration still running.
+Reads the local database directly, so it works with the server down.
 
 ## Collisions and how to get out of one
 
@@ -219,6 +300,7 @@ The backup subsystem (`internal/backup/runner.go`) records the migrations applie
 
 ## Related
 
+- [Migration Checklist](/guides/migration-checklist) — what to verify before opening the PR.
 - [Architecture — Schema footprint](/architecture#schema-footprint).
 - [Upgrades](/guides/upgrades) — `crewship db restore-snapshot`, the other half of a bad-migration rollback.
 - [Crew Journal](/guides/crew-journal) — what v52, v55, v60, v61 mean for the audit stream.
