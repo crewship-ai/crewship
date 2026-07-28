@@ -1,8 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { motion } from "motion/react"
-import { ChevronRight, Trash2 } from "lucide-react"
+import { HelpCircle, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -13,15 +12,17 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
-  Collapsible, CollapsibleContent, CollapsibleTrigger,
-} from "@/components/ui/collapsible"
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { CapabilityGrid } from "@/components/admin/capability-grid"
+import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow } from "../shared"
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -42,10 +43,18 @@ interface MembersSectionProps {
   members: Member[]
   workspaceId: string
   currentUserId?: string
-  canInvite: boolean
+  // There used to be a `canInvite` prop fed by CASL's
+  // `abilities.can("create", "Member")`. It happened to equal the right
+  // answer, but only because OWNER/ADMIN get it from the blanket "manage
+  // all" rule — nothing tied it to `POST /members`'s actual roleManage
+  // tier. The gate is derived from `callerRole` below instead; the prop is
+  // gone rather than left declared-and-ignored for the next reader to trip
+  // over. See lib/permissions/tiers.ts.
   onRefresh: () => void
   /** Caller's workspace role. Surfaces the per-member capability
-   *  grid (PRD-SLASH-CAPABILITIES-2026 §6.7) only for ADMIN+. */
+   *  grid (PRD-SLASH-CAPABILITIES-2026 §6.7), the invite control and the
+   *  remove control only for ADMIN+ (`isAdminTier`); role-change stays
+   *  gated separately in `MemberRoleControl` at MANAGER+ (`isManagerTier`). */
   callerRole?: string
 }
 
@@ -96,13 +105,43 @@ function relativeTime(dateStr: string): string {
   return `${diffYr}y ago`
 }
 
-function initials(name: string | null, email: string): string {
-  if (name) {
-    const parts = name.trim().split(/\s+/)
-    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-    return name.slice(0, 2).toUpperCase()
-  }
-  return email.slice(0, 2).toUpperCase()
+
+/**
+ * The role legend, as help rather than furniture.
+ *
+ * It used to be a permanently-present accordion. The content is static —
+ * identical in every workspace, forever — so it is reference material, and
+ * reference material belongs behind a help affordance next to the thing it
+ * explains, not competing for space with the live roster. The trigger sits
+ * in the Members card header because roles apply to the whole list; a `?`
+ * repeated on every row would be noise.
+ */
+function RoleLegend() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 gap-1.5 text-[11px] text-muted-foreground"
+          aria-label="What do the roles mean?"
+        >
+          <HelpCircle className="size-3.5" />
+          <span className="hidden sm:inline">Roles</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[22rem] p-0">
+        <div className="px-3 py-2 border-b border-border/60">
+          <div className="text-xs font-medium">Roles &amp; permissions</div>
+        </div>
+        {roleSummaries.map((item, idx) => (
+          <SettingsRow key={item.role} label={item.role} border={idx < roleSummaries.length - 1}>
+            <span className="text-[11px] text-muted-foreground text-right">{item.summary}</span>
+          </SettingsRow>
+        ))}
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 // ── Member role control ──────────────────────────────────────────────
@@ -130,7 +169,10 @@ function MemberRoleControl({
   const [saving, setSaving] = useState(false)
 
   const callerRank = callerRole ? roleRank[callerRole] ?? 0 : 0
-  const canEdit = !isSelf && callerRank > (roleRank[member.role] ?? 0)
+  // Role-change is `roleCreate` server-side (MANAGER+) — a plain rank
+  // comparison alone would let e.g. a MEMBER "edit" a VIEWER's role, which
+  // the server would 403. Gate on the tier first, then the ladder.
+  const canEdit = isManagerTier(callerRole) && !isSelf && callerRank > (roleRank[member.role] ?? 0)
   // Grantable roles: strictly below the caller's own rank.
   const options = ROLE_ORDER.filter((r) => (roleRank[r] ?? 0) < callerRank)
 
@@ -183,7 +225,7 @@ function MemberRoleControl({
       >
         <SelectTrigger
           className="h-6 w-[104px] text-[10px] px-2"
-          aria-label={`Change role for ${member.user.full_name ?? member.user.email}`}
+          aria-label={`Change role for ${personLabel(member.user.full_name, member.user.email)}`}
         >
           <SelectValue />
         </SelectTrigger>
@@ -201,7 +243,7 @@ function MemberRoleControl({
             <AlertDialogDescription className="text-xs">
               Change{" "}
               <span className="font-medium text-foreground">
-                {member.user.full_name ?? member.user.email}
+                {personLabel(member.user.full_name, member.user.email)}
               </span>{" "}
               from <span className="font-medium">{member.role}</span> to{" "}
               <span className="font-medium">{pendingRole}</span>?
@@ -234,14 +276,16 @@ export function MembersSection({
   members,
   workspaceId,
   currentUserId,
-  canInvite,
   onRefresh,
   callerRole,
 }: MembersSectionProps) {
   const [removingId, setRemovingId] = useState<string | null>(null)
-  const [rolesOpen, setRolesOpen] = useState(false)
-  const [capsOpen, setCapsOpen] = useState(false)
-  const isAdmin = callerRole === "ADMIN" || callerRole === "OWNER"
+  // isAdmin gates invite, remove AND the per-member capability grid — all
+  // three map to `roleManage` routes. isManager is strictly wider (also
+  // true for MANAGER) and only used for the muted copy below; the
+  // role-change control itself is gated inside MemberRoleControl.
+  const isAdmin = isAdminTier(callerRole)
+  const isManager = isManagerTier(callerRole)
 
   async function handleRemove(memberId: string) {
     setRemovingId(memberId)
@@ -271,7 +315,12 @@ export function MembersSection({
       <SettingsCard
         title="Members"
         description={`${members.length} member${members.length === 1 ? "" : "s"} in this workspace`}
-        actions={canInvite ? <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} /> : undefined}
+        actions={
+          <>
+            <RoleLegend />
+            {isAdmin && <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} />}
+          </>
+        }
       >
         {members.map((member, idx) => {
           const isSelf = currentUserId === member.user.id
@@ -287,16 +336,18 @@ export function MembersSection({
             >
               {/* Left: avatar + name + email */}
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary">
-                  <span className="text-[10px] font-semibold text-primary-foreground leading-none">
-                    {initials(member.user.full_name, member.user.email)}
-                  </span>
-                </div>
+                <UserAvatar
+                  name={member.user.full_name}
+                  email={member.user.email}
+                  src={member.user.avatar_url}
+                  className="h-7 w-7"
+                  textClassName="text-[10px]"
+                />
                 <div className="min-w-0">
                   <div className="text-xs text-foreground truncate">
-                    {member.user.full_name ?? member.user.email}
+                    {personLabel(member.user.full_name, member.user.email)}
                   </div>
-                  {member.user.full_name && (
+                  {(member.user.full_name ?? "").trim() && (
                     <div className="text-[10px] text-muted-foreground/80 font-mono truncate mt-0.5">
                       {member.user.email}
                     </div>
@@ -317,7 +368,7 @@ export function MembersSection({
                   {relativeTime(member.created_at)}
                 </span>
                 <div className="w-6 flex justify-center">
-                  {!isOwner && !isSelf ? (
+                  {isAdmin && !isOwner && !isSelf ? (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button
@@ -336,7 +387,7 @@ export function MembersSection({
                           <AlertDialogDescription className="text-xs">
                             Are you sure you want to remove{" "}
                             <span className="font-medium text-foreground">
-                              {member.user.full_name ?? member.user.email}
+                              {personLabel(member.user.full_name, member.user.email)}
                             </span>{" "}
                             from this workspace? This action cannot be undone.
                           </AlertDialogDescription>
@@ -360,67 +411,40 @@ export function MembersSection({
         })}
       </SettingsCard>
 
-      {/* ── Roles & Permissions (collapsible) ── */}
-      <Collapsible open={rolesOpen} onOpenChange={setRolesOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="flex items-center gap-2 mb-2.5 group"
-          >
-            <motion.div animate={{ rotate: rolesOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
-              <ChevronRight className="h-3 w-3 text-muted-foreground" />
-            </motion.div>
-            <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
-              Roles &amp; Permissions
-            </span>
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-            {roleSummaries.map((item, idx) => (
-              <SettingsRow
-                key={item.role}
-                label={item.role}
-                border={idx < roleSummaries.length - 1}
-              >
-                <span className="text-[11px] text-muted-foreground">
-                  {item.summary}
-                </span>
-              </SettingsRow>
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      {/* The roster above stays visible to everyone; only the mutating
+          controls are tier-gated. Say so once, quietly — this is a normal
+          state for MANAGER/MEMBER/VIEWER, not an error. */}
+      {!isAdmin && (
+        <p className="text-[11px] text-muted-foreground px-1">
+          {isManager
+            ? "Only admins can invite or remove members."
+            : "Only managers and admins can make changes here."}
+        </p>
+      )}
 
-      {/* ── Per-member capabilities (admin-only, PRD-SLASH-CAPABILITIES-2026 §6.7) ── */}
+      {/* ── Per-member capabilities ──
+          Deliberately NOT behind a disclosure. Progressive disclosure is for
+          reference material; this is live state whose checkboxes apply
+          immediately. Hiding it meant "who can do what here?" — the question
+          this screen exists to answer — cost an extra click. */}
       {isAdmin && currentUserId && (
-        <Collapsible open={capsOpen} onOpenChange={setCapsOpen}>
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="flex items-center gap-2 mb-2.5 group"
-            >
-              <motion.div animate={{ rotate: capsOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-              </motion.div>
-              <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
-                Per-member capabilities
-              </span>
-              <span className="text-[10px] text-muted-foreground leading-none">
-                grant individual high-value actions without promoting role
-              </span>
-            </button>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <div className="rounded-xl border border-border/60 bg-card p-3">
-              <CapabilityGrid
+        <div>
+          <div className="flex items-baseline gap-2 mb-2.5">
+            <span className="text-body font-medium text-foreground/80 leading-none">
+              Per-member capabilities
+            </span>
+            <span className="text-[10px] text-muted-foreground leading-none">
+              grant individual high-value actions without promoting role
+            </span>
+          </div>
+          <div className="rounded-xl border border-border/60 bg-card p-3">
+            <CapabilityGrid
                 members={members}
                 workspaceId={workspaceId}
                 currentUserId={currentUserId}
               />
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
+          </div>
+        </div>
       )}
     </div>
   )

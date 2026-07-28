@@ -523,7 +523,7 @@ export function FilesPageClient() {
                     <span className={cn(i === arr.length - 1 ? "text-foreground font-medium" : "text-muted-foreground")}>{seg}</span>
                   </span>
                 ))}
-                {isDirty && <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" title="Unsaved changes" />}
+                {isDirty && <span className="h-2 w-2 rounded-full bg-warn shrink-0" title="Unsaved changes" />}
               </div>
             </div>
             <div className="ml-auto flex items-center gap-2 shrink-0">

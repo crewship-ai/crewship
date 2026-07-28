@@ -2,7 +2,8 @@
 
 import { useState, type FormEvent } from "react"
 import Link from "next/link"
-import { Ship, ArrowLeft } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
+import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -43,9 +44,7 @@ export default function ForgotPasswordPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Ship className="h-6 w-6" />
-            </div>
+            <CrewshipLogoTile />
           </div>
           <CardTitle className="text-xl">Reset your password</CardTitle>
           <CardDescription>
@@ -56,11 +55,11 @@ export default function ForgotPasswordPage() {
           {submitted ? (
             <div className="space-y-4">
               <div
-                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm"
+                className="rounded-md border border-success/40 bg-success/10 p-4 text-sm"
                 role="status"
                 aria-live="polite"
               >
-                <p className="font-medium text-emerald-700 dark:text-emerald-400">Check your inbox.</p>
+                <p className="font-medium text-success">Check your inbox.</p>
                 <p className="mt-1 text-muted-foreground">
                   If an account exists for that email and email is configured on this server, a reset
                   link has been sent. Self-hosted administrators without email configured should run{" "}

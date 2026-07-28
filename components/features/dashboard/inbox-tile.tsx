@@ -21,11 +21,11 @@ interface InboxTileProps {
 }
 
 const KIND_META: Record<InboxKind, { Icon: LucideIcon; cls: string }> = {
-  escalation: { Icon: AlertTriangle, cls: "bg-red-500/12 text-red-400" },
-  keeper:     { Icon: KeyRound,      cls: "bg-amber-500/12 text-amber-400" },
-  review:     { Icon: CheckCircle2,  cls: "bg-blue-500/12 text-blue-400" },
-  proposal:   { Icon: FileText,      cls: "bg-blue-500/12 text-blue-400" },
-  mention:    { Icon: AtSign,        cls: "bg-violet-500/12 text-violet-400" },
+  escalation: { Icon: AlertTriangle, cls: "bg-destructive/12 text-destructive" },
+  keeper:     { Icon: KeyRound,      cls: "bg-warn/12 text-warn" },
+  review:     { Icon: CheckCircle2,  cls: "bg-info/12 text-info" },
+  proposal:   { Icon: FileText,      cls: "bg-info/12 text-info" },
+  mention:    { Icon: AtSign,        cls: "bg-purple/12 text-purple" },
 }
 
 /** Consolidated urgent items list — the "what needs me" feed. */

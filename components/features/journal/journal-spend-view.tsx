@@ -116,7 +116,7 @@ export function JournalSpendView({ workspaceId, workspaceLoading }: Props) {
       {/* KPI header */}
       <div className="flex items-center justify-between rounded-lg border border-border/60 bg-card/50 px-4 py-3">
         <div className="flex items-center gap-3">
-          <DollarSign className="h-5 w-5 text-emerald-400" />
+          <DollarSign className="h-5 w-5 text-success" />
           <div>
             <div className="text-2xl font-semibold tabular-nums">
               {loading ? <Skeleton className="h-7 w-24" /> : formatCost(data?.total_cost_usd ?? 0)}
@@ -124,7 +124,7 @@ export function JournalSpendView({ workspaceId, workspaceLoading }: Props) {
             <div className="text-xs text-muted-foreground">total spend · {WINDOW_LABEL[window]}</div>
           </div>
           {data?.truncated && (
-            <span className="ml-2 text-[11px] text-amber-400">
+            <span className="ml-2 text-[11px] text-warn">
               window exceeds the aggregation cap — showing the most recent rows only
             </span>
           )}
@@ -142,7 +142,7 @@ export function JournalSpendView({ workspaceId, workspaceLoading }: Props) {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 px-4 py-3 text-sm text-rose-300">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}

@@ -25,11 +25,11 @@ import { STATUS_LABEL, type ConnectionRow } from "../connection-model"
  */
 
 const STATUS_STYLE: Record<string, string> = {
-  delivering: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
-  failing: "border-red-400/35 bg-red-400/10 text-red-300",
-  never_used: "border-amber-400/30 bg-amber-400/10 text-amber-300",
+  delivering: "border-success/30 bg-success/10 text-success",
+  failing: "border-destructive/35 bg-destructive/10 text-destructive",
+  never_used: "border-warn/30 bg-warn/10 text-warn",
   disabled: "border-white/10 bg-white/[0.03] text-muted-foreground",
-  unknown: "border-sky-400/25 bg-sky-400/10 text-sky-300",
+  unknown: "border-info/25 bg-info/10 text-info",
 }
 
 /** Category key -> the label the preference matrix shows. */
@@ -229,10 +229,10 @@ export function ConnectionDetail({
                     className={cn(
                       "shrink-0 rounded-full border px-1.5 py-0.5 font-mono text-[10px]",
                       d.status === "sent"
-                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                        ? "border-success/30 bg-success/10 text-success"
                         : d.status === "failed"
-                          ? "border-red-400/35 bg-red-400/10 text-red-300"
-                          : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+                          ? "border-destructive/35 bg-destructive/10 text-destructive"
+                          : "border-warn/30 bg-warn/10 text-warn",
                     )}
                   >
                     {d.status}

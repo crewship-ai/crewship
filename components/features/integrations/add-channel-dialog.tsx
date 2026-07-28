@@ -344,7 +344,7 @@ function Field({
 
 function SecretReveal({ secret, onDone }: { secret: string; onDone: () => void }) {
   return (
-    <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/[0.05] px-3 py-3">
+    <div className="space-y-2 rounded-lg border border-warn/40 bg-warn/[0.05] px-3 py-3">
       <div className="text-xs font-medium text-foreground/90">
         Signing secret — shown only once
       </div>

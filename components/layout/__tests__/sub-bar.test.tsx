@@ -13,6 +13,34 @@ describe("SubBar", () => {
     expect(screen.getByText(/15 open/)).toBeTruthy()
   })
 
+  // A page with an internal nav (Admin's console sections, Settings' tabs)
+  // has to say WHICH section you are in. Without this the chrome above the
+  // fold is identical on Admin/Overview and Admin/Backups, and the only clue
+  // is a highlighted row in the sidebar.
+  it("renders the active section after the title as a path", () => {
+    render(<SubBar title="Admin Console" section="Users" />)
+    const heading = screen.getByRole("heading", { level: 1 })
+    expect(heading).toHaveTextContent("Admin Console / Users")
+  })
+
+  it("emphasises the section and demotes the page it belongs to", () => {
+    render(<SubBar title="Settings" section="Audit Log" />)
+    // Reads as a path — "Settings" recedes, "Audit Log" is where you are.
+    // Both bold would look like two competing headings on one row.
+    expect(screen.getByText("Settings").className).toMatch(/text-muted-foreground/)
+    expect(screen.getByText("Audit Log").className).toMatch(/text-foreground/)
+  })
+
+  it("leaves the title alone when a page has no sections", () => {
+    render(<SubBar title="Skills" description="22 total" />)
+    const heading = screen.getByRole("heading", { level: 1 })
+    expect(heading).toHaveTextContent("Skills")
+    expect(heading.textContent).not.toContain("/")
+    // Section-less pages keep the full-strength title they have today.
+    expect(screen.getByText("Skills").className).toMatch(/text-foreground/)
+    expect(screen.getByText("Skills").className).not.toMatch(/text-muted-foreground/)
+  })
+
   it("does NOT render the second row when there are no tabs and no tools", () => {
     render(<SubBar title="Crews & Agents" description="2 crews · 5 agents" />)
     // No tablist landmark when tabs are absent.

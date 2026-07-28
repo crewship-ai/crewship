@@ -216,7 +216,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                   <Badge
                     variant="outline"
                     className={cn("text-[10px]",
-                      conn.status === "active" ? "border-green-500/30 text-green-400" : "border-gray-500/30 text-gray-400"
+                      conn.status === "active" ? "border-success/30 text-success" : "border-border/30 text-muted-foreground"
                     )}
                   >
                     {conn.status}
@@ -224,7 +224,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="gap-1.5 h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
+                    className="gap-1.5 h-7 text-xs border-destructive/30 text-destructive hover:bg-destructive/10"
                     onClick={() => handleDisconnect(conn.id)}
                     disabled={disconnecting === conn.id}
                   >

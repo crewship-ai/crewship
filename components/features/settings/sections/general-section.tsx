@@ -1,9 +1,11 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useState } from "react"
 import { Check, X, ChevronsUpDown } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
+import { SaveFooter } from "@/components/ui/save-footer"
+import { useDirtyForm } from "@/hooks/use-dirty-form"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -17,6 +19,7 @@ import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
+import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow, SettingsDangerCard } from "../shared"
 
 interface GeneralSectionProps {
@@ -36,13 +39,16 @@ export function GeneralSection({
   workspaceId, orgName, orgSlug, preferredLanguage,
   agentCount, crewCount, memberCount, role, onUpdated, onDelete,
 }: GeneralSectionProps) {
-  const [formName, setFormName] = useState(orgName)
-  const [formSlug, setFormSlug] = useState(orgSlug)
-  const [formLanguage, setFormLanguage] = useState(preferredLanguage)
+  // Name, slug and language are all typed-in values on one card, so they share
+  // one draft and one footer. Language used to PATCH the instant you picked it,
+  // which made the card commit two different ways depending on which control
+  // you touched.
+  const form = useDirtyForm({ name: orgName, slug: orgSlug, language: preferredLanguage })
+  // PATCH /api/v1/workspaces/{id} is roleManage — ADMIN and up. Below that the
+  // card is information, not a form: rendering inputs (even disabled ones) only
+  // invites an edit the server answers with a 403.
+  const canEdit = isAdminTier(role)
   const [langOpen, setLangOpen] = useState(false)
-  const [langSaving, setLangSaving] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle")
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -51,58 +57,29 @@ export function GeneralSection({
   // so the destructive action stays disabled until it matches exactly.
   const slugConfirmed = confirmSlug === orgSlug
 
-  const isDirty = formName !== orgName || formSlug !== orgSlug
-
-  async function handleSave(e: FormEvent) {
-    e.preventDefault()
-    setSaveStatus("saving")
-    setSaveError(null)
-    try {
+  function handleSave() {
+    void form.submit(async (draft) => {
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: formName, slug: formSlug }),
+        // One write for the whole identity triple. The endpoint reads "" as
+        // "clear the language", which is what a null draft means here.
+        body: JSON.stringify({
+          name: draft.name,
+          slug: draft.slug,
+          preferred_language: draft.language ?? "",
+        }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        setSaveStatus("error")
-        setSaveError(typeof body?.error === "string" ? body.error : "Failed to save")
-        return
+        // Thrown, not swallowed: useDirtyForm turns the message into the
+        // footer's error state and keeps the draft for a retry.
+        throw new Error(typeof body?.error === "string" ? body.error : "Failed to save")
       }
-      const updated = await res.json()
-      setFormName(updated.name)
-      setFormSlug(updated.slug)
-      onUpdated(updated)
-      setSaveStatus("success")
-      setTimeout(() => setSaveStatus("idle"), 3000)
-    } catch {
-      setSaveStatus("error")
-      setSaveError("Failed to save changes")
-    }
-  }
-
-  async function handleLanguageChange(code: string | null) {
-    setFormLanguage(code)
-    setLangOpen(false)
-    setLangSaving(true)
-    try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferred_language: code ?? "" }),
-      })
-      if (res.ok) {
-        const updated = await res.json()
-        setFormLanguage(updated.preferred_language)
-        onUpdated(updated)
-      } else {
-        setFormLanguage(preferredLanguage)
-      }
-    } catch {
-      setFormLanguage(preferredLanguage)
-    } finally {
-      setLangSaving(false)
-    }
+      // The server normalizes (slugification); it reaches the inputs via the
+      // parent's props, which the clean form adopts as its new baseline.
+      onUpdated(await res.json())
+    })
   }
 
   async function handleDelete() {
@@ -134,92 +111,129 @@ export function GeneralSection({
     }
   }
 
-  const selectedLang = formLanguage ? LANGUAGES.find((l) => l.name === formLanguage) : null
+  const draftLanguage = form.draft.language
+  const selectedLang = draftLanguage ? LANGUAGES.find((l) => l.name === draftLanguage) : null
+  // Read-only path renders the saved value, not the draft — there is no control
+  // that could have moved it. Looked up only for the flag; an unrecognised
+  // language still prints its own name rather than vanishing.
+  const readOnlyLang = preferredLanguage ? LANGUAGES.find((l) => l.name === preferredLanguage) : null
+
+  function pickLanguage(name: string | null) {
+    form.set("language", name)
+    setLangOpen(false)
+  }
 
   return (
     <div className="space-y-5">
       {/* ── Identity ── */}
-      <SettingsCard title="Identity" description="Your workspace name, slug, and default agent language">
-        <form onSubmit={handleSave}>
-          <SettingsRow label="Workspace name">
-            <Input
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="My Company"
-              className="h-7 text-xs w-48"
-            />
-          </SettingsRow>
-          <SettingsRow label="Slug" description="Used in URLs and CLI commands">
-            <Input
-              value={formSlug}
-              onChange={(e) => setFormSlug(e.target.value)}
-              placeholder="my-company"
-              className="h-7 text-xs w-48 font-mono"
-            />
-          </SettingsRow>
-          {(isDirty || saveStatus !== "idle") && (
-            <div className="flex items-center justify-end gap-3 px-4 py-2 border-b border-border/40">
-              {saveStatus === "error" && saveError && (
-                <span className="text-[11px] text-destructive mr-auto">{saveError}</span>
+      <SettingsCard
+        title="Identity"
+        description={
+          canEdit
+            ? "Your workspace name, slug, and default agent language"
+            // Stated once, in the description, in the same muted type as every
+            // other hint — a non-admin viewing their own workspace is normal,
+            // so it must not read like a permission error.
+            : "Your workspace name, slug, and default agent language. Only workspace admins can change these."
+        }
+      >
+        {!canEdit ? (
+          <>
+            <SettingsRow label="Workspace name">
+              <span className="text-xs text-foreground truncate">{orgName}</span>
+            </SettingsRow>
+            <SettingsRow label="Slug" description="Used in URLs and CLI commands">
+              <span className="text-xs font-mono text-foreground truncate">{orgSlug}</span>
+            </SettingsRow>
+            <SettingsRow
+              label="Agent language"
+              description="Agents will respond in this language"
+              border={false}
+            >
+              {preferredLanguage ? (
+                <span className="text-xs text-foreground truncate">
+                  {readOnlyLang ? `${readOnlyLang.flag} ` : ""}{preferredLanguage}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">Not set</span>
               )}
-              <Button
-                type="submit"
-                size="sm"
-                className="h-7 px-2.5 text-xs"
-                disabled={saveStatus === "saving"}
-              >
-                {saveStatus === "saving" ? <Spinner className="mr-1.5 h-3 w-3" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
-                {saveStatus === "saving" ? "Saving…" : saveStatus === "success" ? "Saved" : "Save changes"}
-              </Button>
-            </div>
-          )}
-        </form>
-        <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
-          <Popover open={langOpen} onOpenChange={setLangOpen}>
-            <PopoverTrigger asChild>
-              <button
-                className="inline-flex items-center justify-between w-48 h-7 px-2.5 rounded-md bg-background border border-border text-xs text-foreground hover:border-ring transition-colors disabled:opacity-50"
-                disabled={langSaving}
-              >
-                {selectedLang ? (
-                  <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
-                ) : (
-                  <span className="text-muted-foreground">Select language…</span>
-                )}
-                <ChevronsUpDown className="h-3 w-3 text-muted-foreground ml-2 shrink-0" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 p-0" align="end">
-              <Command filter={(value, search) => {
-                const lang = LANGUAGES.find((l) => l.name === value)
-                if (!lang) return 0
-                const s = search.toLowerCase()
-                return (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) ? 1 : 0
-              }}>
-                <CommandInput placeholder="Search language…" />
-                <CommandList>
-                  <CommandEmpty>No language found.</CommandEmpty>
-                  <CommandGroup>
-                    {formLanguage && (
-                      <CommandItem value="__clear__" onSelect={() => handleLanguageChange(null)}>
-                        <X className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-muted-foreground text-xs">Clear</span>
-                      </CommandItem>
+            </SettingsRow>
+          </>
+        ) : (
+          <>
+            <SettingsRow label="Workspace name">
+              <Input
+                value={form.draft.name}
+                onChange={(e) => form.set("name", e.target.value)}
+                placeholder="My Company"
+                aria-label="Workspace name"
+                className="h-7 text-xs w-48"
+              />
+            </SettingsRow>
+            <SettingsRow label="Slug" description="Used in URLs and CLI commands">
+              <Input
+                value={form.draft.slug}
+                onChange={(e) => form.set("slug", e.target.value)}
+                placeholder="my-company"
+                aria-label="Slug"
+                className="h-7 text-xs w-48 font-mono"
+              />
+            </SettingsRow>
+            <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
+              <Popover open={langOpen} onOpenChange={setLangOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    className="inline-flex items-center justify-between w-48 h-7 px-2.5 rounded-md bg-background border border-border text-xs text-foreground hover:border-ring transition-colors disabled:opacity-50"
+                    disabled={form.status === "saving"}
+                  >
+                    {selectedLang ? (
+                      <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
+                    ) : (
+                      <span className="text-muted-foreground">Select language…</span>
                     )}
-                    {LANGUAGES.map((lang) => (
-                      <CommandItem key={lang.code} value={lang.name} onSelect={() => handleLanguageChange(lang.name)} className="text-xs">
-                        <span className="mr-2">{lang.flag}</span>
-                        <span>{lang.name}</span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">{lang.native}</span>
-                        {formLanguage === lang.name && <Check className="ml-1 h-3 w-3 text-primary" />}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </SettingsRow>
+                    <ChevronsUpDown className="h-3 w-3 text-muted-foreground ml-2 shrink-0" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="end">
+                  <Command filter={(value, search) => {
+                    const lang = LANGUAGES.find((l) => l.name === value)
+                    if (!lang) return 0
+                    const s = search.toLowerCase()
+                    return (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) ? 1 : 0
+                  }}>
+                    <CommandInput placeholder="Search language…" />
+                    <CommandList>
+                      <CommandEmpty>No language found.</CommandEmpty>
+                      <CommandGroup>
+                        {draftLanguage && (
+                          <CommandItem value="__clear__" onSelect={() => pickLanguage(null)}>
+                            <X className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-muted-foreground text-xs">Clear</span>
+                          </CommandItem>
+                        )}
+                        {LANGUAGES.map((lang) => (
+                          <CommandItem key={lang.code} value={lang.name} onSelect={() => pickLanguage(lang.name)} className="text-xs">
+                            <span className="mr-2">{lang.flag}</span>
+                            <span>{lang.name}</span>
+                            <span className="ml-auto text-[10px] text-muted-foreground">{lang.native}</span>
+                            {draftLanguage === lang.name && <Check className="ml-1 h-3 w-3 text-primary" />}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </SettingsRow>
+            <SaveFooter
+              dirty={form.isDirty}
+              status={form.status}
+              error={form.error}
+              onSave={handleSave}
+              onCancel={form.reset}
+            />
+          </>
+        )}
       </SettingsCard>
 
       {/* ── Usage ── */}
@@ -239,7 +253,7 @@ export function GeneralSection({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
               Crews
             </span>
           }
@@ -251,7 +265,7 @@ export function GeneralSection({
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-purple" />
               Members
             </span> as unknown as string
           }
@@ -264,7 +278,7 @@ export function GeneralSection({
       </SettingsCard>
 
       {/* ── Danger Zone ── */}
-      {role === "OWNER" && (
+      {isOwner(role) && (
         <SettingsDangerCard
           title="Danger zone"
           description="Irreversible actions that affect the whole workspace"

@@ -72,8 +72,8 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
           <h2 className="text-default font-semibold">Assignments</h2>
           {assignments.some((a) => a.status === "RUNNING") && (
             <span aria-hidden="true" className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
           )}
         </div>
@@ -128,8 +128,8 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                               icon={
                                 a.status === "RUNNING" ? (
                                   <span aria-hidden="true" className="relative flex h-2 w-2 shrink-0">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                                   </span>
                                 ) : undefined
                               }

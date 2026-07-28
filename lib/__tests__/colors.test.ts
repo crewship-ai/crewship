@@ -16,11 +16,15 @@ import {
 // 7-digit hex string is invalid, but the lazy /3,8/ pattern would
 // accept those and let a typo slip through.
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+// STATUS_COLORS is now a semantic map: every value is a CSS custom-property
+// reference so the actual colour lives once in app/globals.css (the single
+// source of truth) and tracks the active theme. See BRIEF-COLOR-TOKENS-2026.
+const VAR_RE = /^var\(--[a-z-]+\)$/
 
 describe("STATUS_COLORS", () => {
-  it("every value is a valid hex color", () => {
-    for (const [name, hex] of Object.entries(STATUS_COLORS)) {
-      expect(HEX_RE.test(hex), `${name}=${hex}`).toBe(true)
+  it("every value references a theme token (var(--…)), not a hardcoded hex", () => {
+    for (const [name, v] of Object.entries(STATUS_COLORS)) {
+      expect(VAR_RE.test(v), `${name}=${v}`).toBe(true)
     }
   })
   it("includes the canonical task-status keys", () => {

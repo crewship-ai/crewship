@@ -66,15 +66,15 @@ function originTag(s: SessionRow): OriginTag | null {
   // we don't guess — we just don't show a tag.
   switch (s.origin) {
     case "CLI":
-      return { label: "CLI", icon: Terminal, className: "bg-violet-500/15 text-violet-300" }
+      return { label: "CLI", icon: Terminal, className: "bg-purple/15 text-purple" }
     case "UI":
-      return { label: "UI", icon: MonitorSmartphone, className: "bg-blue-500/15 text-blue-300" }
+      return { label: "UI", icon: MonitorSmartphone, className: "bg-info/15 text-info" }
     case "WEBHOOK":
-      return { label: "Hook", icon: Terminal, className: "bg-amber-500/15 text-amber-300" }
+      return { label: "Hook", icon: Terminal, className: "bg-warn/15 text-warn" }
     case "CRON":
-      return { label: "Cron", icon: Terminal, className: "bg-amber-500/15 text-amber-300" }
+      return { label: "Cron", icon: Terminal, className: "bg-warn/15 text-warn" }
     case "AGENT":
-      return { label: "Agent", icon: Terminal, className: "bg-fuchsia-500/15 text-fuchsia-300" }
+      return { label: "Agent", icon: Terminal, className: "bg-purple/15 text-purple" }
     default:
       return null
   }
@@ -121,7 +121,7 @@ export function SessionsSidebar({
   return (
     <aside className="border-r border-white/8 bg-card flex flex-col min-h-0">
       <div className="px-3 py-2 border-b border-white/8 flex items-center gap-2">
-        <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-900 border border-white/10">
+        <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-muted border border-white/10">
           <Search className="h-3 w-3 text-muted-foreground" />
           <input
             type="search"
@@ -148,7 +148,7 @@ export function SessionsSidebar({
               <button
                 type="button"
                 onClick={() => setShowEmptyOverride(true)}
-                className="text-blue-300 hover:underline"
+                className="text-primary hover:underline"
               >
                 Show {hiddenCount} empty session{hiddenCount === 1 ? "" : "s"}
               </button>
@@ -170,7 +170,7 @@ export function SessionsSidebar({
                   onClick={() => onSelect(s.id)}
                   className={cn(
                     "w-full text-left px-3 py-2 hover:bg-white/[0.04] border-l-2 transition-colors",
-                    active ? "bg-blue-500/10 border-blue-400" : "border-transparent",
+                    active ? "bg-primary/10 border-primary" : "border-transparent",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2 mb-0.5">
@@ -187,9 +187,9 @@ export function SessionsSidebar({
                       {unread > 0 && (
                         <span
                           aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] leading-none"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-info/20 text-info text-[10px] leading-none"
                         >
-                          <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden />
+                          <span className="h-1.5 w-1.5 rounded-full bg-info" aria-hidden />
                           {unread > 99 ? "99+" : unread}
                         </span>
                       )}
@@ -204,8 +204,8 @@ export function SessionsSidebar({
                       className={cn(
                         "px-1 py-0.5 rounded",
                         s.status === "ACTIVE"
-                          ? "bg-emerald-500/15 text-emerald-300"
-                          : "bg-zinc-800 text-muted-foreground",
+                          ? "bg-success/15 text-success"
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       {s.status?.toLowerCase() || "active"}
@@ -219,13 +219,13 @@ export function SessionsSidebar({
                     )}
                     {/* Error marker */}
                     {s.last_message_error && (
-                      <span className="px-1 py-0.5 rounded bg-red-500/15 text-red-300 inline-flex items-center gap-0.5">
+                      <span className="px-1 py-0.5 rounded bg-destructive/15 text-destructive inline-flex items-center gap-0.5">
                         <AlertTriangle className="h-2.5 w-2.5" />
                         Error
                       </span>
                     )}
                     {/* Message count — colored amber on 0 (visible only when override active) */}
-                    <span className={cn(s.message_count === 0 && "text-amber-400/70 italic")}>
+                    <span className={cn(s.message_count === 0 && "text-warn/70 italic")}>
                       {s.message_count} msg{s.message_count === 1 ? "" : "s"}
                     </span>
                   </div>

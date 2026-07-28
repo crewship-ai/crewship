@@ -274,18 +274,18 @@ function BadgeChip({ badge, legacy }: { badge: string; legacy?: boolean }) {
       className={cn(
         "rounded px-1.5 py-px text-[10px] font-medium shrink-0",
         legacy
-          ? "bg-zinc-700/40 text-zinc-400"
+          ? "bg-muted/40 text-muted-foreground"
           : badge === "Latest" || badge === "Default"
             ? "bg-blue-500/15 text-blue-300"
             : badge === "Reasoning"
-              ? "bg-violet-500/15 text-violet-300"
+              ? "bg-purple/15 text-purple"
               : badge === "Multimodal"
-                ? "bg-fuchsia-500/15 text-fuchsia-300"
+                ? "bg-purple/15 text-purple"
                 : badge === "Long ctx"
-                  ? "bg-emerald-500/15 text-emerald-300"
+                  ? "bg-success/15 text-success"
                   : badge === "Custom"
-                    ? "bg-amber-500/15 text-amber-300"
-                    : "bg-zinc-500/15 text-zinc-300",
+                    ? "bg-warn/15 text-warn"
+                    : "bg-muted-foreground/15 text-muted-foreground",
       )}
     >
       {badge}

@@ -659,7 +659,7 @@ function LegacyIntegrationsPage() {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setDetailServer(server); setDetailOpen(true) }}
-                    className="hidden md:inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground shrink-0 font-mono tabular-nums px-1.5 h-5 rounded border border-white/10 hover:border-blue-400/40 hover:bg-blue-500/[0.05] transition-colors"
+                    className="hidden md:inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground shrink-0 font-mono tabular-nums px-1.5 h-5 rounded border border-white/10 hover:border-primary/40 hover:bg-primary/[0.05] transition-colors"
                     title="Manage tools"
                   >
                     <Wrench className="h-2.5 w-2.5" />

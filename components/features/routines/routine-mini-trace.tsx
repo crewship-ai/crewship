@@ -50,21 +50,21 @@ const STEP_ICONS: Record<FlowIconKey, LucideIcon> = {
 
 // Per-kind icon tint, matching the flow diagram's node chrome.
 const KIND_TINT: Record<string, string> = {
-  trigger: "text-amber-400",
+  trigger: "text-warn",
   agent: "text-indigo-400",
   step: "text-muted-foreground",
-  store: "text-cyan-400",
-  tool: "text-violet-400",
-  out: "text-emerald-400",
+  store: "text-notice",
+  tool: "text-purple",
+  out: "text-success",
 }
 
 function StatusGlyph({ status }: { status: MiniStepStatus }) {
   if (status === "success")
-    return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-label="succeeded" />
+    return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-label="succeeded" />
   if (status === "failed")
-    return <XCircle className="h-3.5 w-3.5 shrink-0 text-rose-400" aria-label="failed" />
+    return <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-label="failed" />
   if (status === "running")
-    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-400" aria-label="running" />
+    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warn" aria-label="running" />
   return null
 }
 
@@ -81,7 +81,7 @@ function MiniCallRow({ call }: { call: MiniCall }) {
         {call.name}
       </span>
       {call.tool && (
-        <span className="shrink-0 rounded border border-violet-500/40 px-1 py-0 text-[9px] text-violet-300">
+        <span className="shrink-0 rounded border border-purple/40 px-1 py-0 text-[9px] text-purple">
           {call.tool}
         </span>
       )}

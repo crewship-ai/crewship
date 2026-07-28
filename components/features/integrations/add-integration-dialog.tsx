@@ -182,7 +182,7 @@ export function AddIntegrationDialog({
                     {k.distinguisher}
                   </span>
                   {k.key === "tools" && !toolsConfigured && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-warn/30 bg-warn/10 px-1.5 py-0.5 font-mono text-[10px] text-warn">
                       <KeyRound className="h-2.5 w-2.5" />
                       needs an API key
                     </span>
@@ -266,7 +266,7 @@ export function AddIntegrationDialog({
                               </span>
                             </span>
                             {s.used > 0 && (
-                              <span className="inline-flex shrink-0 items-center gap-1 self-center rounded-full border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">
+                              <span className="inline-flex shrink-0 items-center gap-1 self-center rounded-full border border-success/25 bg-success/10 px-1.5 py-0.5 font-mono text-[10px] text-success">
                                 <Check className="h-2.5 w-2.5" />
                                 {s.used}
                               </span>

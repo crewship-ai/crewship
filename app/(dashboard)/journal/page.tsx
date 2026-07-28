@@ -601,12 +601,12 @@ function AnomalyBadge({
       type="button"
       onClick={onClick}
       aria-label={`Focus ${errCount} error or warning events from the last 5 minutes`}
-      className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-red-500/40 bg-red-500/10 text-[10px] font-mono text-red-300 hover:bg-red-500/20 transition-colors"
+      className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-destructive/40 bg-destructive/10 text-[10px] font-mono text-destructive hover:bg-destructive/20 transition-colors"
       title={`${errCount} error/warn events in the last 5 minutes — click to focus`}
     >
       <span className="relative inline-flex">
-        <span className="absolute inline-flex h-1.5 w-1.5 rounded-full bg-red-400 opacity-75 animate-ping" />
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-400" />
+        <span className="absolute inline-flex h-1.5 w-1.5 rounded-full bg-destructive opacity-75 animate-ping" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-destructive" />
       </span>
       <span className="tabular-nums">{errCount}</span>
       <span className="opacity-80">in 5m</span>
@@ -652,7 +652,7 @@ function MetricsVisibilityChip({
         "inline-flex items-center gap-1.5 h-5 px-2 rounded-full border text-[10px] font-mono transition-colors",
         hidden
           ? "border-border/60 bg-card/50 text-muted-foreground hover:bg-card hover:text-foreground/80"
-          : "border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20",
+          : "border-notice/40 bg-notice/10 text-notice hover:bg-notice/20",
       )}
     >
       <Activity className="h-3 w-3" />
@@ -664,28 +664,28 @@ function MetricsVisibilityChip({
 function StreamStatusBadge({ status }: { status: string }) {
   if (status === "connected") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-success/10 text-success border-success/30">
         <Zap className="h-3 w-3" /> Live
       </Badge>
     )
   }
   if (status === "polling") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-warn/10 text-warn border-warn/30">
         <RadioTower className="h-3 w-3" /> Polling
       </Badge>
     )
   }
   if (status === "connecting") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-blue-500/10 text-blue-300 border-blue-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-info/10 text-info border-info/30">
         <Radio className="h-3 w-3" /> Connecting
       </Badge>
     )
   }
   if (status === "error") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-red-500/10 text-red-300 border-red-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-destructive/10 text-destructive border-destructive/30">
         Offline
       </Badge>
     )

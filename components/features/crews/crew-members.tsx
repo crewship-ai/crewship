@@ -68,8 +68,8 @@ const ROLE_OPTIONS: CrewMemberRole[] = ["ADMIN", "MANAGER", "MEMBER", "VIEWER"]
  *  language stays consistent between the two surfaces. */
 const roleCls: Record<CrewMemberRole, string> = {
   OWNER: "bg-muted text-foreground border-border",
-  ADMIN: "bg-amber-500/10 text-amber-600 border-amber-500/40 dark:text-amber-400",
-  MANAGER: "bg-blue-500/10 text-blue-600 border-blue-500/40 dark:text-blue-400",
+  ADMIN: "bg-warn/10 text-warn border-warn/40 dark:text-warn",
+  MANAGER: "bg-info/10 text-info border-info/40 dark:text-info",
   MEMBER: "bg-muted text-muted-foreground border-border",
   VIEWER: "bg-muted text-muted-foreground border-border",
 }
@@ -222,7 +222,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10"
+                              className="h-7 w-7 text-success hover:text-success hover:bg-success/10"
                               onClick={() => handleSaveRole(member.id)}
                               disabled={savingRole}
                               title="Save"

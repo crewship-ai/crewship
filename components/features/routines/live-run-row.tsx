@@ -6,6 +6,7 @@ import { Pause, Play, Square } from "lucide-react"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { isAwaitingApproval } from "@/hooks/use-active-routine-runs"
+import { SourcePill } from "@/components/features/activity/source-pill"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import { apiFetch } from "@/lib/api-fetch"
 import { routineHref } from "@/lib/routine-href"
@@ -84,7 +85,7 @@ export function LiveRunRow({
         <span
           className={cn(
             "h-1.5 w-1.5 shrink-0 rounded-full animate-pulse",
-            awaiting ? "bg-amber-500" : "bg-blue-500",
+            awaiting ? "bg-warn" : "bg-primary",
           )}
         />
         <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
@@ -96,10 +97,12 @@ export function LiveRunRow({
         </span>
       </div>
       <div className="mt-1 flex items-center gap-1.5 pl-3.5 text-[11px] text-muted-foreground">
+        {/* provenance first — "this run happened because X" (#1418 follow-up) */}
+        <SourcePill run={run} />
         {awaiting ? (
           <>
-            <Pause className="h-3 w-3 shrink-0 text-amber-400" />
-            <span className="text-amber-400">awaiting approval</span>
+            <Pause className="h-3 w-3 shrink-0 text-warn" />
+            <span className="text-warn">awaiting approval</span>
             <Link
               href={routineHref(run.pipeline_slug)}
               onClick={onNavigate}
@@ -110,7 +113,7 @@ export function LiveRunRow({
           </>
         ) : (
           <>
-            <Play className="h-3 w-3 shrink-0 text-blue-400" />
+            <Play className="h-3 w-3 shrink-0 text-primary" />
             {/* current_step_id is the step's id/slug — the list feed
                 has no step totals, so no "2/3" here by design. */}
             <span className="truncate font-mono text-foreground/85">
@@ -133,7 +136,7 @@ export function LiveRunRow({
           disabled={cancelling}
           aria-label="Cancel run"
           title="Cancel this run"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
         >
           {cancelling ? <Spinner className="h-3 w-3" /> : <Square className="h-3 w-3" />}
           Cancel

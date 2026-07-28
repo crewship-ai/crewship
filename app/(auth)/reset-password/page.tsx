@@ -3,7 +3,8 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Ship, ArrowLeft } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
+import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -80,9 +81,7 @@ function ResetForm() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Ship className="h-6 w-6" />
-            </div>
+            <CrewshipLogoTile />
           </div>
           <CardTitle className="text-xl">Choose a new password</CardTitle>
           <CardDescription>
@@ -93,11 +92,11 @@ function ResetForm() {
           {done ? (
             <div className="space-y-4">
               <div
-                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm"
+                className="rounded-md border border-success/40 bg-success/10 p-4 text-sm"
                 role="status"
                 aria-live="polite"
               >
-                <p className="font-medium text-emerald-700 dark:text-emerald-400">Password updated.</p>
+                <p className="font-medium text-success">Password updated.</p>
                 <p className="mt-1 text-muted-foreground">
                   All existing sessions have been signed out. Redirecting to sign in…
                 </p>

@@ -185,7 +185,7 @@ function CustomRangeForm({
           />
         </Field>
       </div>
-      {error && <div className="text-[11px] text-red-300">{error}</div>}
+      {error && <div className="text-[11px] text-destructive">{error}</div>}
       <div className="flex items-center justify-end gap-2">
         <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onCancel}>
           Cancel

@@ -42,6 +42,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/quartermaster"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/secrets"
 	"github.com/crewship-ai/crewship/internal/server"
@@ -341,7 +342,19 @@ var startCmd = &cobra.Command{
 		if deps.DB != nil {
 			notifyRouterDispatcher := notify.NewDispatcher(
 				notify.NewChannelStore(deps.DB), mailer.NewFromEnv(), logger, deps.DB)
-			notifyRateLimiter := notifyroute.NewRateLimiter(5, 1.0/30.0) // burst 5, refill 1/30s
+			// Runtime-tunable via the admin Rate Limiters console: burst and
+			// refill are read live from ratelimitcfg on each Allow (defaults
+			// burst 5, refill 1 token / 30s).
+			notifyRateLimiter := notifyroute.NewDynamicRateLimiter(
+				func() float64 { return float64(ratelimitcfg.Int(ratelimitcfg.KeyNotifyBurst)) },
+				func() float64 {
+					sec := ratelimitcfg.Int(ratelimitcfg.KeyNotifyRefillSec)
+					if sec < 1 {
+						sec = ratelimitcfg.DefaultFor(ratelimitcfg.KeyNotifyRefillSec)
+					}
+					return 1.0 / float64(sec)
+				},
+			)
 			notifyRouter := notifyroute.NewRouter(
 				deps.DB, notifyRouterDispatcher, srv.WSHub(), notifyRateLimiter, logger)
 			inbox.SetExternalNotifier(notifyRouter)
@@ -1064,6 +1077,24 @@ var startCmd = &cobra.Command{
 				userModelWg.Wait()
 			}()
 		}
+
+		// Post-deployment migrations run HERE, not before Start: their whole
+		// purpose is to keep a row-count-proportional backfill out of the boot
+		// path, so an install with a large journal starts serving in seconds
+		// instead of minutes. They batch, commit per batch, and resume if this
+		// process dies partway.
+		//
+		// A failure is logged, not fatal. The server is already serving and the
+		// schema change is additive by contract
+		// (internal/database/migrations/post_deploy/README.md), so refusing to
+		// serve over an incomplete backfill would trade a degraded feature for
+		// an outage. `crewship db migration-status` reports what is outstanding.
+		go func() {
+			if err := database.RunPostDeployMigrations(ctx, db.DB, logger); err != nil {
+				logger.Error("post-deployment migrations did not complete; "+
+					"run `crewship db migration-status` for what is outstanding", "error", err)
+			}
+		}()
 
 		if err := srv.Start(ctx); err != nil {
 			return fmt.Errorf("server error: %w", err)

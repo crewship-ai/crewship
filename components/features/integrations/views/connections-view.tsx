@@ -28,11 +28,11 @@ const KIND_ICON: Record<ConnectionKind, LucideIcon> = {
 }
 
 const STATUS_STYLE: Record<ConnectionStatus, string> = {
-  delivering: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
-  failing: "border-red-400/35 bg-red-400/10 text-red-300",
-  never_used: "border-amber-400/30 bg-amber-400/10 text-amber-300",
+  delivering: "border-success/30 bg-success/10 text-success",
+  failing: "border-destructive/35 bg-destructive/10 text-destructive",
+  never_used: "border-warn/30 bg-warn/10 text-warn",
   disabled: "border-white/10 bg-white/[0.03] text-muted-foreground",
-  unknown: "border-sky-400/25 bg-sky-400/10 text-sky-300",
+  unknown: "border-info/25 bg-info/10 text-info",
 }
 
 interface ConnectionsViewProps {
@@ -106,7 +106,7 @@ export function ConnectionsView({
   return (
     <div className="space-y-4 p-4 md:p-6">
       {error && (
-        <div className="rounded-lg border border-red-400/30 bg-red-400/[0.06] px-3 py-2 text-xs text-red-300">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive">
           {error}
         </div>
       )}

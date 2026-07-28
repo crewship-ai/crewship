@@ -57,7 +57,7 @@ export function McpEndpointsTab({
                   {binding.endpoint || `…?user_id=${binding.user_id}`}
                 </span>
               </div>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/[0.08] px-2 py-0.5 text-[10px] text-emerald-400">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/[0.08] px-2 py-0.5 text-[10px] text-success">
                 ● live
               </span>
             </div>

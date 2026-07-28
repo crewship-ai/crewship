@@ -554,11 +554,11 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                 {authorCrewId ? (
                   describeLead ? (
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-violet-500 to-cyan-400" />
+                      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-purple to-notice" />
                       Lead: <b className="text-foreground">{describeLead.name}</b>
                     </span>
                   ) : (
-                    <span className="text-amber-400">No Lead in this crew</span>
+                    <span className="text-warn">No Lead in this crew</span>
                   )
                 ) : (
                   <span className="text-muted-foreground-soft">pick a crew →</span>
@@ -738,7 +738,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                     <span className="font-mono">slug: {slug}</span>
                   </div>
                   {parseError && (
-                    <Badge variant="outline" className="text-[10px] border-red-500/30 text-red-400">
+                    <Badge variant="outline" className="text-[10px] border-destructive/30 text-destructive">
                       invalid JSON
                     </Badge>
                   )}
@@ -759,7 +759,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                   <div
                     className={cn(
                       "border-t px-3 py-2 text-xs",
-                      testResult.passed ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" : "border-red-500/30 bg-red-500/5 text-red-400",
+                      testResult.passed ? "border-success/30 bg-success/5 text-success" : "border-destructive/30 bg-destructive/5 text-destructive",
                     )}
                   >
                     <div className="flex items-center gap-1.5 font-medium">
@@ -778,7 +778,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                   type="checkbox"
                   checked={skipTestGate}
                   onChange={(e) => setSkipTestGate(e.target.checked)}
-                  className="h-3 w-3 cursor-pointer accent-blue-500"
+                  className="h-3 w-3 cursor-pointer"
                 />
                 Skip test-run gate
                 <AlertTriangle className="h-2.5 w-2.5" />

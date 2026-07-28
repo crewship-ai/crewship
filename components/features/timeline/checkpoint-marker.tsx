@@ -64,14 +64,14 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
     <div className="relative flex gap-3 pl-6">
       <span
         aria-hidden
-        className="absolute left-[-7px] top-2.5 w-4 h-4 rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center"
+        className="absolute left-[-7px] top-2.5 w-4 h-4 rounded-full bg-warn/20 border-2 border-warn flex items-center justify-center"
       >
-        <Flag className="h-2 w-2 text-amber-300" />
+        <Flag className="h-2 w-2 text-warn" />
       </span>
 
-      <div className="flex-1 min-w-0 rounded-lg border-2 border-amber-500/40 bg-amber-500/5 px-3 py-2">
+      <div className="flex-1 min-w-0 rounded-lg border-2 border-warn/40 bg-warn/5 px-3 py-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <Badge className="gap-1 bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          <Badge className="gap-1 bg-warn/20 text-warn border border-warn/40">
             <Flag className="h-3 w-3" /> Checkpoint
           </Badge>
           <span className="text-sm font-medium text-foreground">{label}</span>

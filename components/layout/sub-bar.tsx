@@ -48,6 +48,14 @@ export interface SubBarTab<T extends string = string> {
 export interface SubBarProps<T extends string = string> {
   icon?: LucideIcon
   title: string
+  /**
+   * Active section inside a page that has its own internal nav (Admin's
+   * console sections, Settings' tabs). Renders as `Title / Section` with the
+   * title demoted and the section emphasised, so the row reads as a path
+   * rather than two competing headings. Pages without sections omit it and
+   * keep the plain full-strength title.
+   */
+  section?: React.ReactNode
   /** Live, "·"-separated context (counts / status). Muted, hidden on mobile. */
   description?: React.ReactNode
   /** Extra inline nodes after the description (status badges, Live dot, …). */
@@ -74,6 +82,7 @@ const SCROLL_X = "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-st
 export function SubBar<T extends string = string>({
   icon: Icon,
   title,
+  section,
   description,
   meta,
   leading,
@@ -95,7 +104,23 @@ export function SubBar<T extends string = string>({
 
         <div className="flex items-center gap-2 min-w-0">
           {Icon && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
-          <h1 className="text-body font-medium text-foreground whitespace-nowrap shrink-0">{title}</h1>
+          {/* One <h1> spanning the whole path, so the accessible name of the
+              page is "Admin Console / Users" rather than a bare section label
+              floating next to an unrelated heading. */}
+          <h1 className="text-body whitespace-nowrap shrink-0">
+            <span className={section != null ? "font-normal text-muted-foreground" : "font-medium text-foreground"}>
+              {title}
+            </span>
+            {section != null && (
+              <>
+                {/* whitespace-pre, not a flex gap: the separator has to exist
+                    as real text or the accessible name collapses to
+                    "Admin ConsoleUsers". */}
+                <span className="text-muted-foreground-soft whitespace-pre"> / </span>
+                <span className="font-medium text-foreground">{section}</span>
+              </>
+            )}
+          </h1>
           {description != null && (
             <>
               <span className="text-muted-foreground-soft shrink-0 hidden sm:inline">·</span>
@@ -166,7 +191,7 @@ function SubBarTabButton<T extends string>({
       {tab.label}
       {tab.badge != null && <span className="text-[11px] text-muted-foreground/70">{tab.badge}</span>}
       {tab.locked && (
-        <span className="text-[9px] uppercase tracking-wider text-amber-400/70 font-mono">
+        <span className="text-[9px] uppercase tracking-wider text-warn/70 font-mono">
           {tab.lockedLabel ?? "soon"}
         </span>
       )}

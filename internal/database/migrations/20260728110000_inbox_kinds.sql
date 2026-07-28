@@ -1,38 +1,39 @@
-package database
+-- Widen inbox_items.kind to admit 'schedule_circuit_breaker_tripped'.
+--
+-- internal/pipeline/schedules.go raises an inbox alert when a schedule is
+-- auto-disabled after N consecutive failures (#1405). It wrote the bare
+-- literal "schedule_circuit_breaker_tripped", which no migration had ever
+-- added to the CHECK — v90 widened the set for 'memory_consolidation' and
+-- v162 for 'schedule_missed', but nothing ever admitted this one.
+--
+-- The failure was invisible. inbox.Insert LOGS its error rather than
+-- propagating it, so in production every one of these inserts failed the
+-- constraint and was swallowed into a Warn line. The cost-bleed protection
+-- worked; the alert telling a human "your routine has been disabled and is
+-- no longer running" reached nobody.
+--
+-- It also escaped test coverage: internal/pipeline's rig (openPinningTestDB)
+-- builds a hand-rolled inbox_items with NO CHECK, so the circuit-breaker test
+-- asserted the alert landed and passed green. That rig is corrected in the
+-- same change, and TestInboxKindsMatchSchema inserts every inbox.AllKinds
+-- value against the REAL migrated schema so the code's vocabulary and the
+-- constraint cannot silently diverge again.
+--
+-- SQLite has no ALTER CHECK, so the table is recreated per the documented
+-- pattern (v90, v162): create _new with the widened constraint, copy
+-- positionally, drop, rename, recreate all four indexes. No triggers exist on
+-- this table (verified against the migrated schema), so none are restored.
+--
+-- Runs INSIDE the wrapper transaction, unlike v167: nothing references
+-- inbox_items, so the rebuild needs no PRAGMA foreign_keys=OFF.
+--
+-- The kind list here must stay in sync with internal/inbox.AllKinds — the
+-- totality guard fails CI if it drifts.
+--
+-- Authored as v168 and renumbered on merge: that slot went to
+-- rate_limit_overrides first, and the sequential block closed at v169 while
+-- this branch was open.
 
-// migrationInboxKinds (v168) widens the inbox_items.kind CHECK to admit
-// 'schedule_circuit_breaker_tripped'.
-//
-// Bug this fixes: internal/pipeline/schedules.go raises an inbox alert when
-// a schedule is auto-disabled after N consecutive failures (#1405). It wrote
-// the bare literal "schedule_circuit_breaker_tripped", which no migration
-// had ever added to the CHECK — v90 widened the set to include
-// 'memory_consolidation' and v162 to include 'schedule_missed', but nothing
-// ever admitted the circuit-breaker value.
-//
-// The failure was invisible. inbox.Insert LOGS its error rather than
-// propagating it to any user-visible path, so in production every one of
-// these inserts failed the constraint and was swallowed into a Warn line.
-// The cost-bleed protection worked; the alert telling a human "your routine
-// has been disabled and is no longer running" reached nobody.
-//
-// It also escaped test coverage: internal/pipeline's rig
-// (openPinningTestDB) builds a hand-rolled inbox_items with no CHECK, so
-// schedules_circuit_breaker_test.go asserted the alert landed and passed
-// green. That rig is corrected in the same change, and
-// TestInboxKindsMatchSchema (migrate_v168_inbox_kinds_test.go) now inserts
-// every inbox.AllKinds value against the REAL migrated schema so the code's
-// vocabulary and the constraint can never silently diverge again.
-//
-// SQLite has no ALTER CHECK, so the table is recreated per the documented
-// pattern (see v90, v162): create _new with the widened constraint, copy
-// positionally, drop, rename, recreate all four indexes. No triggers exist
-// on this table (verified against the migrated schema), so none are
-// restored.
-//
-// The kind list here must stay in sync with internal/inbox.AllKinds — the
-// totality guard fails CI if it drifts.
-const migrationInboxKinds = `
 CREATE TABLE inbox_items_new (
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -82,4 +83,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_items_kind_source
 CREATE INDEX IF NOT EXISTS idx_inbox_items_subject_ws
     ON inbox_items (data_subject_id, workspace_id)
     WHERE data_subject_id IS NOT NULL;
-`

@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -85,12 +86,27 @@ type WebhookHandler struct {
 	fence *untrusted.Fence
 
 	// agentRatePerMin / agentMaxConcurrent gate agent-webhook dispatch
-	// (R4#3). Defaulted in the constructor; overridable (tests tighten
-	// them to trip the gate deterministically). agentRuns is the shared
-	// in-flight registry backing the concurrency cap.
+	// (R4#3). agentRatePerMin is 0 by default, meaning "follow the runtime
+	// ratelimitcfg value" (admin-tunable, default 60/min) — see
+	// agentRateLimit(). A test sets a positive value to pin the gate
+	// deterministically. agentRuns is the shared in-flight registry backing
+	// the concurrency cap.
 	agentRatePerMin    int
 	agentMaxConcurrent int
 	agentRuns          *pipeline.RunRegistry
+}
+
+// agentRateLimit resolves the effective per-agent per-minute cap: an explicit
+// positive field (test override) wins; otherwise the runtime-tunable
+// ratelimitcfg value (admin-adjustable, defaults to defaultAgentWebhookRatePerMin).
+func (h *WebhookHandler) agentRateLimit() int {
+	if h.agentRatePerMin > 0 {
+		return h.agentRatePerMin
+	}
+	if v := ratelimitcfg.Int(ratelimitcfg.KeyWebhookAgentPerMin); v > 0 {
+		return v
+	}
+	return defaultAgentWebhookRatePerMin
 }
 
 // NewWebhookHandler creates a WebhookHandler with the given dependencies for webhook verification and dispatch.
@@ -111,7 +127,7 @@ func NewWebhookHandler(
 		hub:                hub,
 		container:          container,
 		logWriter:          logWriter,
-		agentRatePerMin:    defaultAgentWebhookRatePerMin,
+		agentRatePerMin:    0, // 0 → follow runtime ratelimitcfg (default defaultAgentWebhookRatePerMin)
 		agentMaxConcurrent: defaultAgentWebhookMaxConcurrent,
 		agentRuns:          pipeline.NewRunRegistry(),
 	}
@@ -319,15 +335,16 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 	// On reject we Forget the just-made reservation so a legitimate retry
 	// with the same key isn't poisoned for the full TTL (mirrors the
 	// pipeline executor's Forget-on-concurrency-reject).
-	if !pipeline.AllowWebhookFire(agentWebhookRateKey(agentID), h.agentRatePerMin) {
+	ratePerMin := h.agentRateLimit()
+	if !pipeline.AllowWebhookFire(agentWebhookRateKey(agentID), ratePerMin) {
 		if h.idem != nil && info.WorkspaceID != "" {
 			if fErr := h.idem.Forget(ctx, info.WorkspaceID, webhookIdempotencyPipelineID, idemKey); fErr != nil {
 				h.logger.Warn("webhook rate gate: failed to release reservation", "agent_id", agentID, "error", fErr)
 			}
 		}
 		h.logger.Warn("webhook rate gate: agent over per-minute limit, dropping delivery",
-			"agent_id", agentID, "limit_per_min", h.agentRatePerMin)
-		return fmt.Errorf("webhook: agent %s rate limit exceeded (%d/min)", agentID, h.agentRatePerMin)
+			"agent_id", agentID, "limit_per_min", ratePerMin)
+		return fmt.Errorf("webhook: agent %s rate limit exceeded (%d/min)", agentID, ratePerMin)
 	}
 
 	// In-flight concurrency cap (R4#3, second layer) — acquired UP FRONT,

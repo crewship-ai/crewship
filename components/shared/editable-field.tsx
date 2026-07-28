@@ -103,7 +103,7 @@ export function EditableField({
               className="appearance-none bg-transparent border border-transparent hover:border-white/10 rounded px-2 pr-6 py-0.5 text-sm text-foreground/90 cursor-pointer focus:outline-none focus:border-white/15"
             >
               {options.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-zinc-900">
+                <option key={opt.value} value={opt.value} className="bg-muted">
                   {opt.label}
                 </option>
               ))}
@@ -111,8 +111,8 @@ export function EditableField({
             <ChevronDown className="absolute right-1 h-3 w-3 text-muted-foreground pointer-events-none" />
           </div>
         )}
-        {savedFlash && <Check className="h-3 w-3 text-emerald-400" />}
-        {error && <span className="text-[11px] text-red-400" title={error}>!</span>}
+        {savedFlash && <Check className="h-3 w-3 text-success" />}
+        {error && <span className="text-[11px] text-destructive" title={error}>!</span>}
       </div>
     )
   }
@@ -137,7 +137,7 @@ export function EditableField({
             }
           }}
           className={cn(
-            "flex-1 bg-transparent border border-white/15 rounded px-2 py-0.5 text-sm text-foreground outline-none focus:border-blue-400",
+            "flex-1 bg-transparent border border-white/15 rounded px-2 py-0.5 text-sm text-foreground outline-none focus:border-primary",
             mono && "font-mono",
           )}
         />
@@ -166,9 +166,9 @@ export function EditableField({
       {!editing && !readOnly && (
         <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
       )}
-      {savedFlash && <Check className="h-3 w-3 text-emerald-400" />}
+      {savedFlash && <Check className="h-3 w-3 text-success" />}
       {error && (
-        <span className="text-[11px] text-red-400" title={error}>
+        <span className="text-[11px] text-destructive" title={error}>
           !
         </span>
       )}

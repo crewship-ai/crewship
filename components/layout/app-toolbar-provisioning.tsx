@@ -36,10 +36,10 @@ function ProvisioningBadge({
     && provisioning.recentlyCompleted > 0
   const tone = provisioning.failed > 0 ? "red" : onlyRecent ? "emerald" : "amber"
   const colors = tone === "red"
-    ? { bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", text: "text-red-700 dark:text-red-400", icon: "text-red-600" }
+    ? { bg: "bg-destructive dark:bg-destructive/30 border-destructive dark:border-destructive", text: "text-destructive dark:text-destructive", icon: "text-destructive" }
     : tone === "emerald"
-      ? { bg: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800", text: "text-emerald-700 dark:text-emerald-400", icon: "text-emerald-600" }
-      : { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600" }
+      ? { bg: "bg-success dark:bg-success/30 border-success dark:border-success", text: "text-success dark:text-success", icon: "text-success" }
+      : { bg: "bg-warn dark:bg-warn/30 border-warn dark:border-warn", text: "text-warn dark:text-warn", icon: "text-warn" }
 
   const verbalize = () => {
     if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
@@ -195,7 +195,7 @@ function ProvisioningRow({
         >
           {crew.name}
         </Link>
-        <span className={`text-[10px] uppercase tracking-wide shrink-0 ${recentCompleted ? "text-emerald-500" : "text-muted-foreground"}`}>
+        <span className={`text-[10px] uppercase tracking-wide shrink-0 ${recentCompleted ? "text-success" : "text-muted-foreground"}`}>
           {statusLabel}
         </span>
         {(recentCompleted || crew.status === "failed") && onAcknowledge && (
@@ -214,7 +214,7 @@ function ProvisioningRow({
       {/* Active step at feature granularity — "Building image · installing ansible". */}
       {crew.status === "running" && crew.activeFeature && (
         <div className="ml-4 mb-1 text-[11px] text-foreground flex items-center gap-1.5">
-          <Spinner className="h-3 w-3 shrink-0 text-blue-400" />
+          <Spinner className="h-3 w-3 shrink-0 text-primary" />
           <span className="truncate">
             Building image · installing <span className="font-medium">{crew.activeFeature}</span>
           </span>
@@ -273,10 +273,10 @@ function ProvisioningRow({
             disabled={busy || !workspaceId}
             className={`text-xs px-2.5 py-1 rounded border flex items-center gap-1.5 transition-colors ${
               crew.status === "failed"
-                ? "bg-red-500/15 hover:bg-red-500/25 text-red-300 border-red-500/40"
+                ? "bg-destructive/15 hover:bg-destructive/25 text-destructive border-destructive/40"
                 : isPendingRestart
-                  ? "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40"
-                  : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border-amber-500/40"
+                  ? "bg-success/15 hover:bg-success/25 text-success border-success/40"
+                  : "bg-warn/20 hover:bg-warn/30 text-warn border-warn/40"
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {busy ? (
@@ -368,9 +368,9 @@ function ProvisioningChecklist({
         >
           <span className="w-3 h-3 shrink-0 flex items-center justify-center">
             {row.state === "done" ? (
-              <Check className="h-3 w-3 text-emerald-400" />
+              <Check className="h-3 w-3 text-success" />
             ) : row.state === "active" ? (
-              <Spinner className="h-3 w-3 text-blue-400" />
+              <Spinner className="h-3 w-3 text-primary" />
             ) : (
               <Circle className="h-2 w-2 text-muted-foreground-soft" />
             )}
@@ -384,11 +384,11 @@ function ProvisioningChecklist({
 
 
 function ProvisioningStatusDot({ status, recent }: { status: string; recent?: "completed" | "failed" }) {
-  if (status === "running") return <Spinner className="h-3 w-3 text-blue-500 shrink-0" />
-  if (status === "failed") return <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
-  if (recent === "completed") return <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+  if (status === "running") return <Spinner className="h-3 w-3 text-primary shrink-0" />
+  if (status === "failed") return <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+  if (recent === "completed") return <Check className="h-3 w-3 text-success shrink-0" />
   // needs_provision
-  return <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+  return <span className="h-2 w-2 rounded-full bg-warn shrink-0" />
 }
 
 /**
@@ -411,7 +411,7 @@ function ProvisioningEventSteps({ steps }: { steps: ProvisionStepState[] }) {
           key={s.key}
           className={`flex items-center gap-2 text-[11px] ${
             s.status === "failed"
-              ? "text-red-400 font-medium"
+              ? "text-destructive font-medium"
               : s.status === "started"
                 ? "text-foreground font-medium"
                 : "text-muted-foreground"
@@ -419,11 +419,11 @@ function ProvisioningEventSteps({ steps }: { steps: ProvisionStepState[] }) {
         >
           <span className="w-3 h-3 shrink-0 flex items-center justify-center">
             {s.status === "completed" ? (
-              <Check className="h-3 w-3 text-emerald-400" />
+              <Check className="h-3 w-3 text-success" />
             ) : s.status === "failed" ? (
-              <AlertTriangle className="h-3 w-3 text-red-400" />
+              <AlertTriangle className="h-3 w-3 text-destructive" />
             ) : (
-              <Spinner className="h-3 w-3 text-blue-400" />
+              <Spinner className="h-3 w-3 text-primary" />
             )}
           </span>
           <span className="truncate">{s.label}</span>
@@ -446,12 +446,12 @@ function ProvisioningFailure({ crew }: { crew: ProvisioningCrewState }) {
   return (
     <div className="ml-4 mt-0.5">
       {failedStep && (
-        <div className="text-[11px] text-red-400 font-medium">
+        <div className="text-[11px] text-destructive font-medium">
           Failed at <span className="font-semibold">{failedStep}</span>
         </div>
       )}
       {crew.error && (
-        <pre className="text-[10px] text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap break-words max-h-[60px] overflow-hidden mt-0.5">
+        <pre className="text-[10px] text-destructive dark:text-destructive font-mono whitespace-pre-wrap break-words max-h-[60px] overflow-hidden mt-0.5">
           {crew.error.slice(0, 240)}
         </pre>
       )}
@@ -467,7 +467,7 @@ function RecentBuildSummary({ recent }: { recent: NonNullable<ProvisioningCrewSt
   const extra = recent.features.length - shown.length
   return (
     <div className="ml-4 mt-0.5 text-[11px] text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-      <span className="text-emerald-500">ready</span>
+      <span className="text-success">ready</span>
       <span>·</span>
       <span>built {formatProvisionAgo(recent.at)}</span>
       {recent.durationMs ? <><span>·</span><span>{formatProvisionDuration(recent.durationMs)}</span></> : null}
@@ -475,7 +475,7 @@ function RecentBuildSummary({ recent }: { recent: NonNullable<ProvisioningCrewSt
       {shown.length > 0 && (
         <span className="flex flex-wrap items-center gap-1">
           {shown.map((f) => (
-            <span key={f} className="text-foreground">{f} <Check className="inline h-2.5 w-2.5 text-emerald-400" /></span>
+            <span key={f} className="text-foreground">{f} <Check className="inline h-2.5 w-2.5 text-success" /></span>
           ))}
           {extra > 0 && <span>+{extra}</span>}
         </span>

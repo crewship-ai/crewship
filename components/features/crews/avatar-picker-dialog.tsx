@@ -97,7 +97,7 @@ export function AvatarPickerDialog({
           <img
             src={previewUrl}
             alt=""
-            className="w-24 h-24 rounded-2xl border border-white/10 bg-zinc-900"
+            className="w-24 h-24 rounded-2xl border border-white/10 bg-muted"
           />
         </div>
 
@@ -111,7 +111,7 @@ export function AvatarPickerDialog({
               className={cn(
                 "rounded border text-xs transition-colors p-1.5 flex items-center gap-2",
                 draftStyle === null
-                  ? "border-blue-400 bg-blue-500/10 text-blue-300"
+                  ? "border-primary bg-primary/10 text-primary"
                   : "border-white/10 hover:bg-white/5",
               )}
               title={crewStyle ? `Inherit from crew: ${crewStyle}` : "Inherit from crew"}
@@ -131,7 +131,7 @@ export function AvatarPickerDialog({
                 className={cn(
                   "rounded border text-xs transition-colors p-1.5 flex items-center gap-2",
                   draftStyle === s.value
-                    ? "border-blue-400 bg-blue-500/10 text-blue-300"
+                    ? "border-primary bg-primary/10 text-primary"
                     : "border-white/10 hover:bg-white/5",
                 )}
               >
@@ -158,7 +158,7 @@ export function AvatarPickerDialog({
                 aria-label={`Use avatar seed ${qs}`}
                 className={cn(
                   "rounded-lg overflow-hidden border transition-colors",
-                  draftSeed === qs ? "border-blue-400" : "border-white/10 hover:border-white/25",
+                  draftSeed === qs ? "border-primary" : "border-white/10 hover:border-white/25",
                 )}
               >
                 <img src={getAgentAvatarUrl(qs, effectiveStyle)} alt="" className="w-full h-auto" />
@@ -174,7 +174,7 @@ export function AvatarPickerDialog({
             <button
               type="button"
               onClick={() => setDraftSeed(Math.random().toString(36).slice(2, 12))}
-              className="text-[11px] flex items-center gap-1 text-blue-300 hover:text-blue-200"
+              className="text-[11px] flex items-center gap-1 text-primary hover:text-primary"
             >
               <RefreshCw className="h-3 w-3" />
               Regenerate
@@ -185,7 +185,7 @@ export function AvatarPickerDialog({
             value={draftSeed}
             onChange={(e) => setDraftSeed(e.target.value)}
             aria-label="Avatar seed"
-            className="w-full bg-zinc-950 border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-blue-400"
+            className="w-full bg-background border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-primary"
           />
           <div className="text-[11px] text-muted-foreground mt-1">
             Identical seeds across agents produce identical faces. Leave the agent name as the
@@ -206,7 +206,7 @@ export function AvatarPickerDialog({
             type="button"
             onClick={submit}
             disabled={busy}
-            className="text-sm px-3 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40"
+            className="text-sm px-3 py-1.5 rounded bg-primary hover:bg-primary text-white disabled:opacity-40"
           >
             {busy ? "Saving…" : "Save avatar"}
           </button>

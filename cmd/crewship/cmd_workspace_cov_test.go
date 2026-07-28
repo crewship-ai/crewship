@@ -452,8 +452,14 @@ func TestSendWorkspaceInvitation(t *testing.T) {
 			t.Errorf("send: %v", err)
 		}
 	})
-	if !strings.Contains(out, "Invitation sent to a@b.c (ADMIN role).") {
+	// Deliberately no longer claims an email went out — nothing is wired to
+	// send one, and the old wording sent admins away believing the invitee
+	// had been contacted.
+	if !strings.Contains(out, "Invitation recorded for a@b.c (ADMIN role).") {
 		t.Errorf("output:\n%s", out)
+	}
+	if !strings.Contains(out, "No email was sent") {
+		t.Errorf("the warning that nothing was delivered is missing:\n%s", out)
 	}
 	calls := stub.CallsFor("POST", "/api/v1/workspaces/"+covWS+"/invitations")
 	if len(calls) != 1 {

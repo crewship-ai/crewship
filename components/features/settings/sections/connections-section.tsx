@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils"
 import { resolveCrewColor } from "@/lib/colors"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
+import { useAbilities } from "@/hooks/use-abilities"
+import { isManagerTier } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow } from "../shared"
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -62,6 +64,14 @@ function CrewDot({ color }: { color?: string | null }) {
 // ── Component ────────────────────────────────────────────────────────
 
 export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
+  // Both `POST` and `DELETE /crew-connections` are `roleCreate` server-side
+  // (MANAGER+, internal/api/router_crews.go). This component has no
+  // existing role prop, so pull it from useAbilities() rather than adding
+  // one — but gate on isManagerTier, not abilities.can(...): see
+  // lib/permissions/tiers.ts for why CASL isn't the right check here.
+  const { role: callerRole } = useAbilities()
+  const canManage = isManagerTier(callerRole)
+
   const [crews, setCrews] = useState<Crew[]>([])
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
@@ -154,6 +164,11 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   return (
     <div className="space-y-5">
       {/* ── Create Connection ── */}
+      {/* Unlike Members, this card has no read-only content of its own —
+          it's a bare mutation form. Below MANAGER there's nothing worth
+          leaving on screen (a form with no reachable submit isn't "the
+          list"), so omit the whole card and say why once, quietly. */}
+      {canManage ? (
       <SettingsCard
         title="Create connection"
         description="Link two crews so agents on one can dispatch tasks to the other"
@@ -255,6 +270,11 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
           </Button>
         </div>
       </SettingsCard>
+      ) : (
+        <p className="text-[11px] text-muted-foreground px-1">
+          Only managers and admins can create or remove crew connections.
+        </p>
+      )}
 
       {/* ── Active Connections ── */}
       <SettingsCard
@@ -303,21 +323,25 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     label={conn.status}
                     className="text-[10px]"
                   />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={isDisconnecting}
-                    onClick={() => handleDisconnect(conn.id)}
-                    aria-label={`Disconnect ${conn.from_crew_name} ${conn.direction === "bidirectional" ? "↔" : "→"} ${conn.to_crew_name}`}
-                    className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                  >
-                    {isDisconnecting ? (
-                      <Spinner className="size-3" />
-                    ) : (
-                      <Trash2 className="size-3" />
-                    )}
-                  </Button>
+                  {/* The connection graph stays readable for everyone;
+                      only the disconnect action is MANAGER+. */}
+                  {canManage && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={isDisconnecting}
+                      onClick={() => handleDisconnect(conn.id)}
+                      aria-label={`Disconnect ${conn.from_crew_name} ${conn.direction === "bidirectional" ? "↔" : "→"} ${conn.to_crew_name}`}
+                      className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    >
+                      {isDisconnecting ? (
+                        <Spinner className="size-3" />
+                      ) : (
+                        <Trash2 className="size-3" />
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
             )

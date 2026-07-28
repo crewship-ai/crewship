@@ -27,33 +27,33 @@ import { Card, Pill } from "@/components/features/routines/_shared"
 // Visual status → semantic Pill tone mapping. Mirrors what the
 // routines detail panel header does so the status badge has the same
 // tonal language across the app.
-function statusToneFor(status: string | undefined): "emerald" | "rose" | "amber" | "blue" | "violet" | "default" {
+function statusToneFor(status: string | undefined): "success" | "destructive" | "warn" | "blue" | "purple" | "default" {
   switch (status) {
     case "COMPLETED":
     case "DONE":
-      return "emerald"
+      return "success"
     case "FAILED":
     case "CANCELLED":
     case "DUPLICATE":
-      return "rose"
+      return "destructive"
     case "IN_PROGRESS":
       return "blue"
     case "REVIEW":
-      return "violet"
+      return "purple"
     case "PLANNING":
     case "TODO":
-      return "amber"
+      return "warn"
     default:
       return "default"
   }
 }
 
-function priorityToneFor(p: IssuePriority | undefined): "rose" | "amber" | "blue" | "default" {
+function priorityToneFor(p: IssuePriority | undefined): "destructive" | "warn" | "blue" | "default" {
   switch (p) {
     case "urgent":
-      return "rose"
+      return "destructive"
     case "high":
-      return "amber"
+      return "warn"
     case "medium":
     case "low":
       return "blue"
@@ -311,13 +311,13 @@ export function IssueDetailInline({
                 <button
                   disabled={isTransitioning !== null}
                   onClick={() => triggerWorkflow("review_approved", `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, { action: "approve" }, "Issue approved")}
-                  className="inline-flex h-9 items-center gap-2 rounded-md bg-emerald-500/20 px-4 text-sm font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/30 disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-md bg-success/20 px-4 text-sm font-semibold text-success transition-colors hover:bg-success/30 disabled:opacity-50"
                 >
                   ✓ {isTransitioning === "review_approved" ? "Approving…" : "Approve"}
                 </button>
                 <button
                   onClick={() => setReviewChangesOpen(!reviewChangesOpen)}
-                  className="inline-flex h-9 items-center gap-2 rounded-md bg-amber-500/20 px-4 text-sm font-medium text-amber-400 transition-colors hover:bg-amber-500/30"
+                  className="inline-flex h-9 items-center gap-2 rounded-md bg-warn/20 px-4 text-sm font-medium text-warn transition-colors hover:bg-warn/30"
                 >
                   Request changes
                 </button>
@@ -365,7 +365,7 @@ export function IssueDetailInline({
               exit={{ opacity: 0, height: 0 }}
               className="px-6 pt-3"
             >
-              <Card tone="amber" title="Request changes">
+              <Card tone="warn" title="Request changes">
                 <div className="space-y-2 p-3">
                   <textarea
                     className="h-20 w-full resize-none rounded-md border border-border bg-background p-2.5 text-[13px] outline-none focus:border-primary/50"
@@ -400,7 +400,7 @@ export function IssueDetailInline({
                           toast.error(e?.detail || "Failed")
                         }
                       }}
-                      className="h-8 rounded-md bg-amber-500/20 px-3 text-xs font-medium text-amber-400 hover:bg-amber-500/30"
+                      className="h-8 rounded-md bg-warn/20 px-3 text-xs font-medium text-warn hover:bg-warn/30"
                     >
                       Send
                     </button>
@@ -639,7 +639,7 @@ export function IssueDetailInline({
                               patchIssue({ project_id: null })
                               setProjectPopoverOpen(false)
                             }}
-                            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12px] text-rose-400/80 transition-colors hover:bg-rose-500/10"
+                            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12px] text-destructive/80 transition-colors hover:bg-destructive/10"
                           >
                             <span className="h-3 w-3 inline-block">×</span>
                             <span>Remove project</span>
@@ -692,11 +692,11 @@ export function IssueDetailInline({
 
 const KPI_TONE = {
   default: "bg-muted text-muted-foreground",
-  emerald: "bg-emerald-500/20 text-emerald-400",
+  emerald: "bg-success/20 text-success",
   blue: "bg-blue-500/20 text-blue-400",
-  violet: "bg-violet-500/20 text-violet-400",
-  rose: "bg-rose-500/20 text-rose-400",
-  amber: "bg-amber-500/20 text-amber-400",
+  violet: "bg-purple/20 text-purple",
+  rose: "bg-destructive/20 text-destructive",
+  amber: "bg-warn/20 text-warn",
 } as const
 
 function KpiTile({

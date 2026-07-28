@@ -14,16 +14,16 @@ import type { JournalEntry } from "@/lib/types/journal"
 /** Maps severity → stripe colour. Stripe is the 2-px accent on the left edge. */
 const SEVERITY_STRIPE: Record<string, string> = {
   info: "bg-blue-500/70",
-  notice: "bg-cyan-500/70",
-  warn: "bg-amber-500/80",
-  error: "bg-red-500/90",
+  notice: "bg-notice/70",
+  warn: "bg-warn/80",
+  error: "bg-destructive/90",
 }
 
 const SEVERITY_PILL: Record<string, string> = {
   info: "bg-blue-500/15 text-blue-300 border-blue-500/30",
-  notice: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30",
-  warn: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  error: "bg-red-500/15 text-red-300 border-red-500/30",
+  notice: "bg-notice/15 text-notice border-notice/30",
+  warn: "bg-warn/15 text-warn border-warn/30",
+  error: "bg-destructive/15 text-destructive border-destructive/30",
 }
 
 const ACTOR_PILL: Record<string, string> = {
@@ -63,7 +63,7 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
   // Keeper denial: red left border, regardless of severity mapping.
   const isDenied = entry.entry_type === "keeper.decision" && isKeeperDenied(entry)
   const borderClass = isDenied
-    ? "border-red-500/50"
+    ? "border-destructive/50"
     : "border-border/50"
 
   const isExec = entry.entry_type === "exec.command"
@@ -138,10 +138,10 @@ function SummaryEntryCard({ entry }: { entry: JournalEntry }) {
   const [expanded, setExpanded] = useState(body.length < 400)
 
   return (
-    <div className="relative rounded-xl border-2 border-amber-500/60 bg-amber-500/5 overflow-hidden">
+    <div className="relative rounded-xl border-2 border-warn/60 bg-warn/5 overflow-hidden">
       <div className="px-4 py-3">
         <div className="flex items-start gap-2 flex-wrap">
-          <Badge className="gap-1 bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          <Badge className="gap-1 bg-warn/20 text-warn border border-warn/40">
             <Sparkles className="h-3 w-3" /> Crew Summary
           </Badge>
           <span className="ml-auto text-[11px] text-muted-foreground font-mono tabular-nums">
@@ -164,7 +164,7 @@ function SummaryEntryCard({ entry }: { entry: JournalEntry }) {
               <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
-                className="mt-1.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors"
+                className="mt-1.5 text-[11px] text-warn hover:text-warn transition-colors"
               >
                 {expanded ? "Collapse" : "Read more"}
               </button>
@@ -195,8 +195,8 @@ function ExecCommandDetail({ entry }: { entry: JournalEntry }) {
           className={cn(
             "text-[10px] border font-mono",
             exitNum === 0
-              ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
-              : "bg-red-500/15 text-red-300 border-red-500/40",
+              ? "bg-success/15 text-success border-success/40"
+              : "bg-destructive/15 text-destructive border-destructive/40",
           )}
         >
           exit {exitNum}

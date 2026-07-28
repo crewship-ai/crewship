@@ -205,7 +205,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
                     aria-label={`Select ${u.email} for GDPR action`}
                     className={
                       "w-full flex items-center justify-between gap-3 px-3 py-2 text-left transition-colors " +
-                      (isActive ? "bg-emerald-500/10 " : "hover:bg-white/[0.02] ") +
+                      (isActive ? "bg-success/10 " : "hover:bg-white/[0.02] ") +
                       (idx < filtered.length - 1 ? "border-b border-border/40" : "")
                     }
                   >

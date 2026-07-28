@@ -283,7 +283,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                   aria-pressed={window === wv}
                   className={cn(
                     "h-7 px-2.5 text-[10px] font-mono uppercase tracking-wider transition-colors border-r border-border/60 last:border-r-0",
-                    window === wv ? "bg-blue-500/15 text-blue-300" : "text-muted-foreground hover:text-foreground",
+                    window === wv ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {wv}
@@ -312,7 +312,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
             label={`Runs (${window})`}
             value={t ? t.total.toLocaleString() : "—"}
             icon={Zap}
-            iconTone="bg-blue-500/20 text-blue-400"
+            iconTone="bg-info/20 text-info"
             split={t ? { ok: t.succeeded, failed: t.failed } : undefined}
             sub={t ? `${t.succeeded.toLocaleString()} ok · ${t.failed.toLocaleString()} failed` : undefined}
           />
@@ -321,7 +321,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
             value={rate === null ? "—" : `${rate}%`}
             valueColor={successRateColor(rate)}
             icon={CheckCircle}
-            iconTone="bg-emerald-500/20 text-emerald-400"
+            iconTone="bg-success/20 text-success"
             sub={t && t.running > 0 ? `${t.running} running now` : "of completed runs"}
           />
           <RunsKpiTile
@@ -329,14 +329,14 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
             value={t ? t.failed.toLocaleString() : "—"}
             valueColor={t && t.failed > 0 ? "rgb(248, 113, 113)" : undefined}
             icon={XCircle}
-            iconTone="bg-rose-500/20 text-rose-400"
+            iconTone="bg-destructive/20 text-destructive"
             sub={t && t.failed > 0 ? "needs attention" : "all clean"}
           />
           <RunsKpiTile
             label="Median duration"
             value={insights && insights.duration.p50_ms > 0 ? formatDurationMillis(insights.duration.p50_ms) : "—"}
             icon={Clock}
-            iconTone="bg-violet-500/20 text-violet-400"
+            iconTone="bg-purple/20 text-purple"
             sub={
               insights && insights.duration.p95_ms > 0
                 ? `p95 ${formatDurationMillis(insights.duration.p95_ms)}`
@@ -357,7 +357,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
               total: c.total,
               failed: c.failed,
             }))}
-            barClass="bg-cyan-400/70"
+            barClass="bg-notice/70"
           />
           <TopCrewsCard crews={insights?.by_crew ?? []} />
           <BreakdownCard
@@ -396,13 +396,13 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                     "h-7 px-2.5 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 transition-colors border-r border-border/60 last:border-r-0",
                     active
                       ? s === "FAILED"
-                        ? "bg-red-500/15 text-red-300"
+                        ? "bg-destructive/15 text-destructive"
                         : s === "RUNNING"
-                          ? "bg-emerald-500/15 text-emerald-300"
+                          ? "bg-success/15 text-success"
                           : s === "COMPLETED"
-                            ? "bg-sky-500/15 text-sky-300"
+                            ? "bg-info/15 text-info"
                             : s === "TIMEOUT"
-                              ? "bg-amber-500/15 text-amber-300"
+                              ? "bg-warn/15 text-warn"
                               : s === "CANCELLED"
                                 ? "bg-muted text-foreground"
                                 : "bg-primary/15 text-primary-hover"
@@ -515,7 +515,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                     }}
                     title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
                     className={cn(
-                      "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40",
+                      "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40",
                       idx < runs.length - 1 && "border-b border-border/40",
                     )}
                     style={{ gridTemplateColumns: RUN_GRID }}
@@ -637,7 +637,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
     )
   }
   return (
-    <div className="rounded-xl border border-emerald-500/25 bg-card overflow-hidden">
+    <div className="rounded-xl border border-success/25 bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
         <StatusDot status="IN_PROGRESS" live className="h-2 w-2" />
         <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground/85">
@@ -672,7 +672,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
               <span className="text-[11px] text-muted-foreground truncate w-28 hidden sm:block">
                 {run.crew_name ?? "—"}
               </span>
-              <span className="text-[10px] font-mono text-cyan-300/80 hidden md:block">
+              <span className="text-[10px] font-mono text-notice/80 hidden md:block">
                 {triggerLabel(run.trigger_type)}
               </span>
               {run.model && (
@@ -680,7 +680,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
                   {shortModel(run.model)}
                 </span>
               )}
-              <span className="ml-auto font-mono tabular-nums text-[11px] text-emerald-300">
+              <span className="ml-auto font-mono tabular-nums text-[11px] text-success">
                 {run.started_at ? <LiveRunDuration startedAt={run.started_at} /> : "running"}
               </span>
             </li>
@@ -729,8 +729,8 @@ function RunsKpiTile({
       </div>
       {split && splitTotal > 0 && (
         <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
-          <span className="bg-emerald-400/80" style={{ width: `${okPct}%` }} />
-          <span className="bg-rose-400/80" style={{ width: `${100 - okPct}%` }} />
+          <span className="bg-success/80" style={{ width: `${okPct}%` }} />
+          <span className="bg-destructive/80" style={{ width: `${100 - okPct}%` }} />
         </div>
       )}
       {sub && <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div>}
@@ -779,7 +779,7 @@ function BreakdownCard({
                 <span className="truncate">{r.label}</span>
                 <span className="ml-auto font-mono tabular-nums text-muted-foreground">
                   {r.total.toLocaleString()}
-                  {r.failed > 0 && <span className="text-rose-400/80"> · {r.failed} fail</span>}
+                  {r.failed > 0 && <span className="text-destructive/80"> · {r.failed} fail</span>}
                 </span>
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
@@ -812,10 +812,10 @@ function TopCrewsCard({ crews }: { crews: RunInsights["by_crew"] }) {
             const fr = failRate(c.total, c.failed)
             return (
               <li key={c.id || c.name} className="flex items-center gap-2.5 px-4 py-2.5">
-                <span className={cn("h-1.5 w-1.5 rounded-full", fr >= 15 ? "bg-rose-500" : "bg-emerald-500")} />
+                <span className={cn("h-1.5 w-1.5 rounded-full", fr >= 15 ? "bg-destructive" : "bg-success")} />
                 <span className="flex-1 truncate text-sm">{c.name}</span>
                 <span className="font-mono tabular-nums text-[12px] text-foreground/80">{c.total.toLocaleString()}</span>
-                <span className={cn("font-mono tabular-nums text-[11px] w-10 text-right", fr >= 15 ? "text-rose-400" : "text-emerald-400")}>
+                <span className={cn("font-mono tabular-nums text-[11px] w-10 text-right", fr >= 15 ? "text-destructive" : "text-success")}>
                   {fr}%
                 </span>
               </li>

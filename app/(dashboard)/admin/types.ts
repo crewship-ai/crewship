@@ -97,3 +97,4 @@ export type TabKey =
   | "reviews"
   | "backups"
   | "notifications"
+  | "ratelimits"

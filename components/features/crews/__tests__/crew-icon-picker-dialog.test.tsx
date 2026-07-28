@@ -85,6 +85,6 @@ describe("<CrewIconPickerDialog>", () => {
     rerender(<CrewIconPickerDialog {...baseProps} open={true} icon="briefcase" color="blue" />)
     // After re-open, the active icon should be briefcase again, not rocket.
     const briefcaseBtn = document.querySelector('button[title="briefcase"]')
-    expect(briefcaseBtn?.className).toContain("border-blue-400")
+    expect(briefcaseBtn?.className).toContain("border-primary")
   })
 })

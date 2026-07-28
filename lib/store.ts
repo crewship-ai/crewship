@@ -6,25 +6,25 @@ export interface BreadcrumbItem {
   onClick?: () => void
 }
 
+// `settingsTab` used to live here: the Settings page mirrored its local active
+// tab into the store so the global top bar could render a "Settings / <tab>"
+// breadcrumb. That breadcrumb moved into the Settings sub-bar, which reads the
+// page's own state, leaving the field with a writer and no reader.
 interface AppState {
   currentWorkspaceId: string | null
   sidebarOpen: boolean
-  settingsTab: string | null
   breadcrumbs: BreadcrumbItem[]
   setCurrentWorkspaceId: (id: string | null) => void
   setSidebarOpen: (open: boolean) => void
-  setSettingsTab: (tab: string | null) => void
   setBreadcrumbs: (items: BreadcrumbItem[]) => void
 }
 
-/** Global application state store (Zustand) for workspace context, sidebar, settings, and breadcrumbs. */
+/** Global application state store (Zustand) for workspace context, sidebar, and breadcrumbs. */
 export const useAppStore = create<AppState>((set) => ({
   currentWorkspaceId: null,
   sidebarOpen: true,
-  settingsTab: null,
   breadcrumbs: [],
   setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
-  setSettingsTab: (tab) => set({ settingsTab: tab }),
   setBreadcrumbs: (items) => set({ breadcrumbs: items }),
 }))

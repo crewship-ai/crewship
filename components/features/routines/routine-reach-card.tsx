@@ -26,9 +26,9 @@ import { brandLogo } from "@/components/features/integrations/composio/shared"
  */
 
 const MODE_STYLE: Record<string, string> = {
-  full: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
-  read: "border-sky-400/25 bg-sky-400/10 text-sky-300",
-  custom: "border-amber-400/25 bg-amber-400/10 text-amber-300",
+  full: "border-success/25 bg-success/10 text-success",
+  read: "border-info/25 bg-info/10 text-info",
+  custom: "border-warn/25 bg-warn/10 text-warn",
 }
 
 interface AgentLite {

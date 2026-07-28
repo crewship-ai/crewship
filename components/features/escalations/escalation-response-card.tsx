@@ -53,9 +53,9 @@ function confidenceWidthClass(confidence: number): string {
 function ConfidenceIndicator({ confidence }: { confidence: number }) {
   const level = confidence <= 0.3 ? "low" : confidence <= 0.6 ? "medium" : "high"
   const colors = {
-    low: "bg-red-500",
-    medium: "bg-amber-500",
-    high: "bg-emerald-500",
+    low: "bg-destructive",
+    medium: "bg-warn",
+    high: "bg-success",
   }
   const labels = { low: "Low", medium: "Medium", high: "High" }
 
@@ -67,9 +67,9 @@ function ConfidenceIndicator({ confidence }: { confidence: number }) {
           <div className={`h-full rounded-full ${colors[level]} ${confidenceWidthClass(confidence)}`} />
         </div>
         <span className={`text-label font-medium ${
-          level === "low" ? "text-red-600 dark:text-red-400" :
-          level === "medium" ? "text-amber-600 dark:text-amber-400" :
-          "text-emerald-600 dark:text-emerald-400"
+          level === "low" ? "text-destructive dark:text-destructive" :
+          level === "medium" ? "text-warn dark:text-warn" :
+          "text-success dark:text-success"
         }`}>
           {labels[level]} ({Math.round(confidence * 100)}%)
         </span>
@@ -189,10 +189,10 @@ export function EscalationResponseCard({
           )}
 
           {evidencePack.error && (
-            <div className="rounded-md bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 p-2.5">
+            <div className="rounded-md bg-destructive/5 dark:bg-destructive/30 border border-destructive/30 dark:border-destructive/50 p-2.5">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="h-3.5 w-3.5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
-                <span className="text-body text-red-700 dark:text-red-300 font-mono text-xs break-all">
+                <AlertTriangle className="h-3.5 w-3.5 text-destructive dark:text-destructive mt-0.5 shrink-0" />
+                <span className="text-body text-destructive dark:text-destructive font-mono text-xs break-all">
                   {evidencePack.error}
                 </span>
               </div>
@@ -215,10 +215,10 @@ export function EscalationResponseCard({
           )}
 
           {evidencePack.suggested_action && (
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 p-2.5">
-              <span className="text-label font-medium text-blue-700 dark:text-blue-300">
+            <div className="rounded-md bg-info/10 dark:bg-info/30 border border-info/20 dark:border-info/50 p-2.5">
+              <span className="text-label font-medium text-info dark:text-info">
                 Suggested: </span>
-              <span className="text-body text-blue-600 dark:text-blue-400">
+              <span className="text-body text-info dark:text-info">
                 {evidencePack.suggested_action}
               </span>
             </div>
@@ -241,7 +241,7 @@ export function EscalationResponseCard({
             href={metadataUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:text-primary dark:text-primary dark:hover:text-primary underline"
           >
             <ExternalLink className="h-3.5 w-3.5" />
             Open link
@@ -312,7 +312,7 @@ export function EscalationResponseCard({
             size="sm"
             onClick={() => handleResolve("approve")}
             disabled={submitting || (!hasPendingCredential && !resolution.trim())}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            className="bg-success hover:bg-success text-white"
           >
             <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
             {submitting ? "Sending..." : "Approve"}
@@ -322,7 +322,7 @@ export function EscalationResponseCard({
             variant="outline"
             onClick={() => handleResolve("reject")}
             disabled={submitting || (!hasPendingCredential && !resolution.trim())}
-            className="border-red-300 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+            className="border-destructive/30 text-destructive hover:bg-destructive/5 dark:border-destructive/50 dark:text-destructive dark:hover:bg-destructive/30"
           >
             <XCircle className="h-3.5 w-3.5 mr-1" />
             Reject
@@ -332,7 +332,7 @@ export function EscalationResponseCard({
             variant="outline"
             onClick={handleRedirectClick}
             disabled={submitting}
-            className="border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/30"
+            className="border-primary text-primary hover:bg-primary/10 dark:border-primary dark:text-primary dark:hover:bg-primary/30"
           >
             <ArrowRightLeft className="h-3.5 w-3.5 mr-1" />
             Redirect
@@ -342,7 +342,7 @@ export function EscalationResponseCard({
               size="sm"
               onClick={() => handleResolve("redirect")}
               disabled={submitting || !resolution.trim() || !redirectTo}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-primary hover:bg-primary text-white"
             >
               <Send className="h-3.5 w-3.5 mr-1" />
               Send redirect
@@ -361,17 +361,17 @@ export function EscalationResponseCard({
 const ACTION_BADGES: Record<string, { label: string; className: string; icon: React.ComponentType<{ className?: string }> }> = {
   approve: {
     label: "Approved",
-    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    className: "bg-success/15 text-success dark:bg-success/40 dark:text-success",
     icon: CheckCircle2,
   },
   reject: {
     label: "Rejected",
-    className: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
+    className: "bg-destructive/15 text-destructive dark:bg-destructive/40 dark:text-destructive",
     icon: XCircle,
   },
   redirect: {
     label: "Redirected",
-    className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
+    className: "bg-info/15 text-info dark:bg-info/40 dark:text-info",
     icon: ArrowRightLeft,
   },
 }

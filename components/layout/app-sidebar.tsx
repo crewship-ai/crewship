@@ -145,7 +145,7 @@ export function AppSidebar() {
                         </SidebarMenuButton>
                         {showInboxBadge && (
                           <SidebarMenuBadge
-                            className="bg-blue-500/15 text-blue-300 px-1.5 text-[10px] font-semibold tabular-nums"
+                            className="bg-info/15 text-info px-1.5 text-[10px] font-semibold tabular-nums"
                             aria-label={`${inboxUnread > 99 ? "99+" : inboxUnread} unread inbox items`}
                           >
                             {inboxUnread > 99 ? "99+" : inboxUnread}

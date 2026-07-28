@@ -19,6 +19,10 @@ on:
       # including the rewriteTableDefaultLiteral helper that v144, v148 and
       # v161 all share. A guard that does not run is not a guard.
       - 'internal/database/migrate*.go'
+      # The registry moved out of migrate.go: new migrations are .sql files
+      # here. A PR that only edits one of those must still trip this guard —
+      # editing a shipped migration is the violation, whichever form it takes.
+      - 'internal/database/migrations/**'
       - 'scripts/lint-migrations/**'
       - '.github/workflows/migration-lint.yml'
   push:
@@ -45,7 +49,7 @@ jobs:
       # fetch-depth: 0 so the cross-branch comparison can read origin/main.
       # The lint tool runs `git show origin/main:internal/database/migrate.go`
       # which needs the full ref tree.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 

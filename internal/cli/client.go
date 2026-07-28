@@ -183,6 +183,11 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+	// A real User-Agent (crewship/<version> (<os>/<arch>)) instead of Go's
+	// default "Go-http-client/2.0" — that default is what the server was
+	// recording into user_sessions.user_agent, making every CLI login on
+	// every machine look identical and unattributable in the sessions UI.
+	req.Header.Set("User-Agent", UserAgent())
 	for key, values := range c.extraHeaders {
 		for _, v := range values {
 			req.Header.Add(key, v)
@@ -344,6 +349,11 @@ func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string,
 	if err != nil {
 		return "", fmt.Errorf("create workspace request: %w", err)
 	}
+	// This preflight builds its own request instead of going through
+	// NewRequest, so the User-Agent has to be set here too (see the comment
+	// on that call site) — otherwise the slug-resolution round-trip alone
+	// would still show up as the generic Go default.
+	req.Header.Set("User-Agent", UserAgent())
 	if err := c.applyAuth(req); err != nil {
 		return "", err
 	}

@@ -12,6 +12,7 @@ import { useNotificationPrefs, type PrefCell } from "@/hooks/use-notification-pr
 import {
   MUTE_CATEGORY,
   NOTIFICATION_CATEGORY_GROUPS,
+  labelForCategory,
 } from "@/lib/notification-categories"
 import { SettingsCard, SettingsEmpty } from "../shared"
 
@@ -55,21 +56,40 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
     [stateOf],
   )
 
+  const channelLabel = useCallback(
+    (channelId: string) => {
+      const ch = usableChannels.find((c) => c.id === channelId)
+      if (!ch) return channelId
+      return ch.type === "email" ? ch.to : ch.type === "shoutrrr" ? ch.provider : ch.url
+    },
+    [usableChannels],
+  )
+
   const handleToggle = useCallback(
     async (category: string, channelId: string) => {
       const key = `${category}:${channelId}`
       const current = stateOf(category, channelId)
       const next: PrefCell["state"] = current === "immediate" ? "off" : "immediate"
+      // Taxonomy v2 replaced the hardcoded 9-category list this used to read.
+      // labelForCategory also covers the retired keys, so a stored preference
+      // written before the migration still names itself in the toast.
+      const catLabel = labelForCategory(category)
       setPendingKey(key)
       try {
         await setCell({ category, channel_id: channelId, state: next })
+        toast.success(
+          next === "immediate" ? `${catLabel} set to immediate delivery` : `${catLabel} turned off`,
+          { description: channelLabel(channelId) },
+        )
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to update preference")
+        toast.error("Failed to update preference", {
+          description: e instanceof Error ? e.message : undefined,
+        })
       } finally {
         setPendingKey(null)
       }
     },
-    [setCell, stateOf],
+    [setCell, stateOf, channelLabel],
   )
 
   const handleToggleMute = useCallback(
@@ -79,13 +99,18 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
       setPendingKey(key)
       try {
         await setCell({ category: MUTE_CATEGORY, channel_id: channelId, state: next })
+        toast.success(next === "immediate" ? "Channel muted" : "Channel unmuted", {
+          description: channelLabel(channelId),
+        })
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to update mute")
+        toast.error("Failed to update mute", {
+          description: e instanceof Error ? e.message : undefined,
+        })
       } finally {
         setPendingKey(null)
       }
     },
-    [setCell, isMuted],
+    [setCell, isMuted, channelLabel],
   )
 
   const handleTest = useCallback(

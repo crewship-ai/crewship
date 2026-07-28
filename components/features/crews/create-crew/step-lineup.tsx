@@ -39,7 +39,7 @@ function ModeTabs({ state, setMode }: { state: WizardState; setMode: (m: WizardS
           className={cn(
             "px-3.5 py-2.5 text-xs flex items-center gap-2 border-b-2 -mb-px transition-colors",
             state.mode === id
-              ? "border-blue-400 text-foreground"
+              ? "border-primary text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground/80",
           )}
         >
@@ -149,7 +149,7 @@ function BrowseTemplates({ state, setState }: Props) {
   }, [picked, state.name, state.slug, state.description, state.icon, state.color, setState])
 
   return (
-    <div className="grid grid-cols-[1fr_320px] gap-0 border border-white/10 rounded-lg overflow-hidden bg-zinc-950/40 min-h-[440px] max-h-[480px]">
+    <div className="grid grid-cols-[1fr_320px] gap-0 border border-white/10 rounded-lg overflow-hidden bg-background/40 min-h-[440px] max-h-[480px]">
       <div className="flex flex-col min-h-0 border-r border-white/10">
         <div className="px-3 py-2 border-b border-white/10 flex items-center gap-2">
           <div className="flex-1 relative">
@@ -160,7 +160,7 @@ function BrowseTemplates({ state, setState }: Props) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder='Search templates… (e.g. "saas", "research")'
-              className="w-full pl-8 pr-2 py-1.5 text-xs bg-black/30 border border-white/15 rounded outline-none focus:border-blue-400"
+              className="w-full pl-8 pr-2 py-1.5 text-xs bg-black/30 border border-white/15 rounded outline-none focus:border-primary"
             />
           </div>
         </div>
@@ -205,7 +205,7 @@ function BrowseTemplates({ state, setState }: Props) {
               className={cn(
                 "p-2.5 rounded-md border bg-card text-left flex gap-2.5 items-start transition-colors",
                 state.pickedTemplateSlug === t.slug
-                  ? "border-blue-400 bg-blue-500/10"
+                  ? "border-primary bg-primary/10"
                   : "border-white/10 hover:border-white/20",
               )}
             >
@@ -214,7 +214,7 @@ function BrowseTemplates({ state, setState }: Props) {
                 <div className="text-xs font-semibold flex items-center gap-1.5">
                   <span className="truncate">{t.name}</span>
                   {t.is_builtin && (
-                    <span className="shrink-0 inline-flex items-center justify-center h-3 w-3 rounded-full bg-blue-500 text-[8px] text-blue-950 font-bold">
+                    <span className="shrink-0 inline-flex items-center justify-center h-3 w-3 rounded-full bg-info text-[8px] text-info font-bold">
                       ✓
                     </span>
                   )}
@@ -254,7 +254,7 @@ function SourceTab({ active, onClick, label, badge, pill, disabled }: { active: 
       onClick={onClick}
       className={cn(
         "px-3 py-2 text-xs flex items-center gap-1.5 border-b-2 -mb-px",
-        active ? "border-blue-400 text-foreground" : "border-transparent text-muted-foreground",
+        active ? "border-primary text-foreground" : "border-transparent text-muted-foreground",
         !disabled && "hover:text-foreground/80",
         disabled && "opacity-40 cursor-not-allowed",
       )}
@@ -263,7 +263,7 @@ function SourceTab({ active, onClick, label, badge, pill, disabled }: { active: 
       {disabled && <Lock className="h-2.5 w-2.5" />}
       {label}
       {typeof badge === "number" && (
-        <span className={cn("text-[9px] px-1.5 rounded-full font-semibold", active ? "bg-blue-500/20 text-blue-300" : "bg-white/5 text-muted-foreground")}>
+        <span className={cn("text-[9px] px-1.5 rounded-full font-semibold", active ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground")}>
           {badge}
         </span>
       )}
@@ -282,7 +282,7 @@ function CategoryChip({ label, active, count, onClick }: { label: string; active
       className={cn(
         "shrink-0 px-2.5 py-0.5 rounded-full text-[11px] border whitespace-nowrap transition-colors capitalize",
         active
-          ? "bg-blue-500/20 border-blue-400 text-blue-300"
+          ? "bg-primary/20 border-primary text-primary"
           : "bg-card border-white/10 text-foreground/70 hover:border-white/20",
       )}
     >
@@ -299,7 +299,7 @@ function SourceMark({ builtin }: { builtin: boolean }) {
   return (
     <span className={cn(
       "text-[9px] px-1.5 py-0.5 rounded",
-      builtin ? "bg-white/5 text-muted-foreground" : "bg-emerald-500/15 text-emerald-300",
+      builtin ? "bg-white/5 text-muted-foreground" : "bg-success/15 text-success",
     )}>
       {builtin ? "built-in" : "workspace"}
     </span>
@@ -339,7 +339,7 @@ function PreviewPane({ template }: { template: CrewTemplate }) {
             >
               <div className={cn(
                 "h-6 w-6 rounded text-[11px] font-semibold flex items-center justify-center shrink-0",
-                agent.agent_role === "LEAD" ? "bg-amber-500/15 text-amber-300" : "bg-violet-500/15 text-violet-300",
+                agent.agent_role === "LEAD" ? "bg-warn/15 text-warn" : "bg-purple/15 text-purple",
               )}>
                 {agent.name.slice(0, 1).toUpperCase()}
               </div>
@@ -350,7 +350,7 @@ function PreviewPane({ template }: { template: CrewTemplate }) {
               <span className={cn(
                 "text-[9px] font-mono px-1.5 py-0.5 rounded",
                 agent.agent_role === "LEAD"
-                  ? "bg-amber-500/15 text-amber-300"
+                  ? "bg-warn/15 text-warn"
                   : "bg-white/5 text-muted-foreground",
               )}>
                 {agent.agent_role}
@@ -369,7 +369,7 @@ function PreviewPane({ template }: { template: CrewTemplate }) {
 
 function EmptyMode() {
   return (
-    <div className="rounded-lg border border-dashed border-white/15 px-6 py-10 text-center bg-zinc-950/30">
+    <div className="rounded-lg border border-dashed border-white/15 px-6 py-10 text-center bg-background/30">
       <FileX2 className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
       <h4 className="text-sm font-semibold">Empty crew</h4>
       <p className="text-xs text-muted-foreground mt-1.5 max-w-sm mx-auto">

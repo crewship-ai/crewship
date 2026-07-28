@@ -129,7 +129,7 @@ export function NotificationBell() {
         >
           <Bell className="h-4 w-4" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[9px] font-bold text-white ring-2 ring-background">
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-info text-[9px] font-bold text-white ring-2 ring-background">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -141,7 +141,7 @@ export function NotificationBell() {
           {unreadCount > 0 && (
             <button
               onClick={markAllRead}
-              className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+              className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
             >
               <CheckCheck className="h-3 w-3" />
               Mark all read
@@ -168,7 +168,7 @@ export function NotificationBell() {
                     aria-label={isUnread ? `Mark notification as read: ${n.actor_name || n.actor_type} ${ACTION_LABELS[n.action] || n.action} ${n.entity_title || ""}` : undefined}
                     className={cn(
                       "flex items-start gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors cursor-pointer group",
-                      isUnread && "bg-blue-500/[0.03]",
+                      isUnread && "bg-info/[0.03]",
                     )}
                     onClick={() => {
                       if (isUnread) markAsRead(n.id)
@@ -183,7 +183,7 @@ export function NotificationBell() {
                     {/* Unread dot */}
                     <div className="pt-1.5 shrink-0 w-2">
                       {isUnread && (
-                        <div className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+                        <div className="h-1.5 w-1.5 rounded-full bg-info" />
                       )}
                     </div>
 
@@ -209,7 +209,7 @@ export function NotificationBell() {
                           e.stopPropagation()
                           markAsRead(n.id)
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/[0.08] text-muted-foreground-soft hover:text-blue-400 transition-all shrink-0 mt-0.5"
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/[0.08] text-muted-foreground-soft hover:text-primary transition-all shrink-0 mt-0.5"
                         aria-label="Mark as read"
                         title="Mark as read"
                       >

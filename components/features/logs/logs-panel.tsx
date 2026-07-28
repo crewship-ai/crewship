@@ -394,7 +394,7 @@ export function LogsPanel({
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2, ease: "easeOut" }}
-            className="px-3 py-2 border-b border-border/50 bg-red-500/10 text-red-300 text-[11px] flex items-center gap-2 shrink-0 overflow-hidden"
+            className="px-3 py-2 border-b border-border/50 bg-destructive/10 text-destructive text-[11px] flex items-center gap-2 shrink-0 overflow-hidden"
           >
             <AlertCircle className="h-3.5 w-3.5 shrink-0" />
             <span>{error}</span>
@@ -537,7 +537,7 @@ function EmptyState({
             onClick={onClearFilters}
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
-            className="mt-1 inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] text-sky-300 hover:bg-sky-500/20"
+            className="mt-1 inline-flex items-center gap-1 h-6 px-2 rounded border border-primary/40 bg-primary/10 text-[10px] text-primary hover:bg-primary/20"
           >
             Clear all filters
             <span className="opacity-60 font-mono">Esc</span>

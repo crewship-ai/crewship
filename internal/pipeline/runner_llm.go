@@ -314,13 +314,11 @@ func (r *LLMRunner) providerForWorkspace(ctx context.Context, workspaceID string
 	// in those cases ASC silently picks a stale key, which we
 	// caught in CodeRabbit review of #285.
 	var encryptedValue string
-	err := r.db.QueryRowContext(ctx, `
-SELECT encrypted_value FROM credentials
-WHERE workspace_id = ?
-  AND provider = 'ANTHROPIC'
-  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
-  AND status = 'ACTIVE'
-  AND deleted_at IS NULL
+	// anthropicLLMCredentialFilter is the SHARED predicate the run-time
+	// credential gate probes against too, so the gate never blocks a run this
+	// resolver could complete (see internal/pipeline/anthropic_credential.go).
+	err := r.db.QueryRowContext(ctx,
+		`SELECT encrypted_value FROM credentials WHERE workspace_id = ? AND `+anthropicLLMCredentialFilter+`
 ORDER BY created_at DESC
 LIMIT 1`, workspaceID).Scan(&encryptedValue)
 	if errors.Is(err, sql.ErrNoRows) {

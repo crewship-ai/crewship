@@ -9,6 +9,14 @@ import { ProfileSection } from "../sections/profile-section"
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 
+// ProfileSection re-pulls the global session after a successful identity
+// write so the top bar picks the change up; without a provider around it
+// useAuth would throw here.
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ refresh: vi.fn().mockResolvedValue(undefined) }),
+}))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+
 function ok(payload: unknown = {}) {
   return { ok: true, status: 200, json: async () => payload }
 }

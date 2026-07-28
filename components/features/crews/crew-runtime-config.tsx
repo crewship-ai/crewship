@@ -131,12 +131,12 @@ export function CrewRuntimeConfig({
       <div className="flex items-center gap-3">
         <Label className="text-xs font-medium">Cache Status</Label>
         {isProvisioned ? (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success dark:text-success">
             <CheckCircle2 className="h-3.5 w-3.5" />
             Provisioned
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-warn dark:text-warn">
             <Circle className="h-3.5 w-3.5" />
             Not provisioned
           </span>

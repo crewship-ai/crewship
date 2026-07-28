@@ -19,11 +19,11 @@ import type { ConnectionRow } from "../connection-model"
  */
 
 const STATUS_STYLE: Record<string, string> = {
-  sent: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
-  failed: "border-red-400/35 bg-red-400/10 text-red-300",
-  pending: "border-sky-400/25 bg-sky-400/10 text-sky-300",
-  dropped_pref: "border-amber-400/30 bg-amber-400/10 text-amber-300",
-  dropped_rate: "border-amber-400/30 bg-amber-400/10 text-amber-300",
+  sent: "border-success/30 bg-success/10 text-success",
+  failed: "border-destructive/35 bg-destructive/10 text-destructive",
+  pending: "border-info/25 bg-info/10 text-info",
+  dropped_pref: "border-warn/30 bg-warn/10 text-warn",
+  dropped_rate: "border-warn/30 bg-warn/10 text-warn",
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -99,7 +99,7 @@ export function DeliveriesView({
   return (
     <div className="space-y-4 p-4 md:p-6">
       {error && (
-        <div className="rounded-lg border border-red-400/30 bg-red-400/[0.06] px-3 py-2 text-xs text-red-300">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive">
           {error}
         </div>
       )}

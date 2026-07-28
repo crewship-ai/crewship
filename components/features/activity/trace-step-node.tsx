@@ -49,12 +49,12 @@ export type { TraceStepNodeData, TraceTriggerNodeData }
 // type chip on the node so a colorblind user can still distinguish
 // kinds when icons aren't enough.
 const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: string }> = {
-  agent_run: { Icon: Sparkles, label: "agent", tint: "text-purple-300" },
-  http: { Icon: Globe, label: "http", tint: "text-cyan-300" },
-  transform: { Icon: ArrowLeftRight, label: "transform", tint: "text-emerald-300" },
-  code: { Icon: Terminal, label: "code", tint: "text-amber-300" },
+  agent_run: { Icon: Sparkles, label: "agent", tint: "text-purple" },
+  http: { Icon: Globe, label: "http", tint: "text-notice" },
+  transform: { Icon: ArrowLeftRight, label: "transform", tint: "text-success" },
+  code: { Icon: Terminal, label: "code", tint: "text-warn" },
   wait: { Icon: PauseCircle, label: "wait", tint: "text-blue-300" },
-  call_pipeline: { Icon: ScrollText, label: "sub-routine", tint: "text-violet-300" },
+  call_pipeline: { Icon: ScrollText, label: "sub-routine", tint: "text-purple" },
   notify: { Icon: BellRing, label: "notify", tint: "text-pink-300" },
   script: { Icon: FileCode2, label: "script", tint: "text-lime-300" },
 }
@@ -62,7 +62,7 @@ const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: str
 // Trigger isn't a real step kind — it's a synthetic node for the
 // run's entry point (issue / schedule / webhook / manual). Local;
 // nobody outside this file renders the trigger visual.
-const TRIGGER_VISUAL = { Icon: Zap, label: "trigger", tint: "text-orange-300" }
+const TRIGGER_VISUAL = { Icon: Zap, label: "trigger", tint: "text-warn" }
 
 const STATUS_RING: Record<StepStatus, { ring: string; bg: string }> = {
   pending: { ring: "ring-1 ring-white/[0.08]", bg: "bg-card" },
@@ -71,12 +71,12 @@ const STATUS_RING: Record<StepStatus, { ring: string; bg: string }> = {
     bg: "bg-card",
   },
   waiting: {
-    ring: "ring-2 ring-amber-400/60 shadow-[0_0_18px_rgba(251,191,36,0.2)]",
+    ring: "ring-2 ring-warn/60 shadow-[0_0_18px_rgba(251,191,36,0.2)]",
     bg: "bg-card",
   },
-  success: { ring: "ring-1 ring-emerald-500/40", bg: "bg-card" },
+  success: { ring: "ring-1 ring-success/40", bg: "bg-card" },
   failed: {
-    ring: "ring-2 ring-rose-500/60 shadow-[0_0_15px_rgba(244,63,94,0.2)]",
+    ring: "ring-2 ring-destructive/60 shadow-[0_0_15px_rgba(244,63,94,0.2)]",
     bg: "bg-card",
   },
   skipped: { ring: "ring-1 ring-white/[0.06] opacity-60", bg: "bg-card" },
@@ -86,25 +86,25 @@ function StatusPip({ status }: { status: StepStatus }) {
   switch (status) {
     case "running":
       return (
-        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-blue-500 ring-2 ring-background">
+        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary ring-2 ring-background">
           <Spinner className="h-2 w-2 text-white" />
         </span>
       )
     case "waiting":
       return (
-        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 ring-2 ring-background">
+        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warn ring-2 ring-background">
           <PauseCircle className="h-2 w-2 animate-pulse text-white" />
         </span>
       )
     case "success":
       return (
-        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 ring-2 ring-background">
+        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-success ring-2 ring-background">
           <Check className="h-2 w-2 text-white" />
         </span>
       )
     case "failed":
       return (
-        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rose-500 ring-2 ring-background">
+        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-destructive ring-2 ring-background">
           <XCircle className="h-2 w-2 text-white" />
         </span>
       )
@@ -230,10 +230,10 @@ function TraceStepNodeBase({ data }: NodeProps) {
         }
       }}
       className={cn(
-        "relative w-[200px] rounded-lg border border-white/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
+        "relative w-[200px] rounded-lg border border-white/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
         ring.bg,
         ring.ring,
-        selected && "ring-2 ring-blue-400",
+        selected && "ring-2 ring-primary",
         "hover:bg-card/80",
         heatmapClass,
       )}
@@ -278,12 +278,12 @@ function TraceStepNodeBase({ data }: NodeProps) {
             </span>
           )}
           {toolName && (
-            <span className="rounded border border-violet-500/40 px-1 py-0 text-[9px] text-violet-300">
+            <span className="rounded border border-purple/40 px-1 py-0 text-[9px] text-purple">
               {toolName}
             </span>
           )}
           {artifactPath && (
-            <span className="max-w-[88px] truncate rounded border border-amber-500/40 px-1 py-0 text-[9px] text-amber-300">
+            <span className="max-w-[88px] truncate rounded border border-warn/40 px-1 py-0 text-[9px] text-warn">
               {baseName(artifactPath)}
             </span>
           )}
@@ -291,7 +291,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
             <span
               className={cn(
                 "ml-auto inline-flex items-center gap-0.5 rounded bg-white/[0.06] px-1 py-0 text-[9px] font-medium",
-                selected ? "text-blue-300" : "text-muted-foreground",
+                selected ? "text-primary" : "text-muted-foreground",
               )}
             >
               {selected ? "▾" : "▸"} {subSpans.length}{" "}
@@ -423,12 +423,12 @@ function WaitpointActions({
       >
         {resolved === "approved" ? (
           <>
-            <Check className="h-2.5 w-2.5 text-emerald-400/70" />
+            <Check className="h-2.5 w-2.5 text-success/70" />
             <span>approved</span>
           </>
         ) : resolved === "denied" ? (
           <>
-            <XCircle className="h-2.5 w-2.5 text-rose-400/70" />
+            <XCircle className="h-2.5 w-2.5 text-destructive/70" />
             <span>denied</span>
           </>
         ) : (
@@ -449,7 +449,7 @@ function WaitpointActions({
         disabled={busy !== null}
         aria-label="Approve waitpoint"
         className={cn(
-          "flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300 transition-colors hover:bg-emerald-500/25 disabled:opacity-50",
+          "flex items-center gap-1 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-medium text-success transition-colors hover:bg-success/25 disabled:opacity-50",
         )}
       >
         {busy === "approve" ? (
@@ -465,7 +465,7 @@ function WaitpointActions({
         disabled={busy !== null}
         aria-label="Deny waitpoint"
         className={cn(
-          "flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-medium text-rose-300 transition-colors hover:bg-rose-500/25 disabled:opacity-50",
+          "flex items-center gap-1 rounded bg-destructive/15 px-1.5 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/25 disabled:opacity-50",
         )}
       >
         {busy === "deny" ? (
@@ -508,7 +508,7 @@ function TriggerNodeBase({ data }: NodeProps) {
     <div
       role="img"
       aria-label={`Trigger ${label}, ${d.pipelineName ?? "routine"}`}
-      className="relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 ring-1 ring-orange-500/30"
+      className="relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 ring-1 ring-warn/30"
     >
       <Handle
         type="source"
@@ -521,7 +521,7 @@ function TriggerNodeBase({ data }: NodeProps) {
           <Icon className="h-3.5 w-3.5" />
         </span>
         <span className="truncate text-xs font-medium text-foreground">{label}</span>
-        <span className="ml-auto rounded bg-orange-500/10 px-1 py-0 text-[9px] uppercase tracking-wider text-orange-300">
+        <span className="ml-auto rounded bg-warn/10 px-1 py-0 text-[9px] uppercase tracking-wider text-warn">
           {TRIGGER_VISUAL.label}
         </span>
       </div>

@@ -75,8 +75,8 @@ export function ToolAccountDetail({
             className={cn(
               "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]",
               active
-                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                : "border-amber-400/30 bg-amber-400/10 text-amber-300",
+                ? "border-success/30 bg-success/10 text-success"
+                : "border-warn/30 bg-warn/10 text-warn",
             )}
           >
             {account.status.toLowerCase()}
@@ -84,7 +84,7 @@ export function ToolAccountDetail({
         </div>
 
         {!active && (
-          <div className="rounded-lg border border-amber-400/30 bg-amber-400/[0.06] px-3 py-2 text-xs text-amber-200">
+          <div className="rounded-lg border border-warn/30 bg-warn/[0.06] px-3 py-2 text-xs text-warn">
             This account&apos;s authorisation is no longer valid. Agents bound to{" "}
             <span className="font-mono">{slug}</span> cannot act through it until it is
             reconnected — use <span className="font-medium">Refresh</span> on the Connected

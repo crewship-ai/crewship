@@ -2,7 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import React from "react"
 import { renderHook, act, waitFor } from "@testing-library/react"
 
-import { AuthProvider, useAuth, useSession } from "@/hooks/use-auth"
+import { AuthProvider, useAuth, useSession, sessionRetryPolicy } from "@/hooks/use-auth"
+
+function retryable(status: number): Response {
+  return {
+    ok: false,
+    status,
+    headers: { get: () => null },
+    json: async () => ({}),
+  } as unknown as Response
+}
 
 function okJSON(body: unknown): Response {
   return {
@@ -37,13 +46,21 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 describe("useAuth / AuthProvider", () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
+  // Snapshot the retry policy so we can collapse the backoff to ~0ms for
+  // fast, deterministic tests and restore it afterwards.
+  const realPolicy = { ...sessionRetryPolicy }
+
   beforeEach(() => {
     mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
+    sessionRetryPolicy.baseMs = 1
+    sessionRetryPolicy.capMs = 2
+    sessionRetryPolicy.maxAttempts = 4
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    Object.assign(sessionRetryPolicy, realPolicy)
   })
 
   it("throws when useAuth is called outside a provider", () => {
@@ -81,11 +98,75 @@ describe("useAuth / AuthProvider", () => {
     expect(result.current.session).toBeNull()
   })
 
-  it("treats a network error on /session as unauthenticated", async () => {
-    mockFetch.mockRejectedValueOnce(new Error("conn refused"))
+  it("settles on 'unauthenticated' when a cold load can never reach the backend", async () => {
+    // Persistent network error on the very first (cold) load — no session was
+    // ever established, so after exhausting retries the UI must fall back to
+    // 'unauthenticated' and offer login rather than spin forever.
+    mockFetch.mockRejectedValue(new Error("conn refused"))
 
     const { result } = renderHook(() => useAuth(), { wrapper })
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"))
+    expect(result.current.session).toBeNull()
+  })
+
+  it("becomes 'unauthenticated' on a 200 with an empty (logged-out) body", async () => {
+    // NextAuth returns 200 {} when there's no valid session. That IS a
+    // definitive logout — no retry.
+    mockFetch.mockResolvedValueOnce(okJSON({}))
+
+    const { result } = renderHook(() => useAuth(), { wrapper })
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"))
+    expect(result.current.session).toBeNull()
+  })
+
+  describe("refresh-logout resilience", () => {
+    const validSession = { user: { id: "u1", name: "A", email: "a@b" }, expires: "2026-05-01" }
+
+    it("keeps the authenticated session when /session is rate-limited (429)", async () => {
+      // First load authenticates.
+      mockFetch.mockResolvedValueOnce(okJSON(validSession))
+      const { result } = renderHook(() => useAuth(), { wrapper })
+      await waitFor(() => expect(result.current.status).toBe("authenticated"))
+
+      // A burst of refreshes drains a bucket somewhere and /session 429s on
+      // every retry. The session must survive — this is the exact
+      // hammer-refresh path that used to log users out.
+      mockFetch.mockResolvedValue(retryable(429))
+      await act(async () => {
+        await result.current.refresh()
+      })
+
+      expect(result.current.status).toBe("authenticated")
+      expect(result.current.session?.user.id).toBe("u1")
+    })
+
+    it("keeps the authenticated session across a transient 503", async () => {
+      mockFetch.mockResolvedValueOnce(okJSON(validSession))
+      const { result } = renderHook(() => useAuth(), { wrapper })
+      await waitFor(() => expect(result.current.status).toBe("authenticated"))
+
+      mockFetch.mockResolvedValue(retryable(503))
+      await act(async () => {
+        await result.current.refresh()
+      })
+
+      expect(result.current.status).toBe("authenticated")
+      expect(result.current.session?.user.id).toBe("u1")
+    })
+
+    it("recovers a cold load when early 429s give way to a valid session", async () => {
+      // Cold page load (F5) that lands on a drained bucket for the first two
+      // probes, then succeeds — the user must end up authenticated, never
+      // bounced to login.
+      mockFetch
+        .mockResolvedValueOnce(retryable(429))
+        .mockResolvedValueOnce(retryable(429))
+        .mockResolvedValueOnce(okJSON(validSession))
+
+      const { result } = renderHook(() => useAuth(), { wrapper })
+      await waitFor(() => expect(result.current.status).toBe("authenticated"))
+      expect(result.current.session?.user.id).toBe("u1")
+    })
   })
 
   describe("signIn", () => {

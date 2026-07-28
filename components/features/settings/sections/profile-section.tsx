@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { toast } from "sonner"
 import {
-  LogOut,
   Copy,
   Check,
   Key,
@@ -15,8 +15,10 @@ import {
   EyeOff,
   AlertTriangle,
   Shield,
+  ChevronRight,
 } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAuth } from "@/hooks/use-auth"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -33,6 +35,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 import { SettingsCard, SettingsRow, SettingsEmpty } from "../shared"
+import { DeviceSessions } from "./device-sessions"
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -180,6 +183,11 @@ const AVATAR_ACCEPT = "image/png,image/jpeg,image/webp"
 export function ProfileSection({
   userName, userEmail, userAvatarUrl, role, workspaceName, joinedAt, sessionExpires, onSignOut,
 }: ProfileSectionProps) {
+  // The avatar and display name also live in the global session, which the
+  // top bar renders from. Writing them without re-pulling it is what made an
+  // upload look like it had done nothing outside this one card.
+  const { refresh: refreshSession } = useAuth()
+
   // ── Editable profile (name) state (#867.1) ──
   const [displayName, setDisplayName] = useState<string | null | undefined>(userName)
   useEffect(() => { setDisplayName(userName) }, [userName])
@@ -217,12 +225,18 @@ export function ProfileSection({
         return
       }
       setAvatarUrl(body?.avatar_url ?? null)
+      // The complaint this fixes: "I set a profile picture and nothing
+      // seemed to happen" — the row updates, but that's easy to miss.
+      // Failures stay inline-only (avatarError above): a toast would just
+      // repeat what's already sitting right next to the button.
+      toast.success("Profile picture updated")
+      void refreshSession()
     } catch {
       setAvatarError("Upload failed")
     } finally {
       setAvatarUploading(false)
     }
-  }, [])
+  }, [refreshSession])
 
   const removeAvatar = useCallback(async () => {
     setAvatarError(null)
@@ -235,12 +249,14 @@ export function ProfileSection({
         return
       }
       setAvatarUrl(null)
+      toast.success("Profile picture removed")
+      void refreshSession()
     } catch {
       setAvatarError("Could not remove avatar")
     } finally {
       setAvatarUploading(false)
     }
-  }, [])
+  }, [refreshSession])
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState("")
   const [savingName, setSavingName] = useState(false)
@@ -285,12 +301,14 @@ export function ProfileSection({
       }
       setDisplayName(trimmed)
       setEditingName(false)
+      toast.success("Name updated")
+      void refreshSession()
     } catch {
       setNameError("Failed to save name")
     } finally {
       setSavingName(false)
     }
-  }, [nameDraft])
+  }, [nameDraft, refreshSession])
 
   const resetPwForm = useCallback(() => {
     setPwCurrent(""); setPwNew(""); setPwConfirm(""); setPwError(null); setPwDone(false)
@@ -330,6 +348,7 @@ export function ProfileSection({
   const [tokenCopied, setTokenCopied] = useState(false)
   const [tokenVisible, setTokenVisible] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<CLIToken | null>(null)
+  const [showRevokedTokens, setShowRevokedTokens] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -410,12 +429,31 @@ export function ProfileSection({
 
   async function handleRevoke() {
     if (!revokeTarget) return
+    const name = revokeTarget.name
     setRevoking(true)
     try {
-      await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
+      // apiFetch RESOLVES on a 4xx/5xx — it does not throw. The previous
+      // version awaited it, ignored res.ok, and swallowed everything in
+      // `catch {}`, so a refused revoke closed the dialog and refreshed the
+      // list exactly like a successful one. The token stayed put and nothing
+      // said why, which reads as "delete is broken".
+      const res = await apiFetch(`/api/v1/auth/cli-tokens/${revokeTarget.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        const detail = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
+        toast.error(`Couldn't revoke ${name}`, { description: detail })
+        return
+      }
+      toast.success(`Revoked ${name}`)
+      setRevokeTarget(null)
       fetchTokens()
-    } catch { /* ignore */ }
-    finally { setRevoking(false); setRevokeTarget(null) }
+    } catch (e) {
+      toast.error(`Couldn't revoke ${name}`, {
+        description: e instanceof Error ? e.message : undefined,
+      })
+    } finally {
+      setRevoking(false)
+    }
   }
 
   function handleCopyToken(text: string) {
@@ -613,31 +651,6 @@ export function ProfileSection({
         )}
       </SettingsCard>
 
-      {/* ── Session ── */}
-      <SettingsCard title="Session" description="Your current login session on this device">
-        <SettingsRow label="Status">
-          <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Active
-          </span>
-        </SettingsRow>
-        {expiresIn && (
-          <SettingsRow label="Expires">
-            <span className="text-[11px] text-muted-foreground font-mono tabular-nums">{expiresIn}</span>
-          </SettingsRow>
-        )}
-        <SettingsRow label="Sign out of this device" border={false}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-            onClick={onSignOut}
-          >
-            <LogOut className="h-3 w-3 mr-1.5" />
-            Sign out
-          </Button>
-        </SettingsRow>
-      </SettingsCard>
 
       {/* ── New token reveal ── */}
       <AnimatePresence>
@@ -690,18 +703,31 @@ export function ProfileSection({
         )}
       </AnimatePresence>
 
-      {/* ── CLI Tokens ── */}
+      {/* ── Sessions & access ──
+          One card answering one question: who can act as me right now?
+          Browser sessions and CLI tokens live in separate tables and behave
+          differently — a session is discovered (unnamed, carries UA + IP,
+          expires on its own), a token is minted (you named it, chose a tier
+          and scopes, saw the secret once) — so they render as two labelled
+          groups rather than one flat list. Splitting them across two cards
+          made someone hunting a compromise have to know to look twice. */}
       <SettingsCard
-        title="CLI Tokens"
-        description="Authenticate the crewship CLI against this workspace"
-        actions={
-          !showCreateForm && (
-            <Button size="sm" variant="outline" className="h-7 px-2.5 gap-1.5 text-xs" onClick={() => setShowCreateForm(true)}>
-              <Plus className="h-3 w-3" />New token
-            </Button>
-          )
-        }
+        title="Sessions &amp; access"
+        description="Everything that can sign in as you right now. Don't recognise something? End it."
       >
+        <DeviceSessions onSignOut={onSignOut} currentExpiresIn={expiresIn} />
+
+        <div className="flex items-center justify-between px-4 pt-3 pb-1.5 border-t border-border/40">
+          <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground/70 font-semibold">
+            CLI tokens
+          </span>
+          {!showCreateForm && (
+            <Button size="sm" variant="ghost" className="h-6 px-2 gap-1.5 text-[11px]" onClick={() => setShowCreateForm(true)}>
+              <Plus className="size-3" />New token
+            </Button>
+          )}
+        </div>
+
         {/* Create form — full token issuance dialog with tier, scopes,
             expiry. Animates open inline rather than via modal so the
             generated token reveal (below) sits next to the form. */}
@@ -884,12 +910,32 @@ export function ProfileSection({
         ) : (
           <>
             {activeTokens.map((token) => <TokenListItem key={token.id} token={token} onRevoke={() => setRevokeTarget(token)} />)}
-            {revokedTokens.map((token) => (
-              <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
-                <span className="text-xs text-muted-foreground line-through">{token.name}</span>
-                <span className="text-[10px] text-muted-foreground font-mono">revoked</span>
-              </div>
-            ))}
+
+            {/* Revoked tokens are collapsed. The card says "everything that
+                can sign in as you right now" — a revoked token cannot, and
+                on a real account a run of struck-through rows pushed the
+                live ones out of view, on the one screen whose job is
+                spotting live access. Still reachable, because "did my
+                revoke actually stick?" should not need the audit log. */}
+            {revokedTokens.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowRevokedTokens((v) => !v)}
+                  aria-expanded={showRevokedTokens}
+                  className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-muted-foreground hover:text-foreground/80 transition-colors border-b border-border/40 last:border-b-0"
+                >
+                  <ChevronRight className={cn("size-3 transition-transform", showRevokedTokens && "rotate-90")} />
+                  {revokedTokens.length} revoked
+                </button>
+                {showRevokedTokens && revokedTokens.map((token) => (
+                  <div key={token.id} className="flex items-center justify-between px-4 py-2 border-b border-border/40 last:border-b-0 opacity-40">
+                    <span className="text-xs text-muted-foreground line-through">{token.name}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">revoked</span>
+                  </div>
+                ))}
+              </>
+            )}
           </>
         )}
       </SettingsCard>
@@ -969,11 +1015,14 @@ function TokenListItem({
             used {timeAgo(token.last_used_at)}
           </span>
         )}
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+        <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke} aria-label="Revoke token">
+              {/* Named after the token, not "Revoke token": a screen-reader
+                  user tabbing a list of five identical buttons has no other
+                  way to tell which one they are on. */}
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onRevoke} aria-label={`Revoke ${token.name}`}>
                 <Trash2 className="h-3 w-3" />
               </Button>
             </TooltipTrigger>

@@ -98,8 +98,8 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
   return (
     <div className="space-y-4">
       {error && (
-        <Card tone="amber">
-          <div className="px-4 py-3 text-sm text-amber-300">{error}</div>
+        <Card tone="warn">
+          <div className="px-4 py-3 text-sm text-warn">{error}</div>
         </Card>
       )}
 
@@ -148,7 +148,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                   className={cn(
                     "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
                     s.enabled
-                      ? "bg-violet-500/20 text-violet-400"
+                      ? "bg-purple/20 text-purple"
                       : "bg-muted text-muted-foreground",
                   )}
                 >
@@ -157,7 +157,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-semibold">{s.name}</span>
-                    <Pill tone={s.enabled ? "violet" : "default"}>
+                    <Pill tone={s.enabled ? "purple" : "default"}>
                       {s.enabled ? "enabled" : "paused"}
                     </Pill>
                     <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
@@ -201,7 +201,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                     size="sm"
                     variant="ghost"
                     onClick={() => del(s)}
-                    className="h-8 w-8 p-0 text-muted-foreground hover:text-rose-400"
+                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
                     title="Delete"
                     aria-label={`Delete schedule ${s.name}`}
                   >

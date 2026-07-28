@@ -55,7 +55,7 @@ export interface CreateAgentDialogProps {
  *  Crews dialogs use; small enough to inline rather than carve out a
  *  separate component. */
 const INPUT_CLASS =
-  "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
+  "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
@@ -292,8 +292,8 @@ export function CreateAgentDialog({
         <div className="overflow-y-auto max-h-[calc(100vh-180px)]">
           <div className="px-5 py-4 space-y-4">
             {hasNoCrews && (
-              <div className="flex gap-2.5 items-start px-3 py-2.5 rounded-lg bg-amber-400/[0.08] border border-amber-400/[0.25] text-[12px]">
-                <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/30">
+              <div className="flex gap-2.5 items-start px-3 py-2.5 rounded-lg bg-warn/[0.08] border border-warn/[0.25] text-[12px]">
+                <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider bg-warn/20 text-warn border border-warn/30">
                   Heads up
                 </span>
                 <div className="text-foreground/85 leading-relaxed">
@@ -313,7 +313,7 @@ export function CreateAgentDialog({
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      className="text-[11.5px] text-blue-400 hover:text-blue-300 inline-flex items-center gap-1"
+                      className="text-[11.5px] text-primary hover:text-primary/80 inline-flex items-center gap-1"
                     >
                       <Layers className="h-3 w-3" />
                       All {BUILTIN_PERSONAS.length} templates
@@ -365,10 +365,10 @@ export function CreateAgentDialog({
                   aria-label="Customize avatar"
                   aria-haspopup="dialog"
                   aria-expanded={pickerOpen}
-                  className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 hover:border-blue-400/50 transition-colors"
+                  className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-muted hover:border-primary/50 transition-colors"
                 >
                   <img src={avatarUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
-                  <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
+                  <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
                     <Pencil className="h-2.5 w-2.5" />
                   </span>
                 </button>
@@ -469,7 +469,7 @@ export function CreateAgentDialog({
                   <button
                     type="button"
                     onClick={handleResetPrompt}
-                    className="text-[11.5px] text-blue-400 hover:text-blue-300"
+                    className="text-[11.5px] text-primary hover:text-primary/80"
                   >
                     Reset
                     {draft.selectedPersona ? ` to ${draft.selectedPersona.name}` : ""}
@@ -491,12 +491,12 @@ PERSONALITY: …
 RESPONSIBILITIES: …
 WORK STYLE: …`}
                 spellCheck={false}
-                className="w-full min-h-[140px] max-h-[260px] resize-y bg-zinc-950 border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
+                className="w-full min-h-[140px] max-h-[260px] resize-y bg-background border border-white/[0.15] rounded-md px-3 py-2 text-[12px] font-mono leading-relaxed outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
               <p className="text-[10.5px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
                 {isPromptFromTemplate && draft.selectedPersona ? (
                   <>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-400/15 text-emerald-300 border border-emerald-400/25">
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-success/15 text-success border border-success/25">
                       Pre-filled
                     </span>
                     <span>
@@ -506,7 +506,7 @@ WORK STYLE: …`}
                   </>
                 ) : draft.editedPersonaPrompt !== null && draft.selectedPersona ? (
                   <>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-300 border border-amber-400/25">
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn/15 text-warn border border-warn/25">
                       Edited
                     </span>
                     <span>
@@ -540,7 +540,7 @@ WORK STYLE: …`}
                     className={cn(
                       "relative w-[30px] h-[18px] rounded-full transition-colors shrink-0 border",
                       draft.memoryEnabled
-                        ? "bg-blue-500 border-transparent"
+                        ? "bg-primary border-transparent"
                         : "bg-white/[0.04] border-white/[0.08]",
                     )}
                   >
@@ -681,7 +681,7 @@ WORK STYLE: …`}
           <span
             className={cn(
               "text-[11px] mr-auto",
-              validationHint ? "text-amber-400" : "text-muted-foreground",
+              validationHint ? "text-warn" : "text-muted-foreground",
             )}
           >
             {validationHint ?? "⌘↵ to create · Esc to close"}
@@ -698,7 +698,7 @@ WORK STYLE: …`}
             type="button"
             onClick={() => void submit()}
             disabled={!valid || submitting}
-            className="text-[12.5px] px-3.5 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 text-white font-medium disabled:opacity-50 flex items-center gap-1.5"
+            className="text-[12.5px] px-3.5 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-white font-medium disabled:opacity-50 flex items-center gap-1.5"
           >
             {submitting ? (
               <Spinner className="h-3.5 w-3.5" />
@@ -775,7 +775,7 @@ function FieldShell({
     <label className="block">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
         <span>{label}</span>
-        {required && <span className="text-red-400">*</span>}
+        {required && <span className="text-destructive">*</span>}
         {hint && (
           <span className="normal-case font-normal tracking-normal text-[11px] text-muted-foreground">
             — {hint}
@@ -870,7 +870,7 @@ function ChipRow<T extends string>({
           className={cn(
             "px-2.5 py-1 rounded-md text-[11.5px] font-mono border transition-colors",
             active === v
-              ? "bg-blue-500/15 border-blue-400/45 text-blue-300"
+              ? "bg-primary/15 border-primary/45 text-primary"
               : "bg-card-2 border-white/[0.08] text-foreground/80 hover:border-white/[0.15]",
           )}
         >

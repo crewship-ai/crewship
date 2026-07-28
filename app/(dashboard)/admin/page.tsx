@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
-  AlertTriangle, Bell,
+  AlertTriangle, Bell, Gauge,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -26,6 +26,7 @@ import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
 import { GdprActionsPanel } from "@/components/features/admin/gdpr-actions-panel"
 import { NotificationsTab } from "./tabs/notifications-tab"
+import { RateLimitsTab } from "./tabs/rate-limits-tab"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -62,6 +63,7 @@ const sections: NavSection[] = [
     items: [
       { key: "providers", label: "Runtime", icon: Server },
       { key: "notifications", label: "Notifications", icon: Bell },
+      { key: "ratelimits", label: "Rate Limiters", icon: Gauge },
     ],
   },
   {
@@ -296,6 +298,10 @@ export default function AdminPage() {
       return <NotificationsTab workspaceId={workspaceId} />
     }
 
+    if (tab === "ratelimits") {
+      return <RateLimitsTab workspaceId={workspaceId} />
+    }
+
     if (tab === "reviews") {
       return <KeeperQueuePanel workspaceId={workspaceId} />
     }
@@ -331,6 +337,7 @@ export default function AdminPage() {
       <SubBar
         icon={Shield}
         title="Admin Console"
+        section={activeItem?.label}
         ariaLabel="Admin Console"
         meta={
           <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">{role ?? ""}</span>
@@ -385,7 +392,7 @@ export default function AdminPage() {
           {fetchError && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300"
+              className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn"
             >
               <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
               <span>{fetchError}</span>

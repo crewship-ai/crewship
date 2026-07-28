@@ -246,7 +246,7 @@ export function SettingsTab({
             Integrations
             <span className="text-muted-foreground text-sm font-normal ml-1">{integrations?.length ?? 0}</span>
           </h2>
-          <Link href="/integrations" className="text-xs text-blue-300 hover:underline">
+          <Link href="/integrations" className="text-xs text-primary hover:underline">
             Manage workspace integrations →
           </Link>
         </div>
@@ -258,7 +258,7 @@ export function SettingsTab({
           <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
             {integrations.map((i) => (
               <div key={i.id} className="px-4 py-2.5 flex items-center gap-3">
-                <div className="w-7 h-7 rounded bg-violet-500/20 text-violet-300 grid place-items-center text-xs font-semibold">
+                <div className="w-7 h-7 rounded bg-purple/20 text-purple grid place-items-center text-xs font-semibold">
                   {i.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1">
@@ -267,7 +267,7 @@ export function SettingsTab({
                 </div>
                 <span className={cn(
                   "text-[10px]",
-                  i.status === "connected" ? "text-emerald-400" : "text-muted-foreground",
+                  i.status === "connected" ? "text-success" : "text-muted-foreground",
                 )}>
                   {i.status}
                 </span>
@@ -279,8 +279,8 @@ export function SettingsTab({
 
       {/* Danger */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-red-400">Danger zone</h2>
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-destructive">Danger zone</h2>
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-center justify-between">
           <div>
             <div className="text-sm font-medium">Delete this crew</div>
             <div className="text-xs text-muted-foreground">
@@ -290,7 +290,7 @@ export function SettingsTab({
           <button
             type="button"
             onClick={onDelete}
-            className="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 flex items-center gap-1.5"
+            className="text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive border border-destructive/40 hover:bg-destructive/30 flex items-center gap-1.5"
           >
             <Trash2 className="h-3 w-3" />
             Delete {crew.name}

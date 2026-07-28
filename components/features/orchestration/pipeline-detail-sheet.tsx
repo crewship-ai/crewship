@@ -164,7 +164,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
         </SheetHeader>
 
         {loading && <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>}
-        {error && <div className="py-4 text-sm text-red-500">Error: {error}</div>}
+        {error && <div className="py-4 text-sm text-destructive">Error: {error}</div>}
 
         {pipeline && !loading && (
           <Tabs defaultValue="overview" className="mt-4">
@@ -293,7 +293,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
                     <li key={r.id} className="rounded border border-border bg-card/50 p-2.5 text-xs">
                       <div className="flex items-center justify-between">
                         <span className="font-mono">{r.entry_type}</span>
-                        <span className={r.severity === "error" ? "text-red-400" : "text-muted-foreground"}>
+                        <span className={r.severity === "error" ? "text-destructive" : "text-muted-foreground"}>
                           {r.severity}
                         </span>
                       </div>

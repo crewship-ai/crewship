@@ -162,7 +162,7 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalD
                     <Button
                       variant="outline"
                       size="sm"
-                      className="flex-1 h-8 border-red-500/40 text-red-300 hover:bg-red-500/10"
+                      className="flex-1 h-8 border-destructive/40 text-destructive hover:bg-destructive/10"
                       onClick={() => handleDecide("denied")}
                       disabled={submitting !== null}
                     >

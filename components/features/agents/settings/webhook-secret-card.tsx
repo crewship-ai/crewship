@@ -99,8 +99,8 @@ export function WebhookSecretCard({ agentId }: { agentId: string }) {
       </div>
 
       {secret && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 space-y-1.5">
-          <p className="text-micro text-amber-600 dark:text-amber-400">
+        <div className="rounded-md border border-warn/40 bg-warn/10 p-2 space-y-1.5">
+          <p className="text-micro text-warn dark:text-warn">
             Shown once. Copy it now — it cannot be retrieved again.
           </p>
           <div className="flex items-center gap-2">

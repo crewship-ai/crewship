@@ -81,12 +81,12 @@ export function TaskLiveLogs({ agentSlug, taskStatus }: TaskLiveLogsProps) {
   return (
     <Collapsible defaultOpen={isActive}>
       <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
-        <Terminal className="h-4 w-4 text-blue-400 shrink-0" />
+        <Terminal className="h-4 w-4 text-primary shrink-0" />
         <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider flex-1">
           Live Logs
         </h4>
         {isActive && (
-          <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
         )}
         {entries.length > 0 && (
           <span className="text-[10px] text-white/20">{entries.length}</span>

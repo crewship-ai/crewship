@@ -1,55 +1,63 @@
 /**
- * Centralized color definitions — single source of truth.
- * All status, crew, edge, priority, and semantic colors live here.
+ * Centralized color definitions.
  *
- * For brand colors prefer Tailwind utility classes (`bg-primary`,
- * `text-primary`, `border-primary`) — they read CSS variables
- * defined in app/globals.css and track theme changes automatically.
+ * SOURCE OF TRUTH: app/globals.css defines every color that has a token,
+ * per theme. This file NEVER re-types those values as hex — it exposes them
+ * as `var(--token)` strings for the renderers that need a *value* rather than
+ * a Tailwind class (SVG stroke/fill, React Flow node/edge colors, Recharts,
+ * inline styles). All of these resolve CSS custom properties in the DOM.
  *
- * The literal hex values in `BRAND` below exist ONLY for cases where
- * the renderer cannot consume CSS variables: rgba shadow strings,
- * dynamic SVG stroke/fill props, third-party canvas libraries, etc.
- * If you can render with a Tailwind class, do that instead — the
- * BRAND constants exist to avoid scattered hex literals, not as the
- * default styling path.
+ * The only literal colors that remain here are CATEGORICAL / IDENTITY palettes
+ * — crew colors, edge/label preset hues, provider brand tints, message-type
+ * and issue-status-icon aesthetics. Those encode *which thing this is*, not a
+ * semantic state, so tokenizing them would collapse distinctions users rely
+ * on. See BRIEF §2: "if two of these were the same color, would the UI lose
+ * information? Yes → data, keep it."
  */
 
-// ── Brand palette ── (1:1 with --primary / --primary-hover / --info
-// CSS vars in app/globals.css; matches marketing site crewship-web)
+// ── Brand palette ── (var() into --primary / --primary-hover / --info;
+//    theme-aware, so an SVG stroke matches the button beside it in both modes)
 
 export const BRAND = {
-  /** Primary brand blue — dark-mode --primary. Use `bg-primary` in TSX. */
-  primary: "#1E7BFE",
+  /** Primary brand blue — resolves to the theme's --primary. */
+  primary: "var(--primary)",
   /** Hover-state shift of brand blue. */
-  primaryHover: "#3D8FFE",
-  /** Light-mode primary — deeper variant for white-bg legibility. */
-  primaryLight: "#0E6BE8",
-  /** Info / lighter sibling — for journal entries, sparkbars, queued chips. */
-  info: "#5DA1FF",
+  primaryHover: "var(--primary-hover)",
+  /** Kept for API compatibility; --primary already resolves the light variant. */
+  primaryLight: "var(--primary)",
+  /** Info / lighter sibling — journal entries, sparkbars, queued chips. */
+  info: "var(--info)",
 } as const
 
-/** Brand blue as `rgba()` — for shadow/glow strings that can't use CSS vars.
- *  Usage: `box-shadow: 0 0 12px ${BRAND_RGBA(0.22)};` */
+/** Brand blue at a given alpha — for shadow/glow strings.
+ *  Usage: `box-shadow: 0 0 12px ${BRAND_RGBA(0.22)};`
+ *  color-mix keeps it tracking --primary instead of a hand-copied triplet. */
 export function BRAND_RGBA(alpha: number): string {
-  return `rgba(30, 123, 254, ${alpha})`
+  return `color-mix(in oklch, var(--primary) ${alpha * 100}%, transparent)`
 }
 
-// ── Task/mission/agent status colors ──
+// ── Task/mission/agent status colors (semantic → tokens) ──
+// IN_PROGRESS uses --primary: the app brands the "active/alive" state brand-blue
+// (see globals.css agent-pulse). --info stays for non-status informational chips.
 
 export const STATUS_COLORS: Record<string, string> = {
-  COMPLETED: "#22c55e",
-  IN_PROGRESS: "#3b82f6",
-  FAILED: "#ef4444",
-  BLOCKED: "#f59e0b",
-  PENDING: "#64748b",
-  PLANNING: "#8b5cf6",
-  REVIEW: "#a855f7",
-  CANCELLED: "#6b7280",
-  SKIPPED: "#6b7280",
-  AWAITING_APPROVAL: "#8b5cf6",
+  COMPLETED: "var(--success)",
+  IN_PROGRESS: "var(--primary)",
+  FAILED: "var(--destructive)",
+  BLOCKED: "var(--warn)",
+  PENDING: "var(--muted-foreground)",
+  PLANNING: "var(--purple)",
+  REVIEW: "var(--purple)",
+  CANCELLED: "var(--muted-foreground)",
+  SKIPPED: "var(--muted-foreground)",
+  AWAITING_APPROVAL: "var(--purple)",
 }
 
-// ── Issue status icon colors (Linear-style, used in SVG status icons + project status) ──
+// ── Issue status icon colors (Linear-style aesthetic) ──
+// KEEP LITERAL: this is a deliberate Linear-mimic palette. #5E6AD2 (Linear's
+// signature indigo) has no token equivalent, and mixing tokenized + literal
+// entries would make the status-icon row visually incoherent. Categorical
+// identity, not semantic state — see BRIEF §2/§4. Deferred by design.
 
 export const ISSUE_ICON_COLORS: Record<string, string> = {
   BACKLOG: "#8C8C8C",
@@ -64,20 +72,24 @@ export const ISSUE_ICON_COLORS: Record<string, string> = {
   DUPLICATE: "#95959F",
 }
 
-// ── Issue status chart colors (progress bars, pie charts) ──
+// ── Issue status chart colors (progress bars, pie charts) — semantic → tokens ──
 
 export const ISSUE_STATUS_COLORS: Record<string, string> = {
-  BACKLOG: "#6b7280",
-  TODO: "#a3a3a3",
-  IN_PROGRESS: "#3b82f6",
-  REVIEW: "#a855f7",
-  DONE: "#22c55e",
-  COMPLETED: "#22c55e",
-  CANCELLED: "#ef4444",
-  FAILED: "#ef4444",
+  BACKLOG: "var(--muted-foreground)",
+  TODO: "var(--muted-foreground)",
+  IN_PROGRESS: "var(--primary)",
+  REVIEW: "var(--purple)",
+  DONE: "var(--success)",
+  COMPLETED: "var(--success)",
+  CANCELLED: "var(--destructive)",
+  FAILED: "var(--destructive)",
 }
 
 // ── Priority colors ──
+// KEEP LITERAL: urgent/high (orange), medium (yellow), low (blue) encode an
+// ordinal priority level through three distinct hues. Tokenizing orange→warn
+// and yellow→warn would collapse urgent and medium to one color and lose the
+// priority distinction. Categorical-ordinal data — see BRIEF §2. Deferred.
 
 export const PRIORITY_COLORS: Record<string, string> = {
   urgent: "#FC7840",
@@ -86,7 +98,7 @@ export const PRIORITY_COLORS: Record<string, string> = {
   low: "#3B82F6",
 }
 
-// ── Label preset colors ──
+// ── Label preset colors ── (categorical, user-chosen — KEEP, BRIEF §2)
 
 export const LABEL_PRESET_COLORS = [
   { name: "Red", value: "#EF4444" },
@@ -99,7 +111,7 @@ export const LABEL_PRESET_COLORS = [
   { name: "Gray", value: "#6B7280" },
 ] as const
 
-// ── Crew palette (maps crew color ID → hex) ──
+// ── Crew palette (per-crew identity the user picks — KEEP, BRIEF §2) ──
 
 export const CREW_COLORS: Record<string, string> = {
   blue: "#3b82f6",
@@ -120,10 +132,8 @@ export function resolveCrewColor(color: string | null | undefined): string {
 }
 
 /**
- * Tailwind bg utility classes per crew palette ID.
- * Keep these in sync with CREW_COLORS above — they are used wherever inline
- * style backgrounds would otherwise be needed, so the Tailwind-only rule and
- * the palette-ID convention are both enforced at the render site.
+ * Tailwind bg utility classes per crew palette ID. Categorical identity, so
+ * these stay as palette classes (this file is on the lint allowlist).
  */
 export const CREW_BG_CLASSES: Record<string, string> = {
   blue: "bg-blue-500",
@@ -148,7 +158,7 @@ export function getCrewBgClass(color: string | null | undefined): string {
   return (color && CREW_BG_CLASSES[color]) || CREW_BG_DEFAULT
 }
 
-// ── Edge color palette (graph connections) ──
+// ── Edge color palette (graph connections — categorical, KEEP, BRIEF §2) ──
 
 export const EDGE_COLOR_PALETTE = [
   "#06b6d4", "#3b82f6", "#8b5cf6", "#22c55e",
@@ -156,6 +166,8 @@ export const EDGE_COLOR_PALETTE = [
 ] as const
 
 // ── Direction colors (bidirectional vs unidirectional edges) ──
+// KEEP LITERAL: binary categorical encoding of edge direction; collapsing the
+// two hues would lose the distinction. BRIEF §2. Deferred.
 
 export const DIRECTION_COLORS = {
   bidirectional: "#06b6d4",   // cyan
@@ -163,6 +175,8 @@ export const DIRECTION_COLORS = {
 } as const
 
 // ── A2A message type colors ──
+// KEEP LITERAL: @assign/@ask/@broadcast/@result are message-type identity;
+// each hue answers "which kind of message", not a semantic state. BRIEF §2.
 
 export const MESSAGE_TYPE_COLORS: Record<string, string> = {
   "@assign": "#3b82f6",
@@ -171,7 +185,10 @@ export const MESSAGE_TYPE_COLORS: Record<string, string> = {
   "@result": "#22c55e",
 }
 
-// ── Graph chrome (structural/decorative graph colors) ──
+// ── Graph chrome (structural/decorative graph canvas colors) ──
+// KEEP LITERAL: dark-first decorative values tuned for the React Flow canvas
+// (minimap node fill, dimmed-edge, mission label). The graph renders dark-only;
+// these are not theme-adaptive semantic states. Deferred — see report.
 
 export const GRAPH_CHROME = {
   dimmedEdge: "#334155",
@@ -179,42 +196,47 @@ export const GRAPH_CHROME = {
   missionLabel: "#e2e8f0",
 } as const
 
-// ── Status badge classes (Tailwind, for Badge components) ──
+// ── Status badge classes (Tailwind, for Badge components) — semantic → tokens ──
 
 export const STATUS_BADGE_CLASSES: Record<string, string> = {
   PENDING: "bg-muted text-muted-foreground",
-  BLOCKED: "bg-amber-500/20 text-amber-400",
-  IN_PROGRESS: "bg-cyan-500/20 text-cyan-400",
-  COMPLETED: "bg-emerald-500/20 text-emerald-400",
-  FAILED: "bg-red-500/20 text-red-400",
+  BLOCKED: "bg-warn/20 text-warn",
+  IN_PROGRESS: "bg-primary/15 text-primary",
+  COMPLETED: "bg-success/20 text-success",
+  FAILED: "bg-destructive/20 text-destructive",
   SKIPPED: "bg-muted text-muted-foreground",
-  AWAITING_APPROVAL: "bg-violet-500/20 text-violet-400",
+  AWAITING_APPROVAL: "bg-purple/20 text-purple",
 }
 
-// ── Complexity badge classes (Tailwind, for Badge components) ──
+// ── Complexity badge classes (Tailwind, for Badge components) — semantic → tokens ──
 
 export const COMPLEXITY_BADGE_CLASSES: Record<string, string> = {
-  SIMPLE: "bg-emerald-500/20 text-emerald-400",
-  MEDIUM: "bg-amber-500/20 text-amber-400",
-  COMPLEX: "bg-red-500/20 text-red-400",
+  SIMPLE: "bg-success/20 text-success",
+  MEDIUM: "bg-warn/20 text-warn",
+  COMPLEX: "bg-destructive/20 text-destructive",
 }
 
-// ── Graph background colors for status ──
+// ── Graph background tints for status (semantic → token opacities) ──
 
 export const STATUS_BG: Record<string, string> = {
-  COMPLETED: "bg-[#0a1f0f]",
-  IN_PROGRESS: "bg-[#0a1220]",
-  FAILED: "bg-[#1f0a0a]",
-  BLOCKED: "bg-[#1f1a0a]",
-  PENDING: "bg-[#0f1115]",
-  REVIEW: "bg-[#150a1f]",
-  SKIPPED: "bg-[#0f1115]",
-  AWAITING_APPROVAL: "bg-[#150a1f]",
+  COMPLETED: "bg-success/10",
+  IN_PROGRESS: "bg-primary/10",
+  FAILED: "bg-destructive/10",
+  BLOCKED: "bg-warn/10",
+  PENDING: "bg-muted",
+  REVIEW: "bg-purple/10",
+  SKIPPED: "bg-muted",
+  AWAITING_APPROVAL: "bg-purple/10",
 }
 
 // ── Light-theme aware status banner backgrounds ──
-// Use for alert banners, info strips, escalation cards. Light in light mode,
-// tinted-dark in dark mode. Pairs bg + text for one-shot consumption.
+// KEEP LITERAL: this map already does the theme split correctly (distinct
+// light/dark shades). The semantic tokens are single-value across both themes
+// (--success is the same oklch in light and dark, tuned for dark), so folding
+// this into `bg-success/10 text-success` would regress light-mode contrast —
+// text-success (0.72 L) on a light tint fails WCAG AA. This is the one map
+// that's already right; leaving it. See BRIEF §0 (theme-awareness is the goal)
+// and report. Palette classes are allowed here (lint allowlist).
 export const STATUS_BG_LIGHT: Record<string, string> = {
   COMPLETED: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400",
   IN_PROGRESS: "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
@@ -227,25 +249,25 @@ export const STATUS_BG_LIGHT: Record<string, string> = {
   SKIPPED: "bg-muted text-muted-foreground",
 }
 
-// ── Tailwind classes for StatusDot (solid fill, ≤ 2×2) ──
-// Use inside <StatusDot status={...} /> or wherever an inline hex would leak.
+// ── Tailwind classes for StatusDot (solid fill, ≤ 2×2) — semantic → tokens ──
+
 export const STATUS_DOT_CLASSES: Record<string, string> = {
-  COMPLETED: "bg-emerald-500",
-  IN_PROGRESS: "bg-blue-500",
-  FAILED: "bg-red-500",
-  BLOCKED: "bg-amber-500",
-  PENDING: "bg-slate-400",
-  REVIEW: "bg-violet-500",
-  AWAITING_APPROVAL: "bg-violet-500",
-  CANCELLED: "bg-gray-500",
-  SKIPPED: "bg-gray-500",
-  PLANNING: "bg-violet-500",
+  COMPLETED: "bg-success",
+  IN_PROGRESS: "bg-primary",
+  FAILED: "bg-destructive",
+  BLOCKED: "bg-warn",
+  PENDING: "bg-muted-foreground",
+  REVIEW: "bg-purple",
+  AWAITING_APPROVAL: "bg-purple",
+  CANCELLED: "bg-muted-foreground",
+  SKIPPED: "bg-muted-foreground",
+  PLANNING: "bg-purple",
 }
 
 // ── Provider icon colors (Anthropic/OpenAI/GitHub/etc.) ──
-// Replaces hardcoded text-violet-600 / text-amber-600 / text-emerald-600 etc.
-// in credentials and integrations pages. Values are tint-only — pair with
-// lucide icons via <Icon className={PROVIDER_ICON_COLOR[provider]} />.
+// KEEP LITERAL: per-provider brand identity tints (if OpenAI and Google were
+// the same color you'd lose which provider it is). Categorical — BRIEF §2.
+// Palette classes are allowed here (lint allowlist).
 export const PROVIDER_ICON_COLOR: Record<string, string> = {
   ANTHROPIC: "text-violet-500",
   OPENAI: "text-emerald-500",
@@ -261,8 +283,7 @@ export const PROVIDER_ICON_COLOR: Record<string, string> = {
 }
 
 // ── Credential type icon colors (AI_CLI_TOKEN, API_KEY, etc.) ──
-// Replaces hardcoded text-{color}-600 constants in TYPE_CONFIG maps
-// scattered through credential/agent pages.
+// KEEP LITERAL: per-credential-type identity tints. Categorical — BRIEF §2.
 export const CREDENTIAL_TYPE_ICON_COLOR: Record<string, string> = {
   AI_CLI_TOKEN: "text-violet-500",
   API_KEY: "text-amber-500",

@@ -138,11 +138,11 @@ const SETUP_ONLY_SECTION: ExplorerSection<TabKey>[] = [
 
 /** Dot colour per connection status, shared by the list and the facets. */
 const STATUS_DOT: Record<string, string> = {
-  delivering: "bg-emerald-400",
-  failing: "bg-red-400",
-  never_used: "bg-amber-400",
+  delivering: "bg-success",
+  failing: "bg-destructive",
+  never_used: "bg-warn",
   disabled: "bg-muted-foreground/40",
-  unknown: "bg-sky-400",
+  unknown: "bg-info",
 }
 
 /** How far back the "Sent · 24h" column and the status column look. */
@@ -457,7 +457,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         // fall back to two-letter tiles while the column beside them shows the
         // real icon for the same account.
         logoUrl: a.toolkit.logo || brandLogo(a.toolkit.slug),
-        dot: a.status.toUpperCase() === "ACTIVE" ? "bg-emerald-400" : "bg-amber-400",
+        dot: a.status.toUpperCase() === "ACTIVE" ? "bg-success" : "bg-warn",
       }))
   }, [composioStatus.accounts, mcpFilters, search])
 

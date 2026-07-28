@@ -122,7 +122,7 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
             <div className="flex items-center gap-2">
               <code className="text-label bg-accent px-1.5 py-0.5 rounded font-mono">{agent.schedule_cron}</code>
               {agent.schedule_enabled ? (
-                <span className="flex items-center gap-1 text-micro text-emerald-500"><CheckCircle2 className="h-3 w-3" /> Active</span>
+                <span className="flex items-center gap-1 text-micro text-success"><CheckCircle2 className="h-3 w-3" /> Active</span>
               ) : (
                 <span className="flex items-center gap-1 text-micro text-muted-foreground"><XCircle className="h-3 w-3" /> Disabled</span>
               )}
@@ -173,7 +173,7 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
                 }}
                 className="p-1 rounded hover:bg-accent text-muted-foreground"
               >
-                {copied ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                {copied ? <CheckCircle2 className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
               </button>
             </div>
             <p className="text-micro text-muted-foreground">
@@ -201,7 +201,7 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
                     {rotating ? "Rotating…" : hasSecret ? "Rotate secret" : "Generate secret"}
                   </Button>
                   {hasSecret && !newSecret && (
-                    <span className="flex items-center gap-1 text-micro text-emerald-500">
+                    <span className="flex items-center gap-1 text-micro text-success">
                       <CheckCircle2 className="h-3 w-3" /> Secret set
                     </span>
                   )}
@@ -209,10 +209,10 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
 
                 {newSecret && (
                   <div
-                    className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-2 space-y-1.5"
+                    className="rounded-md border border-warn/40 bg-warn/5 px-2.5 py-2 space-y-1.5"
                     data-testid="webhook-secret-reveal"
                   >
-                    <p className="text-micro text-amber-600 dark:text-amber-400">
+                    <p className="text-micro text-warn dark:text-warn">
                       Copy this now — it is shown once and the previous secret already stopped validating.
                     </p>
                     <div className="flex items-center gap-1">
@@ -233,7 +233,7 @@ export function TriggersTab({ agentId, workspaceId }: TriggersTabProps) {
                         }}
                         className="p-1 rounded hover:bg-accent text-muted-foreground"
                       >
-                        {secretCopied ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                        {secretCopied ? <CheckCircle2 className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
                       </button>
                     </div>
                     <button

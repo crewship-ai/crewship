@@ -261,6 +261,84 @@ func loadBaseSources(baseRef string, headSources map[string][]byte) map[string][
 	return out
 }
 
+// --- file-based migrations -------------------------------------------------
+//
+// The registry moved out of migrate.go: new migrations are .sql files under
+// internal/database/migrations/. The slice check above cannot see them, so an
+// edit to an already-shipped .sql file would sail past the very guard this
+// tool exists to be. Same rules, applied to file content: a migration present
+// on the base ref may not change and may not disappear.
+
+const fileMigrationRoot = "internal/database/migrations"
+
+// listBaseMigrationFiles returns path → content for every .sql file under the
+// migrations root as of baseRef. An absent root (base predates the scheme) is
+// not an error — there is simply nothing to compare.
+func listBaseMigrationFiles(baseRef string) (map[string][]byte, error) {
+	cmd := exec.Command("git", "ls-tree", "-r", "--name-only", baseRef, "--", fileMigrationRoot)
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git ls-tree %s: %v (%s)", baseRef, err, errBuf.String())
+	}
+
+	files := map[string][]byte{}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" || !strings.HasSuffix(path, ".sql") {
+			continue
+		}
+		show := exec.Command("git", "show", baseRef+":"+path)
+		var body, showErr bytes.Buffer
+		show.Stdout = &body
+		show.Stderr = &showErr
+		if err := show.Run(); err != nil {
+			return nil, fmt.Errorf("git show %s:%s: %v (%s)", baseRef, path, err, showErr.String())
+		}
+		files[path] = body.Bytes()
+	}
+	return files, nil
+}
+
+// checkFileMigrations compares each base .sql migration against the working
+// tree, returning one message per violation.
+func checkFileMigrations(baseRef string) ([]string, error) {
+	base, err := listBaseMigrationFiles(baseRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var violations []string
+	for path, baseBody := range base {
+		headBody, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				violations = append(violations, fmt.Sprintf(
+					"%s was REMOVED — migrations on %s must be append-only; a database that "+
+						"applied it would have a ledger row this binary cannot explain",
+					path, baseRef))
+				continue
+			}
+			return nil, fmt.Errorf("read %s: %w", path, readErr)
+		}
+		if !bytes.Equal(baseBody, headBody) {
+			violations = append(violations, fmt.Sprintf(
+				"%s CHANGED — an already-released migration must never be edited; every "+
+					"database that already applied it keeps the old schema while new ones get "+
+					"the new one. Add another migration instead (base sha256=%s head=%s)",
+				path, shortSum(baseBody), shortSum(headBody)))
+		}
+	}
+	sort.Strings(violations)
+	return violations, nil
+}
+
+func shortSum(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 func main() {
 	baseRef := "origin/main"
 	if len(os.Args) > 1 {
@@ -334,6 +412,13 @@ func main() {
 					version, base.name, baseFP[:12], headFP[:12]))
 		}
 	}
+
+	fileViolations, err := checkFileMigrations(baseRef)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "check file migrations: %v\n", err)
+		os.Exit(2)
+	}
+	violations = append(violations, fileViolations...)
 
 	if len(violations) > 0 {
 		fmt.Fprintf(os.Stderr, "migration-lint: %d violation(s) against %s:\n", len(violations), baseRef)

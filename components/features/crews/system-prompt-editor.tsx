@@ -82,7 +82,7 @@ export function SystemPromptEditor({
       <div className="flex items-baseline justify-between">
         <h2 className="text-lg font-semibold flex items-center gap-2">
           System prompt
-          {dirty && editing && <span className="h-2 w-2 rounded-full bg-amber-400" title="Unsaved changes" />}
+          {dirty && editing && <span className="h-2 w-2 rounded-full bg-warn" title="Unsaved changes" />}
         </h2>
         <span className="text-[10px] text-muted-foreground">
           {charCount} chars{updatedHint ? ` · ${updatedHint}` : ""}
@@ -112,8 +112,8 @@ export function SystemPromptEditor({
                     className={cn(
                       "text-xs px-3 py-1 rounded text-white",
                       dirty && !saving
-                        ? "bg-emerald-600/80 hover:bg-emerald-500"
-                        : "bg-emerald-700/40 cursor-not-allowed",
+                        ? "bg-success/80 hover:bg-success"
+                        : "bg-success/40 cursor-not-allowed",
                     )}
                     onClick={handleSave}
                     disabled={!dirty || saving}
@@ -163,7 +163,7 @@ export function SystemPromptEditor({
         )}
 
         {error && (
-          <div className="px-4 py-2 border-t border-red-500/20 bg-red-500/5 text-xs text-red-300">
+          <div className="px-4 py-2 border-t border-destructive/20 bg-destructive/5 text-xs text-destructive">
             Save failed: {error}
           </div>
         )}

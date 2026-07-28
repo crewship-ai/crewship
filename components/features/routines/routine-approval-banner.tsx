@@ -51,30 +51,30 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
   return (
     <div
       className={cn(
-        "rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3.5",
+        "rounded-lg border border-warn/30 bg-warn/[0.06] p-3.5",
         className,
       )}
       role="region"
       aria-label="Approval needed"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/15 px-2.5 py-1 text-[11px] font-semibold text-warn">
+          <span className="h-1.5 w-1.5 rounded-full bg-warn animate-pulse" />
           Approval needed
         </span>
         <span className="font-mono text-[11px] text-muted-foreground">step {waitpoint.step_id}</span>
         <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
           <Clock className="h-3 w-3" />
           expires in{" "}
-          <span className={cn("text-foreground/85", urgent && "font-semibold text-rose-400")}>
+          <span className={cn("text-foreground/85", urgent && "font-semibold text-destructive")}>
             {remaining}
           </span>
         </span>
       </div>
 
       {waitpoint.prompt && (
-        <div className="mt-2.5 flex items-start gap-2 rounded-md border border-amber-500/15 bg-background/40 px-3 py-2.5">
-          <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300/70" />
+        <div className="mt-2.5 flex items-start gap-2 rounded-md border border-warn/15 bg-background/40 px-3 py-2.5">
+          <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn/70" />
           <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
             {waitpoint.prompt}
           </p>
@@ -97,7 +97,7 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
           size="sm"
           onClick={() => decide(true)}
           disabled={deciding}
-          className="h-8 gap-1.5 bg-amber-500 px-3.5 text-xs font-semibold text-amber-950 hover:bg-amber-400"
+          className="h-8 gap-1.5 bg-warn px-3.5 text-xs font-semibold text-warn hover:bg-warn"
         >
           {deciding ? <Spinner className="h-3 w-3" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
           Approve

@@ -80,8 +80,8 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
           <h2 className="text-default font-semibold">Escalations</h2>
           {escalations.some((e) => e.status === "PENDING") && (
             <span aria-hidden="true" className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warn opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-warn" />
             </span>
           )}
         </div>

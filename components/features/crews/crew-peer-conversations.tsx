@@ -63,8 +63,8 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
           <h2 className="text-default font-semibold">Peer Conversations</h2>
           {conversations.some((c) => c.status === "RUNNING") && (
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
             </span>
           )}
         </div>
@@ -131,8 +131,8 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                               icon={
                                 c.status === "RUNNING" ? (
                                   <span className="relative flex h-2 w-2 shrink-0">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                                   </span>
                                 ) : undefined
                               }
@@ -149,7 +149,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                                 </TooltipContent>
                               </Tooltip>
                               {c.escalated && (
-                                <Badge variant="outline" className="gap-1 border-0 bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 shrink-0">
+                                <Badge variant="outline" className="gap-1 border-0 bg-warn/15 text-warn dark:bg-warn/40 dark:text-warn shrink-0">
                                   <AlertTriangle className="h-3 w-3" />
                                   Escalated
                                 </Badge>

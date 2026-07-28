@@ -98,10 +98,10 @@ export function formatMemory(mb: number): string {
 
 export function issueStatusColor(status: string | undefined): string {
   const s = (status ?? "").toLowerCase()
-  if (s.includes("progress")) return "bg-blue-400"
-  if (s.includes("review")) return "bg-amber-400"
-  if (s.includes("done") || s.includes("closed") || s.includes("complete")) return "bg-emerald-400"
-  if (s.includes("blocked") || s.includes("error") || s.includes("cancel")) return "bg-red-500"
-  if (s.includes("todo")) return "bg-zinc-400"
-  return "bg-zinc-600"
+  if (s.includes("progress")) return "bg-primary"
+  if (s.includes("review")) return "bg-warn"
+  if (s.includes("done") || s.includes("closed") || s.includes("complete")) return "bg-success"
+  if (s.includes("blocked") || s.includes("error") || s.includes("cancel")) return "bg-destructive"
+  if (s.includes("todo")) return "bg-muted-foreground"
+  return "bg-muted-foreground"
 }

@@ -23,9 +23,9 @@ interface DiffResponse {
 }
 
 function lineClass(line: string): string {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "bg-emerald-500/10 text-emerald-200"
-  if (line.startsWith("-") && !line.startsWith("---")) return "bg-red-500/10 text-red-200"
-  if (line.startsWith("@@")) return "text-cyan-300"
+  if (line.startsWith("+") && !line.startsWith("+++")) return "bg-success/10 text-success"
+  if (line.startsWith("-") && !line.startsWith("---")) return "bg-destructive/10 text-destructive"
+  if (line.startsWith("@@")) return "text-notice"
   if (line.startsWith("diff ") || line.startsWith("+++") || line.startsWith("---") || line.startsWith("index "))
     return "text-muted-foreground"
   return "text-foreground/70"
@@ -79,7 +79,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
     return <EmptyState>Changes are shown per issue or run.</EmptyState>
   }
   if (unavailable) return <EmptyState>Change diffs aren&apos;t wired up for this workspace yet.</EmptyState>
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
   if (data === null) return <EmptyState>Computing diff…</EmptyState>
   if (!data.is_repo) return <EmptyState>This workspace isn&apos;t a git repository — no tracked changes.</EmptyState>
   const files = data.files ?? []
@@ -95,9 +95,9 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
       <div className="flex items-center gap-2 text-[11px] text-muted-foreground mb-3">
         <span className="text-foreground">{files.length} file{files.length === 1 ? "" : "s"}</span>
         <span>·</span>
-        <span className="text-emerald-300">+{totals.add}</span>
-        <span className="text-red-300">−{totals.del}</span>
-        {data.truncated && <><span>·</span><span className="text-amber-300">diff truncated</span></>}
+        <span className="text-success">+{totals.add}</span>
+        <span className="text-destructive">−{totals.del}</span>
+        {data.truncated && <><span>·</span><span className="text-warn">diff truncated</span></>}
       </div>
 
       {files.length > 0 && (
@@ -107,17 +107,17 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
               <span className="truncate">
                 <span className={cn(
                   "inline-block w-4",
-                  f.status === "added" ? "text-emerald-300" :
-                  f.status === "deleted" ? "text-red-300" :
-                  f.status === "renamed" ? "text-blue-300" : "text-amber-300",
+                  f.status === "added" ? "text-success" :
+                  f.status === "deleted" ? "text-destructive" :
+                  f.status === "renamed" ? "text-info" : "text-warn",
                 )}>
                   {f.status === "added" ? "A" : f.status === "deleted" ? "D" : f.status === "renamed" ? "R" : "M"}
                 </span>
                 {f.path}
               </span>
               <span className="shrink-0 text-muted-foreground-soft">
-                <span className="text-emerald-300">+{f.additions ?? 0}</span>{" "}
-                <span className="text-red-300">−{f.deletions ?? 0}</span>
+                <span className="text-success">+{f.additions ?? 0}</span>{" "}
+                <span className="text-destructive">−{f.deletions ?? 0}</span>
               </span>
             </div>
           ))}
@@ -137,7 +137,7 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
               <div key={i} className={cn("px-3", lineClass(line))}>{line || " "}</div>
             ))}
             {lines.length > MAX_LINES && (
-              <div className="px-3 py-1 text-amber-300">… {lines.length - MAX_LINES} more lines — open the full diff in the CLI</div>
+              <div className="px-3 py-1 text-warn">… {lines.length - MAX_LINES} more lines — open the full diff in the CLI</div>
             )}
           </pre>
         )
