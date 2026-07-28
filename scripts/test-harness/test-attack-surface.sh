@@ -139,16 +139,41 @@ assert_code    "A3 valid token is accepted"               200 GET "/api/v1/crews
 assert_code    "A4 admin route rejects no-auth"           401 GET "/api/v1/admin/stats?workspace_id=$WS"
 
 section "Tier A · Internal surface must be UNREACHABLE from the edge (#audit L0.1)"
-# requireInternal fails the network gate for a public source → 404. Any 2xx here
-# would mean the internal keeper/credential surface is internet-reachable.
-assert_code    "B1 /internal/credentials unreachable no-token"  404 GET  "/api/v1/internal/credentials?workspace_id=$WS"
-assert_code    "B2 /internal/credentials unreachable via userJWT" 404 GET "/api/v1/internal/credentials?workspace_id=$WS" "${AUTH[@]}"
-assert_code    "B3 /internal/keeper/request unreachable no-token" 404 POST "/api/v1/internal/keeper/request" -H "Content-Type: application/json" -d '{"agent_slug":"x","credential_id":"y","intent":"probe"}'
-assert_code    "B4 /internal/keeper/request unreachable w/ guessed static token" 404 POST "/api/v1/internal/keeper/request" -H "X-Internal-Token: internal-dev-token" -H "Content-Type: application/json" -d '{"agent_slug":"x","credential_id":"y","intent":"probe"}'
-assert_code    "B5 /internal/agents unreachable no-token"        404 GET  "/api/v1/internal/agents?workspace_id=$WS"
-# The network-origin gate must not be spoofable by a header an edge proxy would
-# otherwise be trusted to set (#1020). A 2xx/4xx-other here means XFF is honoured.
-assert_code    "B6 spoofed X-Forwarded-For does not fake a private origin" 404 GET "/api/v1/internal/agents?workspace_id=$WS" -H "X-Forwarded-For: 127.0.0.1"
+# The 404 these probes expect is produced by the EDGE PROXY (Caddy), which
+# refuses /api/v1/internal/* before it ever reaches the Go server. Hitting the
+# Go loopback port directly bypasses Caddy: the routes exist there, so
+# requireInternal answers 403/405 to a request that never crossed the fence.
+# That is not a passing fence and not a failing one — it is the wrong layer, and
+# asserting 404 against loopback is a guaranteed false fail (this is why stage,
+# which runs the harness against 127.0.0.1:8084, recorded a red e2e forever).
+#
+# So these probes run against the public EDGE, not $SERVER: CREWSHIP_ATTACK_EDGE_URL if
+# set, else $SERVER when it is already a public URL, else SKIP — a loopback
+# target has no edge to test.
+EDGE="${CREWSHIP_ATTACK_EDGE_URL:-}"
+if [[ -z "$EDGE" ]]; then
+  case "$SERVER" in
+    *127.0.0.1*|*localhost*|*0.0.0.0*) EDGE="" ;;
+    *) EDGE="$SERVER" ;;
+  esac
+fi
+if [[ -z "$EDGE" ]]; then
+  skip "Tier A internal-surface fence" "target $SERVER is loopback — the fence lives in Caddy, which loopback bypasses; set CREWSHIP_ATTACK_EDGE_URL to the public URL to test it"
+else
+  _tierb_saved_server="$SERVER"
+  SERVER="$EDGE"
+  # requireInternal fails the network gate for a public source → 404. Any 2xx
+  # here would mean the internal keeper/credential surface is internet-reachable.
+  assert_code    "B1 /internal/credentials unreachable no-token"  404 GET  "/api/v1/internal/credentials?workspace_id=$WS"
+  assert_code    "B2 /internal/credentials unreachable via userJWT" 404 GET "/api/v1/internal/credentials?workspace_id=$WS" "${AUTH[@]}"
+  assert_code    "B3 /internal/keeper/request unreachable no-token" 404 POST "/api/v1/internal/keeper/request" -H "Content-Type: application/json" -d '{"agent_slug":"x","credential_id":"y","intent":"probe"}'
+  assert_code    "B4 /internal/keeper/request unreachable w/ guessed static token" 404 POST "/api/v1/internal/keeper/request" -H "X-Internal-Token: internal-dev-token" -H "Content-Type: application/json" -d '{"agent_slug":"x","credential_id":"y","intent":"probe"}'
+  assert_code    "B5 /internal/agents unreachable no-token"        404 GET  "/api/v1/internal/agents?workspace_id=$WS"
+  # The network-origin gate must not be spoofable by a header an edge proxy would
+  # otherwise be trusted to set (#1020). A 2xx/4xx-other here means XFF is honoured.
+  assert_code    "B6 spoofed X-Forwarded-For does not fake a private origin" 404 GET "/api/v1/internal/agents?workspace_id=$WS" -H "X-Forwarded-For: 127.0.0.1"
+  SERVER="$_tierb_saved_server"
+fi
 
 section "Tier A · Cross-workspace isolation"
 if [[ -z "$OTHER_WS" ]]; then
