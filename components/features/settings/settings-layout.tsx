@@ -20,6 +20,7 @@ import { MembersSection } from "./sections/members-section"
 import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
+import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { MovedToIntegrations } from "./sections/moved-to-integrations"
 
 interface Org {
@@ -47,6 +48,10 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   notifications: { title: "Notifications", description: "Moved to Integrations" },
   "notification-prefs": { title: "Notification Prefs", description: "Moved to Integrations" },
   members: { title: "Members", description: "Team members and permissions" },
+  "access-secrets": {
+    title: "Access & Secrets",
+    description: "Who may read a stored secret in plaintext, and what each classification means",
+  },
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
 
@@ -187,6 +192,9 @@ export function SettingsLayout() {
     // existing links, bookmarks and docs keep working.
     if (activeTab === "notifications" || activeTab === "notification-prefs") {
       return <MovedToIntegrations />
+    }
+    if (activeTab === "access-secrets" && workspaceId) {
+      return <AccessSecretsSection workspaceId={workspaceId} role={role} members={members} />
     }
     if (activeTab === "audit" && workspaceId) {
       return <CrewAuditSection workspaceId={workspaceId} />

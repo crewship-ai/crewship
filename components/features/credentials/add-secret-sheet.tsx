@@ -1,15 +1,19 @@
 "use client"
 
-// AddSecretSheet — the default Add flow. Single-page Sheet with the
-// unified CredentialForm. Replaced the old 4-step wizard as the "+"
-// action; the wizard has since been removed (nothing mounted it).
-// Reviving OAuth/setup-token flows from /credentials is tracked
-// separately.
+// AddSecretSheet — the "+ Add" entry point on /credentials.
+//
+// It used to host the flat one-page CredentialForm ("paste a secret, name it
+// after the env var"). P6 replaced the body with AddCredentialWizard, which
+// separates the two questions that form fused: WHAT SHAPE is this secret, and
+// WHICH VARIABLE should the container see it under. CredentialForm is still
+// the edit surface (EditCredentialDialog) and is untouched.
+//
+// The Sheet stays here so the page's mounting contract — and the props it
+// passes — do not change.
 
 import * as React from "react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
-import { apiFetch } from "@/lib/api-fetch"
-import { CredentialForm } from "./credential-form"
+import { AddCredentialWizard } from "./add-credential-wizard"
 
 interface AddSecretSheetProps {
   workspaceId: string
@@ -21,76 +25,33 @@ interface AddSecretSheetProps {
 }
 
 export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, knownTags }: AddSecretSheetProps) {
-  const handleSubmit = async (values: Parameters<NonNullable<React.ComponentProps<typeof CredentialForm>["onSubmit"]>>[0]) => {
-    const body: Record<string, unknown> = {
-      name: values.name,
-      value: values.value,
-      type: values.type,
-      provider: values.provider,
-      scope: values.scope,
-      tags: values.tags,
-    }
-    if (values.description) body.description = values.description
-    if (values.expiresAt) body.token_expires_at = new Date(values.expiresAt).toISOString()
-    if (values.scope === "CREW") body.crew_ids = values.crewIds
-
-    try {
-      const res = await apiFetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        return typeof data.error === "string" ? data.error : "Failed to create credential"
-      }
-      onSuccess()
-      onOpenChange(false)
-      return null
-    } catch {
-      return "Network error"
-    }
-  }
-
-  const handleTest = async (values: Parameters<NonNullable<React.ComponentProps<typeof CredentialForm>["onTest"]>>[0]) => {
-    try {
-      const res = await apiFetch(`/api/v1/credentials/test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: values.provider,
-          type: values.type,
-          value: values.value,
-        }),
-      })
-      if (!res.ok) return { valid: false, error: "Test request failed" }
-      const data = await res.json()
-      return { valid: !!data.valid, error: data.error }
-    } catch {
-      return { valid: false, error: "Network error" }
-    }
-  }
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-[480px] p-0 flex flex-col">
+      <SheetContent side="right" className="sm:max-w-[520px] p-0 flex flex-col">
         <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
-          <SheetTitle className="text-base">Add secret</SheetTitle>
+          <SheetTitle className="text-base">Add a credential</SheetTitle>
           <SheetDescription className="text-xs">
-            Paste any API key, token, or password. The agent reads it from the env var name you choose.
+            Pick the shape, fill what it asks for, then say who gets it and under which variable
+            name. Values are encrypted with AES-256-GCM and never shown again.
           </SheetDescription>
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <CredentialForm
-            workspaceId={workspaceId}
-            mode="create"
-            onSubmit={handleSubmit}
-            onCancel={() => onOpenChange(false)}
-            onTest={handleTest}
-            submitLabel="Save secret"
-            knownTags={knownTags}
-          />
+          {/* Remount per open so a half-finished draft never survives a close —
+              a wizard that reopens on step 3 with somebody else's pasted token
+              still in state is a leak waiting for a screenshot. */}
+          {open && (
+            <AddCredentialWizard
+              key={open ? "open" : "closed"}
+              workspaceId={workspaceId}
+              knownTags={knownTags}
+              onCancel={() => onOpenChange(false)}
+              onSuccess={() => {
+                onSuccess()
+                onOpenChange(false)
+              }}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>

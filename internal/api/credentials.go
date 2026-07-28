@@ -94,7 +94,14 @@ type credentialResponse struct {
 	// answer "does this still work" rather than "we didn't look". Server-side
 	// so the client needs no second list; the detail sheet renders its Test
 	// action from this. See probeSupportedProviders.
-	Testable       bool    `json:"testable"`
+	Testable bool `json:"testable"`
+	// Sensitivity is the reveal classification (STANDARD / RESTRICTED /
+	// SEALED, see credentials_reveal.go). Read paths carry it because it
+	// decides whether a reveal is possible AT ALL — SEALED is refused for
+	// every role including OWNER — and a client that cannot see it can only
+	// discover the refusal by letting the user click and take a 403. That is
+	// the affordance-then-403 shape this surface has been removing.
+	Sensitivity    string  `json:"sensitivity"`
 	TokenExpiresAt *string `json:"token_expires_at"`
 	LastCheckedAt  *string `json:"last_checked_at"`
 	LastError      *string `json:"last_error"`
@@ -252,7 +259,7 @@ const credentialSelectPrefix = `
 		c.last_used_at, c.last_used_ips, c.tags,
 		c.created_at, c.updated_at,
 		c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-		c.encrypted_value,
+		c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'),
 		(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 	FROM credentials c
 	WHERE `
@@ -278,7 +285,7 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
-			&encValue,
+			&encValue, &c.Sensitivity,
 			&c.AgentCount); err != nil {
 			return nil, err
 		}
@@ -362,7 +369,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-			c.encrypted_value,
+			c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'),
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
@@ -372,7 +379,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
-		&encValue,
+		&encValue, &c.Sensitivity,
 		&c.AgentCount)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)

@@ -16,6 +16,7 @@ import {
   Pencil,
   Eye,
   EyeOff,
+  ListTree,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
@@ -33,6 +34,7 @@ import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { RevealDialog } from "./reveal-dialog"
 
 interface CredentialSummary {
   id: string
@@ -65,6 +67,20 @@ interface CredentialSummary {
    *  a placebo. Optional so older payloads decode; absent reads as "no probe",
    *  which hides the button rather than offering one that cannot answer. */
   testable?: boolean
+  /** Crews this credential is linked to — used to find the agents that
+   *  inherit it through a crew grant rather than an explicit assignment. */
+  crew_ids?: string[]
+  /**
+   * Classification (STANDARD / RESTRICTED / SEALED).
+   *
+   * GET /api/v1/credentials does NOT return this today — `credentialResponse`
+   * in internal/api/credentials.go now carries `sensitivity`, so this is
+   * normally
+   * undefined, and every consumer below has to treat "unknown" as its own
+   * state rather than as STANDARD. The moment the field is added to the read
+   * payload, the gating here starts working with no other change.
+   */
+  sensitivity?: string | null
 }
 
 interface AuditEvent {
@@ -87,6 +103,42 @@ interface RotationRow {
   old_value_gone: boolean
 }
 
+/** GET /api/v1/credentials/{id}/fields. `value` is non-null ONLY for a
+ *  non-secret field — the server never returns a secret's bytes, in any form. */
+interface CredentialFieldRow {
+  key: string
+  is_secret: boolean
+  ordinal: number
+  value: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** GET /api/v1/credentials/bindings?credential_id= */
+interface BindingRow {
+  id: string
+  credential_id: string
+  credential_name: string
+  scope: string
+  crew_id: string | null
+  agent_id: string | null
+  slot: string
+  created_at: string
+}
+
+/** One row of GET /api/v1/agents/{id}/credentials, narrowed to this credential. */
+interface AssignmentRow {
+  agentName: string
+  envVarName: string
+  /** "explicit" (an agent_credentials row) or "crew" (inherited via the crew). */
+  grantSource: string
+  expiresAt?: string
+  expired: boolean
+}
+
+/** How many agents we will interrogate for grant provenance. See loadAssignments. */
+const MAX_ASSIGNMENT_LOOKUPS = 12
+
 export interface CredentialDetailSheetProps {
   workspaceId: string
   credential: CredentialSummary | null
@@ -102,13 +154,25 @@ export interface CredentialDetailSheetProps {
 export function CredentialDetailSheet({
   workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit,
 }: CredentialDetailSheetProps) {
-  const [tab, setTab] = React.useState<"overview" | "used-by" | "audit" | "settings">("overview")
+  const [tab, setTab] = React.useState<"overview" | "fields" | "used-by" | "audit" | "settings">("overview")
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
   const [rotations, setRotations] = React.useState<RotationRow[]>([])
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
+  const [fields, setFields] = React.useState<CredentialFieldRow[]>([])
+  const [fieldsLoading, setFieldsLoading] = React.useState(false)
+  const [bindings, setBindings] = React.useState<BindingRow[]>([])
+  const [assignments, setAssignments] = React.useState<AssignmentRow[]>([])
+  const [revealEnabled, setRevealEnabled] = React.useState(false)
+  const [revealOpen, setRevealOpen] = React.useState(false)
+  // The classification a PUT .../sensitivity last returned. Starts unset and
+  // takes precedence over the value the list/get payload carried, so the pill
+  // and the SEALED gate follow a change made in this sheet without a refetch.
+  const [sensitivity, setSensitivity] = React.useState<string | null>(null)
+  const [sensitivitySaving, setSensitivitySaving] = React.useState(false)
+  const [sensitivityError, setSensitivityError] = React.useState<string | null>(null)
   // Inline value rewrite — Vercel-parity manual rotation. Lives in the
   // Settings tab next to the full grace-overlap rotation flow.
   const [valueDraft, setValueDraft] = React.useState("")
@@ -133,6 +197,30 @@ export function CredentialDetailSheet({
   const canUpdate = abilities.can("update", "Credential")
   const canRotate = abilities.can("manage", "Credential") || hasCapability(Capability.CredentialRotate)
   const canDelete = abilities.can("delete", "Credential")
+  // Lowering a classification is OWNER/ADMIN (credentials_reveal.go
+  // SetSensitivity: the lower branch re-checks with "manage"); raising is
+  // MANAGER+. Two gates because the server has two.
+  const canLowerSensitivity = abilities.can("manage", "Credential")
+
+  const effectiveSensitivity = sensitivity ?? credential?.sensitivity ?? null
+
+  /**
+   * Reveal, gated exactly the way credentials_reveal.go gates it:
+   *
+   *   L1 the workspace switch  → GET /credentials/reveal-policy
+   *   L2 role floor MANAGER+   → CASL "update" (revealRoleFloor = "update")
+   *   L2 the capability        → credentials:reveal, which no role implies
+   *   L0 classification        → SEALED never, by anyone
+   *
+   * All four, not any of them. The capability is the one people expect to be
+   * implied by being an OWNER and is deliberately not — so an OWNER without
+   * it must not see this button.
+   */
+  const canReveal =
+    canUpdate &&
+    hasCapability(Capability.CredentialReveal) &&
+    revealEnabled &&
+    effectiveSensitivity !== "SEALED"
 
   React.useEffect(() => {
     if (!open || !credential) {
@@ -140,12 +228,38 @@ export function CredentialDetailSheet({
       setAudit([])
       setRotations([])
       setTestResult(null)
+      setFields([])
+      setBindings([])
+      setAssignments([])
+      setSensitivity(null)
+      setSensitivityError(null)
+      setRevealEnabled(false)
+      setRevealOpen(false)
       setValueDraft("")
       setShowValueDraft(false)
       setValueSaved(false)
       setValueError(null)
     }
   }, [open, credential])
+
+  // The workspace reveal switch. MANAGER+ may read it (GetPolicy's own gate),
+  // so anyone below "update" is never asked — a 403 here would be read as
+  // "disabled", which happens to be right, but asking is still noise.
+  React.useEffect(() => {
+    if (!open || !credential || !canUpdate) return
+    let cancelled = false
+    apiFetch(`/api/v1/credentials/reveal-policy?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { enabled?: boolean } | null) => {
+        if (!cancelled) setRevealEnabled(Boolean(body?.enabled))
+      })
+      .catch(() => {
+        // Unreachable server → treat reveal as off. Failing closed on a
+        // disclosure control is the only acceptable direction.
+        if (!cancelled) setRevealEnabled(false)
+      })
+    return () => { cancelled = true }
+  }, [open, credential, canUpdate, workspaceId])
 
   React.useEffect(() => {
     if (!open || !credential) return
@@ -156,6 +270,22 @@ export function CredentialDetailSheet({
         .then((data: AuditEvent[]) => setAudit(Array.isArray(data) ? data : []))
         .catch(() => setAudit([]))
         .finally(() => setAuditLoading(false))
+    }
+    if (tab === "fields") {
+      setFieldsLoading(true)
+      apiFetch(`/api/v1/credentials/${credential.id}/fields?workspace_id=${workspaceId}`)
+        .then((r) => r.ok ? r.json() : [])
+        .then((data: CredentialFieldRow[]) => setFields(Array.isArray(data) ? data : []))
+        .catch(() => setFields([]))
+        .finally(() => setFieldsLoading(false))
+    }
+    if (tab === "used-by") {
+      apiFetch(`/api/v1/credentials/bindings?workspace_id=${workspaceId}&credential_id=${credential.id}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((body: { bindings?: BindingRow[] } | null) =>
+          setBindings(Array.isArray(body?.bindings) ? body.bindings : []))
+        .catch(() => setBindings([]))
+      void loadAssignments(workspaceId, credential).then(setAssignments).catch(() => setAssignments([]))
     }
     if (tab === "settings" && canRotate) {
       // Rotation history is only rendered for users who can rotate —
@@ -200,10 +330,35 @@ export function CredentialDetailSheet({
     setConfirmDelete(false)
   }
 
+  const setClassification = async (next: string) => {
+    setSensitivitySaving(true)
+    setSensitivityError(null)
+    try {
+      const res = await apiFetch(
+        `/api/v1/credentials/${credential.id}/sensitivity?workspace_id=${workspaceId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sensitivity: next }),
+        },
+      )
+      const data = (await res.json().catch(() => ({}))) as { sensitivity?: string; error?: string }
+      if (!res.ok) {
+        setSensitivityError(typeof data.error === "string" ? data.error : `Request failed (${res.status})`)
+        return
+      }
+      setSensitivity(data.sensitivity ?? next)
+    } catch {
+      setSensitivityError("Network error")
+    } finally {
+      setSensitivitySaving(false)
+    }
+  }
+
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="sm:max-w-[480px] p-0 flex flex-col">
+        <SheetContent side="right" className="sm:max-w-[520px] p-0 flex flex-col">
           <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -216,6 +371,18 @@ export function CredentialDetailSheet({
                       title="Crewship uses this credential to authenticate the agent's CLI inside the container"
                     >
                       CLI
+                    </Badge>
+                  )}
+                  {effectiveSensitivity && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[9px] px-1 font-mono shrink-0",
+                        effectiveSensitivity === "SEALED" && "border-destructive/50 text-destructive",
+                        effectiveSensitivity === "RESTRICTED" && "border-warn/50 text-warn",
+                      )}
+                    >
+                      {effectiveSensitivity}
                     </Badge>
                   )}
                 </div>
@@ -247,6 +414,9 @@ export function CredentialDetailSheet({
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1 flex flex-col">
             <TabsList className="px-3 mt-2 justify-start bg-transparent border-b border-white/10 rounded-none h-9">
               <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
+              <TabsTrigger value="fields" className="text-xs">
+                <ListTree className="h-3 w-3 mr-1" />Fields
+              </TabsTrigger>
               <TabsTrigger value="used-by" className="text-xs">
                 Used by{credential._count_agent_credentials > 0 && (
                   <Badge variant="secondary" className="ml-1.5 h-4 text-[10px] px-1.5">{credential._count_agent_credentials}</Badge>
@@ -317,6 +487,56 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
+                {/*
+                  The value block. §2.6 L8 — and this ordering is a security
+                  decision, not a layout preference: ROTATE is the primary
+                  action and reveal is the secondary one, because most
+                  legitimate reasons to want a value are really reasons to
+                  replace it. A control that is used rarely is a control that
+                  keeps working; making rotation the path of least resistance
+                  is what keeps the reveal count low enough that each one is
+                  worth investigating.
+                */}
+                {(canRotate || canReveal) && (
+                  <div className="pt-3 border-t border-white/10 space-y-2">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Value
+                    </div>
+                    <div className="rounded-md border border-white/10 bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
+                      ••••••••••••••••
+                    </div>
+                    {canRotate && (
+                      <>
+                        <Button size="sm" className="w-full justify-start" onClick={() => onRotate(credential)}>
+                          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                          Rotate and show the new value
+                        </Button>
+                        <p className="text-[10px] text-muted-foreground">
+                          Mints a new value, shows it once, and lets the old one drain through the
+                          grace window. Nothing existing is disclosed.
+                        </p>
+                      </>
+                    )}
+                    {canReveal && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="w-full justify-start text-[11px] text-muted-foreground hover:text-foreground -ml-2"
+                          onClick={() => setRevealOpen(true)}
+                        >
+                          <Eye className="h-3 w-3 mr-1.5" />
+                          Reveal the existing value…
+                        </Button>
+                        <p className="text-[10px] text-muted-foreground">
+                          Requires a written reason and is recorded in the tamper-evident journal
+                          before the value is returned.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Test now is only meaningful where the server maintains an
                     upstream probe (credential.testable — see
                     probeSupportedProviders) and requires update permission.
@@ -341,8 +561,117 @@ export function CredentialDetailSheet({
                 )}
               </TabsContent>
 
-              <TabsContent value="used-by" className="m-0">
-                {credential.agent_names.length > 0 ? (
+              {/*
+                Fields. A secret part is listed by KEY and marked "secret" —
+                there is no masked placeholder standing in for a value, because
+                the server does not return one: credential_fields.go omits
+                `encrypted_value` from the SELECT entirely, so there are no
+                bytes here to render even by accident. Non-secret parts (region,
+                account id) ARE shown, which is the entire reason they are
+                stored in the clear.
+              */}
+              <TabsContent value="fields" className="m-0">
+                {fieldsLoading ? (
+                  <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
+                ) : fields.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-6 text-center">
+                    This credential is a single value — no extra fields.
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {fields.map((f) => (
+                      <li
+                        key={f.key}
+                        className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs flex items-center gap-2"
+                      >
+                        <span className="font-mono text-foreground/90">{f.key}</span>
+                        {f.is_secret ? (
+                          <Badge variant="outline" className="ml-auto text-[9px] px-1 border-warn/40 text-warn">
+                            secret
+                          </Badge>
+                        ) : (
+                          <span className="ml-auto font-mono text-[11px] text-muted-foreground truncate max-w-[220px]">
+                            {f.value}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </TabsContent>
+
+              <TabsContent value="used-by" className="m-0 space-y-4">
+                {/* Bindings — (scope, slot) → this credential. This is the
+                    answer to "which env var will the container actually see",
+                    which before P3 had no answer short of booting the agent. */}
+                {bindings.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Slots
+                    </div>
+                    <ul className="space-y-1">
+                      {bindings.map((b) => (
+                        <li
+                          key={b.id}
+                          className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs flex items-center gap-2"
+                        >
+                          <Badge variant="outline" className="text-[9px] px-1">{b.scope}</Badge>
+                          <span className="font-mono">{b.slot}</span>
+                          {(b.crew_id || b.agent_id) && (
+                            <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                              {b.crew_id ?? b.agent_id}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {assignments.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Agents
+                    </div>
+                    <ul className="space-y-1.5">
+                      {assignments.map((a) => (
+                        <li
+                          key={`${a.agentName}:${a.envVarName}:${a.grantSource}`}
+                          className="rounded-md border border-white/10 bg-background px-3 py-2 text-sm flex items-center gap-2"
+                        >
+                          <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="truncate">{a.agentName}</span>
+                          {/* grant_source decides where the revoke lives: an
+                              explicit grant has an assignment id and its own
+                              DELETE; a crew-derived one has no row at all and
+                              can only be taken away by unlinking the crew. */}
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "ml-auto text-[9px] px-1",
+                              a.grantSource === "crew" ? "border-info/40 text-info" : "opacity-70",
+                            )}
+                            title={
+                              a.grantSource === "crew"
+                                ? "Inherited from the crew — unlink the crew to take it away"
+                                : "Granted to this agent directly"
+                            }
+                          >
+                            {a.grantSource === "crew" ? "crew grant" : "explicit"}
+                          </Badge>
+                          {a.expiresAt && (
+                            <Badge
+                              variant="outline"
+                              className={cn("text-[9px] px-1", a.expired ? "border-destructive/40 text-destructive" : "border-warn/40 text-warn")}
+                            >
+                              {a.expired ? "lease expired" : "leased"}
+                            </Badge>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : credential.agent_names.length > 0 ? (
                   <ul className="space-y-1.5">
                     {credential.agent_names.map((name) => (
                       <li key={name} className="rounded-md border border-white/10 bg-background px-3 py-2 text-sm flex items-center gap-2">
@@ -413,6 +742,58 @@ export function CredentialDetailSheet({
                     Rotation with grace overlap and deletion require a workspace admin.
                   </p>
                 )}
+
+                {/* Classification. Raising is MANAGER+ and unaudited (it only
+                    ever removes reach); lowering is OWNER/ADMIN and journaled
+                    as a precondition, because it hands out a key that did not
+                    exist a second earlier. */}
+                {canUpdate && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                      Classification
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {["STANDARD", "RESTRICTED", "SEALED"].map((level) => {
+                        const current = effectiveSensitivity
+                        const rank = ["STANDARD", "RESTRICTED", "SEALED"]
+                        const lowering = current !== null && rank.indexOf(level) < rank.indexOf(current)
+                        const blocked = lowering && !canLowerSensitivity
+                        return (
+                          <button
+                            key={level}
+                            type="button"
+                            disabled={sensitivitySaving || blocked || level === current}
+                            aria-pressed={level === current}
+                            onClick={() => setClassification(level)}
+                            title={blocked ? "Lowering a classification is a workspace-admin action" : undefined}
+                            className={cn(
+                              "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
+                              level === current
+                                ? "border-primary/50 bg-primary/10 text-primary-hover"
+                                : "border-white/10 text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {level}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {effectiveSensitivity === null
+                        ? "The current classification is not reported by the credentials API — picking one below sets it."
+                        : effectiveSensitivity === "SEALED"
+                          ? "SEALED can never be revealed, by any role. Break-glass is rotation, not disclosure."
+                          : "Raise it at any time; lowering it is an audited, admin-only action."}
+                    </p>
+                    {sensitivityError && (
+                      <span className="text-[11px] text-destructive inline-flex items-center gap-1">
+                        <XCircle className="h-3 w-3" />
+                        {sensitivityError}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Inline value rewrite — quick manual rotation without
                     grace overlap. For users who just need to paste a
                     new key and move on (Vercel pattern). The real
@@ -583,6 +964,19 @@ export function CredentialDetailSheet({
         </SheetContent>
       </Sheet>
 
+      <RevealDialog
+        workspaceId={workspaceId}
+        credentialId={credential.id}
+        credentialName={credential.name}
+        sensitivity={effectiveSensitivity}
+        open={revealOpen}
+        onOpenChange={setRevealOpen}
+        onRotateInstead={() => {
+          setRevealOpen(false)
+          onRotate(credential)
+        }}
+      />
+
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -607,6 +1001,70 @@ export function CredentialDetailSheet({
   )
 }
 
+/**
+ * Who actually holds this credential, and under which rule.
+ *
+ * There is no "list the assignments of credential X" endpoint — grant
+ * provenance lives on GET /agents/{agentId}/credentials, one agent at a time.
+ * So this asks only the agents that could plausibly hold it: the ones named on
+ * the credential (explicit grants) and the members of the crews it is linked
+ * to (crew grants), capped so a large workspace cannot turn one sheet into
+ * dozens of requests. Agents outside both sets cannot have it.
+ *
+ * grant_source itself always comes from the server. Deriving it here from
+ * scope + crew membership would be a second opinion, and the two would drift.
+ */
+async function loadAssignments(
+  workspaceId: string,
+  credential: CredentialSummary,
+): Promise<AssignmentRow[]> {
+  const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+  if (!res.ok) return []
+  const agents = await res.json()
+  if (!Array.isArray(agents)) return []
+
+  const crewIds = new Set(credential.crew_ids ?? [])
+  const names = new Set(credential.agent_names ?? [])
+  const candidates = (agents as { id?: string; name?: string; crew_id?: string | null }[])
+    .filter((a) => typeof a?.id === "string")
+    .filter((a) => names.has(a.name ?? "") || (a.crew_id ? crewIds.has(a.crew_id) : false))
+    .slice(0, MAX_ASSIGNMENT_LOOKUPS)
+
+  const rows: AssignmentRow[] = []
+  await Promise.all(
+    candidates.map(async (agent) => {
+      try {
+        const r = await apiFetch(
+          `/api/v1/agents/${encodeURIComponent(agent.id!)}/credentials` +
+            `?workspace_id=${encodeURIComponent(workspaceId)}`,
+        )
+        if (!r.ok) return
+        const list = await r.json()
+        if (!Array.isArray(list)) return
+        for (const row of list as {
+          credential_id?: string
+          env_var_name?: string
+          grant_source?: string
+          expires_at?: string
+          expired?: boolean
+        }[]) {
+          if (row?.credential_id !== credential.id) continue
+          rows.push({
+            agentName: agent.name ?? agent.id!,
+            envVarName: row.env_var_name ?? "",
+            grantSource: row.grant_source ?? "explicit",
+            expiresAt: row.expires_at,
+            expired: Boolean(row.expired),
+          })
+        }
+      } catch {
+        // One unreachable agent must not blank the whole list.
+      }
+    }),
+  )
+  return rows.sort((a, b) => a.agentName.localeCompare(b.agentName))
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[100px_1fr] gap-2 text-xs">
@@ -620,4 +1078,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Cancel({ children }: { children: React.ReactNode }) {
   return <AlertDialogCancel>{children}</AlertDialogCancel>
 }
-

@@ -209,3 +209,62 @@ func TestCredentialRead_TestableOnBothScanPaths(t *testing.T) {
 			"was updated and the other was not", *fromList, getBody.Testable)
 	}
 }
+
+// TestCredentialRead_ExposesSensitivity closes the gap the UI work surfaced.
+//
+// sensitivity decides whether a credential can be revealed at all — SEALED is
+// refused for every role including OWNER — but it was write-only: set through
+// PUT /{id}/sensitivity, echoed by the reveal and sensitivity responses, and
+// absent from every credential READ. So a client could gate its reveal
+// affordance on the workspace switch, the capability and the role floor, and
+// then had to let the user click and take a 403 for the fourth.
+//
+// That is the same defect as the audit tab rendering for a MEMBER: a control
+// that appears usable and answers with a refusal. Server-declared here, the
+// way testable already is, so the client needs no second copy of the rule.
+func TestCredentialRead_ExposesSensitivity(t *testing.T) {
+	t.Parallel()
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	const credID = "cred-sealed"
+	seedCredentialEnc(t, db, wsID, userID, credID, "PROD_DB", "hunter2")
+	if _, err := db.Exec(`UPDATE credentials SET sensitivity = 'SEALED' WHERE id = ?`, credID); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	getReq := httptest.NewRequest("GET", "/api/v1/credentials/"+credID, nil)
+	getReq.SetPathValue("credentialId", credID)
+	getReq = getReq.WithContext(withWorkspace(getReq.Context(), wsID, "OWNER"))
+	getRR := httptest.NewRecorder()
+	h.Get(getRR, getReq)
+	var got struct {
+		Sensitivity string `json:"sensitivity"`
+	}
+	if err := json.Unmarshal(getRR.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Get unmarshal: %v", err)
+	}
+	if got.Sensitivity != "SEALED" {
+		t.Errorf("Get sensitivity = %q, want SEALED — without it no client can tell that "+
+			"reveal is impossible before trying", got.Sensitivity)
+	}
+
+	listReq := httptest.NewRequest("GET", "/api/v1/credentials", nil)
+	listReq = listReq.WithContext(withWorkspace(listReq.Context(), wsID, "OWNER"))
+	listRR := httptest.NewRecorder()
+	h.List(listRR, listReq)
+	var list []struct {
+		ID          string `json:"id"`
+		Sensitivity string `json:"sensitivity"`
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &list); err != nil {
+		t.Fatalf("List unmarshal: %v", err)
+	}
+	for _, c := range list {
+		if c.ID == credID && c.Sensitivity != "SEALED" {
+			t.Errorf("List sensitivity = %q, want SEALED — List and Get scan into "+
+				"credentialResponse at two independent sites and must agree", c.Sensitivity)
+		}
+	}
+}
