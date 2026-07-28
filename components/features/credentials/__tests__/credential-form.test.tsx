@@ -104,3 +104,41 @@ describe("edit mode with a legacy invalid name", () => {
     expect(onSubmit.mock.calls[0][0].name).toBe("MY_LEGACY_KEY")
   })
 })
+
+// The "Test value" button was gated on BrandEntry.cli — the five brands
+// Crewship drives inside agent containers. That is not the set of brands the
+// server can probe: GITHUB, GITLAB and VERCEL have real upstream probes in
+// credentials_test_endpoint.go and none is cli:true, so the button was hidden
+// for three providers that would have answered.
+//
+// The flag is gone; the server now says so via
+// GET /credentials/default-env-var?provider=…&type=… → { testable }.
+describe("test-value button gating", () => {
+  function mockTestable(testable: boolean) {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (typeof url === "string" && url.includes("default-env-var")) {
+        return { ok: true, status: 200, json: async () => ({ env_var: "GH_TOKEN", testable }) }
+      }
+      return { ok: true, status: 200, json: async () => [] }
+    })
+  }
+
+  it("offers Test for a provider the server can probe", async () => {
+    mockTestable(true)
+    renderForm({ hideValue: false, onTest: vi.fn().mockResolvedValue({ valid: true }) })
+    fireEvent.change(nameInput(), { target: { value: "GH_TOKEN" } })
+    fireEvent.change(screen.getByLabelText("Value"), { target: { value: "ghp_abc123" } })
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /test value/i })).toBeInTheDocument(),
+    )
+  })
+
+  it("hides Test for a provider with no probe, so it can't render a placebo", async () => {
+    mockTestable(false)
+    renderForm({ hideValue: false, onTest: vi.fn().mockResolvedValue({ valid: true }) })
+    fireEvent.change(nameInput(), { target: { value: "NOTION_TOKEN" } })
+    fireEvent.change(screen.getByLabelText("Value"), { target: { value: "secret_abc123" } })
+    await waitFor(() => expect(nameInput().value).toBe("NOTION_TOKEN"))
+    expect(screen.queryByRole("button", { name: /test value/i })).not.toBeInTheDocument()
+  })
+})

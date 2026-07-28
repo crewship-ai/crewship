@@ -88,7 +88,13 @@ type credentialResponse struct {
 	// (#955) — an OpenAI-compatible base URL, not a secret, so it is
 	// echoed back on read the way Username is. nil for every other type;
 	// no read endpoint ever returns the value of a secret credential.
-	EndpointURL    *string `json:"endpoint_url,omitempty"`
+	EndpointURL *string `json:"endpoint_url,omitempty"`
+	// Testable reports whether Crewship maintains a real upstream probe for
+	// this credential's (provider, type) — i.e. whether POST /{id}/test can
+	// answer "does this still work" rather than "we didn't look". Server-side
+	// so the client needs no second list; the detail sheet renders its Test
+	// action from this. See probeSupportedProviders.
+	Testable       bool    `json:"testable"`
 	TokenExpiresAt *string `json:"token_expires_at"`
 	LastCheckedAt  *string `json:"last_checked_at"`
 	LastError      *string `json:"last_error"`
@@ -279,6 +285,7 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 		c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 		c.Tags = parseTags(tagsRaw)
 		c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
+		c.Testable = probeSupported(c.Provider, c.Type)
 		result = append(result, c)
 	}
 	return result, rows.Err()
@@ -370,6 +377,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)
 	c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
+	c.Testable = probeSupported(c.Provider, c.Type)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -472,7 +480,13 @@ func (h *CredentialHandler) DefaultEnvVar(w http.ResponseWriter, r *http.Request
 	// #1083: the provider→env-var map is single-sourced in internal/credprovider
 	// so this handler and the CLI's --provider help can't drift.
 	envVar := credprovider.DefaultEnvVar(prov)
-	writeJSON(w, http.StatusOK, map[string]string{"env_var": envVar})
+	// testable rides along on the call the Add Credential wizard already makes,
+	// so the client never needs its own opinion about which providers can be
+	// probed. See probeSupportedProviders for why that second opinion was a bug.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"env_var":  envVar,
+		"testable": probeSupported(prov, r.URL.Query().Get("type")),
+	})
 }
 
 // isAnthropicOAuthToken detects if a value is an Anthropic OAuth/setup token

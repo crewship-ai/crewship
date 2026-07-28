@@ -60,6 +60,11 @@ interface CredentialSummary {
   agent_names: string[]
   _count_agent_credentials: number
   mcp_used: boolean
+  /** Server-declared: does Crewship maintain a real upstream probe for this
+   *  credential's (provider, type)? Gates the "Test now" action so it is never
+   *  a placebo. Optional so older payloads decode; absent reads as "no probe",
+   *  which hides the button rather than offering one that cannot answer. */
+  testable?: boolean
 }
 
 interface AuditEvent {
@@ -306,11 +311,15 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
-                {/* Test now is only meaningful for CLI providers and
-                    requires update permission. Mirrors the BE gating
-                    in TestStored — hiding the button avoids a click →
-                    403 dead-end for read-only members. */}
-                {getBrand(credential.provider).cli && canUpdate && (
+                {/* Test now is only meaningful where the server maintains an
+                    upstream probe (credential.testable — see
+                    probeSupportedProviders) and requires update permission.
+                    Mirrors the BE gating in TestStored — hiding the button
+                    avoids a click → 403 dead-end for read-only members.
+                    Deliberately NOT gated on brand .cli like the badge above:
+                    that flag marks the CLIs Crewship drives in the container,
+                    which excluded GitHub/GitLab/Vercel despite real probes. */}
+                {credential.testable && canUpdate && (
                 <div className="pt-3 border-t border-white/10 flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
                     {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}

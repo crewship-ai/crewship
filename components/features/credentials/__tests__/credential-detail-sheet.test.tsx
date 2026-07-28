@@ -56,11 +56,11 @@ const credential = {
   mcp_used: false,
 }
 
-function renderSheet() {
+function renderSheet(overrides: Record<string, unknown> = {}) {
   return render(
     <CredentialDetailSheet
       workspaceId="ws1"
-      credential={credential}
+      credential={{ ...credential, ...overrides }}
       open
       onOpenChange={() => {}}
       onRefresh={() => {}}
@@ -152,5 +152,33 @@ describe("Settings tab gating by role", () => {
     expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
     // delete stays OWNER/ADMIN-only — the capability grants rotate, nothing more
     expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
+  })
+})
+
+// "Test now" used to be gated on getBrand(provider).cli — the five brands
+// Crewship drives inside agent containers. That set is not the set the server
+// can probe (GITHUB, GITLAB and VERCEL have real probes and are not cli:true),
+// so the action was hidden for credentials TestStored would have answered.
+//
+// The server decides now and says so per credential, via `testable` on the read
+// payload. The separate CLI badge keeps using .cli — that badge really is about
+// "Crewship authenticates the agent's CLI with this", a different question.
+describe("Test now gating follows server-declared probe support", () => {
+  it("shows Test now when the server says the credential is testable", () => {
+    h.role = "OWNER"
+    renderSheet({ provider: "GITHUB", testable: true })
+    expect(screen.getByRole("button", { name: /test now/i })).toBeInTheDocument()
+  })
+
+  it("hides Test now when the server has no probe for it", () => {
+    h.role = "OWNER"
+    renderSheet({ provider: "NOTION", testable: false })
+    expect(screen.queryByRole("button", { name: /test now/i })).not.toBeInTheDocument()
+  })
+
+  it("still hides Test now from roles that cannot update, even when testable", () => {
+    h.role = "MEMBER"
+    renderSheet({ provider: "GITHUB", testable: true })
+    expect(screen.queryByRole("button", { name: /test now/i })).not.toBeInTheDocument()
   })
 })
