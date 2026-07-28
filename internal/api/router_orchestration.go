@@ -229,6 +229,25 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("PATCH", "/api/v1/notification-channels/{id}", roleInline, nch.Patch)
 	r.authedMut("DELETE", "/api/v1/notification-channels/{id}", roleInline, nch.Delete)
 	r.authedMut("POST", "/api/v1/notification-channels/{id}/test", roleInline, nch.Test)
+	// Test an UNSAVED draft. Without it the first time anyone learns whether
+	// their webhook URL is right is after they have already committed it.
+	// roleInline: the handler's own bar is "authenticated member", matching
+	// personal-channel creation — see TestDraft's doc comment.
+	r.authedMut("POST", "/api/v1/notification-channels/test", roleInline, nch.TestDraft)
+
+	// Agent pairing: which agents may post to a channel of their own accord.
+	// roleInline because the authority mirrors editing the channel itself —
+	// MANAGER+ for a workspace channel, ownership for a personal one — and
+	// only the handler can tell which it is looking at.
+	nca := NewNotifyChannelAgentsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/notification-channels/{id}/agents", authed(wsCtx(http.HandlerFunc(nca.List))))
+	// The mirror: what can THIS agent reach? Same read bar as the line above —
+	// the response says that a channel exists and of what kind, never where it
+	// points, so it carries no more than the channel-side view already does.
+	anc := NewAgentNotifyChannelsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/notification-channels", authed(wsCtx(http.HandlerFunc(anc.List))))
+	r.authedMut("POST", "/api/v1/notification-channels/{id}/agents", roleInline, nca.Allow)
+	r.authedMut("DELETE", "/api/v1/notification-channels/{id}/agents/{agentId}", roleInline, nca.Deny)
 
 	// Providers registry (#1412): which shoutrrr providers this instance
 	// supports and which are admin-enabled. Read is any authenticated

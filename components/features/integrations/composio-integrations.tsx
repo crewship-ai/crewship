@@ -16,8 +16,10 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { invalidate, readThrough } from "@/lib/stale-cache"
 
 import type {
+  ConnectedAccount,
   Inventory,
   ToolkitInfo,
   ToolkitsResp,
@@ -50,7 +52,65 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "mcp", label: "MCP endpoints" },
 ]
 
-export function ComposioIntegrations() {
+/**
+ * What the host page needs in order to render this surface's chrome for it:
+ * the left-panel counts, the SubBar description, and whether the API key is
+ * set. Reported upward rather than duplicated, so there is one fetch and one
+ * source of truth for both.
+ */
+export interface ComposioStatus {
+  loading: boolean
+  configured: boolean
+  /** "env" or the key's label; null when no key is set. */
+  keyLabel: string | null
+  counts: {
+    apps: number
+    accounts: number
+    users: number
+    agentsBound: number
+    agentsTotal: number
+    endpoints: number
+  }
+  /** Toolkit slug -> connected account count, for the Toolkit facet. */
+  toolkits: { slug: string; count: number }[]
+  /** Composio user id -> connected account count, for the User facet. */
+  users: { id: string; count: number }[]
+  /** Every connected account, flattened — the host lists and details these. */
+  accounts: ConnectedAccount[]
+  /** Agents + their bindings, so a detail can answer "who can act through it". */
+  agents: AgentLite[]
+  bindings: AgentBindingsMap
+}
+
+export interface ComposioIntegrationsProps {
+  /**
+   * Controlled section. When provided, the component's own tab strip is not
+   * rendered — the host owns navigation (today: the left panel).
+   */
+  section?: TabKey
+  /**
+   * true = the host page renders the identity and actions. Without this the
+   * component draws a second "Integrations" heading and a second Refresh
+   * button inside a page that already has both.
+   */
+  embedded?: boolean
+  /** Controlled API-key dialog, so the host can open it from its own SubBar. */
+  apiKeyOpen?: boolean
+  onApiKeyOpenChange?: (open: boolean) => void
+  /** Search term from the host's unified box; falls back to internal state. */
+  search?: string
+  /** Reports counts + configured state upward. Must be a stable callback. */
+  onStatus?: (status: ComposioStatus) => void
+}
+
+export function ComposioIntegrations({
+  section,
+  embedded = false,
+  apiKeyOpen,
+  onApiKeyOpenChange,
+  search: searchProp,
+  onStatus,
+}: ComposioIntegrationsProps = {}) {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   // Latest workspace id, mirrored into a ref so async loaders can detect when a
@@ -67,17 +127,30 @@ export function ComposioIntegrations() {
   const [error, setError] = React.useState<string | null>(null)
 
   const load = React.useCallback(async (wid: string) => {
-    setLoading(true)
-    setError(null)
-    try {
+    // Serve whatever is cached first. Leaving and re-entering this tab used to
+    // pay the full round trip again and show skeletons for it, even when the
+    // data was seconds old — see lib/stale-cache.ts.
+    const { value, fresh, fromCache } = readThrough(`composio:${wid}:inventory`, async () => {
       const r = await apiFetch(`/api/v1/integrations/composio/inventory?workspace_id=${wid}`)
       if (!r.ok) throw new Error(`Request failed (${r.status})`)
-      const j = (await r.json()) as Inventory
+      return (await r.json()) as Inventory
+    })
+    if (value && wsRef.current === wid) {
+      setData(value)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+    setError(null)
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
       setData(j)
     } catch (e) {
       if (wsRef.current !== wid) return
-      setError(e instanceof Error ? e.message : "Failed to load inventory")
+      // A background refresh that fails while cached data is on screen is not
+      // worth an error banner over data the user can still see.
+      if (!fromCache) setError(e instanceof Error ? e.message : "Failed to load inventory")
     } finally {
       if (wsRef.current === wid) setLoading(false)
     }
@@ -90,23 +163,38 @@ export function ComposioIntegrations() {
   // ── Catalog (toolkits) ──
   const [toolkits, setToolkits] = React.useState<ToolkitInfo[]>([])
   const [total, setTotal] = React.useState(0)
-  const [search, setSearch] = React.useState("")
+  const [searchState, setSearch] = React.useState("")
+  // The host's box wins when it is driving; the internal one stays for the
+  // stand-alone rendering the feature flag can still fall back to.
+  const search = searchProp ?? searchState
   const [tkLoading, setTkLoading] = React.useState(true)
 
   const loadToolkits = React.useCallback(async (wid: string, q: string) => {
-    setTkLoading(true)
-    try {
+    // Cached per query, so going back to the unfiltered catalog after a search
+    // is instant — this is the slowest of the four calls, since it reaches
+    // Composio's own API.
+    const { value, fresh } = readThrough(`composio:${wid}:toolkits:${q}`, async () => {
       const params = new URLSearchParams({ workspace_id: wid })
       if (q) params.set("search", q)
       const r = await apiFetch(`/api/v1/integrations/composio/toolkits?${params}`)
       if (!r.ok) throw new Error(String(r.status))
-      const j = (await r.json()) as ToolkitsResp
+      return (await r.json()) as ToolkitsResp
+    })
+    if (value && wsRef.current === wid) {
+      setToolkits(value.toolkits ?? [])
+      setTotal(value.total ?? 0)
+      setTkLoading(false)
+    } else {
+      setTkLoading(true)
+    }
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
       setToolkits(j.toolkits ?? [])
       setTotal(j.total ?? 0)
     } catch {
       if (wsRef.current !== wid) return
-      setToolkits([])
+      if (!value) setToolkits([])
     } finally {
       if (wsRef.current === wid) setTkLoading(false)
     }
@@ -125,15 +213,16 @@ export function ComposioIntegrations() {
   const [agentsLoading, setAgentsLoading] = React.useState(true)
 
   const loadAgents = React.useCallback(async (wid: string) => {
-    setAgentsLoading(true)
-    try {
+    // The priciest of the four: one call for the agent list, then one per
+    // agent for its bindings. Cached as a unit — re-running an N+1 fan-out on
+    // every tab entry is what made this surface feel slow.
+    const { value, fresh } = readThrough(`composio:${wid}:agents`, async () => {
       const r = await apiFetch(`/api/v1/agents?workspace_id=${wid}`)
       if (!r.ok) throw new Error(String(r.status))
       const list = (await r.json()) as AgentLite[]
-      if (wsRef.current !== wid) return // workspace switched mid-flight
-      setAgents(list)
-      // Fetch each agent's Composio binding in parallel. A failed lookup for one
-      // agent shouldn't blank the whole table — degrade that row to "no access".
+      // Fetch each agent's Composio binding in parallel. A failed lookup for
+      // one agent shouldn't blank the whole table — degrade that row to
+      // "no access".
       const entries = await Promise.all(
         list.map(async (a): Promise<[string, AgentBindingsMap[string]]> => {
           try {
@@ -148,12 +237,27 @@ export function ComposioIntegrations() {
           }
         }),
       )
+      return { agents: list, bindings: Object.fromEntries(entries) as AgentBindingsMap }
+    })
+
+    if (value && wsRef.current === wid) {
+      setAgents(value.agents)
+      setBindings(value.bindings)
+      setAgentsLoading(false)
+    } else {
+      setAgentsLoading(true)
+    }
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
-      setBindings(Object.fromEntries(entries))
+      setAgents(j.agents)
+      setBindings(j.bindings)
     } catch {
       if (wsRef.current !== wid) return
-      setAgents([])
-      setBindings({})
+      if (!value) {
+        setAgents([])
+        setBindings({})
+      }
     } finally {
       if (wsRef.current === wid) setAgentsLoading(false)
     }
@@ -173,17 +277,29 @@ export function ComposioIntegrations() {
 
   // ── Settings (API key) ──
   const [settings, setSettings] = React.useState<ComposioSettings | null>(null)
-  const [keyOpen, setKeyOpen] = React.useState(false)
+  const [keyOpenState, setKeyOpenState] = React.useState(false)
+  const keyOpen = apiKeyOpen ?? keyOpenState
+  const setKeyOpen = React.useCallback(
+    (open: boolean) => {
+      setKeyOpenState(open)
+      onApiKeyOpenChange?.(open)
+    },
+    [onApiKeyOpenChange],
+  )
   const [connect, setConnect] = React.useState<{
     toolkit?: { slug: string; name: string }
     userId?: string
   } | null>(null)
 
   const loadSettings = React.useCallback(async (wid: string) => {
-    try {
+    const { value, fresh } = readThrough(`composio:${wid}:settings`, async () => {
       const r = await apiFetch(`/api/v1/integrations/composio/settings?workspace_id=${wid}`)
-      if (!r.ok) return
-      const j = (await r.json()) as ComposioSettings
+      if (!r.ok) throw new Error(String(r.status))
+      return (await r.json()) as ComposioSettings
+    })
+    if (value && wsRef.current === wid) setSettings(value)
+    try {
+      const j = await fresh
       if (wsRef.current !== wid) return // workspace switched mid-flight
       setSettings(j)
     } catch {
@@ -197,6 +313,9 @@ export function ComposioIntegrations() {
 
   const refreshAll = React.useCallback(
     (wid: string) => {
+      // Refresh means refresh: drop this workspace's cache first, or the
+      // button would re-render the same values it was pressed to replace.
+      invalidate(`composio:${wid}:`)
       void load(wid)
       void loadToolkits(wid, search)
       void loadSettings(wid)
@@ -205,7 +324,8 @@ export function ComposioIntegrations() {
     [load, loadToolkits, search, loadSettings, loadAgents],
   )
 
-  const [tab, setTab] = React.useState<TabKey>("catalog")
+  const [tabState, setTab] = React.useState<TabKey>("catalog")
+  const tab = section ?? tabState
 
   const busy = wsLoading || loading
 
@@ -230,35 +350,116 @@ export function ComposioIntegrations() {
   // while settings is still loading.
   const configured = settings ? settings.configured : data?.enabled ?? false
 
+  // Facet material for the host's left panel: how many connected accounts sit
+  // under each toolkit and each Composio user.
+  const toolkitCounts = React.useMemo(() => {
+    const m = new Map<string, number>()
+    data?.users.forEach((u) =>
+      u.connected_accounts.forEach((a) => m.set(a.toolkit.slug, (m.get(a.toolkit.slug) ?? 0) + 1)),
+    )
+    return [...m.entries()]
+      .map(([slug, count]) => ({ slug, count }))
+      .sort((a, b) => b.count - a.count || a.slug.localeCompare(b.slug))
+  }, [data])
+
+  const allAccounts = React.useMemo(
+    () => (data?.users ?? []).flatMap((u) => u.connected_accounts),
+    [data],
+  )
+
+  const userCounts = React.useMemo(
+    () =>
+      (data?.users ?? [])
+        .map((u) => ({ id: u.user_id, count: u.connected_accounts.length }))
+        .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)),
+    [data],
+  )
+
+  // Push the summary up. Keyed on the primitives it is built from rather than
+  // on the object, which would be a fresh identity every render and would loop
+  // the host straight back into this effect.
+  const keyLabel = settings?.configured
+    ? settings.source === "env"
+      ? "env"
+      : settings.label ?? "set"
+    : null
+  const endpointCount = React.useMemo(
+    () => agents.filter((a) => (bindings[a.id]?.length ?? 0) > 0).length,
+    [agents, bindings],
+  )
+  React.useEffect(() => {
+    onStatus?.({
+      loading: busy,
+      configured,
+      keyLabel,
+      counts: {
+        apps: total,
+        accounts: connectedCount,
+        users: userCount,
+        agentsBound,
+        agentsTotal: agents.length,
+        endpoints: endpointCount,
+      },
+      toolkits: toolkitCounts,
+      users: userCounts,
+      accounts: allAccounts,
+      agents,
+      bindings,
+    })
+  }, [
+    onStatus,
+    busy,
+    configured,
+    keyLabel,
+    total,
+    connectedCount,
+    userCount,
+    agentsBound,
+    agents,
+    bindings,
+    allAccounts,
+    endpointCount,
+    toolkitCounts,
+    userCounts,
+  ])
+
   return (
-    <div className="p-4 md:p-6 pb-10 space-y-5 bg-background min-h-[calc(100vh-48px)]">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Plug className="h-4 w-4 text-foreground/60" />
-          <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
-          <span className="text-[11px] text-muted-foreground">· powered by Composio</span>
-          {settings?.configured && (
-            <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/[0.08] px-2 py-0.5 text-[10px] text-success">
-              ● key set{settings.source === "env" ? " (env)" : settings.label ? ` · ${settings.label}` : ""}
-            </span>
-          )}
+    <div
+      className={cn(
+        "space-y-5 bg-background",
+        // The host page already supplies page padding when it embeds us.
+        embedded ? "p-0" : "p-4 md:p-6 pb-6",
+      )}
+    >
+      {!embedded && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Plug className="h-4 w-4 text-foreground/60" />
+            <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
+            <span className="text-[11px] text-muted-foreground">· powered by Composio</span>
+            {settings?.configured && (
+              <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/[0.08] px-2 py-0.5 text-[10px] text-success">
+                ● key set{settings.source === "env" ? " (env)" : settings.label ? ` · ${settings.label}` : ""}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setKeyOpen(true)}>
+              <KeyRound className="h-3.5 w-3.5" />
+              API key
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => workspaceId && refreshAll(workspaceId)}
+              disabled={busy}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setKeyOpen(true)}>
-            <KeyRound className="h-3.5 w-3.5" />
-            API key
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => workspaceId && refreshAll(workspaceId)}
-            disabled={busy}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
-            Refresh
-          </Button>
-        </div>
-      </div>
+      )}
 
       {keyOpen && workspaceId && (
         <ApiKeyModal
@@ -304,7 +505,9 @@ export function ComposioIntegrations() {
 
       {!busy && !error && configured && workspaceId && data && (
         <>
-          {/* KPI row */}
+          {/* KPI row. Suppressed when embedded: the host renders the same
+              four figures from the status it already receives. */}
+          {!embedded && (
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
             <KpiCard label="Connectable apps" value={total || "—"} sub="Composio catalog" />
             <KpiCard
@@ -324,25 +527,30 @@ export function ComposioIntegrations() {
               sub="have a Composio user"
             />
           </div>
+          )}
 
-          {/* Tabs */}
-          <div className="flex gap-1 overflow-x-auto border-b border-white/10">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setTab(t.key)}
-                className={cn(
-                  "whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] transition-colors",
-                  tab === t.key
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground/80",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          {/* Tabs — only when nobody outside is driving the section. Two
+              navigations for one set of views is what made this read as a
+              page inside a page. */}
+          {section === undefined && (
+            <div className="flex gap-1 overflow-x-auto border-b border-white/10">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={cn(
+                    "whitespace-nowrap border-b-2 px-3.5 py-2.5 text-[13px] transition-colors",
+                    tab === t.key
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground/80",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Tab content */}
           {tab === "catalog" && (
@@ -351,6 +559,7 @@ export function ComposioIntegrations() {
               total={total}
               search={search}
               onSearch={setSearch}
+              hideSearch={searchProp !== undefined}
               loading={tkLoading}
               configuredSlugs={configuredSlugs}
               onConnect={(toolkit) => setConnect({ toolkit })}

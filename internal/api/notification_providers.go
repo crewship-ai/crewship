@@ -35,25 +35,55 @@ func providerSettingKey(p string) string {
 	return "notify.provider." + p + ".enabled"
 }
 
+// providerInfo describes one provider to a client. It carries the FORM
+// DEFINITION — label, blurb and per-field label/help/placeholder — so the UI
+// and the CLI render the same questions without either of them hard-coding a
+// provider list that drifts from the server's.
+//
+// `scheme` is retained for API compatibility and mirrors `provider`. The
+// delivery library's URL scheme is an implementation detail a client has no
+// use for: clients send field values, the server composes the URL.
 type providerInfo struct {
 	Provider string `json:"provider"`
 	Scheme   string `json:"scheme"`
-	Enabled  bool   `json:"enabled"`
+	Label    string `json:"label"`
+	Blurb    string `json:"blurb"`
+	// Category is the catalog section (chat | push | incident). Served rather
+	// than mapped client-side so a new provider lands in the right section
+	// without a matching frontend change — see notify.ProviderCategories.
+	Category string                 `json:"category"`
+	Fields   []notify.ProviderField `json:"fields"`
+	Enabled  bool                   `json:"enabled"`
 }
 
 // List serves GET /api/v1/notification-providers.
 func (h *NotifyProvidersHandler) List(w http.ResponseWriter, r *http.Request) {
-	out := make([]providerInfo, 0, len(notify.SupportedProviders()))
-	for _, p := range notify.SupportedProviders() {
-		enabled, err := providerEnabled(r.Context(), h.db, p)
+	specs := notify.Providers()
+	out := make([]providerInfo, 0, len(specs))
+	for _, spec := range specs {
+		enabled, err := providerEnabled(r.Context(), h.db, spec.Name)
 		if err != nil {
-			h.logger.Error("notify: read provider setting", "err", err, "provider", p)
+			h.logger.Error("notify: read provider setting", "err", err, "provider", spec.Name)
 			replyError(w, http.StatusInternalServerError, "internal")
 			return
 		}
-		out = append(out, providerInfo{Provider: p, Scheme: p, Enabled: enabled})
+		out = append(out, providerInfo{
+			Provider: spec.Name,
+			Scheme:   spec.Name,
+			Label:    spec.Label,
+			Blurb:    spec.Blurb,
+			Category: string(spec.Category),
+			Fields:   spec.Fields,
+			Enabled:  enabled,
+		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+	// `categories` ships alongside so a client renders sections in OUR order
+	// with OUR labels instead of inferring them from the providers it happens
+	// to have received.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"providers":  out,
+		"categories": notify.ProviderCategories(),
+	})
 }
 
 // patchProviderRequest is the PATCH body.

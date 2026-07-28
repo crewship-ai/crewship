@@ -58,7 +58,7 @@ func (r *Router) RecoverStuckDeliveries(ctx context.Context) (attempted, sent in
 // recoverOne re-attempts a single stuck delivery. Returns true iff it was
 // delivered this pass.
 func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
-	body, priority, url, err := r.deriveMessage(ctx, d.SourceKind, d.SourceID)
+	body, priority, payload, err := r.deriveMessage(ctx, d.SourceKind, d.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Source inbox item is gone — nothing left to render. Bump the
@@ -76,6 +76,9 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		return false
 	}
 
+	// Same derivation as the live path, so a recovered delivery carries the
+	// same links and variables the original attempt would have.
+	links, vars := notificationFacts(d.SourceKind, payload)
 	msg := notify.CategoryMessage{
 		WorkspaceID: d.WorkspaceID,
 		Category:    d.Category,
@@ -84,7 +87,8 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		Priority:    priority,
 		SourceKind:  d.SourceKind,
 		SourceID:    d.SourceID,
-		URL:         url,
+		Links:       links,
+		Vars:        vars,
 	}
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
 		if merr := r.deliveries.MarkFailed(ctx, d.ID, err.Error()); merr != nil {
@@ -98,26 +102,31 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 	return true
 }
 
-// deriveMessage re-reads the body/priority/deep-link for a delivery from
-// its durable inbox_items source. Returns sql.ErrNoRows if the source is
+// deriveMessage re-reads the body, priority and source payload for a delivery
+// from its durable inbox_items row. Returns sql.ErrNoRows if the source is
 // gone.
-func (r *Router) deriveMessage(ctx context.Context, kind, sourceID string) (body, priority, url string, err error) {
+//
+// It returns the payload rather than a link: turning a payload into links and
+// template variables is notificationFacts' job, and doing it here as well is
+// what let the live path and this one drift into reading a single hardcoded
+// key each.
+func (r *Router) deriveMessage(ctx context.Context, kind, sourceID string) (body, priority string, payload map[string]any, err error) {
 	var payloadJSON string
 	err = r.db.QueryRowContext(ctx,
 		`SELECT COALESCE(body_md,''), priority, COALESCE(payload_json,'{}')
 		 FROM inbox_items WHERE kind = ? AND source_id = ?`,
 		kind, sourceID).Scan(&body, &priority, &payloadJSON)
 	if err != nil {
-		return "", "", "", err
+		return "", "", nil, err
 	}
-	// Deep link, if the source carried one (same key the live path reads).
-	var payload map[string]any
-	if json.Unmarshal([]byte(payloadJSON), &payload) == nil {
-		if u, ok := payload["chat_url"].(string); ok {
-			url = u
-		}
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		// A malformed payload costs links and variables, not the delivery
+		// — the message itself is intact.
+		r.logger.Warn("notifyroute: recovery: source payload not JSON",
+			"error", err, "kind", kind, "source_id", sourceID)
+		payload = nil
 	}
-	return body, priority, url, nil
+	return body, priority, payload, nil
 }
 
 // RunRecoveryLoop drives RecoverStuckDeliveries on a ticker until ctx is

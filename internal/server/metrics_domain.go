@@ -113,8 +113,20 @@ func writePromMetric(b *strings.Builder, name, help, mtype, hostname string, sam
 	}
 }
 
+// formatPromValue renders a sample value for the Prometheus text format.
+//
+// 'f', not 'g': the 'g' verb switches to scientific notation once the exponent
+// grows, and nothing here was large enough to notice until migration versions
+// became YYYYMMDDHHMMSS timestamps — at which point the schema-version gauge
+// started reporting 2.02607281102e+13. Prometheus parses that, so nothing
+// breaks loudly; the number is just unreadable on a dashboard, and anything
+// written against the plain form quietly stops matching.
+//
+// -1 precision keeps the shortest representation that round-trips, so 0.75
+// stays "0.75" and 14 stays "14". +Inf/-Inf/NaN format the same under both
+// verbs and are spellings Prometheus accepts.
 func formatPromValue(v float64) string {
-	return strconv.FormatFloat(v, 'g', -1, 64)
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // statusSamples zero-fills the closed set so every label value is

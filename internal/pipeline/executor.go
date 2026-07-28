@@ -1614,7 +1614,7 @@ func (e *Executor) failRun(ctx context.Context, in RunInput, emit *pipelineEmitC
 // must finalize result.DurationMs first — the emit carries it.
 func (e *Executor) completeRun(ctx context.Context, in RunInput, emit *pipelineEmitContext, result *RunResult) {
 	result.Status = "COMPLETED"
-	emit.emitRunCompleted(ctx, result.DurationMs, result.CostUSD)
+	emit.emitRunCompleted(ctx, result.DurationMs, result.CostUSD, announcesOwnCompletion(in.dsl))
 	if in.Mode == ModeRun && in.pipeline != nil {
 		_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "COMPLETED")
 	}

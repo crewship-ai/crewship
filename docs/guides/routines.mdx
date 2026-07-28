@@ -823,6 +823,24 @@ A **non-blocking** inbox message pushed mid-run — the push, author-controlled 
 | `title` | Inbox card title. Rendered, secret-redacted, truncated. |
 | `body` | Markdown body. Rendered from the run context (`{{ steps.X.output }}`, `{{ inputs.* }}`) and secret-redacted. At least one of `title`/`body` is required. |
 | `priority` | `urgent` \| `high` \| `medium` \| `low`. Default `medium`. |
+| `category` | Which [notification category](/guides/notifications) this notice routes under, e.g. `routines.failed`. Optional; see below. |
+
+**Saying what the notice *is*.** Without `category`, every notify step routes as `chat.replies` — the category an inbox `message` maps to. That is fine for a progress ping and wrong for everything else: "the nightly deploy failed" and "here is your weekly digest" arrive under the same label, and the [preference matrix](/guides/notifications#two-layer-preferences-the-1412-category-system) people tune is invisible to you, the one author who knows what the event actually is.
+
+```json
+{
+  "id": "tell_ops",
+  "type": "notify",
+  "to": "workspace",
+  "title": "Nightly deploy failed",
+  "category": "routines.failed",
+  "priority": "high"
+}
+```
+
+**One announcement, not two.** Crewship also emits a `routines.completed` notification of its own when a run finishes, so a routine that says nothing still reports that it ended. If your routine unconditionally tells the whole workspace it finished under that same category, the generic one is suppressed — your message says what happened *and* carries the result, and getting both every run is how a channel earns a mute. Suppression is deliberately narrow: a notice behind an `if`, or aimed at a role, a user, a crew or the trigger, reaches fewer people than the generic one, so that one still goes out.
+
+A category is a **routing label, not a privilege**: it selects which row of a recipient's matrix the notice is matched against, and every row is still opt-in per user and still gated by the channel's allowlist. An unknown category is rejected when the routine is saved — routing into one nothing matches would deliver to nobody while the run reported success. The full vocabulary is in `crewship notify prefs --help`.
 
 **Targeting a crew.** `to: "crew:<slug>"` addresses a crew's **human audience** — everyone listed as a member of that crew — and delivers one inbox card per member:
 

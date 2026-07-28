@@ -1079,7 +1079,7 @@ func (s *PipelineScheduler) maybeTripCircuitBreaker(ctx context.Context, sched *
 	})
 	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
 		WorkspaceID: sched.WorkspaceID,
-		Kind:        "schedule_circuit_breaker_tripped",
+		Kind:        inbox.KindScheduleCircuitBreakerTripped,
 		SourceID:    sched.ID,
 		TargetRole:  "MANAGER",
 		Title:       fmt.Sprintf("Routine %s paused after %d straight failures", label, newCount),
@@ -1119,7 +1119,7 @@ func (s *PipelineScheduler) alertFailedScheduledRun(ctx context.Context, sched *
 	}
 	if err := inbox.Insert(ctx, s.store.db, s.logger, inbox.Item{
 		WorkspaceID: sched.WorkspaceID,
-		Kind:        "failed_run",
+		Kind:        inbox.KindFailedRun,
 		SourceID:    sourceID,
 		TargetRole:  "MANAGER",
 		Title:       fmt.Sprintf("Scheduled routine failed: %s", label),

@@ -7,22 +7,30 @@ import (
 )
 
 // Delivery is one row of the notification_deliveries outbox/log (v154).
+//
+// The json tags are load-bearing, not decoration: this struct is serialized
+// straight out of GET /api/v1/notification-deliveries, and both clients — the
+// CLI's `notifychannel deliveries` table and the dashboard's Deliveries view —
+// read snake_case keys. Without tags the API emitted Go field names, and
+// Go's case-insensitive unmarshal fallback hid half of it: `ID` still matched
+// `id`, but `ChannelID` never matched `channel_id`, so those columns arrived
+// empty. api.TestDeliveriesWireIsSnakeCase pins the names on the wire.
 type Delivery struct {
-	ID          string
-	WorkspaceID string
-	ChannelID   string
-	UserID      string
-	Category    string
-	DedupKey    string
-	SourceKind  string
-	SourceID    string
-	Title       string
-	Status      string // pending | sent | failed | dropped_pref | dropped_rate
-	Error       string
-	Attempts    int
-	CreatedAt   string
-	UpdatedAt   string
-	SentAt      string
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	ChannelID   string `json:"channel_id"`
+	UserID      string `json:"user_id"`
+	Category    string `json:"category"`
+	DedupKey    string `json:"dedup_key"`
+	SourceKind  string `json:"source_kind"`
+	SourceID    string `json:"source_id"`
+	Title       string `json:"title"`
+	Status      string `json:"status"` // pending | sent | failed | dropped_pref | dropped_rate
+	Error       string `json:"error,omitempty"`
+	Attempts    int    `json:"attempts"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	SentAt      string `json:"sent_at,omitempty"`
 }
 
 // Delivery statuses.

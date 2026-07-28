@@ -231,7 +231,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	}
 	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 		WorkspaceID: body.WorkspaceID,
-		Kind:        "escalation",
+		Kind:        inbox.KindEscalation,
 		SourceID:    escalationID,
 		TargetRole:  "MANAGER",
 		Title:       inboxTitle,

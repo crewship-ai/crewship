@@ -244,6 +244,7 @@ func writeMCPDroid(
 	// for rationale + invariants.
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
+	specs = injectNotifyMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -286,6 +287,7 @@ func writeMCPGemini(
 	// for rationale.
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
+	specs = injectNotifyMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -347,6 +349,7 @@ func writeMCPOpenCode(
 	// for rationale.
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
+	specs = injectNotifyMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}
@@ -421,6 +424,7 @@ func writeMCPCodex(
 	// server named "crewship-memory" (override path).
 	specs = injectMemoryMCP(specs, req.AgentSlug, memorySinkReady(ctx, container, containerID))
 	specs = injectRoutinesMCP(specs)
+	specs = injectNotifyMCP(specs)
 	if len(specs) == 0 {
 		return nil
 	}

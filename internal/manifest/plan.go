@@ -53,6 +53,21 @@ type Plan struct {
 	// plan will leave as PENDING (no value supplied). The CLI prints
 	// this list at the end so the user knows to fill values in.
 	PendingCredentials []string
+	// Skipped names things the manifest declared that this run cannot
+	// apply, and what has to be supplied to change that — a notification
+	// channel whose secret was not provided, a Composio grant with no
+	// connected account to act as.
+	//
+	// They are reported rather than silently dropped, and reported rather
+	// than PLANNED: a grant with no user_id used to be planned as a create,
+	// refused by the server, downgraded to a warning and counted as applied,
+	// so every run printed "1 created" for something that never existed and
+	// the plan never settled.
+	//
+	// One list, because they are one fact — "declared, not applied, here is
+	// what you owe it" — and a reader scanning the output should not have to
+	// learn two places to look.
+	Skipped []string
 	// Warnings carries non-fatal advisories surfaced during plan
 	// construction. They do NOT block apply; the CLI prints them
 	// before exit so the operator sees them next to the summary.
@@ -112,6 +127,13 @@ func BuildPlan(ctx context.Context, c *Client, b *Bundle, opts Options) (*Plan, 
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
+	// Apply defaults this; BuildPlan did not, so a caller that planned
+	// without secrets hit a nil interface the moment anything asked for one.
+	// Planning is the read-only path people reach for first, so it has to be
+	// at least as forgiving as the one that writes.
+	if opts.Secrets == nil {
+		opts.Secrets = NoSecretsSource{}
+	}
 	p := &Plan{}
 
 	pb := &planBuilder{client: c, opts: opts, plan: p}
@@ -138,6 +160,12 @@ func BuildPlan(ctx context.Context, c *Client, b *Bundle, opts Options) (*Plan, 
 			if err := pb.planSkill(ctx, &ws.Spec.Skills[j], "workspace"); err != nil {
 				return nil, err
 			}
+		}
+		// Notifications before crews: the Composio key has to be in place
+		// before an agent's toolkit grants can mean anything, and a channel
+		// has to exist before an agent can be paired to it.
+		if err := pb.planNotifications(ctx, ws); err != nil {
+			return nil, err
 		}
 		for ci := range ws.Spec.Crews {
 			crew := &ws.Spec.Crews[ci]
@@ -241,6 +269,18 @@ func kindOrder(kind string, action Action) int {
 	}
 	r, ok := rank[kind]
 	if !ok {
+		// The SPEC-2 kinds emit LOWERCASE names from their per-kind packages
+		// ("routine", "issue"), while this map documents them capitalised —
+		// so every one of them missed and fell through to the fallback below,
+		// leaving them ordered by description string. Nothing noticed until a
+		// manifest first had one SPEC-2 kind reference another created in the
+		// same apply: an issue binding a routine failed with "routine not
+		// found" while the routine sat below it in the plan, alphabetically
+		// after "issue". Matching both spellings fixes it without renaming
+		// anything either side.
+		r, ok = rank[snakeToDocKind(kind)]
+	}
+	if !ok {
 		return 99
 	}
 	if action == ActionDelete {
@@ -252,6 +292,20 @@ func kindOrder(kind string, action Action) int {
 		return 100 - r
 	}
 	return r
+}
+
+// snakeToDocKind turns an emitted plan-item kind into the document-kind name
+// the rank table is written in: "routine" -> "Routine", "recurring_issue" ->
+// "RecurringIssue".
+func snakeToDocKind(kind string) string {
+	parts := strings.Split(kind, "_")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, "")
 }
 
 // planBuilder is the mutable scratch space used while assembling a
@@ -758,6 +812,11 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 				return err
 			}
 		} else {
+			// A NEW agent has no id yet, so planAgentLinks cannot run for it —
+			// which meant a grant declared beside a brand-new agent was never
+			// planned at all. Grants resolve their agent by slug at exec time,
+			// so they do not need one.
+			pb.planComposioGrants(a.Slug, a.ComposioToolkits)
 			agentCopy := a
 			pb.appendItem(ActionCreate, "agent", desc,
 				func(ctx context.Context, client *Client, opts Options) error {
@@ -807,6 +866,8 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 // during apply (createAgent path) or via these helpers when the
 // agent already exists.
 func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Agent, wsCreds map[string]Credential, wsSkills map[string]Skill, crewSlug string) error {
+	pb.planComposioGrants(a.Slug, a.ComposioToolkits)
+
 	existingSkills, err := pb.client.ListAgentSkills(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("list agent skills for %q/%q: %w", crewSlug, a.Slug, err)

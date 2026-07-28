@@ -142,18 +142,27 @@ func TestNotifyChannelAdd_ValidationLocal(t *testing.T) {
 	}
 
 	covSetFlagCli9(t, notifyChannelAddCmd, "type", "sms")
-	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "'shoutrrr'") {
+	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "'chat'") {
 		t.Errorf("bad type should fail locally; got %v", err)
 	}
 
+	// "shoutrrr" stays accepted as a hidden alias for "chat": it was a flag
+	// VALUE, so scripts in the wild pass it and renaming it outright would
+	// break them.
 	covSetFlagCli9(t, notifyChannelAddCmd, "type", "shoutrrr")
 	covSetFlagCli9(t, notifyChannelAddCmd, "provider", "")
 	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "--provider") {
-		t.Errorf("shoutrrr without provider should fail locally; got %v", err)
+		t.Errorf("the shoutrrr alias should still be accepted as a type; got %v", err)
+	}
+
+	covSetFlagCli9(t, notifyChannelAddCmd, "type", "chat")
+	covSetFlagCli9(t, notifyChannelAddCmd, "provider", "")
+	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "--provider") {
+		t.Errorf("chat without provider should fail locally; got %v", err)
 	}
 	covSetFlagCli9(t, notifyChannelAddCmd, "provider", "slack")
 	covSetFlagCli9(t, notifyChannelAddCmd, "url", "")
-	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "--url") {
-		t.Errorf("shoutrrr without url should fail locally; got %v", err)
+	if err := notifyChannelAddCmd.RunE(notifyChannelAddCmd, nil); err == nil || !strings.Contains(err.Error(), "--field") {
+		t.Errorf("chat with neither --field nor --url should fail locally; got %v", err)
 	}
 }

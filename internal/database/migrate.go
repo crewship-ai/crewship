@@ -1976,6 +1976,22 @@ END;
 	// first and had already been applied to live instances.
 	// See migrate_consts_v169_account_setup_purpose.go.
 	{version: 169, name: "account_setup_purpose", sql: migrationAccountSetupPurpose},
+
+	// Notification category taxonomy v2: widen user_notification_prefs.category
+	// to the new vocabulary and rewrite stored preference cells + per-channel
+	// allowlists onto it. The old 9-category set had 4 categories nothing could
+	// ever produce. Rewrite, never drop — an opted-in user stays opted in.
+	//
+	// Stays in this slice rather than moving to migrations/ because it needs
+	// Go: the rewrite reads existing rows and maps each old category onto its
+	// replacement, which is not expressible as plain SQL.
+	//
+	// Authored as v169 and renumbered on merge. That slot went to
+	// account_setup_purpose first and has been applied to live instances, and
+	// the sequential block closed at v169 while this branch was open — so the
+	// new number is a timestamp, which is the whole point of the scheme.
+	// See migrate_consts_notify_taxonomy.go.
+	{version: 20260728110100, name: "notify_taxonomy", fn: migrationNotifyTaxonomy},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

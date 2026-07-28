@@ -268,7 +268,7 @@ func TestEmitHelpers_NilReceiverIsSafe(t *testing.T) {
 	c.emitStepSkipped(ctx, step, "cond")
 	c.emitStepRetry(ctx, step, 1, 3, "err", time.Second)
 	c.emitValidationFailed(ctx, step, "reason", OnFailAbort)
-	c.emitRunCompleted(ctx, 10, 0.5)
+	c.emitRunCompleted(ctx, 10, 0.5, false)
 	c.emitRunFailed(ctx, "s1", "boom")
 }
 
@@ -302,7 +302,7 @@ func TestEmitHelpers_BroadcastEveryEvent(t *testing.T) {
 	c.emitStepSkipped(ctx, step, "{{ inputs.go }}")
 	c.emitStepRetry(ctx, step, 2, 3, "rate limit", 800*time.Millisecond)
 	c.emitValidationFailed(ctx, step, "too short", OnFailEscalateTier)
-	c.emitRunCompleted(ctx, 100, 0.05)
+	c.emitRunCompleted(ctx, 100, 0.05, false)
 	c.emitRunFailed(ctx, "s1", "fatal")
 
 	want := []string{

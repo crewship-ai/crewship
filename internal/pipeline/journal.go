@@ -399,13 +399,21 @@ func (c *pipelineEmitContext) emitValidationFailed(ctx context.Context, step Ste
 	c.broadcast("pipeline.step.validation_failed", p)
 }
 
-func (c *pipelineEmitContext) emitRunCompleted(ctx context.Context, totalDurationMs int64, totalCostUSD float64) {
+func (c *pipelineEmitContext) emitRunCompleted(ctx context.Context, totalDurationMs int64, totalCostUSD float64, selfAnnounced bool) {
 	if c == nil {
 		return
 	}
 	p := map[string]any{
 		"total_duration_ms": totalDurationMs,
 		"total_cost_usd":    totalCostUSD,
+	}
+	// Told to the notification bridge, not acted on here: the journal
+	// records what happened regardless, and only the fan-out cares whether
+	// this run already announced itself. Set only when true so an entry that
+	// predates this, or one written by a path that cannot know, reads the
+	// same as "no claim".
+	if selfAnnounced {
+		p["self_announced"] = true
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,

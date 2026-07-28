@@ -23,12 +23,33 @@ import (
 // either don't accept the field or interpret it differently, and a
 // blanket inject would leak the OWNER/ADMIN escape hatch into places
 // it isn't meant to apply.
+//
+// The governance gate is the second half of the same story. A routine with an
+// http/egress or code step is classified RISKY and lands as `proposed`, which
+// cannot run until a MANAGER+ approves it. That is right for a routine an
+// agent wrote; it is wrong for a seed, where the whole promise is "fill in the
+// environment file and every routine runs". So the same OWNER/ADMIN escape
+// hatch the server already exposes (`skip_governance_gate`) is forwarded the
+// same way, behind its own flag — the operator has to ask for it, and asking
+// for one gate does not silently open the other.
 type skipTestGateClient struct {
 	inner internalapi.Client
+	// governance forwards skip_governance_gate alongside skip_test_gate.
+	governance bool
 }
 
 func withSkipTestGate(c internalapi.Client) internalapi.Client {
 	return &skipTestGateClient{inner: c}
+}
+
+// withSkipGovernanceGate forwards skip_governance_gate on routine saves, so a
+// risky-but-intended routine lands `active` instead of queued for approval.
+func withSkipGovernanceGate(c internalapi.Client) internalapi.Client {
+	if existing, ok := c.(*skipTestGateClient); ok {
+		existing.governance = true
+		return existing
+	}
+	return &skipTestGateClient{inner: c, governance: true}
 }
 
 func (c *skipTestGateClient) Get(ctx context.Context, path string) (*internalapi.Response, error) {
@@ -37,7 +58,7 @@ func (c *skipTestGateClient) Get(ctx context.Context, path string) (*internalapi
 
 func (c *skipTestGateClient) Post(ctx context.Context, path string, body any) (*internalapi.Response, error) {
 	if isPipelineSavePath(path) {
-		body = mergeSkipTestGate(body)
+		body = mergeSkipTestGate(body, c.governance)
 	}
 	return c.inner.Post(ctx, path, body)
 }
@@ -76,7 +97,7 @@ func isPipelineSavePath(path string) bool {
 // computation for allocation may overflow" gate quiet. Go grows the
 // map on the one extra Set call below, so the runtime cost is the
 // same one bucket reallocation either way.
-func mergeSkipTestGate(body any) any {
+func mergeSkipTestGate(body any, governance bool) any {
 	m, ok := body.(map[string]any)
 	if !ok {
 		return body
@@ -86,5 +107,8 @@ func mergeSkipTestGate(body any) any {
 		out[k] = v
 	}
 	out["skip_test_gate"] = true
+	if governance {
+		out["skip_governance_gate"] = true
+	}
 	return out
 }

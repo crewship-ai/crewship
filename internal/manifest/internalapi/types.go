@@ -151,6 +151,7 @@ type WorkspaceContext struct {
 	RemoteLabels   []SlugLookup
 	RemoteCrews    []SlugLookup
 	RemoteAgents   []SlugLookup
+	RemoteRoutines []SlugLookup
 }
 
 // HasProject reports whether the slug is present in either the
@@ -175,6 +176,13 @@ func (w *WorkspaceContext) HasCrew(slug string) bool {
 // HasAgent reports whether the agent slug is declared or remote.
 func (w *WorkspaceContext) HasAgent(slug string) bool {
 	return hasSlug(w.DeclaredAgents, slug) || hasSlug(w.RemoteAgents, slug)
+}
+
+// HasRoutine reports whether the routine slug is declared or remote. Used by
+// Issue.routine_slug, so a bundle that declares both a routine and an issue
+// bound to it validates without a round trip.
+func (w *WorkspaceContext) HasRoutine(slug string) bool {
+	return hasSlug(w.DeclaredRoutines, slug) || hasSlug(w.RemoteRoutines, slug)
 }
 
 func hasSlug(list []SlugLookup, slug string) bool {

@@ -2290,6 +2290,36 @@
         ]
       }
     },
+    "/api/v1/agents/{agentId}/notification-channels": {
+      "get": {
+        "operationId": "get_api_v1_agents_agentId_notification-channels",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
     "/api/v1/agents/{agentId}/peers": {
       "get": {
         "operationId": "get_api_v1_agents_agentId_peers",
@@ -9780,6 +9810,35 @@
         ]
       }
     },
+    "/api/v1/notification-channels/test": {
+      "post": {
+        "operationId": "post_api_v1_notification-channels_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-channels"
+        ]
+      }
+    },
     "/api/v1/notification-channels/{id}": {
       "delete": {
         "operationId": "delete_api_v1_notification-channels_id",
@@ -9830,6 +9889,111 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-channels"
+        ]
+      }
+    },
+    "/api/v1/notification-channels/{id}/agents": {
+      "get": {
+        "operationId": "get_api_v1_notification-channels_id_agents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-channels"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_notification-channels_id_agents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "notification-channels"
+        ]
+      }
+    },
+    "/api/v1/notification-channels/{id}/agents/{agentId}": {
+      "delete": {
+        "operationId": "delete_api_v1_notification-channels_id_agents_agentId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

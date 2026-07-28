@@ -3,6 +3,8 @@ package pipeline
 import (
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/notify"
 )
 
 // validateStepEgress runs the step-body shape checks for the
@@ -109,6 +111,14 @@ func validateStepEgress(st Step) error {
 		}
 		if st.Notify.Priority != "" && !isValidNotifyPriority(st.Notify.Priority) {
 			return fmt.Errorf("pipeline: step %q (notify) priority %q invalid (allowed: urgent high medium low)", st.ID, st.Notify.Priority)
+		}
+		// Rejected at author time because the failure is otherwise silent:
+		// a category nothing matches routes to nobody, and the run reports
+		// success. ValidCategory also excludes the "*" mute sentinel, which
+		// is a preference-row marker rather than something to emit into.
+		if st.Notify.Category != "" && !notify.ValidCategory(st.Notify.Category) {
+			return fmt.Errorf("pipeline: step %q (notify) category %q is not a notification category (see `crewship notifychannel categories`)",
+				st.ID, st.Notify.Category)
 		}
 	case StepScript:
 		if st.Script == nil {

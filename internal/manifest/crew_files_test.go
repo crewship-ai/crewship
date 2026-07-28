@@ -124,5 +124,6 @@ type nilAPI struct{}
 func (nilAPI) Get(context.Context, string) (*http.Response, error)        { return nil, nil }
 func (nilAPI) Post(context.Context, string, any) (*http.Response, error)  { return nil, nil }
 func (nilAPI) Patch(context.Context, string, any) (*http.Response, error) { return nil, nil }
+func (nilAPI) Put(context.Context, string, any) (*http.Response, error)   { return nil, nil }
 func (nilAPI) Delete(context.Context, string) (*http.Response, error)     { return nil, nil }
 func (nilAPI) GetWorkspaceID() string                                     { return "" }

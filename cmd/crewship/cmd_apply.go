@@ -64,6 +64,7 @@ func init() {
 	applyCmd.Flags().Bool("from-env", false, "Read credential values from process environment")
 	applyCmd.Flags().String("secrets-file", "", "Load credential values from a KEY=VALUE file")
 	applyCmd.Flags().Bool("skip-test-gate", false, "Forward skip_test_gate=true on routine save (requires OWNER/ADMIN role server-side)")
+	applyCmd.Flags().Bool("skip-governance-gate", false, "Forward skip_governance_gate=true so risky routines land active instead of queued for approval (requires OWNER/ADMIN)")
 	applyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts (required for destructive plans in non-TTY)")
 	_ = applyCmd.MarkFlagRequired("file")
 
@@ -88,6 +89,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	fromEnv, _ := cmd.Flags().GetBool("from-env")
 	secretsFile, _ := cmd.Flags().GetString("secrets-file")
 	skipTestGate, _ := cmd.Flags().GetBool("skip-test-gate")
+	skipGovGate, _ := cmd.Flags().GetBool("skip-governance-gate")
 	yes, _ := cmd.Flags().GetBool("yes")
 
 	if strict && replace {
@@ -122,10 +124,11 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// `terraform plan && terraform apply` so users always know what
 	// they're about to mutate.
 	plan, err := manifest.BuildPlan(cmd.Context(), client, bundle, manifest.Options{
-		Mode:         mode,
-		Secrets:      secrets,
-		SkipTestGate: skipTestGate,
-		BaseDir:      manifestBaseDir(path),
+		Mode:               mode,
+		Secrets:            secrets,
+		SkipTestGate:       skipTestGate,
+		SkipGovernanceGate: skipGovGate,
+		BaseDir:            manifestBaseDir(path),
 	})
 	if err != nil {
 		return err
@@ -135,6 +138,11 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	if dryRun {
 		printSummary(plan, nil)
+		// A dry run is exactly where "what will NOT happen" belongs: it is
+		// the preview someone reads before committing, and the first version
+		// of this printed skips only on the real run — so the plan quietly
+		// omitted the one channel it was not going to create.
+		printSkipped(plan)
 		printWarnings(plan)
 		return nil
 	}
@@ -149,12 +157,13 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := manifest.Apply(cmd.Context(), client, bundle, manifest.Options{
-		Mode:         mode,
-		Secrets:      secrets,
-		Yes:          yes,
-		SkipTestGate: skipTestGate,
-		BaseDir:      manifestBaseDir(path),
-		OnReport:     func(string) { /* plan already printed */ },
+		Mode:               mode,
+		Secrets:            secrets,
+		Yes:                yes,
+		SkipTestGate:       skipTestGate,
+		SkipGovernanceGate: skipGovGate,
+		BaseDir:            manifestBaseDir(path),
+		OnReport:           func(string) { /* plan already printed */ },
 	})
 	// Any error from Apply means nothing was committed past the
 	// point of failure — print whatever summary we have and bail.
@@ -167,6 +176,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// fool downstream tooling into thinking apply succeeded.
 	if err != nil {
 		printSummary(plan, result)
+		printSkipped(plan)
 		printWarnings(plan)
 		if errors.Is(err, manifest.ErrConfirmationRequired) {
 			return fmt.Errorf("aborted: destructive plan requires confirmation (pass --yes)")
@@ -189,6 +199,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stdout, "  - %s\n", env)
 		}
 	}
+	printSkipped(plan)
 	printWarnings(plan)
 
 	provisionHintForCrews(bundle)
@@ -298,6 +309,23 @@ func provisionHintForCrews(b *manifest.Bundle) {
 	fmt.Fprintf(os.Stdout, "Next: build crew containers with:\n")
 	for _, s := range slugs {
 		fmt.Fprintf(os.Stdout, "  crewship crew provision %s\n", s)
+	}
+}
+
+// printSkipped reports things the manifest declared that this run could not
+// apply, each naming what has to be supplied.
+//
+// Deliberately not folded into warnings: a warning is advisory, this is a
+// thing the file asked for and the run did not do. Naming the variable is
+// what turns "why is Discord not there?" into a one-line answer.
+func printSkipped(plan *manifest.Plan) {
+	if plan == nil || len(plan.Skipped) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%sSKIPPED (declared but not applied):%s\n", cli.Yellow, cli.Reset)
+	for _, line := range plan.Skipped {
+		fmt.Fprintf(os.Stdout, "  - %s\n", line)
 	}
 }
 

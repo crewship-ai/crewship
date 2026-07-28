@@ -67,6 +67,12 @@ func (f *kindsFakeAPI) Post(_ context.Context, path string, body any) (*http.Res
 	return jsonResp(404, map[string]any{"error": "not found"}), nil
 }
 
+// Put routes to Patch: no fake distinguishes them, and the only
+// difference that matters here is the verb the real server sees.
+func (f *kindsFakeAPI) Put(ctx context.Context, path string, body any) (*http.Response, error) {
+	return f.Patch(ctx, path, body)
+}
+
 func (f *kindsFakeAPI) Patch(_ context.Context, path string, body any) (*http.Response, error) {
 	f.record("PATCH", path, body)
 	return jsonResp(200, body), nil

@@ -89,7 +89,7 @@ func TestEmitRunLevel_DryRunDoesNotBroadcast(t *testing.T) {
 	c := newEmitCtxForBroadcastTest(ws, em, 0, true) // draft validation
 
 	c.emitRunFailed(context.Background(), "s1", "boom")
-	c.emitRunCompleted(context.Background(), 1200, 0.5)
+	c.emitRunCompleted(context.Background(), 1200, 0.5, false)
 
 	if len(ws.events) != 0 {
 		t.Errorf("dry-run must not broadcast run-level events (workspace-wide toast for a draft test); got %v", ws.types())
@@ -104,7 +104,7 @@ func TestEmitRunCompleted_TopLevelStillBroadcasts(t *testing.T) {
 	ws := &captureWS{}
 	c := newEmitCtxForBroadcastTest(ws, &captureEmitter{}, 0, false)
 
-	c.emitRunCompleted(context.Background(), 1200, 0.5)
+	c.emitRunCompleted(context.Background(), 1200, 0.5, false)
 
 	if got := ws.types(); len(got) != 1 || got[0] != "pipeline.run.completed" {
 		t.Errorf("top-level real run must broadcast completion, got %v", got)

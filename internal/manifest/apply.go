@@ -101,7 +101,13 @@ type Options struct {
 	// PENDING credentials) prevent a successful test_run from
 	// happening before save. See pipelines_crud.Save.
 	SkipTestGate bool
-	OnReport     func(line string)
+	// SkipGovernanceGate forwards skip_governance_gate on routine saves so a
+	// risky routine lands `active` rather than queued for MANAGER+ approval.
+	// Separate from SkipTestGate: they are different gates protecting
+	// different things, and a seeder asking to skip one has not asked for the
+	// other.
+	SkipGovernanceGate bool
+	OnReport           func(line string)
 	// BaseDir is the directory the manifest file was loaded from —
 	// relative CrewFile.Src paths resolve against it. Empty = process
 	// working directory (stdin manifests).

@@ -74,6 +74,16 @@ export const JOURNAL_ENTRY_TYPES = [
   "system.hook_toggled",
   "system.consolidation_triggered",
   "system.consolidation_completed",
+  // Issues — creation and assignment used to be indistinguishable from a
+  // status change, so the timeline showed one icon for all three.
+  "mission.created",
+  "mission.assigned",
+  // Notifications — an outbound send is a side effect that LEAVES the
+  // instance, and it deserves its own row and icon next to the event that
+  // caused it rather than living only in an admin-only deliveries table.
+  "notification.delivered",
+  "notification.failed",
+  "notification.dropped",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

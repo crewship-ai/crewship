@@ -184,6 +184,12 @@ type IssueSpec struct {
 	// slug == name) to attach. The Create handler accepts an array
 	// of label IDs in `labels`; Plan resolves slug → id before POST.
 	Labels []string `yaml:"labels,omitempty" json:"labels,omitempty"`
+
+	// RoutineSlug binds this issue to a saved routine (missions.routine_id,
+	// migration v84). A slug rather than an id, like every other cross-
+	// resource reference here: ids are server-minted, so a manifest carrying
+	// one would not survive being applied to a second instance.
+	RoutineSlug string `yaml:"routine_slug,omitempty" json:"routine_slug,omitempty"`
 }
 
 // IssueDocument is the YAML envelope produced/consumed by the
@@ -219,6 +225,7 @@ type IssueRemote struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	ProjectID    *string `json:"project_id"`
+	RoutineID    *string `json:"routine_id"`
 	// Labels arrives as a denormalised array; we only need each
 	// label's name for round-trip (Label kind keys on name).
 	Labels []issueRemoteLabel `json:"labels"`
@@ -336,6 +343,12 @@ func (d *IssueDocument) Validate(wsCtx internalapi.WorkspaceContext) error {
 		return fmt.Errorf("issue %q: spec.project_slug %q does not reference any declared or remote project",
 			d.Metadata.Slug, d.Spec.ProjectSlug)
 	}
+	if d.Spec.RoutineSlug != "" &&
+		(len(wsCtx.DeclaredRoutines) > 0 || len(wsCtx.RemoteRoutines) > 0) &&
+		!wsCtx.HasRoutine(d.Spec.RoutineSlug) {
+		return fmt.Errorf("issue %q: spec.routine_slug %q does not reference any declared or remote routine",
+			d.Metadata.Slug, d.Spec.RoutineSlug)
+	}
 	if d.Spec.AssigneeSlug != "" &&
 		(len(wsCtx.DeclaredAgents) > 0 || len(wsCtx.RemoteAgents) > 0) &&
 		!wsCtx.HasAgent(d.Spec.AssigneeSlug) {
@@ -409,32 +422,36 @@ func (d *IssueDocument) resolvedTitle() string {
 // explicit "labels" replacement in PATCH (the Update handler treats
 // a non-nil labels field as a full set replacement).
 func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *IssueRemote) ([]internalapi.PlanItem, error) {
-	crewID, err := issueLookupCrewIDBySlug(ctx, c, d.Spec.CrewSlug)
-	if err != nil {
-		return nil, fmt.Errorf("issue %q: resolve crew_slug: %w", d.Metadata.Slug, err)
-	}
+	// The crew may not exist YET: BuildPlan walks crews before the
+	// standalone kinds, but a plan is built before anything executes, so a
+	// crew this same apply will create is invisible here. Resolution is
+	// therefore deferred into Exec — by which time the crew's own create has
+	// run. Validate already rejects a crew that is neither declared nor
+	// remote, so this is not a loosening of the check, only a move.
+	// Only the UPDATE path needs this up front — it has a remote row, so the
+	// crew demonstrably exists. The create path resolves everything in Exec.
+	crewID, _ := issueLookupCrewIDBySlug(ctx, c, d.Spec.CrewSlug)
 
 	if remote == nil {
-		// CREATE — resolve all FKs once, then POST. We pre-resolve
-		// at Plan time rather than inside Exec so the dry-run path
-		// surfaces a dangling FK before we touch the wire. Resolution
-		// errors propagate up so the operator sees which slug is
-		// unknown before Apply makes any mutation.
-		projectID, err := issueResolveOptionalProjectID(ctx, c, d.Spec.ProjectSlug)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve project_slug: %w", d.Metadata.Slug, err)
-		}
-		assigneeID, err := issueResolveOptionalAgentID(ctx, c, d.Spec.AssigneeSlug)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve assignee_slug: %w", d.Metadata.Slug, err)
-		}
-		labelIDs, err := issueResolveLabelIDs(ctx, c, d.Spec.Labels)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve labels: %w", d.Metadata.Slug, err)
-		}
-
-		body := d.toCreateBody(projectID, assigneeID, labelIDs)
+		// CREATE — every FK is resolved LAZILY, inside Exec.
+		//
+		// The first version resolved here, at plan time, so a dangling slug
+		// surfaced before touching the wire. That reads well and is wrong for
+		// the shape that matters most: a single file declaring a crew, an
+		// agent, a routine and an issue that references all three. A plan is
+		// built before anything executes, so none of them exist yet, and
+		// every reference "dangles" — the manifest was unusable in exactly
+		// the case it was written for. Three of these were fixed one at a
+		// time (crew, routine, assignee) before it was clear the rule is
+		// general, so they are all deferred now rather than waiting for the
+		// fourth to be discovered in production.
+		//
+		// Nothing is loosened: Validate already rejects a slug that is
+		// neither declared in the bundle nor present remotely, and a
+		// reference that never materialises still fails — in Exec, naming
+		// itself.
 		slug := d.Metadata.Slug
+		spec := d.Spec
 		title := d.resolvedTitle()
 
 		return []internalapi.PlanItem{{
@@ -443,6 +460,28 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 			Action:      internalapi.ActionCreate,
 			Description: fmt.Sprintf("create issue %q in crew %q", title, d.Spec.CrewSlug),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
+				crewID, err := issueLookupCrewIDBySlug(ctx, c, spec.CrewSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve crew_slug: %w", slug, err)
+				}
+				projectID, err := issueResolveOptionalProjectID(ctx, c, spec.ProjectSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve project_slug: %w", slug, err)
+				}
+				assigneeID, err := issueResolveOptionalAgentID(ctx, c, spec.AssigneeSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve assignee_slug: %w", slug, err)
+				}
+				labelIDs, err := issueResolveLabelIDs(ctx, c, spec.Labels)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve labels: %w", slug, err)
+				}
+				routineID, err := issueResolveOptionalRoutineID(ctx, c, spec.RoutineSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve routine_slug: %w", slug, err)
+				}
+
+				body := d.toCreateBody(projectID, assigneeID, labelIDs, routineID)
 				path := fmt.Sprintf("/api/v1/crews/%s/issues", crewID)
 				resp, err := c.Post(ctx, path, body)
 				if err != nil {
@@ -465,8 +504,10 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 	if err != nil {
 		return nil, fmt.Errorf("issue %q: resolve assignee_slug: %w", d.Metadata.Slug, err)
 	}
+	// An update path can also name a routine this apply is creating.
+	routineID, _ := issueResolveOptionalRoutineID(ctx, c, d.Spec.RoutineSlug)
 
-	patch, labelsChanged, err := d.diffPatch(remote, projectID, assigneeID)
+	patch, labelsChanged, err := d.diffPatch(remote, projectID, assigneeID, routineID)
 	if err != nil {
 		return nil, fmt.Errorf("issue %q: diff: %w", d.Metadata.Slug, err)
 	}
@@ -545,7 +586,7 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 // brand-new Issue document the row lands in BACKLOG and the next
 // Plan run will detect drift and PATCH it to DONE. This is a known
 // two-apply quirk and is documented in the per-kind docs page.
-func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []string) map[string]any {
+func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []string, routineID string) map[string]any {
 	body := map[string]any{
 		"title": d.resolvedTitle(),
 	}
@@ -567,6 +608,11 @@ func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []st
 	if len(labelIDs) > 0 {
 		body["labels"] = labelIDs
 	}
+	// Omitted rather than sent empty: the server reads routine_id:"" as
+	// "clear the binding", which is wrong on an update and pointless here.
+	if routineID != "" {
+		body["routine_id"] = routineID
+	}
 	return body
 }
 
@@ -581,8 +627,17 @@ func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []st
 // slugs to IDs before stuffing them into the patch — keeps the
 // concern of "did the set drift" separate from "do we have IDs to
 // send".
-func (d *IssueDocument) diffPatch(remote *IssueRemote, projectID, assigneeID string) (map[string]any, bool, error) {
+func (d *IssueDocument) diffPatch(remote *IssueRemote, projectID, assigneeID, routineID string) (map[string]any, bool, error) {
 	patch := map[string]any{}
+
+	// Only when the manifest declares one, and only when it differs — an
+	// omitted routine_slug means "leave the server value alone", the same
+	// rule every other optional field here follows. Re-patching an already
+	// correct binding on every apply would make the plan noisy and its
+	// "unchanged" count meaningless.
+	if routineID != "" && routineID != deref(remote.RoutineID) {
+		patch["routine_id"] = routineID
+	}
 
 	if t := d.resolvedTitle(); t != "" && t != remote.Title {
 		patch["title"] = t
@@ -666,11 +721,13 @@ func issueSameLabelSet(declared []string, remote []issueRemoteLabel) bool {
 func LookupIssueRemoteBySlug(ctx context.Context, c internalapi.Client, slug, crewSlug, title string) (*IssueRemote, error) {
 	crewID, err := issueLookupCrewIDBySlug(ctx, c, crewSlug)
 	if err != nil {
-		// Crew missing → issue obviously absent. Surface the
-		// underlying error so callers can choose between waiting
-		// for the crew to be created earlier in the bundle and
-		// aborting.
-		return nil, err
+		// A crew that does not exist yet cannot hold an issue, so the honest
+		// answer is "no remote row" — which plans a create. This is the
+		// normal state during the first apply of a file that declares both
+		// the crew and the issue; returning an error made that combination
+		// impossible. A crew that never materialises still fails, later, in
+		// the create's own Exec, where the message can name it.
+		return nil, nil
 	}
 	rows, err := issueListForCrew(ctx, c, crewID)
 	if err != nil {
@@ -751,6 +808,70 @@ func issueResolveOptionalAgentID(ctx context.Context, c internalapi.Client, slug
 	return "", fmt.Errorf("agent with slug %q not found", slug)
 }
 
+// issueResolveOptionalRoutineID is the routine-slug analogue of
+// issueResolveOptionalAgentID. Resolved during Plan so a dangling reference
+// fails before anything is written — a bad slug that only surfaced at Exec
+// would leave half a manifest applied.
+func issueResolveOptionalRoutineID(ctx context.Context, c internalapi.Client, slug string) (string, error) {
+	if strings.TrimSpace(slug) == "" {
+		return "", nil
+	}
+	routines, err := issueListRoutines(ctx, c)
+	if err != nil {
+		return "", err
+	}
+	for _, r := range routines {
+		if r.Slug == slug {
+			return r.ID, nil
+		}
+	}
+	return "", fmt.Errorf("routine with slug %q not found", slug)
+}
+
+// issueRoutineStub is the trimmed pipeline row the resolver needs.
+type issueRoutineStub struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+}
+
+// issueListRoutines fetches the workspace's saved routines.
+func issueListRoutines(ctx context.Context, c internalapi.Client) ([]issueRoutineStub, error) {
+	// Workspace-scoped, like every other pipeline route — there is no
+	// bare /api/v1/pipelines, and asking for one 404s.
+	path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines", c.WorkspaceID())
+	resp, err := c.Get(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	if err := checkStatus(resp, "list routines"); err != nil {
+		return nil, err
+	}
+	body, err := readAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read %s body: %w", path, err)
+	}
+	if len(body) == 0 {
+		return nil, nil
+	}
+	var rows []issueRoutineStub
+	if err := json.Unmarshal(body, &rows); err == nil {
+		return rows, nil
+	}
+	// The list endpoint has been seen wrapping rows in an envelope; accept
+	// both rather than failing the whole apply on a shape difference.
+	var wrapped struct {
+		Pipelines []issueRoutineStub `json:"pipelines"`
+		Data      []issueRoutineStub `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if wrapped.Pipelines != nil {
+		return wrapped.Pipelines, nil
+	}
+	return wrapped.Data, nil
+}
+
 // issueResolveLabelIDs maps each declared slug (== name) to a label
 // ID via one GET /api/v1/labels. Returns an error mentioning the
 // offending slug on the first miss so the user can fix the typo
@@ -816,6 +937,15 @@ func ExportIssues(ctx context.Context, c internalapi.Client) ([]*IssueDocument, 
 	for _, a := range agents {
 		agentSlugByID[a.ID] = a.Slug
 	}
+	// Routines are best-effort: an instance where /pipelines is unreadable
+	// should still export its issues, just without the binding, rather than
+	// failing the whole export over one optional field.
+	routineSlugByID := map[string]string{}
+	if routines, err := issueListRoutines(ctx, c); err == nil {
+		for _, r := range routines {
+			routineSlugByID[r.ID] = r.Slug
+		}
+	}
 
 	var out []*IssueDocument
 	for _, crew := range crews {
@@ -848,6 +978,11 @@ func ExportIssues(ctx context.Context, c internalapi.Client) ([]*IssueDocument, 
 			if row.ProjectID != nil {
 				if slug, ok := projectSlugByID[*row.ProjectID]; ok {
 					doc.Spec.ProjectSlug = slug
+				}
+			}
+			if row.RoutineID != nil {
+				if slug, ok := routineSlugByID[*row.RoutineID]; ok {
+					doc.Spec.RoutineSlug = slug
 				}
 			}
 			if row.AssigneeID != nil && deref(row.AssigneeType) == "agent" {

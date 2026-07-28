@@ -38,30 +38,18 @@ const (
 	ChannelShoutrrr ChannelType = "shoutrrr"
 )
 
-// Provider names for ChannelShoutrrr channels. These are the MVP-supported
-// shoutrrr services (issue #1412) — the library supports many more, but the
-// providers-registry endpoint and channel-create validation only admit
-// this set for now, matching the URL schemes exposed in the CLI/UI.
+// Chat/push provider names. The full set, their form fields and their URL
+// composition live in providers_catalog.go — SupportedProviders() and
+// ProviderByName() read from there.
+//
+// These three are declared here because they predate the catalog and appear
+// in stored rows, the API and the CLI. The rest are declared alongside the
+// catalog.
 const (
 	ProviderSlack    = "slack"
 	ProviderDiscord  = "discord"
 	ProviderTelegram = "telegram"
 )
-
-// shoutrrrSchemes maps a Provider name to the URL scheme shoutrrr expects.
-// Kept as a lookup (rather than provider == scheme) so a provider name can
-// diverge from its wire scheme without touching call sites.
-var shoutrrrSchemes = map[string]string{
-	ProviderSlack:    "slack",
-	ProviderDiscord:  "discord",
-	ProviderTelegram: "telegram",
-}
-
-// SupportedProviders lists the MVP shoutrrr provider names, in a stable
-// order, for the providers-registry API/CLI surface.
-func SupportedProviders() []string {
-	return []string{ProviderSlack, ProviderDiscord, ProviderTelegram}
-}
 
 // ChannelScope distinguishes a workspace-wide channel (managed by an
 // ADMIN/OWNER, available to every category/user the admin allowlists) from
@@ -141,10 +129,15 @@ type ChannelInput struct {
 
 	// Provider is required for Type == ChannelShoutrrr (slack|discord|telegram).
 	Provider string
-	// ShoutrrrURL is the full Apprise-style service URL for
-	// Type == ChannelShoutrrr (e.g. "slack://hook:TOKEN@webhook"). Stored
-	// via the same secret_enc encrypt-at-rest path as the webhook secret.
+	// ShoutrrrURL is a pre-composed delivery URL for Type == ChannelShoutrrr.
+	// The scripting / backup-restore path; interactive callers send Fields
+	// instead and let the server compose. Stored via the same secret_enc
+	// encrypt-at-rest path as the webhook secret.
 	ShoutrrrURL string
+	// Fields are the provider form's values (see providers_catalog.go). When
+	// present they take precedence over ShoutrrrURL: the server composes the
+	// delivery URL so the user never has to know one exists.
+	Fields map[string]string
 
 	// Scope defaults to ScopeWorkspace when empty. ScopeUser requires
 	// OwnerUserID.
@@ -252,12 +245,23 @@ func (s *ChannelStore) Create(ctx context.Context, in ChannelInput) (Channel, er
 		ch.To = to
 	case ChannelShoutrrr:
 		provider := strings.ToLower(strings.TrimSpace(in.Provider))
-		scheme, ok := shoutrrrSchemes[provider]
+		p, ok := ProviderByName(provider)
 		if !ok {
 			return Channel{}, fmt.Errorf("notify: unknown provider %q (want one of %v)", provider, SupportedProviders())
 		}
+		// Two ways in. Fields is the normal path: the user filled in the
+		// provider's form and the server composes the delivery URL, so they
+		// never see or type one. ServiceURL stays supported for scripting and
+		// for restoring a channel from a backup.
 		rawURL := strings.TrimSpace(in.ShoutrrrURL)
-		if err := validateShoutrrrURL(rawURL, scheme); err != nil {
+		if len(in.Fields) > 0 {
+			composed, err := ComposeServiceURL(provider, in.Fields)
+			if err != nil {
+				return Channel{}, err
+			}
+			rawURL = composed
+		}
+		if err := validateShoutrrrURL(rawURL, p.Scheme); err != nil {
 			return Channel{}, err
 		}
 		ch.Provider = provider
@@ -370,6 +374,23 @@ func (s *ChannelStore) List(ctx context.Context, workspaceID, viewerUserID strin
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+// ListAll returns EVERY channel in the workspace, including other members'
+// personal ones — the admin overview of "what is this instance wired into".
+// Secrets are redacted, exactly as in List.
+//
+// Deliberately a separate method rather than a flag on List. The viewer
+// filter in List is a privacy boundary, and a boolean parameter is the kind
+// of thing that gets passed `true` by a caller who did not think about it.
+// A distinct name forces the call site to say what it is doing, and the
+// handler that uses this is the one place that checks for the admin role.
+//
+// Callers MUST still redact the destination address for channels the viewer
+// does not own if they surface this to a non-admin — a Telegram chat id is a
+// member's personal contact detail.
+func (s *ChannelStore) ListAll(ctx context.Context, workspaceID string) ([]Channel, error) {
+	return s.query(ctx, workspaceID, "", false)
 }
 
 // ListEnabled returns the enabled channels with decrypted secrets, for

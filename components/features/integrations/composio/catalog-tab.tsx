@@ -20,6 +20,7 @@ export function CatalogTab({
   loading,
   configuredSlugs,
   onConnect,
+  hideSearch = false,
 }: {
   toolkits: ToolkitInfo[]
   total: number
@@ -28,6 +29,12 @@ export function CatalogTab({
   loading: boolean
   configuredSlugs: Set<string>
   onConnect: (toolkit: { slug: string; name: string }) => void
+  /**
+   * true = the host page's unified search box is driving `search`. Rendering
+   * our own box too would give the same list two inputs, only one of which
+   * does anything.
+   */
+  hideSearch?: boolean
 }) {
   return (
     <section className="space-y-3">
@@ -35,15 +42,17 @@ export function CatalogTab({
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Connector catalog{total ? ` (${total} apps)` : ""}
         </h2>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search apps (gmail, github, slack…)"
-            className="w-64 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
-          />
-        </div>
+        {!hideSearch && (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Search apps (gmail, github, slack…)"
+              className="w-64 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+            />
+          </div>
+        )}
       </div>
       {loading ? (
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">

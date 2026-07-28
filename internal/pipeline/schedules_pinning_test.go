@@ -58,10 +58,19 @@ CREATE TABLE IF NOT EXISTS pipeline_versions (
     UNIQUE (pipeline_id, version),
     UNIQUE (pipeline_id, definition_hash)
 );
+-- The kind CHECK mirrors the real schema (migration v168 / inbox.AllKinds)
+-- ON PURPOSE. Without it this rig silently accepted any string, and
+-- schedules_circuit_breaker_test.go passed green for a kind the production
+-- CHECK rejected — proving Insert was CALLED, not that it SUCCEEDED. Keep
+-- this list in sync with inbox.AllKinds; internal/database's
+-- TestInboxKindsMatchSchema is the authority.
 CREATE TABLE IF NOT EXISTS inbox_items (
     id                  TEXT PRIMARY KEY,
     workspace_id        TEXT NOT NULL,
-    kind                TEXT NOT NULL,
+    kind                TEXT NOT NULL
+                          CHECK (kind IN ('waitpoint', 'escalation', 'failed_run', 'message',
+                                          'memory_consolidation', 'schedule_missed',
+                                          'schedule_circuit_breaker_tripped')),
     source_id           TEXT NOT NULL,
     target_user_id      TEXT,
     target_role         TEXT,

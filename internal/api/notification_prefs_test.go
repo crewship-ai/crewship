@@ -24,7 +24,7 @@ func TestNotifyPrefsHandler_PutThenGet_RoundTrips(t *testing.T) {
 	h := NewNotifyPrefsHandler(db, newTestLogger())
 
 	putBody, _ := json.Marshal(map[string]any{
-		"cells": []notifyroute.PrefCell{{Category: notify.CategoryApprovals, ChannelID: ch.ID, State: "immediate"}},
+		"cells": []notifyroute.PrefCell{{Category: notify.CategoryAgentsApproval, ChannelID: ch.ID, State: "immediate"}},
 	})
 	putReq := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/me/notification-prefs", strings.NewReader(string(putBody))), "u1", "ws1", "MEMBER")
 	putRR := httptest.NewRecorder()
@@ -56,7 +56,7 @@ func TestNotifyPrefsHandler_Get_IsolatedPerUser(t *testing.T) {
 	h := NewNotifyPrefsHandler(db, newTestLogger())
 
 	body, _ := json.Marshal(map[string]any{
-		"cells": []notifyroute.PrefCell{{Category: notify.CategoryBudget, ChannelID: ch.ID, State: "immediate"}},
+		"cells": []notifyroute.PrefCell{{Category: notify.CategoryAgentsBudget, ChannelID: ch.ID, State: "immediate"}},
 	})
 	putReq := withWorkspaceUser(httptest.NewRequest("PUT", "/api/v1/me/notification-prefs", strings.NewReader(string(body))), "u1", "ws1", "MEMBER")
 	h.Put(httptest.NewRecorder(), putReq)

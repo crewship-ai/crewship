@@ -137,9 +137,15 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// the outbox/delivery LOG (dedup keys, retry counters, sent_at) —
 	// operational telemetry that regenerates as new events fire, so it
 	// does NOT ride bundles.
-	"notification_channels":   IntentInclude,
-	"user_notification_prefs": IntentInclude,
-	"notification_deliveries": IntentExcludeOperational,
+	// notification_channel_agents (v170) is the agent↔channel grant table:
+	// which agents a human allowed to post to which channel. Dropping it on
+	// restore would silently revoke every agent's ability to notify, and the
+	// symptom — an agent quietly failing to reach anyone — is exactly the kind
+	// nobody notices until it matters.
+	"notification_channels":       IntentInclude,
+	"user_notification_prefs":     IntentInclude,
+	"notification_channel_agents": IntentInclude,
+	"notification_deliveries":     IntentExcludeOperational,
 
 	// === Discovered via drift detection (2026-05-25) ===============
 	// Every workspace-scoped table the FK walk currently surfaces.

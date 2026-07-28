@@ -512,9 +512,16 @@ func issueCovDoc() *IssueDocument {
 func TestIssueCov_Plan_CrewResolveFails(t *testing.T) {
 	t.Parallel()
 
+	// Deferred to Exec — see TestIssue_Plan_CrewSlugUnknown. Plan succeeds
+	// because the crew may still be created by this apply; the create is
+	// what discovers that it was not.
 	c := newCovClient(map[string]covRoute{"GET /api/v1/crews": {body: `[]`}})
-	_, err := issueCovDoc().Plan(context.Background(), c, nil)
-	if err == nil || !strings.Contains(err.Error(), "resolve crew_slug") {
+	items, err := issueCovDoc().Plan(context.Background(), c, nil)
+	if err != nil {
+		t.Fatalf("Plan should defer, not fail: %v", err)
+	}
+	if err := items[0].Exec(context.Background(), c); err == nil ||
+		!strings.Contains(err.Error(), "resolve crew_slug") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -522,47 +529,61 @@ func TestIssueCov_Plan_CrewResolveFails(t *testing.T) {
 func TestIssueCov_Plan_CreateResolveFailures(t *testing.T) {
 	t.Parallel()
 
+	// Every FK moved from Plan into Exec so a manifest can declare a crew, an
+	// agent, a routine and an issue that references them all in one file —
+	// none of which exist while the plan is being built. The failures did not
+	// go away, they moved: each still fails, and still names its own field.
 	crews := covRoute{body: `[{"id":"c1","slug":"eng"}]`}
 
-	t.Run("project resolve fails", func(t *testing.T) {
-		t.Parallel()
-		doc := issueCovDoc()
-		doc.Spec.ProjectSlug = "ghost"
-		c := newCovClient(map[string]covRoute{
-			"GET /api/v1/crews":    crews,
-			"GET /api/v1/projects": {body: `[]`},
+	cases := []struct {
+		name   string
+		mutate func(*IssueDocument)
+		routes map[string]covRoute
+		want   string
+	}{
+		{
+			name:   "project resolve fails",
+			mutate: func(d *IssueDocument) { d.Spec.ProjectSlug = "ghost" },
+			routes: map[string]covRoute{"GET /api/v1/crews": crews, "GET /api/v1/projects": {body: `[]`}},
+			want:   "resolve project_slug",
+		},
+		{
+			name:   "assignee resolve fails",
+			mutate: func(d *IssueDocument) { d.Spec.AssigneeSlug = "ghost" },
+			routes: map[string]covRoute{"GET /api/v1/crews": crews, "GET /api/v1/agents": {body: `[]`}},
+			want:   "resolve assignee_slug",
+		},
+		{
+			name:   "labels resolve fails",
+			mutate: func(d *IssueDocument) { d.Spec.Labels = []string{"ghost"} },
+			routes: map[string]covRoute{"GET /api/v1/crews": crews, "GET /api/v1/labels": {body: `[]`}},
+			want:   "resolve labels",
+		},
+		{
+			name:   "routine resolve fails",
+			mutate: func(d *IssueDocument) { d.Spec.RoutineSlug = "ghost" },
+			routes: map[string]covRoute{"GET /api/v1/crews": crews},
+			want:   "resolve routine_slug",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			doc := issueCovDoc()
+			tc.mutate(doc)
+			c := newCovClient(tc.routes)
+
+			items, err := doc.Plan(context.Background(), c, nil)
+			if err != nil {
+				t.Fatalf("Plan should defer, not fail: %v", err)
+			}
+			err = items[0].Exec(context.Background(), c)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error mentioning %q, got %v", tc.want, err)
+			}
 		})
-		_, err := doc.Plan(context.Background(), c, nil)
-		if err == nil || !strings.Contains(err.Error(), "resolve project_slug") {
-			t.Fatalf("got %v", err)
-		}
-	})
-	t.Run("assignee resolve fails", func(t *testing.T) {
-		t.Parallel()
-		doc := issueCovDoc()
-		doc.Spec.AssigneeSlug = "ghost"
-		c := newCovClient(map[string]covRoute{
-			"GET /api/v1/crews":  crews,
-			"GET /api/v1/agents": {body: `[]`},
-		})
-		_, err := doc.Plan(context.Background(), c, nil)
-		if err == nil || !strings.Contains(err.Error(), "resolve assignee_slug") {
-			t.Fatalf("got %v", err)
-		}
-	})
-	t.Run("labels resolve fails", func(t *testing.T) {
-		t.Parallel()
-		doc := issueCovDoc()
-		doc.Spec.Labels = []string{"ghost"}
-		c := newCovClient(map[string]covRoute{
-			"GET /api/v1/crews":  crews,
-			"GET /api/v1/labels": {body: `[]`},
-		})
-		_, err := doc.Plan(context.Background(), c, nil)
-		if err == nil || !strings.Contains(err.Error(), "resolve labels") {
-			t.Fatalf("got %v", err)
-		}
-	})
+	}
 }
 
 func TestIssueCov_Plan_CreateExec(t *testing.T) {
@@ -757,7 +778,7 @@ func TestIssueCov_DiffPatch(t *testing.T) {
 			Status:      "done",
 		},
 	}
-	patch, labelsChanged, err := doc.diffPatch(remote, "p2", "a2")
+	patch, labelsChanged, err := doc.diffPatch(remote, "p2", "a2", "")
 	if err != nil {
 		t.Fatalf("diffPatch: %v", err)
 	}
@@ -788,7 +809,7 @@ func TestIssueCov_DiffPatch(t *testing.T) {
 		Metadata: internalapi.Metadata{Slug: "s", Name: "Old title"},
 		Spec:     IssueSpec{CrewSlug: "eng", Description: "old desc", Priority: "none", Status: "backlog"},
 	}
-	patch, labelsChanged, err = same.diffPatch(remote, "p1", "a1")
+	patch, labelsChanged, err = same.diffPatch(remote, "p1", "a1", "")
 	if err != nil {
 		t.Fatalf("diffPatch: %v", err)
 	}

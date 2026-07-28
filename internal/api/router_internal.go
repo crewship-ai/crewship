@@ -10,6 +10,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -143,6 +144,13 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 
 	// Cross-crew messaging and file sharing (called by sidecar)
 	crewMsg := NewCrewMessagingHandler(r.db, r.storagePath, r.logger)
+	// Agent-initiated notifications. An agent may send to a channel a human
+	// explicitly paired it with — default-deny, per-agent rate limited, and
+	// scrubbed on the way out. See internal_notifications.go.
+	agentNotify := NewAgentNotifyHandler(r.db, mailer.NewFromEnv(), r.Journal(), r.logger)
+	r.mux.Handle("GET /api/v1/internal/notifications/channels", internalAuth(http.HandlerFunc(agentNotify.ListChannels)))
+	r.mux.Handle("POST /api/v1/internal/notifications/send", internalAuth(http.HandlerFunc(agentNotify.Send)))
+
 	r.mux.Handle("POST /api/v1/internal/crew-messages", internalAuth(http.HandlerFunc(crewMsg.SendMessage)))
 	r.mux.Handle("GET /api/v1/internal/crew-messages", internalAuth(http.HandlerFunc(crewMsg.ListMessages)))
 	r.mux.Handle("GET /api/v1/internal/crew-files/{crewId}", internalAuth(http.HandlerFunc(crewMsg.ReadFile)))

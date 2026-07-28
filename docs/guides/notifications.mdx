@@ -1,37 +1,140 @@
 ---
 title: "Outbound notifications"
-description: "Email, signed-webhook, Slack, Discord, and Telegram delivery for approvals, escalations, failed runs, chat replies, and more — with a per-user preference matrix and anti-storm rate limiting."
+description: "Email, signed-webhook, chat and push delivery for approvals, escalations, failed runs, issue activity, chat replies, and more — with a per-user preference matrix and anti-storm rate limiting."
 icon: "bell"
 ---
+
+## Where this lives
+
+**Integrations** (`/integrations`) — two tabs, because there are exactly two kinds of thing here:
+
+| Tab | Is | Sections in the left panel |
+| --- | --- | --- |
+| **Notifications** | Where Crewship reaches a *human* | Connections · My preferences · Deliveries |
+| **Tools (MCP)** | What an *agent* can act through | App catalog · Connected accounts · Agent access · Tools · Triggers · MCP endpoints |
+
+Everything else is a **section inside a tab**, in the left panel — not another top-level tab. Both panels are the same component with different inputs: the same toolbar (search + **Filter**), the same popover, the same section rows, the same active-filter chips. A page with five top tabs and two differently-behaving rails is not simpler for having more entry points.
+
+Under the sections, each panel **lists the things themselves** — your connections, your connected tool accounts — the way `/routines` lists routines. A rail that only holds section links makes you open a section to find out what is in it. Search and the Filter popover narrow that list, so what the panel shows is what the main column is showing.
+
+Picking one opens its **detail**: for a connection, which categories it may carry, which agents may post to it, and its own recent deliveries; for a tool account, whose it is, whether its authorisation still works, and which agents can act through it. Those answers used to be spread across a row, an admin-only overview and the delivery log, so nobody could see one connection whole.
+
+The **Filter** popover is the one every faceted page in the app uses (`sidebar-kit`'s `SidebarFilterButton`, as on /issues and /routines). Facet counts are computed against the rows the *other* facets already allow, so a bucket never offers a filter that comes back empty — and a facet never narrows its own counts to zero.
+
+Managed tool accounts are **not** in the Notifications connection list. They were, and it was the most confusing thing on the page: a Discord webhook and a Gmail tool account sat in one table under one word, with different owners, different lifecycles and different meanings of "connected".
+
+It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart. **Notifications** and **Deliveries** stay here rather than moving back: the preference matrix is a grid *over these connections*, and "why didn't it arrive" is a question about them — splitting either from the list it refers to is the same two-places-for-one-thing this page was built to undo.
+
+### Adding something: one door
+
+There is no Catalog tab. Browsing what you *could* connect is a question you ask while adding, not a place you work in, and as a tab it sat at the same weight as the four you actually use.
+
+**+ Add integration** asks the kind first — **Notifications** (somewhere Crewship reaches a person) or **Tools & MCP** (something an agent can act through) — then the service, then its form. The kinds are a list in the code, so a third one later is one entry rather than a new tab and a second grid to reconcile with the first.
+
+Picking Tools jumps straight to that tab's app catalog, or to the API-key dialog when no key is set yet: browsing a catalog you cannot connect from is a dead end.
+
+### Finding a service you have not connected yet
+
+Search on **Connections** only searches what exists. When it comes back empty but a service matches, the empty state says how many and opens **Add integration** — searching for `telegram` before you own a Telegram channel is a question the page can answer rather than a blank list.
+
+The service list inside that flow is grouped into **Chat**, **Push**, **Incident** and **E-mail & webhook**. The grouping comes from the server (`GET /api/v1/notification-providers` returns a `category` per provider), so a provider added on the backend appears in the right section without a frontend change. A provider an admin has disabled is shown greyed out and unpickable — visible, and visibly unavailable, rather than missing.
+
+Each service carries its own brand mark in its own colour: you recognise Slack by its aubergine long before you read the label, and a column of identical grey glyphs is not something you can scan. The artwork is vendored — CC0 SVG Logos for the full-colour marks, CC0 Simple Icons and MIT Tabler for the monochrome ones, and CC BY-SA Arcticons for Gotify, which exists nowhere under a more permissive licence. A brand whose official colour is black (Matrix) is lifted for display, because rendering it faithfully on a dark-first UI means rendering it invisible.
+
+### Tools (MCP)
+
+Composio's six views are rows in the **left panel**, not a second tab strip inside the page's own. Its facets are Toolkit and User — Kind/Status/Scope/Service filter nothing here. The page owns the heading, the KPI row and the actions. The **API key** sits at the foot of the left panel, showing which key is in use rather than being a button in the action bar — it configures the instance once, and does not belong beside *Add integration*.
+
+Its four reads — inventory, the app catalog, settings and every agent's bindings — are cached for 30 s with stale-while-revalidate (`lib/stale-cache.ts`). Leaving and re-entering the tab used to pay the full round trip again and show skeletons for it, including an N+1 fan-out over every agent. A cached surface now paints immediately and refreshes behind; **Refresh** drops the cache first, so it means refresh.
+
+The search box in the left panel drives this tab too — Composio's own three inner search boxes are suppressed while it is, so one list never has two inputs where only one works.
+
+Before a key is saved the panel shows a single **Setup** row and says the sections appear once there is a key. Six empty sections would be six dead ends.
+
+### Where else this shows up
+
+The connections are configured here, but the two questions they raise are asked elsewhere, so the answers appear there too:
+
+- **An agent's Skills & Tools tab** (Crews) — under **Integrations**, beside Connectors, a **Notifications** card lists the channels the agent may post to, with **Manage access** to grant or revoke. It sits there rather than on Overview because that tab is the agent's access surface, and a channel grant is access. Each pairing is still gated on the *channel* — MANAGER+ for a workspace channel, ownership for a personal one — so a refusal comes from the server in its own words rather than being guessed at in the UI.
+- **A routine's Overview** extends *What it touches* with **Reach through its agents**: the routine runs Riley, Riley is granted Gmail, therefore this routine can send mail. That hop is invisible in the DSL, because the grant lives on the agent. Read-only — it is a summary of grants made elsewhere.
+
+```bash
+# What can this agent reach?  (the mirror of `notifychannel agents list`)
+crewship agent channels <agent-id>
+```
+
+### Seeing everyone's connections (admins)
+
+On **Connections**, ADMIN/OWNER get an **Everyone's connections** toggle in the tab row. It widens the list to include other members' personal channels — but it shows *that* a member has a channel and of what kind, never *where it points*: a Telegram chat id is a contact detail, not workspace configuration. Those rows are read-only; only their owner can test, disable or delete them.
+
+### Delivery status
+
+The **Status** column is derived from the delivery log, which is ADMIN/OWNER-only. A member sees `Enabled` rather than `Delivering` — the page does not claim to know something it cannot read. Ordering matters: a channel's most recent *failure* outranks an older success, and deliveries that were muted or rate-gated never count as delivering, so a silenced channel cannot look healthy.
 
 ## Two systems, one page
 
 Crewship has grown two outbound-notification mechanisms, documented together here:
 
 1. **Run-terminal broadcast** (issue #850, below in [Legacy: run-terminal broadcast](#legacy-run-terminal-broadcast)) — workspace-wide **email**/**webhook** channels that fire on a routine run's `completed`/`failed` terminal state. Unchanged by everything below; still the right tool for "tell the whole workspace when this routine fails."
-2. **Category preference system** (issue #1412, the rest of this page) — a per-user, Linear/Novu-style **category × channel matrix** covering nine notification categories (approvals, escalations, failed/completed runs, chat replies, security, budget, system, and memory events), delivered to **email, webhook, Slack, Discord, or Telegram**, with admin-managed workspace channels AND self-service personal channels, an anti-storm rate gate, and a persistent delivery log.
+2. **Category preference system** (issue #1412, the rest of this page) — a per-user, Linear/Novu-style **category × channel matrix** covering routine, issue, agent, system and chat categories, delivered to **email, a signed webhook, or any of eleven chat and push destinations**, with admin-managed workspace channels AND self-service personal channels, an anti-storm rate gate, and a persistent delivery log.
 
 Both ride the same channel type (`notification_channels`) and the same low-level delivery code — a channel you create can serve BOTH systems (a workspace webhook can both receive the legacy `run.completed` broadcast and be selected in someone's category matrix).
 
 <Note>
-Workspace-scoped channel writes require **ADMIN/OWNER**. A personal channel (`--personal`) is self-service — any member may add their own. A signing secret / shoutrrr service URL is shown **once** at creation — store it then; it can never be read back.
+Workspace-scoped channel writes require **ADMIN/OWNER**. A personal channel (`--personal`) is self-service — any member may add their own. A webhook signing secret is shown **once** at creation — store it then; it can never be read back. Chat destinations have nothing to reveal: their delivery URL is composed from the values you supplied.
 </Note>
 
-## The 9 categories
+## Categories
+
+Categories are grouped so the matrix stays readable. Every one of them has a real event behind it — a category you can switch on always delivers something.
+
+### Routines
 
 | Category | Fires on | Bypasses the rate gate? |
 | --- | --- | --- |
-| `approvals` | A waitpoint needs a decision | Yes — never silently dropped |
-| `escalations` | An escalation needs review | Yes — never silently dropped |
-| `runs.failed` | A routine run fails | No |
-| `runs.completed` | A routine run completes | No |
-| `chat.replies` | An agent replies and you're not watching live | No |
-| `security` | Reserved for future emit points | No |
-| `budget` | Reserved for future emit points | No |
-| `system` | Reserved for future emit points | No |
-| `memory` | A memory-consolidation event | No |
+| `routines.completed` | A routine run finishes successfully | No |
+| `routines.failed` | A routine run ends in an error | No |
+| `routines.skipped` | A scheduled run was skipped by its catch-up policy | No |
+| `routines.missed` | A schedule missed occurrences, or was auto-disabled after repeated failures | No |
 
-`approvals` and `escalations` always deliver immediately and skip the anti-storm token bucket entirely — a blocking HITL item must never be dropped as "too many notifications." `security`/`budget`/`system` are selectable in the matrix today even though nothing emits them yet (the category vocabulary is fixed so a future emit point needs no schema change).
+### Issues
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `issues.created` | A new issue is opened | No |
+| `issues.state` | An issue changes status, including blocked/unblocked | No |
+| `issues.assigned` | An issue is assigned | No |
+| `issues.comment` | Someone comments on an issue | No |
+
+### Agents
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `agents.approval` | A waitpoint needs a decision | Yes — never silently dropped |
+| `agents.escalation` | An escalation needs review | Yes — never silently dropped |
+| `agents.error` | An agent container fails to start or crashes | No |
+| `agents.budget` | A spend limit is reached or exceeded | No |
+
+### System
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `system.health` | The instance itself reports a problem | No |
+| `system.migration` | A schema migration runs | No |
+| `security` | A guardrail fires, or an egress attempt is blocked | No |
+
+### Chat & memory
+
+| Category | Fires on | Bypasses the rate gate? |
+| --- | --- | --- |
+| `chat.replies` | An agent replies and you're not watching live | No |
+| `memory` | A memory-consolidation event needs review | No |
+
+`agents.approval` and `agents.escalation` always deliver immediately and skip the anti-storm token bucket entirely — a blocking HITL item must never be dropped as "too many notifications."
+
+<Note>
+**Renamed in taxonomy v2.** The original vocabulary used `approvals`, `escalations`, `runs.failed`, `runs.completed`, `budget` and `system`. Four of the nine categories it defined had no event behind them at all — they were switchable rows that could never deliver. Your existing preferences and per-channel allowlists were migrated automatically: an opted-in cell stays opted in, a muted channel stays muted, and `system` was split across both `system.health` and `system.migration` rather than dropping half of what it meant. Only the delivery **log** keeps the old names, because rewriting history would misreport what was actually sent.
+</Note>
 
 <Note>
 Every cell's state is `off` (default) or `immediate`. A `digest` value is legal in the schema (so a future digest-batching window needs no migration) but nothing writes it yet — that's v2 scope.
@@ -61,6 +164,44 @@ Headers:
 | `X-Crewship-Signature` | `sha256=<hex>` — HMAC-SHA256 of the **raw request body**, keyed on the channel secret |
 | `X-Crewship-Event` | `run.completed` or `run.failed` |
 
+A **category-routed** message (the #1412 system — an approval, a failed run, a chat reply) uses a different payload on the same channel, signed the same way and carrying `X-Crewship-Category` instead of `X-Crewship-Event`:
+
+```json
+{
+  "category": "routines.failed",
+  "title": "Scheduled routine failed: nightly-report",
+  "body": "Schedule **Nightly** fired `nightly-report` and it failed — exit 1.",
+  "priority": "high",
+  "source_kind": "failed_run",
+  "source_id": "sched_run_abc",
+  "url": "https://crewship.example.com/runs",
+  "links": [
+    { "label": "Open runs", "url": "https://crewship.example.com/runs" }
+  ],
+  "vars": { "schedule_id": "sc_1", "pipeline_id": "pl_9", "run_id": "run_abc" }
+}
+```
+
+`url` is the primary link — the first entry of `links` — and keeps the meaning it had before `links` existed, so a receiver already reading it does not break. `vars` carries the source event's own facts; a producer that starts recording a new fact surfaces it here without a schema change, so treat the object as open.
+
+### Deep links
+
+Notifications carry links to the thing they are about, so a message in Discord is something you can act on rather than something you have to go look up.
+
+Set **`CREWSHIP_PUBLIC_URL`** to the address people reach this instance at:
+
+```bash
+CREWSHIP_PUBLIC_URL=https://crewship.example.com
+```
+
+Without it, links are delivered as app-relative paths (`/issues/CS-12`). Those work in the in-app inbox and are useless in a chat client, which has no origin to resolve them against. Crewship will not guess a hostname — a link that looks right and 404s costs more than an obviously relative one.
+
+**Titles are sent natively.** Every chat and push service in the catalog except Google Chat has its own title field, and Crewship uses it rather than gluing the title onto the front of the message text. On a chat service that is the difference between a bold header and a plain first line; on a **push** service — Pushover, ntfy, Gotify — the title is the line your phone shows on the lock screen, so this is the difference between a useful notification and one you have to open to identify. Google Chat discards the field, so there the title stays in the text and nothing is lost.
+
+**Discord arrives as one message.** shoutrrr's Discord service defaults to sending each line of a message as its own embedded item, which turns an ordinary notification into a stack of disconnected boxes — title in one, each body line in another, the link in a third. Crewship overrides that on the way out, so channels created before this change are fixed too without being re-added. A message still splits on Discord's own 2000-character limit.
+
+Links point only where a page actually resolves. An issue, a mission timeline, a chat session and an agent's approvals have their own routes and are linked precisely; a failed run gets the runs list, because there is no per-run page to send you to yet. No notification links to an invented filter that the destination silently ignores.
+
 Verify it (Go):
 
 ```go
@@ -80,35 +221,107 @@ Delivery is **best-effort with retries**: 3 attempts with exponential backoff. A
 
 An email channel sends via the instance mailer. **Email delivery must be configured** (`RESEND_API_KEY` and `RESEND_FROM` set on the server) — otherwise creating an email channel is rejected with a clear error, so you learn at configuration time rather than silently losing notifications (**fail-closed**).
 
-### Shoutrrr — Slack, Discord, Telegram
+### Chat and push
 
-A `shoutrrr` channel delivers via [github.com/nicholas-fedor/shoutrrr](https://github.com/nicholas-fedor/shoutrrr), an Apprise-style notification library. Give it a **provider** and a **service URL**:
+A chat channel delivers to Discord, Slack, Telegram, ntfy, Gotify, Pushover, Mattermost, Matrix, Microsoft Teams, Google Chat, or Opsgenie.
 
-| Provider | URL format | Notes |
-| --- | --- | --- |
-| `slack` | `slack://hook:TOKEN@webhook` | `TOKEN` is your Slack incoming-webhook token (the part after `/services/` in the webhook URL, dash-joined) |
-| `discord` | `discord://token@channel` | `token` and `channel` come from your Discord webhook URL: `.../webhooks/{channel}/{token}` |
-| `telegram` | `telegram://token@telegram?chats=@channel-1,chat-id-2` | `token` is your bot token from BotFather; `chats` is a comma-separated list of `@channel` handles or numeric chat ids |
+Each destination carries a **category** — `chat`, `push` or `incident` — which is the one piece of routing advice the list can give you: chat posts into a room somebody is expected to be reading, push reaches one person's device now, and incident escalates through an on-call rota until someone acknowledges. It is a column in `crewship notifychannel providers` and the section heading in the dashboard catalog; both read the same field from the server.
 
-The service URL is **secret** (it embeds your bot token / webhook token) — it rides the exact same `secret_enc` encrypt-at-rest column the webhook signing secret uses, is returned **once** at creation, and is never exposed again by any read endpoint.
+Each one asks for **what that service actually gives you** — Discord for the webhook URL you copy out of Server Settings, Telegram for a bot token and a chat ID — with a line under each field saying where to find it. You never construct or see a delivery URL: the server composes one from your answers and stores it encrypted, in the same `secret_enc` column the webhook signing secret uses. It is never returned by any read endpoint.
+
+To see what a provider needs:
 
 ```bash
-# Workspace-wide Slack channel (ADMIN/OWNER only)
-crewship notifychannel add --type shoutrrr --provider slack \
-  --url "slack://hook:xoxb-...@webhook" --categories approvals,escalations
-
-# Your OWN personal Telegram channel (any role — self-service)
-crewship notifychannel add --type shoutrrr --provider telegram \
-  --url "telegram://123456:ABC-token@telegram?chats=@myhandle" --personal
+crewship notifychannel providers                      # every provider, and its required fields
+crewship notifychannel providers --provider telegram  # one provider's full form
 ```
 
-A shoutrrr channel also participates in the [legacy run-terminal broadcast](#legacy-run-terminal-broadcast) if it subscribes to `events` — Slack/Discord/Telegram is a **new provider alongside** email/webhook, not a replacement.
+Then fill the fields in with `--field key=value`:
 
-An instance admin can disable a provider instance-wide (`crewship notifychannel providers`, `PATCH /api/v1/notification-providers/{provider}`); a disabled provider is rejected at **channel-create time** (fail-closed) but doesn't retroactively break channels that already exist.
+```bash
+# Workspace-wide Discord channel (ADMIN/OWNER only)
+crewship notifychannel add --type chat --provider discord \
+  --field webhook_url=https://discord.com/api/webhooks/123/abc \
+  --categories agents.approval,agents.escalation
+
+# Your OWN personal Telegram channel (any role — self-service)
+crewship notifychannel add --type chat --provider telegram \
+  --field bot_token=123456:ABC-token --field chat_id=@myhandle --personal
+```
+
+<Note>
+**Test before you save.** `crewship notifychannel test-draft` (and the **Send test** button on the form) sends one real notification using the values you have typed and stores nothing. Use it to confirm a token is right instead of saving a channel and discovering the mistake when a real alert goes missing.
+
+```bash
+crewship notifychannel test-draft --type chat --provider ntfy --field topic=my-alerts
+```
+</Note>
+
+A chat channel also participates in the [legacy run-terminal broadcast](#legacy-run-terminal-broadcast) if it subscribes to `events` — chat and push are **new destinations alongside** email/webhook, not a replacement.
+
+An instance admin (ADMIN or OWNER) can disable a provider instance-wide:
+
+```bash
+crewship notifychannel providers                      # which are enabled
+crewship notifychannel providers disable discord      # refuse new channels on it
+crewship notifychannel providers enable discord       # allow them again
+```
+
+A disabled provider is rejected at **channel-create time** (fail-closed). It does **not** stop channels that already exist — they keep delivering. To silence one of those, disable or remove that channel. If you need a true kill switch for a provider, disable it *and* the channels already on it.
+
+<Note>
+`--type shoutrrr` still works as a hidden alias for `--type chat`, and `--url` still accepts a pre-composed delivery URL, so existing scripts and backup restores keep working. Both are undocumented on purpose: nobody should have to learn a URL syntax to connect Discord.
+</Note>
+
+## Agents sending notifications
+
+An agent can send a notification itself — "the migration finished", "this needs a decision", "the build is broken" — through the `notify_send` tool inside its container.
+
+**An agent has no channels by default.** Access is granted per (channel, agent) by a human, and there is no way for an agent to grant itself one. That is deliberate: an agent can already reach the network, so the question this answers is not "can it send" but *which of your team's channels may it speak on*. On Slack or Discord a reader cannot tell an agent's message from a colleague's at a glance, so an agent that could post anywhere by virtue of existing turns one confused or prompt-injected agent into a workspace-wide megaphone.
+
+```bash
+# Let one agent post to the ops channel
+crewship notifychannel agents allow nch_abc123 --agent agt_xyz789
+
+# Who can post here?
+crewship notifychannel agents list nch_abc123
+
+# Revoke
+crewship notifychannel agents deny nch_abc123 --agent agt_xyz789
+```
+
+Pairing takes the same authority as editing the channel: **ADMIN/OWNER** for a workspace channel, ownership for a personal one.
+
+### What the agent sees
+
+Two tools, injected automatically into every agent's MCP config:
+
+| Tool | Does |
+| --- | --- |
+| `list_notification_channels` | The channels THIS agent may send to — id, type and provider only, never a destination address |
+| `notify_send` | Sends `title` (+ optional `body`) to one of them |
+
+### What is enforced on the way out
+
+| Gate | Behaviour |
+| --- | --- |
+| **Identity** | The agent id comes from the container's own token, not the request. An agent cannot send as a sibling and inherit its grants. |
+| **Pairing** | Default-deny. The refusal names the CLI command a human needs to run, since the agent cannot fix it. |
+| **Rate** | Per (agent, channel): burst 3, refilling one per minute. Tighter than the human-facing gate — an agent in a loop can call a tool hundreds of times a minute without noticing, and the blast radius is a channel other people are reading. A `429` means slow down, not retry. |
+| **Scrubbing** | Title and body both go through the secret scrubber. Agent-authored text is untrusted output about to leave the instance. |
+| **Size** | 8 KB body cap, so a runaway agent cannot page a wall of text onto someone's phone. |
+
+Every agent send lands on the [Activity](/guides/activity) timeline as `notification.delivered` with the agent as the actor, so "who sent this to Slack?" has an answer.
+
+<Note>
+Agent messages are **not** routed through the per-user preference matrix. The pairing is the authorization — a human already decided this agent may post here — so letting someone's mute silently swallow it would make an approved grant look broken from both ends.
+</Note>
 
 ## Payload safety
 
-Every notification body — the legacy `output_preview` and the new category message's `body` — is passed through the secret **scrubber** (the same redaction the `notify` step uses) and capped before it leaves the instance — API keys and tokens in a run's output or an agent's reply never reach a webhook body, an email, or a chat message.
+Every author-influenced field of a notification — title, body, link labels and every value in `vars`, including nested ones — is passed through the secret **scrubber** (the same redaction the `notify` step uses) before it leaves the instance. Bodies are additionally capped. API keys and tokens in a run's output, a journal summary or an agent's reply never reach a webhook body, an email, or a chat message.
+
+Redaction is a property of delivering a message, applied once for every producer. It is not something a caller opts into: a producer that starts carrying a new fact is covered by default rather than when someone remembers.
 
 ## Two-layer preferences (the #1412 category system)
 
@@ -160,7 +373,25 @@ crewship notifychannel deliveries --status failed
 crewship notifychannel deliveries --category approvals --channel nch_abc123
 ```
 
-Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller.
+Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller. The **Deliveries** tab on `/integrations` renders the same rows, with each status translated into a reason — `dropped_pref` reads as *recipient has this category muted*, `dropped_rate` as *folded into a digest* — because the whole point is telling a quiet channel apart from a broken one.
+
+<Note>
+The API serves this log with snake_case keys (`channel_id`, `created_at`, …). Until 2026-07 the fields carried no JSON tags at all, so the server emitted Go field names and any client asking for `channel_id` got nothing: `crewship notifychannel deliveries` printed blank CHANNEL, USER and CREATED columns. If you are scripting against an older instance, that is why.
+</Note>
+
+### On the Activity timeline
+
+Every outbound send also lands on the [Activity](/guides/activity) timeline with its own webhook icon, so "this left the instance and went to Slack" sits next to the event that caused it rather than only in the admin-only log above:
+
+| Entry type | Shown as |
+| --- | --- |
+| `notification.delivered` | Notified via *provider* |
+| `notification.failed` | Notification to *provider* failed, with the error |
+| `notification.dropped` | Notification to *provider* dropped, with the reason (rate limit) |
+
+<Note>
+These entries never themselves trigger a notification. Delivery records commit through the same journal the notification router watches, so routing one would notify about having notified — and that notification would emit another record. The mapping refuses them explicitly.
+</Note>
 
 ## CLI
 
@@ -176,12 +407,13 @@ crewship notifychannel add --type webhook --url https://hooks.example.com/crewsh
 crewship notifychannel add --type email --to ops@example.com
 
 # Workspace Slack channel restricted to two categories (ADMIN/OWNER)
-crewship notifychannel add --type shoutrrr --provider slack \
-  --url slack://hook:TOKEN@webhook --categories approvals,security
+crewship notifychannel add --type chat --provider slack \
+  --field webhook_url=https://hooks.slack.com/services/T0/B0/XXX \
+  --categories agents.approval,security
 
 # Your own personal Telegram channel (any role)
-crewship notifychannel add --type shoutrrr --provider telegram \
-  --url "telegram://TOKEN@telegram?chats=@you" --personal
+crewship notifychannel add --type chat --provider telegram \
+  --field bot_token=123:ABC --field chat_id=@you --personal
 
 # List channels (secrets never shown)
 crewship notifychannel list
@@ -218,7 +450,8 @@ All routes are workspace-scoped (the workspace comes from your auth context).
 | `PATCH` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Update `enabled`/`categories`/`min_priority`/`events` |
 | `POST` | `/api/v1/notification-channels/{id}/test` | ADMIN/OWNER, or owner for a personal channel | Send a test event |
 | `DELETE` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Delete a channel |
-| `GET` | `/api/v1/notification-providers` | member | Supported shoutrrr providers + enabled state |
+| `GET` | `/api/v1/notification-providers` | member | Chat/push providers, their form fields, and enabled state |
+| `POST` | `/api/v1/notification-channels/test` | member | Test an **unsaved** draft; persists nothing |
 | `PATCH` | `/api/v1/notification-providers/{provider}` | ADMIN/OWNER | Enable/disable a provider instance-wide |
 | `GET` | `/api/v1/me/notification-prefs` | self | Your category x channel matrix |
 | `PUT` | `/api/v1/me/notification-prefs` | self | Upsert one or more cells in your matrix |
@@ -233,15 +466,15 @@ Create body:
 ```json
 { "type": "webhook", "url": "https://hooks.example.com/crewship", "events": ["all"] }
 { "type": "email", "to": "ops@example.com" }
-{ "type": "shoutrrr", "provider": "slack", "shoutrrr_url": "slack://hook:TOKEN@webhook",
+{ "type": "shoutrrr", "provider": "slack", "fields": {"webhook_url": "https://hooks.slack.com/services/T0/B0/XXX"},
   "categories": ["approvals", "escalations"], "min_priority": "medium" }
-{ "type": "shoutrrr", "provider": "telegram", "shoutrrr_url": "telegram://TOKEN@telegram?chats=@you",
+{ "type": "shoutrrr", "provider": "telegram", "fields": {"bot_token": "123:ABC", "chat_id": "@you"},
   "personal": true }
 ```
 
 `events` (optional, legacy broadcast — defaults to `["run.failed"]`; accepts `completed`, `failed`, or `all`), `categories` (optional, admin allowlist — defaults to every category), `min_priority` (optional — defaults to `low`) are independent of each other: a channel can serve the legacy broadcast, the category matrix, both, or neither.
 
-The create response for a webhook or shoutrrr channel includes the `secret` field **once** — the signing secret or the shoutrrr service URL — the only time it is ever returned.
+The create response for a **webhook** channel includes the `secret` field **once** — the signing secret — the only time it is ever returned.
 
 Preference matrix body (`PUT /api/v1/me/notification-prefs`):
 
@@ -256,8 +489,8 @@ Preference matrix body (`PUT /api/v1/me/notification-prefs`):
 
 ## Legacy: run-terminal broadcast
 
-The original (#850) mechanism: workspace-wide email/webhook/shoutrrr channels that fire on a routine run's terminal state. **Unchanged** by #1412 — this is documented for reference, not deprecated; it's still the right tool for "tell the whole workspace when this routine fails," independent of anyone's personal preference matrix.
+The original (#850) mechanism: workspace-wide email/webhook/chat channels that fire on a routine run's terminal state. **Unchanged** by #1412 — this is documented for reference, not deprecated; it's still the right tool for "tell the whole workspace when this routine fails," independent of anyone's personal preference matrix.
 
-Each channel subscribes to the outcomes it cares about via `events` — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`). See [Channel types](#channel-types) above for the webhook payload shape, HMAC verification, and the shoutrrr message format.
+Each channel subscribes to the outcomes it cares about via `events` — by default **failures only**, so a routine that runs hourly doesn't flood an inbox with success pings. Opt into completions with `--events completed` (or `--events all`). See [Channel types](#channel-types) above for the webhook payload shape and HMAC verification.
 
 Delivery is hooked on the run's **terminal write** in the pipeline finalize path — not on the CLI — so **scheduled runs** with no connected client notify exactly the same as interactive ones. Only `completed` and `failed` outcomes fire (and then only to channels subscribed to that outcome); `cancelled` and `interrupted` are operational states and are intentionally silent. Fan-out is asynchronous and best-effort, so it never slows or fails the run — a failing channel is logged, not retried into oblivion (3 attempts with exponential backoff, then it drops).

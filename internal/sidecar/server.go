@@ -469,6 +469,13 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// same savePipeline test_run→save flow as POST /pipelines/save.
 				s.handleRoutinesMCP(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/notify":
+				// In-container MCP server exposing the notification tools
+				// (list_notification_channels / notify_send). An agent can
+				// reach a human on a channel a human paired it with —
+				// default-deny, rate limited, and scrubbed server-side.
+				s.handleNotifyMCP(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/assign":
 				s.handleAssign(w, r)
 				return

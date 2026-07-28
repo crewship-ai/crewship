@@ -384,6 +384,30 @@ const (
 	// land here so they are visible in the same surface as exec.command
 	// outputs they were processing when things went wrong.
 	EntryAgentError EntryType = "agent.error"
+
+	// Issues — mission lifecycle beyond the status changes
+	// EntryMissionStatus already covers. Creation and assignment were
+	// previously invisible to the journal: an issue appearing or changing
+	// hands left no trace outside the mission_activity table and a
+	// WebSocket event, so neither Activity nor an external notification
+	// could see it happen.
+	EntryMissionCreated  EntryType = "mission.created"
+	EntryMissionAssigned EntryType = "mission.assigned"
+
+	// Notifications — the outbound delivery attempt itself. An external
+	// send is a side effect that leaves the instance, and until now it was
+	// visible only in the notification_deliveries table behind an
+	// admin-only endpoint. Emitting it here puts "this went to Slack" on
+	// the same Activity timeline as the event that caused it, with its own
+	// icon.
+	//
+	// These MUST NOT map to a notification category — see
+	// notifyroute.CategoryForJournalType, which rejects them explicitly.
+	// Routing a delivery record back into the router would notify about
+	// notifying, forever.
+	EntryNotificationDelivered EntryType = "notification.delivered"
+	EntryNotificationFailed    EntryType = "notification.failed"
+	EntryNotificationDropped   EntryType = "notification.dropped"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

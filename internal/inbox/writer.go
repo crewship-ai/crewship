@@ -33,7 +33,33 @@ const (
 	// overdue cron occurrences per its catchup_policy (#1422 item 2).
 	// Requires migration v155 (widens the inbox_items.kind CHECK).
 	KindScheduleMissed = "schedule_missed"
+	// KindScheduleCircuitBreakerTripped surfaces a schedule auto-disabled
+	// after N consecutive failures (#1405). The value was previously
+	// written as a bare string literal in internal/pipeline/schedules.go
+	// and was NEVER in the inbox_items.kind CHECK, so every insert failed
+	// the constraint and the "your routine was disabled" alert reached
+	// nobody. Requires migration v168.
+	KindScheduleCircuitBreakerTripped = "schedule_circuit_breaker_tripped"
 )
+
+// AllKinds is the canonical set of inbox_items.kind values the product
+// writes. It is the single source of truth for the DB CHECK constraint:
+// TestInboxKindsMatchSchema (internal/database) inserts one row per entry
+// against the REAL migrated schema, so a kind added here without a
+// matching migration fails CI rather than failing silently at runtime.
+//
+// That guard exists because the failure mode is invisible: Insert's error
+// is logged, not propagated to the user, so a kind missing from the CHECK
+// means an alert that simply never arrives.
+var AllKinds = []string{
+	KindWaitpoint,
+	KindEscalation,
+	KindFailedRun,
+	KindMessage,
+	KindMemoryConsolidation,
+	KindScheduleMissed,
+	KindScheduleCircuitBreakerTripped,
+}
 
 // ExternalNotifier is the injected seam that fans a freshly-committed
 // inbox item out to a recipient's EXTERNAL notification channels — email /
@@ -111,6 +137,22 @@ type Item struct {
 	Priority     string                 // urgent | high | medium | low — defaults to medium
 	Blocking     bool                   // true = needs explicit action
 	Payload      map[string]interface{} // kind-specific structured data
+
+	// Category optionally names the notification category this item routes
+	// under, overriding the kind→category mapping the router would apply.
+	// It exists for producers that know what an event IS better than its
+	// inbox kind can express — a routine's notify step emits kind "message"
+	// whatever it is about, so without this every routine notice arrived as
+	// a chat reply.
+	//
+	// IN-FLIGHT ONLY: not a column, not persisted. The resolved category is
+	// stored on the delivery row, which is what the recovery sweep reads, so
+	// there is nothing for the inbox table to remember. Empty = let the
+	// router decide, which keeps that mapping in one place.
+	//
+	// This package stays a leaf and does not import internal/notify, so the
+	// value is validated where it is authored, not here.
+	Category string
 }
 
 // Insert persists a new inbox row. INSERT OR IGNORE so the

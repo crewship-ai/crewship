@@ -240,7 +240,7 @@ INSERT INTO pipeline_waitpoints (
 	}
 	inbox.Insert(ctx, s.db, slog.Default(), inbox.Item{
 		WorkspaceID: req.WorkspaceID,
-		Kind:        "waitpoint",
+		Kind:        inbox.KindWaitpoint,
 		SourceID:    token,
 		TargetRole:  "MANAGER",
 		Title:       title,

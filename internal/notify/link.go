@@ -1,0 +1,156 @@
+package notify
+
+import "strings"
+
+// Link is a deep link carried on a notification: where a person goes to act
+// on what the message is telling them.
+//
+// Path is APP-RELATIVE ("/issues/CS-12"), never absolute, because a producer
+// knows what a notification is about but not where this instance is reachable
+// from — that depends on a reverse proxy, a hostname and a scheme none of the
+// producing packages have any business knowing. Delivery makes it absolute,
+// once, in AbsoluteLink.
+//
+// Before this, a notification carried one opaque URL string, set by exactly
+// one producer (the chat bridge) from a relative path and delivered verbatim.
+// A relative path is not a link in Discord: there is no origin to resolve it
+// against. So the single clickable thing a notification could carry only ever
+// worked inside the app's own inbox.
+type Link struct {
+	// Label is what the link says. It is author-influenced text and is
+	// scrubbed with the rest of the envelope.
+	Label string `json:"label,omitempty"`
+	// Path is app-relative, with or without a leading slash. An absolute
+	// URL is tolerated for links that genuinely point elsewhere (a GitHub
+	// PR, a Composio account) and is passed through untouched.
+	Path string `json:"path"`
+}
+
+// AbsoluteLink resolves a Link path against the instance's public URL.
+//
+// Three cases the callers depend on:
+//
+//   - base == "": nothing is configured, so there is no honest absolute form.
+//     The path is returned unchanged, which keeps the in-app inbox working
+//     and declines to guess a hostname. A guessed host is worse than a
+//     relative one — it produces a link that looks right and 404s.
+//   - path is already absolute: returned untouched, so a producer can carry
+//     a link that points outside this app.
+//   - otherwise: joined with exactly one slash.
+func AbsoluteLink(base, path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
+	}
+	if base == "" {
+		return path
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
+}
+
+// PrimaryLink returns the first link, which is the one single-URL formats
+// use — the webhook payload's `url`, an e-mail footer, a push notification
+// that has room for one tap target.
+//
+// Link order is therefore meaningful: producers put the primary action first.
+func (m CategoryMessage) PrimaryLink() (Link, bool) {
+	if len(m.Links) == 0 {
+		return Link{}, false
+	}
+	return m.Links[0], true
+}
+
+// resolveLinks returns the message's links with every path made absolute
+// against base. Delivery formats call this instead of reading msg.Links
+// directly, so no format can forget the step.
+func (m CategoryMessage) resolveLinks(base string) []Link {
+	if len(m.Links) == 0 {
+		return nil
+	}
+	out := make([]Link, 0, len(m.Links))
+	for _, l := range m.Links {
+		if url := AbsoluteLink(base, l.Path); url != "" {
+			out = append(out, Link{Label: l.Label, Path: url})
+		}
+	}
+	return out
+}
+
+// linkLines renders links as one "Label: url" line each, for the plain-text
+// formats (shoutrrr chat services, e-mail text). Chat clients auto-link a
+// bare URL, so no markup is needed and none is emitted — a format that
+// mangles links in half the services is worse than none.
+func linkLines(links []Link) string {
+	if len(links) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, l := range links {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		if l.Label != "" {
+			b.WriteString(l.Label)
+			b.WriteString(": ")
+		}
+		b.WriteString(l.Path)
+	}
+	return b.String()
+}
+
+// scrubMessage redacts secrets across EVERY author-influenced field of the
+// envelope.
+//
+// This used to be one line covering Body, and the agent-send handler worked
+// around it by scrubbing its own title — with a comment noting the delivery
+// path "was never asked to" cover that field. The three producers that did
+// not know to work around it (journal bridge, inbox router, recovery sweep)
+// delivered titles straight from a journal summary to Discord, unscrubbed.
+//
+// Scrubbing is a property of delivering a message, not of one caller, so it
+// happens once, here, where all four producers converge.
+func scrubMessage(m *CategoryMessage, scrub func(string) string) {
+	m.Title = scrub(m.Title)
+	m.Body = scrub(m.Body)
+	for i := range m.Links {
+		m.Links[i].Label = scrub(m.Links[i].Label)
+		// The path too: a link is a place a secret can hide in a query
+		// string, and a scrubbed link that no longer resolves is the
+		// correct outcome — the link was the leak.
+		m.Links[i].Path = scrub(m.Links[i].Path)
+	}
+	if m.Vars != nil {
+		if out, ok := scrubValue(m.Vars, scrub).(map[string]any); ok {
+			m.Vars = out
+		}
+	}
+}
+
+// scrubValue walks a Vars tree redacting every string it reaches.
+//
+// Vars is the fact bag templates render against, so anything in it can end up
+// in a delivered body — and a producer copying a source payload in wholesale
+// is the expected usage, not the exotic one. Recursing costs little and
+// removes the footgun of a secret one level down surviving.
+func scrubValue(v any, scrub func(string) string) any {
+	switch t := v.(type) {
+	case string:
+		return scrub(t)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = scrubValue(val, scrub)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = scrubValue(val, scrub)
+		}
+		return out
+	default:
+		return v
+	}
+}

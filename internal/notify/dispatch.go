@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -19,7 +21,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/webhook"
-	"github.com/nicholas-fedor/shoutrrr"
+	"github.com/nicholas-fedor/shoutrrr/pkg/router"
+	"github.com/nicholas-fedor/shoutrrr/pkg/types"
 )
 
 // Provider is the seam behind which the shoutrrr delivery mechanism sits
@@ -29,9 +32,13 @@ import (
 type Provider interface {
 	// Send delivers message via the Apprise-style service url (e.g.
 	// "slack://hook:TOKEN@webhook"). ctx governs cancellation only —
-	// shoutrrr.Send itself is synchronous with no context parameter, so
+	// the underlying send is synchronous with no context parameter, so
 	// Send runs it in a goroutine and races it against ctx.Done().
-	Send(ctx context.Context, url, message string) error
+	//
+	// params carries the fields a service renders NATIVELY rather than as
+	// message text — "title" above all, which on a push service is the line
+	// that appears on a lock screen. See shoutrrrMessage.
+	Send(ctx context.Context, url, message string, params map[string]string) error
 }
 
 // shoutrrrProvider is the production Provider: github.com/nicholas-fedor/
@@ -42,10 +49,24 @@ type Provider interface {
 // format per provider.
 type shoutrrrProvider struct{}
 
-func (shoutrrrProvider) Send(ctx context.Context, rawURL, message string) error {
+// shoutrrrRouter locates a service for a delivery url. The package's own
+// default router is unexported and its Send helper hardcodes an empty params
+// map, so a title could never reach a service through it.
+var shoutrrrRouter = router.ServiceRouter{Timeout: router.DefaultTimeout}
+
+func (shoutrrrProvider) Send(ctx context.Context, rawURL, message string, params map[string]string) error {
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- shoutrrr.Send(rawURL, message)
+		// shoutrrr.Send is Locate + service.Send with an EMPTY params map,
+		// so it can never carry a native title. Doing the same two steps
+		// here is what makes params reachable at all.
+		svc, err := shoutrrrRouter.Locate(rawURL)
+		if err != nil {
+			errCh <- fmt.Errorf("locating service for notification url: %w", err)
+			return
+		}
+		p := types.Params(params)
+		errCh <- svc.Send(message, &p)
 	}()
 	select {
 	case err := <-errCh:
@@ -152,6 +173,33 @@ type Dispatcher struct {
 	logger      *slog.Logger
 	maxAttempts int
 	baseBackoff time.Duration
+
+	// publicURL is where this instance is reachable from a browser. It is
+	// the ONE place that knows it: producers build app-relative link paths
+	// and delivery resolves them here, so no producing package has to learn
+	// about reverse proxies, hostnames or schemes. Empty = links are
+	// delivered relative, which is honest about not knowing rather than
+	// guessing a host and emitting links that 404.
+	publicURL string
+}
+
+// publicURLEnv names the browser-reachable base URL of this instance, e.g.
+// "https://crewship.example.com". Deep links in notifications are resolved
+// against it.
+//
+// It is read from the environment rather than threaded through every
+// constructor because four production sites build a Dispatcher, and a site
+// that forgot to pass it would not fail — it would quietly emit relative
+// links no chat client can open. Same reasoning, and the same shape, as
+// mailer.NewFromEnv resolving SMTP.
+const publicURLEnv = "CREWSHIP_PUBLIC_URL"
+
+// WithPublicURL overrides the browser-reachable base URL used to make deep
+// links absolute. Wiring code holding the value from config should call this;
+// it takes precedence over publicURLEnv. Returns the dispatcher for chaining.
+func (d *Dispatcher) WithPublicURL(u string) *Dispatcher {
+	d.publicURL = strings.TrimSpace(u)
+	return d
 }
 
 // NewDispatcher wires a dispatcher. A nil mailer degrades e-mail delivery
@@ -173,6 +221,7 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 		logger:      logger,
 		maxAttempts: 3,
 		baseBackoff: 200 * time.Millisecond,
+		publicURL:   strings.TrimSpace(os.Getenv(publicURLEnv)),
 	}
 }
 
@@ -227,24 +276,38 @@ func (d *Dispatcher) DispatchOne(ctx context.Context, ch Channel, ev Notificatio
 	return d.deliver(ctx, ch, ev)
 }
 
-// scrubPreview redacts secrets then caps the snippet. The cap is applied
-// on a rune boundary so a multi-byte UTF-8 character (emoji, non-Latin
-// text — common in agent output) is never sliced mid-rune into invalid
-// UTF-8.
+// scrubPreview redacts secrets then caps the snippet.
+//
+// The two halves are separate because they are separate concerns applied to
+// different scopes: EVERY field of a notification is redacted, but only the
+// body is capped — truncating a title or a link would corrupt it.
 func (d *Dispatcher) scrubPreview(s string) string {
+	return capPreview(d.scrubText(s))
+}
+
+// scrubText redacts secrets. This is the one redactor; nothing else in the
+// package (or outside it) should construct its own.
+func (d *Dispatcher) scrubText(s string) string {
 	if s == "" {
 		return ""
 	}
-	s = d.scrub.Scrub(s)
-	if len(s) > outputPreviewCap {
-		// Walk back to the last full rune at/under the byte cap.
-		cut := outputPreviewCap
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "…"
+	return d.scrub.Scrub(s)
+}
+
+// capPreview bounds a snippet so a large run deliverable can't bloat a
+// message. The cap is applied on a rune boundary so a multi-byte UTF-8
+// character (emoji, non-Latin text — common in agent output) is never sliced
+// mid-rune into invalid UTF-8.
+func capPreview(s string) string {
+	if len(s) <= outputPreviewCap {
+		return s
 	}
-	return s
+	// Walk back to the last full rune at/under the byte cap.
+	cut := outputPreviewCap
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 func (d *Dispatcher) deliver(ctx context.Context, ch Channel, ev NotificationEvent) error {
@@ -269,10 +332,10 @@ func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev Notific
 	if ch.Secret == "" {
 		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
 	}
-	message := fmt.Sprintf("Crewship: routine %s %s (run %s)", ev.RoutineSlug, ev.Status, ev.RunID)
-	if ev.OutputPreview != "" {
-		message += "\n\n" + ev.OutputPreview
-	}
+	url := ServiceURLForDelivery(ch.Secret)
+	message, params := shoutrrrMessage(url,
+		fmt.Sprintf("Crewship: routine %s %s (run %s)", ev.RoutineSlug, ev.Status, ev.RunID),
+		ev.OutputPreview)
 
 	var lastErr error
 	for attempt := 0; attempt < d.maxAttempts; attempt++ {
@@ -281,7 +344,7 @@ func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev Notific
 				return err
 			}
 		}
-		if err := provider.Send(ctx, ch.Secret, message); err != nil {
+		if err := provider.Send(ctx, url, message, params); err != nil {
 			lastErr = err
 			continue
 		}
@@ -415,3 +478,8 @@ func EventTypeForStatus(status string) string {
 		return ""
 	}
 }
+
+// ScrubText used to live here so the agent-send handler could redact a title
+// the delivery path did not cover. DeliverCategoryMessage now scrubs the
+// whole envelope for every producer, so the workaround — and the second
+// scrubber instance it constructed per call — is gone.

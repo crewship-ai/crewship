@@ -19,12 +19,13 @@ type fakeProvider struct {
 type fakeSend struct {
 	URL     string
 	Message string
+	Params  map[string]string
 }
 
-func (f *fakeProvider) Send(_ context.Context, url, message string) error {
+func (f *fakeProvider) Send(_ context.Context, url, message string, params map[string]string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sent = append(f.sent, fakeSend{URL: url, Message: message})
+	f.sent = append(f.sent, fakeSend{URL: url, Message: message, Params: params})
 	return f.erron
 }
 
@@ -165,7 +166,7 @@ func TestDeliverCategoryMessage_Shoutrrr(t *testing.T) {
 	ch := Channel{ID: "c1", Type: ChannelShoutrrr, Secret: "slack://hook:T@webhook", Enabled: true}
 
 	err := d.DeliverCategoryMessage(context.Background(), ch, CategoryMessage{
-		WorkspaceID: "w", Category: CategoryApprovals,
+		WorkspaceID: "w", Category: CategoryAgentsApproval,
 		Title: "Approval needed", Body: "Agent wants to run `rm -rf /tmp/x`",
 	})
 	if err != nil {

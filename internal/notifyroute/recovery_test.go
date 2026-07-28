@@ -57,7 +57,7 @@ func TestRecovery_RedeliversStuckPending(t *testing.T) {
 		t.Fatalf("seed inbox source: %v", err)
 	}
 
-	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-rec-1", notify.CategoryApprovals, StatusPending)
+	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-rec-1", notify.CategoryAgentsApproval, StatusPending)
 
 	attempted, sent := r.RecoverStuckDeliveries(context.Background())
 	if attempted != 1 || sent != 1 {
@@ -83,7 +83,7 @@ func TestRecovery_RetriesFailed(t *testing.T) {
 		 VALUES ('ibx2', 'ws1', 'waitpoint', 'wp-rec-2', 'Approve', 'body', 'unread', 'medium')`); err != nil {
 		t.Fatalf("seed inbox source: %v", err)
 	}
-	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-rec-2", notify.CategoryApprovals, StatusFailed)
+	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-rec-2", notify.CategoryAgentsApproval, StatusFailed)
 
 	if _, sent := r.RecoverStuckDeliveries(context.Background()); sent != 1 {
 		t.Fatalf("failed delivery should be retried and sent, sent=%d", sent)
@@ -105,7 +105,7 @@ func TestRecovery_SkipsOverAttemptCap(t *testing.T) {
 		 VALUES ('ibx3', 'ws1', 'waitpoint', 'wp-rec-3', 'Approve', 'body', 'unread', 'medium')`); err != nil {
 		t.Fatalf("seed inbox source: %v", err)
 	}
-	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-rec-3", notify.CategoryApprovals, StatusFailed)
+	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-rec-3", notify.CategoryAgentsApproval, StatusFailed)
 	// Push attempts to the cap.
 	if _, err := db.Exec(`UPDATE notification_deliveries SET attempts = ? WHERE id = ?`, recoveryMaxAttempts, id); err != nil {
 		t.Fatalf("bump attempts: %v", err)
@@ -128,7 +128,7 @@ func TestRecovery_SourceGoneAgesOut(t *testing.T) {
 	r := newTestRouter(db, nil, nil)
 	ch := seedWebhookChannel(t, db, rs.URL)
 	// No inbox_items row seeded — the source is gone.
-	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-missing", notify.CategoryApprovals, StatusPending)
+	id := insertStuckDelivery(t, r, ch, "waitpoint", "wp-missing", notify.CategoryAgentsApproval, StatusPending)
 
 	_, sent := r.RecoverStuckDeliveries(context.Background())
 	if sent != 0 {

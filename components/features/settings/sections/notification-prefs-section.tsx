@@ -9,26 +9,16 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useNotificationChannels } from "@/hooks/use-notification-channels"
 import { useNotificationPrefs, type PrefCell } from "@/hooks/use-notification-prefs"
+import {
+  MUTE_CATEGORY,
+  NOTIFICATION_CATEGORY_GROUPS,
+  labelForCategory,
+} from "@/lib/notification-categories"
 import { SettingsCard, SettingsEmpty } from "../shared"
 
 interface NotificationPrefsSectionProps {
   workspaceId: string
 }
-
-// Fixed row order — mirrors internal/notify.AllCategories exactly.
-const CATEGORIES: { key: string; label: string }[] = [
-  { key: "approvals", label: "Approvals" },
-  { key: "escalations", label: "Escalations" },
-  { key: "runs.failed", label: "Failed runs" },
-  { key: "runs.completed", label: "Completed runs" },
-  { key: "chat.replies", label: "Chat replies" },
-  { key: "security", label: "Security" },
-  { key: "budget", label: "Budget" },
-  { key: "system", label: "System" },
-  { key: "memory", label: "Memory" },
-]
-
-const MUTE_CATEGORY = "*"
 
 function channelIcon(type: string) {
   if (type === "email") return Mail
@@ -80,7 +70,10 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
       const key = `${category}:${channelId}`
       const current = stateOf(category, channelId)
       const next: PrefCell["state"] = current === "immediate" ? "off" : "immediate"
-      const catLabel = CATEGORIES.find((c) => c.key === category)?.label ?? category
+      // Taxonomy v2 replaced the hardcoded 9-category list this used to read.
+      // labelForCategory also covers the retired keys, so a stored preference
+      // written before the migration still names itself in the toast.
+      const catLabel = labelForCategory(category)
       setPendingKey(key)
       try {
         await setCell({ category, channel_id: channelId, state: next })
@@ -219,9 +212,24 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
                 </tr>
               </thead>
               <tbody>
-                {CATEGORIES.map((cat) => (
+                {NOTIFICATION_CATEGORY_GROUPS.flatMap((group) => [
+                  // Group heading — taxonomy v2 has 17 rows, and a flat grid
+                  // of that height is unreadable. The heading spans the whole
+                  // table so the eye can find "Routines" without counting.
+                  <tr key={`group:${group.key}`} className="border-b border-border/30">
+                    <td
+                      colSpan={usableChannels.length + 1}
+                      className="px-3 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sticky left-0 bg-card"
+                    >
+                      {group.label}
+                    </td>
+                  </tr>,
+                  ...group.categories.map((cat) => (
                   <tr key={cat.key} className="border-b border-border/30 last:border-b-0">
-                    <td className="px-3 py-2 text-foreground/80 sticky left-0 bg-card whitespace-nowrap">
+                    <td
+                      className="px-3 py-2 pl-5 text-foreground/80 sticky left-0 bg-card whitespace-nowrap"
+                      title={cat.hint}
+                    >
                       {cat.label}
                     </td>
                     {usableChannels.map((ch) => {
@@ -260,7 +268,8 @@ export function NotificationPrefsSection({ workspaceId }: NotificationPrefsSecti
                       )
                     })}
                   </tr>
-                ))}
+                  )),
+                ])}
               </tbody>
             </table>
           </div>

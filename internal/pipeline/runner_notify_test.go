@@ -422,6 +422,12 @@ func TestValidate_NotifyStep(t *testing.T) {
 		{"valid trigger", `{"to":"trigger","body":"done"}`, false},
 		{"valid role", `{"to":"role:MANAGER","body":"done"}`, false},
 		{"templated target ok", `{"to":"user:{{ inputs.uid }}","body":"done"}`, false},
+		// Notify fields were not template-checked at all, so a ref to
+		// something that does not exist passed save and rendered empty at
+		// run time — `to` fell back to a workspace notice, `title`/`body`
+		// went out with a hole in them, and the run reported success.
+		{"templated target, unknown input", `{"to":"user:{{ inputs.nope }}","body":"done"}`, true},
+		{"templated body, unknown step", `{"to":"workspace","body":"{{ steps.nope.output }}"}`, true},
 		{"missing to", `{"title":"hi","body":"there"}`, true},
 		{"missing title and body", `{"to":"workspace"}`, true},
 		{"bad role", `{"to":"role:VIEWER","body":"x"}`, true},
@@ -430,7 +436,11 @@ func TestValidate_NotifyStep(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dslJSON := `{"dsl_version":"1.0","name":"t","steps":[{"id":"n","type":"notify","notify":` + tc.notify + `}]}`
+			// `uid` is declared so the templated-target case exercises the
+			// SHAPE it is about, rather than tripping the separate
+			// unknown-input check.
+			dslJSON := `{"dsl_version":"1.0","name":"t","inputs":[{"name":"uid","type":"string"}],` +
+				`"steps":[{"id":"n","type":"notify","notify":` + tc.notify + `}]}`
 			dsl, err := Parse([]byte(dslJSON))
 			if err != nil {
 				t.Fatalf("parse: %v", err)

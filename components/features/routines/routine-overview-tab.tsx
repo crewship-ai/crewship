@@ -30,6 +30,7 @@ import { usePipelineStepOverrides, type PipelineStepOverride } from "@/hooks/use
 import type { RoutineDetail } from "./routines-detail-panel"
 import { Card } from "./_shared"
 import { RoutineTouches } from "./routine-touches"
+import { RoutineReachCard } from "./routine-reach-card"
 import { RoutineMiniTrace } from "./routine-mini-trace"
 import { RunTagChips } from "./routine-tag-chips"
 import { RoutineBudgetCard } from "./routine-budget-card"
@@ -210,8 +211,12 @@ export function RoutineOverviewTab({
 
         {/* What it touches — capability manifest as brand-logo chips. */}
         <Card title="What it touches" subtitle="blast radius" icon={ShieldAlert}>
-          <div className="px-3 py-2">
+          <div className="space-y-3 px-3 py-2">
             <RoutineTouches manifest={manifest} />
+            {/* The transitive hop the manifest cannot see: the routine runs
+                Riley, Riley is granted Gmail, so this routine can send mail.
+                The grant lives on the agent, so the DSL never mentions it. */}
+            <RoutineReachCard workspaceId={workspaceId} agentSlugs={manifest?.agents ?? []} />
           </div>
         </Card>
       </div>

@@ -81,14 +81,14 @@ describe("NotificationPrefsSection — matrix cell + mute button", () => {
     setCellMock.mockResolvedValue(undefined)
     render(<NotificationPrefsSection workspaceId="ws1" />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Approvals on email/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Approval needed on email/ }))
 
     await waitFor(() =>
-      expect(setCellMock).toHaveBeenCalledWith({ category: "approvals", channel_id: "c1", state: "immediate" }),
+      expect(setCellMock).toHaveBeenCalledWith({ category: "agents.approval", channel_id: "c1", state: "immediate" }),
     )
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
     const [title, opts] = toastSuccess.mock.calls[0]
-    expect(String(title)).toMatch(/approvals/i)
+    expect(String(title)).toMatch(/approval/i)
     expect(JSON.stringify(opts)).toContain("ops@example.com")
   })
 
@@ -96,7 +96,7 @@ describe("NotificationPrefsSection — matrix cell + mute button", () => {
     setCellMock.mockRejectedValue(new Error("category not allowed"))
     render(<NotificationPrefsSection workspaceId="ws1" />)
 
-    const cellBtn = screen.getByRole("button", { name: /Approvals on email/ })
+    const cellBtn = screen.getByRole("button", { name: /Approval needed on email/ })
     fireEvent.click(cellBtn)
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())

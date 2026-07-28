@@ -19,7 +19,7 @@ func TestPrefStore_SetAndGet_RoundTrips(t *testing.T) {
 
 	prefs := NewPrefStore(db)
 	err = prefs.Set(context.Background(), "ws1", "u_member", []PrefCell{
-		{Category: notify.CategoryApprovals, ChannelID: ch.ID, State: "immediate"},
+		{Category: notify.CategoryAgentsApproval, ChannelID: ch.ID, State: "immediate"},
 		{Category: notify.CategorySecurity, ChannelID: ch.ID, State: "off"},
 	})
 	if err != nil {
@@ -31,15 +31,15 @@ func TestPrefStore_SetAndGet_RoundTrips(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 	idx := indexCells(got)
-	if idx.state(notify.CategoryApprovals, ch.ID) != "immediate" {
-		t.Errorf("approvals cell = %q, want immediate", idx.state(notify.CategoryApprovals, ch.ID))
+	if idx.state(notify.CategoryAgentsApproval, ch.ID) != "immediate" {
+		t.Errorf("approvals cell = %q, want immediate", idx.state(notify.CategoryAgentsApproval, ch.ID))
 	}
 	if idx.state(notify.CategorySecurity, ch.ID) != "off" {
 		t.Errorf("security cell = %q, want off", idx.state(notify.CategorySecurity, ch.ID))
 	}
 	// Unset cell defaults to off.
-	if idx.state(notify.CategoryBudget, ch.ID) != "off" {
-		t.Errorf("unset budget cell should default to off, got %q", idx.state(notify.CategoryBudget, ch.ID))
+	if idx.state(notify.CategoryAgentsBudget, ch.ID) != "off" {
+		t.Errorf("unset budget cell should default to off, got %q", idx.state(notify.CategoryAgentsBudget, ch.ID))
 	}
 }
 
@@ -52,10 +52,10 @@ func TestPrefStore_Set_UpsertsExistingCell(t *testing.T) {
 	prefs := NewPrefStore(db)
 	ctx := context.Background()
 
-	if err := prefs.Set(ctx, "ws1", "u_member", []PrefCell{{Category: notify.CategoryBudget, ChannelID: ch.ID, State: "immediate"}}); err != nil {
+	if err := prefs.Set(ctx, "ws1", "u_member", []PrefCell{{Category: notify.CategoryAgentsBudget, ChannelID: ch.ID, State: "immediate"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := prefs.Set(ctx, "ws1", "u_member", []PrefCell{{Category: notify.CategoryBudget, ChannelID: ch.ID, State: "off"}}); err != nil {
+	if err := prefs.Set(ctx, "ws1", "u_member", []PrefCell{{Category: notify.CategoryAgentsBudget, ChannelID: ch.ID, State: "off"}}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := prefs.Get(ctx, "ws1", "u_member")
@@ -81,7 +81,7 @@ func TestPrefStore_Set_RejectsDigestState(t *testing.T) {
 	prefs := NewPrefStore(db)
 	// The DB CHECK admits 'digest' (schema is v2-ready) but the MVP store
 	// layer rejects it — there is no digest scheduler to honor it yet.
-	err := prefs.Set(context.Background(), "ws1", "u_member", []PrefCell{{Category: notify.CategorySystem, ChannelID: "nch_x", State: "digest"}})
+	err := prefs.Set(context.Background(), "ws1", "u_member", []PrefCell{{Category: notify.CategorySystemHealth, ChannelID: "nch_x", State: "digest"}})
 	if err == nil {
 		t.Fatal("expected rejection of state=digest at the store layer (v2 scope)")
 	}
