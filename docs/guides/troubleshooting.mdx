@@ -325,7 +325,7 @@ mv ~/.crewship/crewship.db ~/.crewship/crewship.db.bak
 crewship start                                   # fresh DB, replays migrations
 ```
 
-**Maintainer-side:** two guards cover this now. The `migration-lint` CI
+**Maintainer-side:** two guards cover this now. The **Migration Lint** CI
 workflow catches a colliding version pre-merge, and new migrations take
 timestamp version numbers (`YYYYMMDDHHMMSS`), so two branches can no
 longer reach for the same one. See [Migrations](/guides/migrations).

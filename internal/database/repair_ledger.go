@@ -207,16 +207,37 @@ func ApplyLedgerRepair(ctx context.Context, db *sql.DB, plan RepairPlan) error {
 	// that has not been moved yet (two migrations swapping numbers is the
 	// obvious case). Park everything negative first — no real version is
 	// negative — then place each row at its target.
+	// Both loops assert they moved exactly one row. Without that, a plan
+	// containing two moves off the same source — which the planner cannot
+	// produce but an external caller can, since this is exported — parks the
+	// row once, silently matches nothing the second time, and still commits
+	// while reporting "Ledger repaired". Rewriting the ledger is not a place
+	// to trust that a statement did what was intended.
+	moveOne := func(what string, to, from int, name string) error {
+		res, err := tx.ExecContext(ctx,
+			`UPDATE _migrations SET version = ? WHERE version = ?`, to, from)
+		if err != nil {
+			return fmt.Errorf("%s %q (v%d): %w", what, name, r0(from), err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("%s %q (v%d): affected-row count unavailable: %w", what, name, r0(from), err)
+		}
+		if n != 1 {
+			return fmt.Errorf("%w: %s of %q expected exactly one row at v%d, changed %d",
+				ErrLedgerChanged, what, name, r0(from), n)
+		}
+		return nil
+	}
+
 	for _, r := range plan.Renumbers {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE _migrations SET version = ? WHERE version = ?`, -r.From, r.From); err != nil {
-			return fmt.Errorf("park %q (v%d): %w", r.Name, r.From, err)
+		if err := moveOne("park", -r.From, r.From, r.Name); err != nil {
+			return err
 		}
 	}
 	for _, r := range plan.Renumbers {
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE _migrations SET version = ? WHERE version = ?`, r.To, -r.From); err != nil {
-			return fmt.Errorf("renumber %q (v%d → v%d): %w", r.Name, r.From, r.To, err)
+		if err := moveOne("renumber", r.To, -r.From, r.Name); err != nil {
+			return err
 		}
 	}
 
@@ -224,4 +245,14 @@ func ApplyLedgerRepair(ctx context.Context, db *sql.DB, plan RepairPlan) error {
 		return fmt.Errorf("commit repair: %w", err)
 	}
 	return nil
+}
+
+// r0 reports a parked (negated) version as the real one, so error messages
+// name the version an operator recognises rather than the negative placeholder
+// the move pass uses internally.
+func r0(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

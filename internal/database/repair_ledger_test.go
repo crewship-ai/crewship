@@ -235,3 +235,68 @@ func TestRepairThenMigrate_RecoversARenumberedDatabase(t *testing.T) {
 		t.Fatalf("Migrate still refuses after the repair: %v", err)
 	}
 }
+
+// ApplyLedgerRepair is exported, so a caller can hand it a plan the planner
+// would never produce. And even from the planner, the re-check and the writes
+// are separate statements. A move that matches nothing must be an error, not a
+// silent no-op followed by "Ledger repaired".
+func TestApplyLedgerRepair_RefusesAMoveThatChangesNothing(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "noop.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE _migrations (
+		version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now')))`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO _migrations (version, name) VALUES (168, 'real')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// A plan with two moves off the SAME source row. The re-check passes for
+	// both (the row is there, the name matches), the first park consumes it,
+	// and the second move then matches nothing — silently, while the repair
+	// still commits and reports success.
+	//
+	// The planner cannot produce this, but ApplyLedgerRepair is exported and a
+	// caller can. The simpler "source row is absent" case is already caught by
+	// the re-check above the writes, verified separately.
+	plan := RepairPlan{Renumbers: []Renumber{
+		{Name: "real", From: 168, To: 169},
+		{Name: "real", From: 168, To: 170},
+	}}
+	if err := ApplyLedgerRepair(context.Background(), db, plan); err == nil {
+		t.Fatal("want an error for a renumber that matches no row")
+	}
+
+	// And the genuine one must not have been left half-applied.
+	var version int
+	if err := db.QueryRow(`SELECT version FROM _migrations WHERE name = 'real'`).Scan(&version); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if version != 168 {
+		t.Errorf("version = %d, want 168 — the failed repair should have rolled back entirely", version)
+	}
+}
+
+// The plainly-absent case, kept separate so it is clear which guard catches
+// which: this one is the re-check, before any write happens.
+func TestApplyLedgerRepair_RefusesAMoveForARowThatIsNotThere(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "absent.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE _migrations (
+		version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now')))`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	plan := RepairPlan{Renumbers: []Renumber{{Name: "ghost", From: 500, To: 501}}}
+	if err := ApplyLedgerRepair(context.Background(), db, plan); !errors.Is(err, ErrLedgerChanged) {
+		t.Fatalf("err = %v, want ErrLedgerChanged", err)
+	}
+}
