@@ -76,10 +76,8 @@ func PlanLedgerRepair(applied []LedgerEntry) (RepairPlan, error) {
 
 func planLedgerRepair(applied, declared []LedgerEntry) (RepairPlan, error) {
 	declaredByName := make(map[string]int, len(declared))
-	declaredByVersion := make(map[int]string, len(declared))
 	for _, d := range declared {
 		declaredByName[d.Name] = d.Version
-		declaredByVersion[d.Version] = d.Name
 	}
 
 	var plan RepairPlan
