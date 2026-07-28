@@ -142,7 +142,13 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// restore would silently revoke every agent's ability to notify, and the
 	// symptom — an agent quietly failing to reach anyone — is exactly the kind
 	// nobody notices until it matters.
+	// notification_templates is the operator's own wording for what those
+	// notifications SAY. It is authored configuration in the same sense as
+	// the channels themselves — losing it on restore would silently revert
+	// every message to the shipped default, and the only symptom would be
+	// that the words changed, which no alert catches.
 	"notification_channels":       IntentInclude,
+	"notification_templates":      IntentInclude,
 	"user_notification_prefs":     IntentInclude,
 	"notification_channel_agents": IntentInclude,
 	"notification_deliveries":     IntentExcludeOperational,

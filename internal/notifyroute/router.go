@@ -28,6 +28,7 @@ type Router struct {
 	channels   *notify.ChannelStore
 	prefs      *PrefStore
 	deliveries *DeliveryStore
+	templates  *notify.TemplateStore
 	dispatcher *notify.Dispatcher
 	presence   PresenceChecker // nil = no presence gate (never suppress)
 	limiter    *RateLimiter    // nil = no rate limiting
@@ -50,6 +51,7 @@ func NewRouter(db *sql.DB, dispatcher *notify.Dispatcher, presence PresenceCheck
 		channels:   notify.NewChannelStore(db),
 		prefs:      NewPrefStore(db),
 		deliveries: NewDeliveryStore(db),
+		templates:  notify.NewTemplateStore(db),
 		dispatcher: dispatcher,
 		presence:   presence,
 		limiter:    limiter,
@@ -241,6 +243,35 @@ func (r *Router) routeToUser(ctx context.Context, category string, item inbox.It
 	}
 }
 
+// applyTemplate rewrites a message's wording from the operator's template for
+// its category, when one exists.
+//
+// Only for notifications the PRODUCT computes. A message that arrives as inbox
+// kind "message" was written by somebody — a routine author's notify step, an
+// agent's chat reply — and an operator's category template has no business
+// overwriting another person's words. That would be a different feature, and a
+// worse one, wearing this one's name.
+//
+// Applied BEFORE delivery so the envelope scrub still covers whatever the
+// template pulled in: a template can reference any fact, including one holding
+// a secret, and it must not become a way around redaction.
+//
+// A template that cannot be read is not a reason to lose the notification. The
+// producer's own wording is a correct message; failing the delivery over a
+// missing override would trade a cosmetic problem for a silent one.
+func (r *Router) applyTemplate(ctx context.Context, msg notify.CategoryMessage, channelID string) notify.CategoryMessage {
+	if r.templates == nil || msg.SourceKind == inbox.KindMessage {
+		return msg
+	}
+	tmpl, err := r.templates.Resolve(ctx, msg.WorkspaceID, msg.Category, channelID)
+	if err != nil {
+		r.logger.Warn("notifyroute: resolve message template",
+			"error", err, "category", msg.Category, "channel_id", channelID)
+		return msg
+	}
+	return tmpl.Apply(msg)
+}
+
 // deliverToChannel runs the rate gate, writes the outbox row (coalescing
 // on (channel_id, dedup_key)), attempts delivery, and updates the log.
 func (r *Router) deliverToChannel(ctx context.Context, category string, item inbox.Item, uid string, ch notify.Channel, dedupKey string) {
@@ -285,6 +316,7 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		Links:       links,
 		Vars:        vars,
 	}
+	msg = r.applyTemplate(ctx, msg, ch.ID)
 
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
 		if merr := r.deliveries.MarkFailed(ctx, id, err.Error()); merr != nil {

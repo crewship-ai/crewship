@@ -130,6 +130,9 @@ var BackupTables = []string{
 	// and agents, so it restores after its channel parent above. agents are
 	// dumped earlier in this list.
 	"notification_channel_agents",
+	// notification_templates references notification_channels(id) on its
+	// optional channel_id, so it restores after the channel parent too.
+	"notification_templates",
 	"webhooks",
 	"routines",
 	"schedules",
