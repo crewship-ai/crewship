@@ -193,17 +193,21 @@ func TestRepairThenMigrate_RecoversARenumberedDatabase(t *testing.T) {
 	defer db.Close()
 
 	logger := quietLogger()
-	if err := Migrate(ctx, db, logger); err != nil {
-		t.Fatalf("initial migrate: %v", err)
-	}
 
-	// Recreate dev3's ledger exactly: the last migration was authored under
-	// the previous one's number, so it sits at `other.version` and nothing
-	// occupies its declared version.
+	// Recreate dev3 exactly: the last migration was authored under the previous
+	// one's number, so it sits at `other.version` — and `other` itself has
+	// never run on this machine, because it merged to main only after this
+	// database had already applied the branch.
 	victim := migrations[len(migrations)-1] // authored as, and renumbered from…
 	other := migrations[len(migrations)-2]  // …this version, which main then took
-	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = ?`, other.version); err != nil {
-		t.Fatalf("stage collision: %v", err)
+	// MigrateSkipping, not "Migrate then DELETE the ledger row": deleting the
+	// row would leave `other`'s schema change applied while claiming it never
+	// ran, and the final Migrate below — which applies it for real — would then
+	// fail on a duplicate column for reasons that have nothing to do with the
+	// repair. That is not a hypothetical: it is what a plain ALTER TABLE ADD
+	// COLUMN in the second-newest migration does to this test.
+	if err := MigrateSkipping(ctx, db, logger, other.name); err != nil {
+		t.Fatalf("initial migrate (without %s): %v", other.name, err)
 	}
 	if _, err := db.Exec(`UPDATE _migrations SET version = ? WHERE version = ?`,
 		other.version, victim.version); err != nil {

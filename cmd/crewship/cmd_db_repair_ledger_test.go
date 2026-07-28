@@ -35,29 +35,46 @@ func stageRenumberedLedger(t *testing.T) (dataDir string, from, to int) {
 	if err != nil {
 		t.Fatalf("data dir: %v", err)
 	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// Learn the last two migrations from a throwaway database at head. We need
+	// the NAME of the one to leave out before building the real fixture, and
+	// the registry is unexported.
+	var fromName string
+	func() {
+		scratch, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "scratch.db"))
+		if err != nil {
+			t.Fatalf("open scratch: %v", err)
+		}
+		defer scratch.Close()
+		if err := database.Migrate(context.Background(), scratch, quiet); err != nil {
+			t.Fatalf("migrate scratch: %v", err)
+		}
+		led, err := database.ReadLedger(context.Background(), scratch)
+		if err != nil {
+			t.Fatalf("read ledger: %v", err)
+		}
+		if len(led) < 2 {
+			t.Fatalf("need at least two migrations, got %d", len(led))
+		}
+		to = led[len(led)-1].Version // where the newest migration belongs
+		from = led[len(led)-2].Version
+		fromName = led[len(led)-2].Name // …and this one had not merged yet
+	}()
+
 	db, err := sql.Open("sqlite", dd.DatabasePath())
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	defer db.Close()
 
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db, quiet); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
-	led, err := database.ReadLedger(context.Background(), db)
-	if err != nil {
-		t.Fatalf("read ledger: %v", err)
-	}
-	if len(led) < 2 {
-		t.Fatalf("need at least two migrations, got %d", len(led))
-	}
-	to = led[len(led)-1].Version   // where the newest migration belongs
-	from = led[len(led)-2].Version // where the branch had recorded it
-
-	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = ?`, from); err != nil {
-		t.Fatalf("stage: %v", err)
+	// MigrateSkipping, not "migrate to head then delete a ledger row": on dev3
+	// the migration that took the branch's number had never run, and deleting
+	// its row while leaving its schema change in place would make the final
+	// Migrate — the one that applies it for real — fail on an already-existing
+	// column, blaming the repair for something the fixture did.
+	if err := database.MigrateSkipping(context.Background(), db, quiet, fromName); err != nil {
+		t.Fatalf("migrate (without %s): %v", fromName, err)
 	}
 	if _, err := db.Exec(`UPDATE _migrations SET version = ? WHERE version = ?`, from, to); err != nil {
 		t.Fatalf("stage: %v", err)

@@ -21,12 +21,8 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 		return fmt.Errorf("migration registry is invalid, refusing to migrate: %w", migrationRegistryErr)
 	}
 
-	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
-		version INTEGER PRIMARY KEY,
-		name TEXT NOT NULL,
-		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-	)`); err != nil {
-		return fmt.Errorf("create migrations table: %w", err)
+	if err := ensureMigrationsTable(ctx, db); err != nil {
+		return err
 	}
 
 	// Version-skew guard (forward-only). If the DB carries a migration
@@ -63,6 +59,59 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// ensureMigrationsTable creates the ledger if it is not there yet. Shared by
+// Migrate and MigrateSkipping so the two cannot disagree about its shape.
+func ensureMigrationsTable(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		return fmt.Errorf("create migrations table: %w", err)
+	}
+	return nil
+}
+
+// MigrateSkipping applies every migration except the one named, and is the
+// honest way to build one specific fixture: the database that ran a feature
+// branch BEFORE the migration which later claimed that branch's version number
+// had merged. That is the dev3 shape `crewship db repair-ledger` exists to fix,
+// and it is the state the repair must recover from end to end.
+//
+// The tempting shortcut is to migrate to head and then delete a ledger row.
+// That is a lie, and it fails in a way that blames the wrong component: the
+// skipped migration's schema change is still in place, so when the repaired
+// database finally applies it for real, a plain `ALTER TABLE … ADD COLUMN`
+// dies on a duplicate column and the test reports "the repair did not work".
+// Reproducing "this migration never ran" requires not running it.
+//
+// NOT a production entry point — nothing in the server calls it, and a database
+// built this way is missing a migration by construction. Refuses an unknown
+// name rather than quietly applying everything, because a fixture that skips
+// nothing proves nothing.
+func MigrateSkipping(ctx context.Context, db *sql.DB, logger *slog.Logger, skipName string) error {
+	if migrationRegistryErr != nil {
+		return fmt.Errorf("migration registry is invalid, refusing to migrate: %w", migrationRegistryErr)
+	}
+	if err := ensureMigrationsTable(ctx, db); err != nil {
+		return err
+	}
+
+	keep := make([]migration, 0, len(migrations))
+	skipped := false
+	for _, m := range migrations {
+		if m.name == skipName {
+			skipped = true
+			continue
+		}
+		keep = append(keep, m)
+	}
+	if !skipped {
+		return fmt.Errorf("no migration is named %q — refusing to build a fixture that skips nothing", skipName)
+	}
+	return applyRegistry(ctx, db, keep, logger)
 }
 
 // applyRegistry applies one ordered set of migrations, skipping the ones

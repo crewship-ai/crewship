@@ -413,6 +413,23 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/credentials/reveal-policy", authed(wsCtx(http.HandlerFunc(reveal.GetPolicy))))
 	r.authedMut("PUT", "/api/v1/credentials/reveal-policy", roleInline, reveal.SetPolicy)
 	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/sensitivity", roleInline, reveal.SetSensitivity)
+
+	// Credential custom fields (PRD-CREDENTIALS-V2-2026 §2.2). The multi-part
+	// half of a credential: AWS wants access key id + secret + region, a
+	// service account wants a blob + a filename, and one `encrypted_value`
+	// column cannot say that.
+	//
+	// The READ route registers exactly like GET /credentials/{id} — authed +
+	// wsCtx, with credentialVisibilityFilter applied inside — so the parts can
+	// never be visible to someone the whole credential is hidden from. The
+	// WRITES declare roleCreate, matching PATCH /credentials/{credentialId}
+	// above: writing a field is writing the credential, and a looser gate here
+	// would be a way around the tighter one there.
+	fields := NewCredentialFieldHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/fields", authed(wsCtx(http.HandlerFunc(fields.List))))
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/fields", roleCreate, fields.Create)
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/fields/{fieldKey}", roleCreate, fields.Update)
+	r.authedMut("DELETE", "/api/v1/credentials/{credentialId}/fields/{fieldKey}", roleCreate, fields.Delete)
 	// #1083: wrap in wsCtx like every other credentials route. The response
 	// carries no tenant data, but requiring workspace membership keeps this
 	// route uniform with the rest of the credentials surface.
