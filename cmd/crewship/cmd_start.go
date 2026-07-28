@@ -1060,6 +1060,24 @@ var startCmd = &cobra.Command{
 			}()
 		}
 
+		// Post-deployment migrations run HERE, not before Start: their whole
+		// purpose is to keep a row-count-proportional backfill out of the boot
+		// path, so an install with a large journal starts serving in seconds
+		// instead of minutes. They batch, commit per batch, and resume if this
+		// process dies partway.
+		//
+		// A failure is logged, not fatal. The server is already serving and the
+		// schema change is additive by contract
+		// (internal/database/migrations/post_deploy/README.md), so refusing to
+		// serve over an incomplete backfill would trade a degraded feature for
+		// an outage. `crewship db migration-status` reports what is outstanding.
+		go func() {
+			if err := database.RunPostDeployMigrations(ctx, db.DB, logger); err != nil {
+				logger.Error("post-deployment migrations did not complete; "+
+					"run `crewship db migration-status` for what is outstanding", "error", err)
+			}
+		}()
+
 		if err := srv.Start(ctx); err != nil {
 			return fmt.Errorf("server error: %w", err)
 		}
