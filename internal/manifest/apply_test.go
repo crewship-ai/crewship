@@ -27,6 +27,8 @@ type fakeAPIClient struct {
 	credsByName        map[string]map[string]any
 	integrationsByCrew map[string]map[string]map[string]any
 	agentSkillBindings map[string][]map[string]any // agentID → bindings
+	routinesBySlug     map[string]map[string]any   // routine drift fixtures
+	composioBindings   []map[string]any            // agent→toolkit grants
 	agentCredBindings  map[string][]map[string]any
 
 	// Error-injection knob: when non-zero, GET /api/v1/credentials
@@ -55,6 +57,7 @@ func newFakeAPI(t *testing.T) *fakeAPIClient {
 		integrationsByCrew: map[string]map[string]map[string]any{},
 		agentSkillBindings: map[string][]map[string]any{},
 		agentCredBindings:  map[string][]map[string]any{},
+		routinesBySlug:     map[string]map[string]any{},
 	}
 }
 
@@ -81,6 +84,31 @@ func (f *fakeAPIClient) Get(_ context.Context, path string) (*http.Response, err
 		var out []map[string]any
 		for _, c := range f.crewsBySlug {
 			out = append(out, c)
+		}
+		return resp(200, out), nil
+	case strings.Contains(path, "/pipelines/"):
+		// listRoutines fetches each routine by slug for its full definition.
+		slug := path[strings.LastIndex(path, "/")+1:]
+		if r, ok := f.routinesBySlug[slug]; ok {
+			return resp(200, r), nil
+		}
+		return resp(404, map[string]any{"error": "not found"}), nil
+	case strings.HasSuffix(path, "/pipelines"):
+		// Routine drift detection reads this. Empty by default; a test that
+		// wants an existing routine seeds routinesBySlug.
+		var out []map[string]any
+		for _, r := range f.routinesBySlug {
+			out = append(out, r)
+		}
+		return resp(200, out), nil
+	case strings.HasSuffix(path, "/bind"):
+		return resp(200, map[string]any{"bindings": f.composioBindings}), nil
+	case path == "/api/v1/agents":
+		// Workspace-wide, used by lookups that name an agent without naming
+		// its crew (channel grants, Composio grants).
+		var out []map[string]any
+		for _, a := range f.agentsBySlug {
+			out = append(out, a)
 		}
 		return resp(200, out), nil
 	case strings.HasPrefix(path, "/api/v1/agents?crew_id="):

@@ -70,16 +70,22 @@ func TestIssue_Plan_OmitsRoutineWhenUnset(t *testing.T) {
 }
 
 func TestIssue_Plan_UnknownRoutineSlugFails(t *testing.T) {
-	// Fail during Plan, before anything is written. A dangling routine
-	// reference that only surfaces at Exec would leave half a demo applied.
+	// Deferred to Exec, like the crew: the routine may be created by an
+	// earlier item of this same apply, so it cannot be resolved while the
+	// plan is built. One that never appears still fails, and still names
+	// itself — a dangling reference must not pass silently.
 	doc := issueSampleDoc()
 	doc.Spec.RoutineSlug = "does-not-exist"
 	client := newIssueFake()
 	issueSeedFakeFull(client)
 
-	_, err := doc.Plan(context.Background(), client, nil)
+	items, err := doc.Plan(context.Background(), client, nil)
+	if err != nil {
+		t.Fatalf("Plan should defer, not fail: %v", err)
+	}
+	err = items[0].Exec(context.Background(), client)
 	if err == nil {
-		t.Fatal("expected Plan to fail on an unknown routine slug")
+		t.Fatal("expected Exec to fail on an unknown routine slug")
 	}
 	if !strings.Contains(err.Error(), "does-not-exist") {
 		t.Errorf("error should name the offending slug, got: %v", err)

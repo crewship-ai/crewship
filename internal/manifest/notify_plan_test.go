@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -197,5 +198,27 @@ func TestNotifyPlan_AnEmptyEnvValueCountsAsMissing(t *testing.T) {
 				t.Errorf("the skip must name the variable to fill in, got %q", plan.SkippedChannels[0])
 			}
 		})
+	}
+}
+
+func TestComposioGrant_MissingUserIDIsPendingNotFatal(t *testing.T) {
+	// The bind endpoint rejects an empty user_id, and the user id is the
+	// CONNECTED ACCOUNT's identity — instance-specific, created by a browser
+	// flow no manifest can perform. So a portable file that omits it is
+	// describing a grant that cannot be made yet, which is the same condition
+	// as "no account connected" and must not fail the apply.
+	for _, msg := range []string{
+		"API error (400): user_id is required",
+		"no connected account for gmail",
+		"agent is not connected to that toolkit",
+	} {
+		if !composioNeedsAccount(errors.New(msg)) {
+			t.Errorf("%q should be treated as pending, not as a failure", msg)
+		}
+	}
+	// A genuine failure still is one — otherwise every mistake would be
+	// silently downgraded to a warning.
+	if composioNeedsAccount(errors.New("API error (500): internal")) {
+		t.Error("a server error must not be swallowed as pending")
 	}
 }

@@ -103,7 +103,7 @@ func (f *issueFakeClient) Get(_ context.Context, path string) (*internalapi.Resp
 			out = append(out, a)
 		}
 		return issueJSONResp(200, out), nil
-	case path == "/api/v1/pipelines":
+	case strings.HasSuffix(path, "/pipelines"):
 		rows := make([]issueRoutineStub, 0, len(f.routines))
 		for _, r := range f.routines {
 			rows = append(rows, r)
@@ -485,12 +485,21 @@ func TestIssue_Plan_CreateOmitsOptionalFieldsWhenUnset(t *testing.T) {
 // ── 6. Plan: FK resolution failures ─────────────────────────────────────────
 
 func TestIssue_Plan_CrewSlugUnknown(t *testing.T) {
+	// The failure MOVED, it did not go away. Crew resolution is deferred into
+	// Exec so a crew created earlier in the same apply is visible by then;
+	// a crew that never appears still fails, and still names itself.
 	doc := issueSampleDoc()
 	client := newIssueFake()
-	// No crews seeded — resolution should fail with a clear error.
-	_, err := doc.Plan(context.Background(), client, nil)
+	issueSeedFakeFull(client)
+	delete(client.crews, "engineering")
+
+	items, err := doc.Plan(context.Background(), client, nil)
+	if err != nil {
+		t.Fatalf("Plan should defer, not fail: %v", err)
+	}
+	err = items[0].Exec(context.Background(), client)
 	if err == nil || !strings.Contains(err.Error(), "resolve crew_slug") {
-		t.Fatalf("want resolve-crew error, got %v", err)
+		t.Fatalf("want resolve-crew error at Exec, got %v", err)
 	}
 }
 
@@ -499,9 +508,15 @@ func TestIssue_Plan_ProjectSlugUnknown(t *testing.T) {
 	client := newIssueFake()
 	client.crews["engineering"] = issueCrewStub{ID: "crew_eng", Slug: "engineering"}
 	// project_slug is declared but not seeded server-side.
-	_, err := doc.Plan(context.Background(), client, nil)
+	// Deferred to Exec — see the comment on Plan. The failure still
+	// happens and still names the field it came from.
+	items, err := doc.Plan(context.Background(), client, nil)
+	if err != nil {
+		t.Fatalf("Plan should defer, not fail: %v", err)
+	}
+	err = items[0].Exec(context.Background(), client)
 	if err == nil || !strings.Contains(err.Error(), "resolve project_slug") {
-		t.Fatalf("want resolve-project error, got %v", err)
+		t.Fatalf("want a resolve project_slug error at Exec, got %v", err)
 	}
 }
 
@@ -510,9 +525,15 @@ func TestIssue_Plan_AssigneeSlugUnknown(t *testing.T) {
 	doc.Spec.ProjectSlug = "" // sidestep the project lookup
 	client := newIssueFake()
 	client.crews["engineering"] = issueCrewStub{ID: "crew_eng", Slug: "engineering"}
-	_, err := doc.Plan(context.Background(), client, nil)
+	// Deferred to Exec — see the comment on Plan. The failure still
+	// happens and still names the field it came from.
+	items, err := doc.Plan(context.Background(), client, nil)
+	if err != nil {
+		t.Fatalf("Plan should defer, not fail: %v", err)
+	}
+	err = items[0].Exec(context.Background(), client)
 	if err == nil || !strings.Contains(err.Error(), "resolve assignee_slug") {
-		t.Fatalf("want resolve-assignee error, got %v", err)
+		t.Fatalf("want a resolve assignee_slug error at Exec, got %v", err)
 	}
 }
 
@@ -523,9 +544,14 @@ func TestIssue_Plan_LabelSlugUnknown(t *testing.T) {
 	doc.Spec.Labels = []string{"ghost-label"}
 	client := newIssueFake()
 	client.crews["engineering"] = issueCrewStub{ID: "crew_eng", Slug: "engineering"}
-	_, err := doc.Plan(context.Background(), client, nil)
+	// Deferred to Exec — labels can be created by this same apply too.
+	items, err := doc.Plan(context.Background(), client, nil)
+	if err != nil {
+		t.Fatalf("Plan should defer, not fail: %v", err)
+	}
+	err = items[0].Exec(context.Background(), client)
 	if err == nil || !strings.Contains(err.Error(), "ghost-label") {
-		t.Fatalf("want label-not-found error mentioning the slug, got %v", err)
+		t.Fatalf("want a label-not-found error naming the slug, got %v", err)
 	}
 }
 
@@ -755,11 +781,17 @@ func TestLookupIssueRemoteBySlug_FindByTitle(t *testing.T) {
 }
 
 func TestLookupIssueRemoteBySlug_CrewMissing(t *testing.T) {
+	// A crew that does not exist cannot hold an issue, so the answer is "no
+	// remote row" rather than an error — which is what lets a manifest
+	// declare a crew and an issue in it in the same file. Erroring here made
+	// that combination impossible.
 	client := newIssueFake()
-	// No crews seeded — should bubble up the crew not-found error.
-	_, err := LookupIssueRemoteBySlug(context.Background(), client, "anything", "ghost", "any title")
-	if err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("want crew not-found error, got %v", err)
+	got, err := LookupIssueRemoteBySlug(context.Background(), client, "anything", "ghost", "any title")
+	if err != nil {
+		t.Fatalf("a missing crew is not an error here: %v", err)
+	}
+	if got != nil {
+		t.Errorf("want nil remote, got %+v", got)
 	}
 }
 

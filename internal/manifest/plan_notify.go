@@ -92,6 +92,7 @@ func (pb *planBuilder) planNotificationChannel(ch *NotificationChannel, remote [
 				})
 		}
 		pb.planChannelGrants(ch, func(context.Context, *Client) (string, error) { return id, nil })
+		pb.planChannelPrefs(ch, func(context.Context, *Client) (string, error) { return id, nil })
 		return
 	}
 
@@ -107,12 +108,34 @@ func (pb *planBuilder) planNotificationChannel(ch *NotificationChannel, remote [
 			*created = out.ID
 			return nil
 		})
-	pb.planChannelGrants(ch, func(context.Context, *Client) (string, error) {
+	channelID := func(context.Context, *Client) (string, error) {
 		if *created == "" {
 			return "", fmt.Errorf("channel %q was not created, so its grants cannot be applied", ch.Slug)
 		}
 		return *created, nil
-	})
+	}
+	pb.planChannelGrants(ch, channelID)
+	pb.planChannelPrefs(ch, channelID)
+}
+
+// planChannelPrefs routes categories to this channel for the applying user.
+//
+// Its own item, like the grants: a channel that exists but delivers nothing is
+// the failure mode this exists to prevent, and folding it into the create
+// would hide which half went wrong.
+func (pb *planBuilder) planChannelPrefs(ch *NotificationChannel, channelID func(context.Context, *Client) (string, error)) {
+	if len(ch.DeliverToMe) == 0 {
+		return
+	}
+	cats := append([]string(nil), ch.DeliverToMe...)
+	pb.appendItem(ActionCreate, "notification_pref", ch.Slug+" → me",
+		func(ctx context.Context, c *Client, _ Options) error {
+			id, err := channelID(ctx, c)
+			if err != nil {
+				return err
+			}
+			return c.RouteCategoriesToChannel(ctx, id, cats)
+		})
 }
 
 // planChannelGrants appends one item per agent allowed to post to the channel.
@@ -242,11 +265,40 @@ func sameStrings(a, b []string) bool {
 // refusal is downgraded to a warning so a demo manifest lands cleanly on an
 // instance where the browser step has not happened yet.
 func (pb *planBuilder) planComposioGrants(agentSlug string, grants []ComposioToolkitGrant) {
+	if len(grants) == 0 {
+		return
+	}
+	// What the agent already has, when it already exists. A new agent has no
+	// id yet and therefore no grants, so an empty set is the right answer for
+	// it too — no special case needed.
+	var existing []ComposioBinding
+	if agentID, err := pb.client.FindAgentIDBySlug(context.Background(), agentSlug); err == nil {
+		existing = pb.client.ListAgentToolkits(context.Background(), agentID)
+	}
+
 	for i := range grants {
 		g := grants[i]
 		mode := g.Mode
 		if mode == "" {
 			mode = "read"
+		}
+		// Re-binding a grant that already matches is churn: the plan would
+		// never settle, and "apply until it says nothing changed" is the
+		// whole contract.
+		if composioGrantSatisfied(existing, g.Toolkit, mode) {
+			pb.appendItem(ActionUnchanged, "composio_grant", agentSlug+":"+g.Toolkit, nil)
+			continue
+		}
+		// Warned HERE, not from inside Exec. Exec-time warnings land on the
+		// plan object Apply builds internally, which is not the one the CLI
+		// prints — so they were invisible. This condition is knowable up
+		// front anyway: the bind endpoint requires a user_id, so a grant
+		// without one cannot succeed, and saying so in the plan is better
+		// than discovering it after the run.
+		if g.UserID == "" {
+			pb.plan.Warnings = append(pb.plan.Warnings, fmt.Sprintf(
+				"composio: %s → %s has no user_id, so it stays pending. The id belongs to a connected account: connect one in Integrations → Tools, then set user_id on the grant.",
+				agentSlug, g.Toolkit))
 		}
 		pb.appendItem(ActionCreate, "composio_grant", agentSlug+":"+g.Toolkit,
 			func(ctx context.Context, c *Client, _ Options) error {
@@ -264,7 +316,7 @@ func (pb *planBuilder) planComposioGrants(agentSlug string, grants []ComposioToo
 				if err := c.BindAgentToolkit(ctx, agentID, body); err != nil {
 					if composioNeedsAccount(err) {
 						pb.plan.Warnings = append(pb.plan.Warnings, fmt.Sprintf(
-							"composio: %s is not granted %s yet — no account is connected for that app. Connect one in Integrations → Tools, then re-apply.",
+							"composio: %s is not granted %s yet — no connected account to act as. Connect one in Integrations → Tools, then set user_id on the grant and re-apply.",
 							agentSlug, g.Toolkit))
 						return nil
 					}
@@ -275,6 +327,17 @@ func (pb *planBuilder) planComposioGrants(agentSlug string, grants []ComposioToo
 	}
 }
 
+// composioGrantSatisfied reports whether the agent already holds this grant at
+// this scope. Mode is compared too: widening read to full is a real change.
+func composioGrantSatisfied(existing []ComposioBinding, toolkit, mode string) bool {
+	for _, b := range existing {
+		if b.Toolkit == toolkit && b.Mode == mode {
+			return true
+		}
+	}
+	return false
+}
+
 // composioNeedsAccount reports whether the refusal was "nothing is connected
 // yet" rather than a real failure. Matched on the message because the endpoint
 // answers 400 for both, and a manifest that cannot tell them apart would
@@ -283,5 +346,11 @@ func composioNeedsAccount(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "no connected account") ||
 		strings.Contains(msg, "not connected") ||
-		strings.Contains(msg, "connect an account")
+		strings.Contains(msg, "connect an account") ||
+		// "user_id is required" is the same condition wearing a different
+		// message: the user id IS the connected account's identity, so a
+		// manifest that omits it is describing a grant that cannot be made
+		// until somebody connects one. A portable file cannot carry an
+		// instance-specific id, so this must not fail the apply.
+		strings.Contains(msg, "user_id is required")
 }

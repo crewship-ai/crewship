@@ -864,6 +864,35 @@ func ExportRoutines(ctx context.Context, c internalapi.Client) ([]*RoutineDocume
 	return out, nil
 }
 
+// LookupRoutineRemoteBySlug returns the saved routine with this slug, or
+// (nil, nil) when the workspace has none.
+//
+// The apply phase used to call RoutineDocument.Plan with a hardcoded nil
+// remote, so the drift machinery below — RoutineRemote, routineDiffers, the
+// "unchanged" branch — was written and never reached. Every apply re-saved
+// every routine, minting a version nobody had asked for and making it
+// impossible for a plan to honestly report that nothing changed.
+func LookupRoutineRemoteBySlug(ctx context.Context, c internalapi.Client, slug string) (*RoutineRemote, error) {
+	wsID := c.WorkspaceID()
+	if wsID == "" {
+		return nil, fmt.Errorf("routine lookup: workspace_id not set on client")
+	}
+	rows, err := listRoutines(ctx, c, wsID)
+	if err != nil {
+		// Propagated, not swallowed. Treating a failed lookup as "absent"
+		// would silently plan a create for a routine that may well exist —
+		// a re-save is survivable, but a plan that cannot tell "not there"
+		// from "could not look" is not one to trust.
+		return nil, err
+	}
+	for i := range rows {
+		if rows[i].Slug == slug {
+			return &rows[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func listRoutines(ctx context.Context, c internalapi.Client, wsID string) ([]RoutineRemote, error) {
 	resp, err := c.Get(ctx, fmt.Sprintf("/api/v1/workspaces/%s/pipelines", wsID))
 	if err != nil {

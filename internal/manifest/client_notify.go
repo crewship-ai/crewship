@@ -125,6 +125,62 @@ func (c *Client) FindAgentIDBySlug(ctx context.Context, slug string) (string, er
 	return "", fmt.Errorf("agent with slug %q not found in this workspace", slug)
 }
 
+// ComposioBinding is one agent-to-toolkit grant as the server reports it.
+type ComposioBinding struct {
+	Toolkit string `json:"toolkit"`
+	Mode    string `json:"mode"`
+	UserID  string `json:"user_id"`
+}
+
+// ListAgentToolkits returns an agent's current Composio grants.
+//
+// Read during planning so a grant that already matches reports as unchanged.
+// Best-effort: an instance with no Composio key answers 4xx here, and that is
+// "nothing granted", not a reason to fail a plan that is mostly about crews.
+func (c *Client) ListAgentToolkits(ctx context.Context, agentID string) []ComposioBinding {
+	resp, err := c.api.Get(ctx, "/api/v1/integrations/composio/agents/"+agentID+"/bind")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return nil
+	}
+	var body struct {
+		Bindings []ComposioBinding `json:"bindings"`
+	}
+	if err := decodeJSON(resp.Body, &body); err != nil {
+		return nil
+	}
+	return body.Bindings
+}
+
+// prefCell mirrors notifyroute.PrefCell on the wire.
+type prefCell struct {
+	Category  string `json:"category"`
+	ChannelID string `json:"channel_id"`
+	State     string `json:"state"`
+}
+
+// RouteCategoriesToChannel sets the APPLYING USER's preferences so these
+// categories deliver to this channel.
+//
+// PUT here is an upsert of the named cells, not a replacement of the whole
+// matrix — a manifest declaring two categories must not silently mute
+// everything else the person had configured.
+func (c *Client) RouteCategoriesToChannel(ctx context.Context, channelID string, categories []string) error {
+	cells := make([]prefCell, 0, len(categories))
+	for _, cat := range categories {
+		cells = append(cells, prefCell{Category: cat, ChannelID: channelID, State: "immediate"})
+	}
+	resp, err := c.api.Put(ctx, "/api/v1/me/notification-prefs", map[string]any{"cells": cells})
+	if err != nil {
+		return fmt.Errorf("set notification prefs: %w", err)
+	}
+	defer resp.Body.Close()
+	return cli.CheckError(resp)
+}
+
 // SetComposioAPIKey stores the workspace's Composio project key.
 func (c *Client) SetComposioAPIKey(ctx context.Context, key string) error {
 	resp, err := c.api.Put(ctx, "/api/v1/integrations/composio/settings",

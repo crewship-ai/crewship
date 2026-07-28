@@ -117,6 +117,13 @@ func BuildPlan(ctx context.Context, c *Client, b *Bundle, opts Options) (*Plan, 
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
+	// Apply defaults this; BuildPlan did not, so a caller that planned
+	// without secrets hit a nil interface the moment anything asked for one.
+	// Planning is the read-only path people reach for first, so it has to be
+	// at least as forgiving as the one that writes.
+	if opts.Secrets == nil {
+		opts.Secrets = NoSecretsSource{}
+	}
 	p := &Plan{}
 
 	pb := &planBuilder{client: c, opts: opts, plan: p}
@@ -252,6 +259,18 @@ func kindOrder(kind string, action Action) int {
 	}
 	r, ok := rank[kind]
 	if !ok {
+		// The SPEC-2 kinds emit LOWERCASE names from their per-kind packages
+		// ("routine", "issue"), while this map documents them capitalised —
+		// so every one of them missed and fell through to the fallback below,
+		// leaving them ordered by description string. Nothing noticed until a
+		// manifest first had one SPEC-2 kind reference another created in the
+		// same apply: an issue binding a routine failed with "routine not
+		// found" while the routine sat below it in the plan, alphabetically
+		// after "issue". Matching both spellings fixes it without renaming
+		// anything either side.
+		r, ok = rank[snakeToDocKind(kind)]
+	}
+	if !ok {
 		return 99
 	}
 	if action == ActionDelete {
@@ -263,6 +282,20 @@ func kindOrder(kind string, action Action) int {
 		return 100 - r
 	}
 	return r
+}
+
+// snakeToDocKind turns an emitted plan-item kind into the document-kind name
+// the rank table is written in: "routine" -> "Routine", "recurring_issue" ->
+// "RecurringIssue".
+func snakeToDocKind(kind string) string {
+	parts := strings.Split(kind, "_")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, "")
 }
 
 // planBuilder is the mutable scratch space used while assembling a
@@ -769,6 +802,11 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 				return err
 			}
 		} else {
+			// A NEW agent has no id yet, so planAgentLinks cannot run for it —
+			// which meant a grant declared beside a brand-new agent was never
+			// planned at all. Grants resolve their agent by slug at exec time,
+			// so they do not need one.
+			pb.planComposioGrants(a.Slug, a.ComposioToolkits)
 			agentCopy := a
 			pb.appendItem(ActionCreate, "agent", desc,
 				func(ctx context.Context, client *Client, opts Options) error {

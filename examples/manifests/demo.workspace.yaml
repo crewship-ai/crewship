@@ -1,0 +1,180 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# The demo workspace, as one file.
+#
+# Everything a first look at Crewship should show, and the links between the
+# pieces rather than the pieces alone: a routine that runs, an ISSUE BOUND TO
+# THAT ROUTINE, an agent granted a real app, and somewhere the whole thing
+# reports to when it fails.
+#
+#   crewship apply --file demo.workspace.yaml --secrets-file .env.local --dry-run
+#   crewship apply --file demo.workspace.yaml --secrets-file .env.local
+#
+# `apply` is declarative, like Terraform. Re-running it is idempotent, and by
+# default THIS FILE IS THE DESIRED STATE: anything it no longer declares is
+# deleted. Pick the behaviour you want:
+#
+#   (default)   sync — create, update, and delete to match this file
+#   --strict    fail if any resource already exists
+#   --replace   delete and recreate everything it matches (destructive)
+#
+# SECRETS ARE NEVER IN THIS FILE. Each one names the environment variable it
+# comes from; --secrets-file (or --from-env) supplies the value. A variable
+# that is missing or blank is not an error — the thing that needed it is
+# skipped and named in the output, because a channel that exists and delivers
+# nowhere is worse than one that is absent.
+
+apiVersion: crewship/v1
+kind: Workspace
+
+metadata:
+  name: Crewship Demo
+  slug: crewship-demo
+  description: A working example — one crew, one routine, one issue that runs it.
+  preferred_language: en
+  version: 1.0.0
+
+spec:
+  # ── Managed tools ──────────────────────────────────────────────────────
+  # Only the key. The connected ACCOUNTS cannot live here: each one is a
+  # per-user OAuth handshake against Composio, so this file can say which
+  # agent is entitled to an app but not perform the browser step that
+  # creates the account. Grants below apply cleanly either way and take
+  # effect the moment someone connects.
+  composio:
+    api_key_from_env: COMPOSIO_API_KEY
+
+  # ── Where this workspace reports to ────────────────────────────────────
+  notification_channels:
+    # The one people watch. Riley is granted it below, so the agent can
+    # escalate on its own instead of waiting to be asked.
+    - slug: demo-alerts
+      type: chat
+      provider: discord
+      fields_from_env:
+        webhook_url: DISCORD_WEBHOOK_URL
+      categories:
+        - chat.replies        # what the demo routine's notify step emits
+        - routines.failed     # a run ended in an error
+        - routines.missed     # a schedule stopped happening — the quiet failure
+        - agents.approval     # an agent is blocked on a human
+        - agents.escalation   # an agent escalated deliberately
+      # Allowlisting a category only permits it. Delivery is decided by the
+      # per-user matrix, so a manifest that stopped at the channel would
+      # leave a workspace where nothing ever arrives and nobody can see why.
+      deliver_to_me:
+        - chat.replies
+        - routines.failed
+        - routines.missed
+        - agents.approval
+        - agents.escalation
+      agents:
+        - demo-riley
+
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+      label: Anthropic API key
+
+  crews:
+    - slug: demo-ops
+      name: Demo Ops
+      icon: activity
+      color: blue
+      agents:
+        # Namespaced on purpose. Agent slugs are unique per WORKSPACE, not
+        # per crew, so a demo applied next to an existing seed collides on a
+        # plain name — 409, halfway through the apply. A demo-owned prefix
+        # keeps this file additive against a workspace that already has
+        # people in it.
+        - slug: demo-riley
+          name: Riley
+          role_title: Platform Engineer
+          description: Runs the nightly check and says something when it breaks.
+          agent_role: LEAD
+          env_refs:
+            - ANTHROPIC_API_KEY
+          # Declarative. Applying a grant for an app nobody has connected
+          # yet is legitimate — it starts working the moment someone does —
+          # so a fresh instance reports it as a warning, not a failure.
+          composio_toolkits:
+            - toolkit: gmail
+              mode: read     # least surprising default; `full` is opt-in
+
+---
+# ── Routine 1: the one that runs the moment you finish the env file ────
+# HTTP fetch, then say what came back. No agent, no LLM, no credential —
+# a demo you cannot run until you have bought an API key is not a demo.
+#
+# The notify step lands in the inbox as `chat.replies`, which the channel
+# above allowlists and routes to you, so the output arrives in Discord.
+apiVersion: crewship/v1
+kind: Routine
+metadata:
+  name: Fetch and report
+  slug: demo-fetch-and-report
+  labels:
+    crew: demo-ops
+spec:
+  dsl_version: "1.0"
+  description: Fetch a URL and post what came back. Runs with nothing configured.
+  estimated_cost_usd: 0
+  # Declared, because the egress gate blocks anything not on this list.
+  egress_targets:
+    - 127.0.0.1
+  inputs:
+    - name: url
+      type: string
+      required: false
+      description: >-
+        Any GET endpoint returning JSON. Defaults to this instance's own
+        health check, which needs no third party and no network egress — a
+        demo that only works when some public API is up and un-rate-limited
+        is a demo that fails in front of people. Change the port if yours
+        differs, or point it anywhere and add the host to egress_targets.
+      default: http://127.0.0.1:8080/api/health
+  steps:
+    - id: fetch
+      type: http
+      http:
+        method: GET
+        url: "{{ inputs.url }}"
+        headers:
+          User-Agent: crewship-demo
+        max_response_bytes: 20000
+    - id: report
+      type: notify
+      notify:
+        to: workspace
+        title: "Fetch and report"
+        body: |-
+          GET {{ inputs.url }}
+          → HTTP {{ steps.fetch.status }}
+
+          {{ steps.fetch.body }}
+        priority: low
+
+---
+# ── The issue that runs it ──────────────────────────────────────────────
+# This is the link the demo exists to show. missions.routine_id has been in
+# the schema since v84, but until now no manifest could express it — so a
+# demo could describe an issue and a routine and never the line between them.
+apiVersion: crewship/v1
+kind: Issue
+metadata:
+  name: Fetch and report is not reporting
+  slug: demo-fetch-report-issue
+spec:
+  crew_slug: demo-ops
+  title: Fetch and report is not reporting
+  description: |-
+    The fetch should post its result and has not.
+
+    Run the bound routine from this issue to reproduce it — it needs no
+    credentials, so it works on a workspace you set up two minutes ago. If
+    the run fails, `routines.failed` reaches the Discord channel, so the
+    failure announces itself rather than waiting to be noticed.
+  priority: medium
+  assignee_slug: demo-riley
+  routine_slug: demo-fetch-and-report

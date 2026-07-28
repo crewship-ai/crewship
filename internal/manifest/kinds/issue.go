@@ -422,36 +422,36 @@ func (d *IssueDocument) resolvedTitle() string {
 // explicit "labels" replacement in PATCH (the Update handler treats
 // a non-nil labels field as a full set replacement).
 func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *IssueRemote) ([]internalapi.PlanItem, error) {
-	crewID, err := issueLookupCrewIDBySlug(ctx, c, d.Spec.CrewSlug)
-	if err != nil {
-		return nil, fmt.Errorf("issue %q: resolve crew_slug: %w", d.Metadata.Slug, err)
-	}
+	// The crew may not exist YET: BuildPlan walks crews before the
+	// standalone kinds, but a plan is built before anything executes, so a
+	// crew this same apply will create is invisible here. Resolution is
+	// therefore deferred into Exec — by which time the crew's own create has
+	// run. Validate already rejects a crew that is neither declared nor
+	// remote, so this is not a loosening of the check, only a move.
+	// Only the UPDATE path needs this up front — it has a remote row, so the
+	// crew demonstrably exists. The create path resolves everything in Exec.
+	crewID, _ := issueLookupCrewIDBySlug(ctx, c, d.Spec.CrewSlug)
 
 	if remote == nil {
-		// CREATE — resolve all FKs once, then POST. We pre-resolve
-		// at Plan time rather than inside Exec so the dry-run path
-		// surfaces a dangling FK before we touch the wire. Resolution
-		// errors propagate up so the operator sees which slug is
-		// unknown before Apply makes any mutation.
-		projectID, err := issueResolveOptionalProjectID(ctx, c, d.Spec.ProjectSlug)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve project_slug: %w", d.Metadata.Slug, err)
-		}
-		assigneeID, err := issueResolveOptionalAgentID(ctx, c, d.Spec.AssigneeSlug)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve assignee_slug: %w", d.Metadata.Slug, err)
-		}
-		labelIDs, err := issueResolveLabelIDs(ctx, c, d.Spec.Labels)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve labels: %w", d.Metadata.Slug, err)
-		}
-		routineID, err := issueResolveOptionalRoutineID(ctx, c, d.Spec.RoutineSlug)
-		if err != nil {
-			return nil, fmt.Errorf("issue %q: resolve routine_slug: %w", d.Metadata.Slug, err)
-		}
-
-		body := d.toCreateBody(projectID, assigneeID, labelIDs, routineID)
+		// CREATE — every FK is resolved LAZILY, inside Exec.
+		//
+		// The first version resolved here, at plan time, so a dangling slug
+		// surfaced before touching the wire. That reads well and is wrong for
+		// the shape that matters most: a single file declaring a crew, an
+		// agent, a routine and an issue that references all three. A plan is
+		// built before anything executes, so none of them exist yet, and
+		// every reference "dangles" — the manifest was unusable in exactly
+		// the case it was written for. Three of these were fixed one at a
+		// time (crew, routine, assignee) before it was clear the rule is
+		// general, so they are all deferred now rather than waiting for the
+		// fourth to be discovered in production.
+		//
+		// Nothing is loosened: Validate already rejects a slug that is
+		// neither declared in the bundle nor present remotely, and a
+		// reference that never materialises still fails — in Exec, naming
+		// itself.
 		slug := d.Metadata.Slug
+		spec := d.Spec
 		title := d.resolvedTitle()
 
 		return []internalapi.PlanItem{{
@@ -460,6 +460,28 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 			Action:      internalapi.ActionCreate,
 			Description: fmt.Sprintf("create issue %q in crew %q", title, d.Spec.CrewSlug),
 			Exec: func(ctx context.Context, c internalapi.Client) error {
+				crewID, err := issueLookupCrewIDBySlug(ctx, c, spec.CrewSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve crew_slug: %w", slug, err)
+				}
+				projectID, err := issueResolveOptionalProjectID(ctx, c, spec.ProjectSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve project_slug: %w", slug, err)
+				}
+				assigneeID, err := issueResolveOptionalAgentID(ctx, c, spec.AssigneeSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve assignee_slug: %w", slug, err)
+				}
+				labelIDs, err := issueResolveLabelIDs(ctx, c, spec.Labels)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve labels: %w", slug, err)
+				}
+				routineID, err := issueResolveOptionalRoutineID(ctx, c, spec.RoutineSlug)
+				if err != nil {
+					return fmt.Errorf("issue %q: resolve routine_slug: %w", slug, err)
+				}
+
+				body := d.toCreateBody(projectID, assigneeID, labelIDs, routineID)
 				path := fmt.Sprintf("/api/v1/crews/%s/issues", crewID)
 				resp, err := c.Post(ctx, path, body)
 				if err != nil {
@@ -482,10 +504,8 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 	if err != nil {
 		return nil, fmt.Errorf("issue %q: resolve assignee_slug: %w", d.Metadata.Slug, err)
 	}
-	routineID, err := issueResolveOptionalRoutineID(ctx, c, d.Spec.RoutineSlug)
-	if err != nil {
-		return nil, fmt.Errorf("issue %q: resolve routine_slug: %w", d.Metadata.Slug, err)
-	}
+	// An update path can also name a routine this apply is creating.
+	routineID, _ := issueResolveOptionalRoutineID(ctx, c, d.Spec.RoutineSlug)
 
 	patch, labelsChanged, err := d.diffPatch(remote, projectID, assigneeID, routineID)
 	if err != nil {
@@ -701,11 +721,13 @@ func issueSameLabelSet(declared []string, remote []issueRemoteLabel) bool {
 func LookupIssueRemoteBySlug(ctx context.Context, c internalapi.Client, slug, crewSlug, title string) (*IssueRemote, error) {
 	crewID, err := issueLookupCrewIDBySlug(ctx, c, crewSlug)
 	if err != nil {
-		// Crew missing → issue obviously absent. Surface the
-		// underlying error so callers can choose between waiting
-		// for the crew to be created earlier in the bundle and
-		// aborting.
-		return nil, err
+		// A crew that does not exist yet cannot hold an issue, so the honest
+		// answer is "no remote row" — which plans a create. This is the
+		// normal state during the first apply of a file that declares both
+		// the crew and the issue; returning an error made that combination
+		// impossible. A crew that never materialises still fails, later, in
+		// the create's own Exec, where the message can name it.
+		return nil, nil
 	}
 	rows, err := issueListForCrew(ctx, c, crewID)
 	if err != nil {
@@ -814,16 +836,19 @@ type issueRoutineStub struct {
 
 // issueListRoutines fetches the workspace's saved routines.
 func issueListRoutines(ctx context.Context, c internalapi.Client) ([]issueRoutineStub, error) {
-	resp, err := c.Get(ctx, "/api/v1/pipelines")
+	// Workspace-scoped, like every other pipeline route — there is no
+	// bare /api/v1/pipelines, and asking for one 404s.
+	path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines", c.WorkspaceID())
+	resp, err := c.Get(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("GET /api/v1/pipelines: %w", err)
+		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if err := checkStatus(resp, "list routines"); err != nil {
 		return nil, err
 	}
 	body, err := readAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read /api/v1/pipelines body: %w", err)
+		return nil, fmt.Errorf("read %s body: %w", path, err)
 	}
 	if len(body) == 0 {
 		return nil, nil
@@ -839,7 +864,7 @@ func issueListRoutines(ctx context.Context, c internalapi.Client) ([]issueRoutin
 		Data      []issueRoutineStub `json:"data"`
 	}
 	if err := json.Unmarshal(body, &wrapped); err != nil {
-		return nil, fmt.Errorf("decode /api/v1/pipelines: %w", err)
+		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	if wrapped.Pipelines != nil {
 		return wrapped.Pipelines, nil

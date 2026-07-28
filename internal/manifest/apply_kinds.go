@@ -51,6 +51,9 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		// internal/manifest/skip_test_gate.go.
 		c = withSkipTestGate(c)
 	}
+	if pb.opts.SkipGovernanceGate {
+		c = withSkipGovernanceGate(c)
+	}
 
 	// Phase 3: Projects (no deps)
 	for i := range b.Projects {
@@ -189,7 +192,14 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 	// contract, so a single document can produce up to 1+N+1 items.
 	for i := range b.Routines {
 		doc := &b.Routines[i]
-		items, err := doc.Plan(ctx, c, nil)
+		// Look the remote up first. This used to pass nil unconditionally,
+		// which meant the kind's drift detection never ran and every apply
+		// re-saved every routine — see LookupRoutineRemoteBySlug.
+		remote, err := kinds.LookupRoutineRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("routine %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
 		if err != nil {
 			return fmt.Errorf("routine %q: plan: %w", doc.Metadata.Slug, err)
 		}
@@ -582,6 +592,9 @@ func wrapKindExec(inner func(ctx context.Context, c internalapi.Client) error, c
 		execClient := adapter
 		if opts.SkipTestGate {
 			execClient = withSkipTestGate(execClient)
+		}
+		if opts.SkipGovernanceGate {
+			execClient = withSkipGovernanceGate(execClient)
 		}
 		return inner(ctx, execClient)
 	}

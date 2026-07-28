@@ -171,6 +171,17 @@ type NotificationChannel struct {
 	// Default-deny on the server, so an omitted list means no agent can.
 	Agents []string `yaml:"agents,omitempty" json:"agents,omitempty"`
 
+	// DeliverToMe routes these categories to this channel FOR THE APPLYING
+	// USER.
+	//
+	// A channel existing is not the same as anything arriving through it:
+	// delivery is decided by the per-user preference matrix, so a manifest
+	// that stops at creating the channel produces a workspace where nothing
+	// is ever sent and nobody can see why. Per-user by nature — this sets the
+	// preferences of whoever runs `apply`, which is the only person whose
+	// preferences they have any business setting.
+	DeliverToMe []string `yaml:"deliver_to_me,omitempty" json:"deliver_to_me,omitempty"`
+
 	// Enabled defaults to true. A pointer so "declared false" is
 	// distinguishable from "not mentioned".
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
@@ -575,8 +586,17 @@ type ComposioToolkitGrant struct {
 	// Tools narrows a custom-mode grant to named tools. Ignored otherwise.
 	Tools []string `yaml:"tools,omitempty" json:"tools,omitempty"`
 
-	// UserID is the Composio user the agent acts as. Optional — the server
-	// picks the workspace default when omitted.
+	// UserID is the Composio user the agent acts as — the identity that owns
+	// the connected account, so the grant means "act as this person on this
+	// app".
+	//
+	// The server REQUIRES it (composio_handler.go rejects an empty one), and
+	// it is instance-specific: it comes from an account somebody connected
+	// through the browser, so a portable manifest cannot hard-code one.
+	// Leaving it out is therefore normal and is treated the same as having no
+	// connected account at all — the grant is reported as pending rather than
+	// failing the apply. Fill it in once the account exists; the value is on
+	// Integrations → Tools → Connected accounts.
 	UserID string `yaml:"user_id,omitempty" json:"user_id,omitempty"`
 }
 
