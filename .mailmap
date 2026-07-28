@@ -1,0 +1,15 @@
+# Canonical identities for git log / shortlog / blame.
+#
+# Commits reached this repo through two channels that stamped different
+# addresses: local commits used the machine's git identity, PRs squash-merged
+# through GitHub used the account's noreply address. Both are the same person.
+# This file collapses them so `git shortlog -sne`, generated changelogs and
+# CONTRIBUTORS lists show one author instead of three.
+#
+# Format: <canonical name> <canonical email> <email seen in history>
+# Note: GitHub's web UI and contribution graph do not read .mailmap — they
+# resolve authorship from the verified addresses on the account instead.
+
+Pavel Srba <srba@unify.cz> <46597712+Srbino@users.noreply.github.com>
+Pavel Srba <srba@unify.cz> <srba@advine.ai>
+Pavel Srba <srba@unify.cz> <pavel@unifylab.cz>
