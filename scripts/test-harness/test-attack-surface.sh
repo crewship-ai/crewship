@@ -86,7 +86,22 @@ WS="${CREWSHIP_ATTACK_WS:-$(cs workspace list --format json 2>/dev/null | jq -r 
 OTHER_WS="${CREWSHIP_ATTACK_OTHER_WS:-}"
 # The PUBLIC entrypoint — the reverse proxy, not the app port. The perimeter
 # probes below are meaningless without it; see the B section for why.
+#
+# Trailing slash stripped once, here. The gauntlet forwards its positional
+# public-url arg verbatim, so `https://edge/` is a realistic spelling of the
+# same edge, and unnormalised it breaks two things:
+#
+#   - the "$EDGE == $SERVER" skip below stops matching, so a run pointed at the
+#     app port would probe it as if it were the edge — the exact confusion this
+#     whole section exists to prevent;
+#   - "$base$p" builds `https://edge//api/v1/internal/...`, which curl does send
+#     on the wire (verified: `GET //api/v1/internal/credentials`). Our Caddy
+#     merges slashes before matching, so its deny still fires — but that is an
+#     edge-specific mercy, not a property to depend on. Any edge whose matcher
+#     is literal answers 404 for having no such route, and 404 is exactly what
+#     B1–B6 assert: a green perimeter while the deny rule was gone.
 EDGE="${CREWSHIP_ATTACK_EDGE_URL:-}"
+EDGE="${EDGE%/}"
 
 # ── http helper: prints the status code, stashes body in $_ATK_BODY ───────────
 # Per-run temp file: a fixed /tmp path is both a symlink target on a shared box
@@ -99,8 +114,14 @@ trap 'rm -f "$_ATK_BODY_FILE"' EXIT
 _ATK_BASE=""
 code() { # method path [curl args...]
   local m="$1" p="$2"; shift 2
-  local base="${_ATK_BASE:-$SERVER}"
-  local c; c=$(/usr/bin/curl -sS -o "$_ATK_BODY_FILE" -w '%{http_code}' -X "$m" "$base$p" "$@" 2>/dev/null)
+  local base="${_ATK_BASE:-$SERVER}"; base="${base%/}"
+  # Bounded, because one of these targets is now a remote host over TLS. An edge
+  # that accepts the connection and then stalls would hang B1 forever and the
+  # suite would never reach its summary — which the gauntlet reports as
+  # `blocked`, i.e. no verdict at all, after burning its whole 30-minute cap.
+  # A probe that cannot answer in 10s has failed; say so and keep going.
+  local c; c=$(/usr/bin/curl -sS --connect-timeout 5 --max-time 10 \
+    -o "$_ATK_BODY_FILE" -w '%{http_code}' -X "$m" "$base$p" "$@" 2>/dev/null)
   _ATK_BODY="$(/usr/bin/head -c200 "$_ATK_BODY_FILE" 2>/dev/null | /usr/bin/tr '\n' ' ')"
   printf '%s' "$c"
 }
@@ -173,7 +194,7 @@ section "Tier A · Internal surface must be UNREACHABLE from the edge (#audit L0
 if [[ -z "$EDGE" ]]; then
   skip "B1–B6 internal surface unreachable from the edge" \
     "set CREWSHIP_ATTACK_EDGE_URL to the PUBLIC url (e.g. https://crewship-stage.unifylab.cz). Probing the app port directly cannot answer this: every host that can reach it is on a private LAN, which requireInternal treats as internal"
-elif [[ "$EDGE" == "$SERVER" ]]; then
+elif [[ "$EDGE" == "${SERVER%/}" ]]; then
   skip "B1–B6 internal surface unreachable from the edge" \
     "CREWSHIP_ATTACK_EDGE_URL equals the app url ($SERVER) — that is not an edge, so the perimeter is not being tested"
 else
