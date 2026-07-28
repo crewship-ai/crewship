@@ -100,6 +100,10 @@ describe("InviteMemberDialog", () => {
 
     expect(await screen.findByText(/already had an account|existing account/i)).toBeTruthy()
     expect(screen.queryByLabelText("Setup link")).toBeNull()
+    // The heading is part of the same claim. "Send them this link" over a
+    // dialog that deliberately issues no link is the conflation this pair of
+    // commits exists to remove, one surface at a time.
+    expect(screen.queryByText("Send them this link")).toBeNull()
   })
 
   it("surfaces the server's reason for a refusal", async () => {

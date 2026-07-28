@@ -166,7 +166,13 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{result ? "Send them this link" : "Add member"}</DialogTitle>
+          {/* Keyed off setup_url like everything else in this dialog. The
+              heading is part of the claim: "Send them this link" above a
+              dialog that deliberately issues no link says the opposite of
+              the paragraph underneath it. */}
+          <DialogTitle>
+            {!result ? "Add member" : result.setup_url ? "Send them this link" : "Member added"}
+          </DialogTitle>
           <DialogDescription>
             {result
               ? result.setup_url
