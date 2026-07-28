@@ -85,7 +85,11 @@ function route({ revealEnabled = false, fields = [], bindings = [], agents = [],
   })
 }
 
-function renderSheet(overrides: Record<string, unknown> = {}, onRotate = vi.fn()) {
+function renderSheet(
+  overrides: Record<string, unknown> = {},
+  onRotate = vi.fn(),
+  onBack = vi.fn(),
+) {
   render(
     <CredentialDetailSheet
       workspaceId="ws1"
@@ -95,9 +99,10 @@ function renderSheet(overrides: Record<string, unknown> = {}, onRotate = vi.fn()
       onRefresh={() => {}}
       onRotate={onRotate}
       onEdit={() => {}}
+      onBack={onBack}
     />,
   )
-  return { onRotate }
+  return { onRotate, onBack }
 }
 
 function openTab(name: RegExp) {
@@ -380,25 +385,32 @@ describe("classification control", () => {
   })
 })
 
-// The detail view opens centred, like New crew and like Add a credential.
-// One create/inspect shape across the app, not two.
+// The detail view is master-detail INLINE, the way /integrations does it:
+// clicking a row in the rail swaps the main pane for that credential and
+// offers a way back. Not a modal — a modal keeps the list visible behind a
+// scrim and asks the reader to dismiss something before they can look at the
+// next credential, which is the wrong rhythm for a page whose whole job is
+// comparing and moving between secrets.
 //
-// role="dialog" is not the assertion: Radix builds Sheet on the Dialog
-// primitive, so a right-hand panel answers that query too — a first attempt at
-// this test passed against the very sheet it was written to replace. The
-// ui-kit's data-slot is what separates them.
+// Add-a-credential stays a centred dialog. That is not an inconsistency: a
+// create flow is a task you finish or abandon, an inspect flow is somewhere
+// you navigate. /integrations makes the same split.
 describe("container", () => {
-  it("is a centred dialog, not a side sheet", () => {
+  it("renders inline rather than inside a modal", () => {
     h.role = "OWNER"
     renderSheet()
-    const shell = screen.getByRole("dialog")
-    expect(shell).toHaveAttribute("data-slot", "dialog-content")
-    expect(shell).not.toHaveAttribute("data-slot", "sheet-content")
+    // No dialog at all: a modal here would trap the reader behind a scrim.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    // Present twice on purpose: once as the breadcrumb's nav context, once as
+    // the identity header — the same shape /integrations uses.
+    expect(screen.getAllByText("GH_TOKEN").length).toBeGreaterThan(0)
   })
 
-  it("still names itself by the credential, so the modal is not an unlabelled box", () => {
+  it("offers a way back to the list", () => {
     h.role = "OWNER"
-    renderSheet()
-    expect(screen.getByRole("dialog", { name: /GH_TOKEN|cred/i })).toBeInTheDocument()
+    const onBack = vi.fn()
+    renderSheet({}, undefined, onBack)
+    fireEvent.click(screen.getByRole("button", { name: /back to credentials/i }))
+    expect(onBack).toHaveBeenCalled()
   })
 })

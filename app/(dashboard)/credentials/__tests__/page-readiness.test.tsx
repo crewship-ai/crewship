@@ -9,7 +9,7 @@
 // been told about.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { _resetWorkspaceStoreForTests } from "@/hooks/use-workspace"
 import CredentialsPage from "../page"
 
@@ -301,4 +301,38 @@ describe("KPI strip", () => {
     const tile = (await screen.findByText("Tools missing")).closest("div")!.parentElement!
     expect(within(tile).getByText(/no crew reported/i)).toBeInTheDocument()
   })
+})
+
+// Master-detail, not a modal: selecting a credential replaces the table.
+//
+// This file stubs CredentialDetailSheet, so the breadcrumb and its Back button
+// belong to the component test — asserting them here would only ever exercise
+// the stub. What IS the page's responsibility, and only testable here, is the
+// swap: the list must be GONE rather than covered, and the rail must drive it.
+describe("master-detail", () => {
+  it("replaces the list with the detail rather than covering it", async () => {
+    routeApi({
+      credentials: [
+        makeCredential({ id: "cred_1", name: "GH_TOKEN" }),
+        makeCredential({ id: "cred_2", name: "ANTHROPIC_API_KEY", provider: "ANTHROPIC" }),
+      ],
+    })
+    render(<CredentialsPage />)
+
+    const rail = await screen.findByRole("complementary")
+    fireEvent.click(within(rail).getByRole("button", { name: /GH_TOKEN/ }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: /credential list/i })).not.toBeInTheDocument(),
+    )
+    // A modal would have left the table queryable behind a scrim, and would
+    // have announced itself as a dialog. Neither is true here.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  // No "clicking the selected row closes it" test: re-selecting a row does
+  // not toggle, and it should not — Back is the way out, and a rail row that
+  // sometimes navigates and sometimes dismisses is a coin flip. The Back
+  // button itself is covered in the component test, where the real component
+  // renders instead of this file's stub.
 })

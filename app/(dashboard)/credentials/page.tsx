@@ -502,7 +502,29 @@ export default function CredentialsPage() {
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 md:p-6">
-      {loadError ? (
+      {/* Master-detail, the /integrations shape: selecting a credential
+          REPLACES the list rather than covering it. A modal would keep the
+          table behind a scrim and make the reader dismiss one secret before
+          looking at the next — the wrong rhythm for a page whose job is moving
+          between them. Add-a-credential stays a dialog on purpose: a create is
+          a task you finish or abandon, an inspect is somewhere you navigate.
+          Written as the first branch of the existing chain so the detail needs
+          no wrapper of its own. */}
+      {detailOpen && detailCredential && workspaceId ? (
+        <CredentialDetailSheet
+          workspaceId={workspaceId}
+          credential={detailCredential}
+          open
+          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailCredential(null) }}
+          onBack={() => { setDetailOpen(false); setDetailCredential(null) }}
+          onRefresh={handleRefresh}
+          onEdit={(c) => handleEdit(c as Credential)}
+          onRotate={(c) => {
+            setRotateCredential(c as unknown as Credential)
+            setRotateOpen(true)
+          }}
+        />
+      ) : loadError ? (
         // Load failure — visually and semantically distinct from the
         // empty state: red accent, explicit error copy, and a Retry
         // affordance. Never claims "no credentials yet".
@@ -671,18 +693,7 @@ export default function CredentialsPage() {
       )}
 
       {workspaceId && (
-        <CredentialDetailSheet
-          workspaceId={workspaceId}
-          credential={detailCredential}
-          open={detailOpen}
-          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailCredential(null) }}
-          onRefresh={handleRefresh}
-          onEdit={(c) => handleEdit(c as Credential)}
-          onRotate={(c) => {
-            setRotateCredential(c as unknown as Credential)
-            setRotateOpen(true)
-          }}
-        />
+        <></>
       )}
 
       {workspaceId && rotateCredential && (

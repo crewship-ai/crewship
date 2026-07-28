@@ -4,6 +4,7 @@ import * as React from "react"
 import { motion } from "motion/react"
 import {
   Activity,
+  ChevronLeft,
   Settings as SettingsIcon,
   Users,
   FlaskConical,
@@ -19,9 +20,7 @@ import {
   ListTree,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from "@/components/ui/dialog"
+
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -151,10 +150,12 @@ export interface CredentialDetailSheetProps {
   /** Optional handler — opens the full Edit dialog. When omitted the
    *  Edit button is hidden (legacy callers). */
   onEdit?: (cred: CredentialSummary) => void
+  /** Returns to the list. Renders the back breadcrumb when supplied. */
+  onBack?: () => void
 }
 
 export function CredentialDetailSheet({
-  workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit,
+  workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit, onBack,
 }: CredentialDetailSheetProps) {
   const [tab, setTab] = React.useState<"overview" | "fields" | "used-by" | "audit" | "settings">("overview")
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
@@ -359,19 +360,39 @@ export function CredentialDetailSheet({
 
   return (
     <>
-      {/* Centred, like New crew and Add a credential. A side sheet reads as an
-          inspector docked beside the list, which is why this one kept the list
-          visible behind it — but the detail view is where rotation, reveal and
-          classification live, and those deserve the screen rather than a
-          glance sideways. Wider than the create dialog because this one is
-          tabbed: Fields and Used-by are tables, not field lists. */}
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[760px] max-h-[85vh] p-0 overflow-hidden flex flex-col">
-          <DialogHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+      {/* Master-detail INLINE, the way /integrations does it: the rail selects,
+          the main pane becomes that credential, and a breadcrumb goes back.
+          Not a modal — a modal keeps the list behind a scrim and makes the
+          reader dismiss one secret before looking at the next, which is the
+          wrong rhythm for a page whose job is moving between them.
+          Add-a-credential stays a dialog on purpose: a create is a task you
+          finish or abandon, an inspect is somewhere you navigate. */}
+      <div className="flex h-full flex-col">
+        {onBack && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Back to credentials
+            </button>
+            {/* Not font-mono: this is the breadcrumb's nav context, matching
+                /integrations. The monospace name belongs to the identity
+                header below, which is the credential itself rather than a
+                trail back to the list. */}
+            <span className="truncate text-xs font-medium text-foreground/85">
+              {credential.name}
+            </span>
+          </div>
+        )}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="px-5 pt-4 pb-3 border-b border-white/10">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <DialogTitle className="text-base font-mono truncate">{credential.name}</DialogTitle>
+                  <h2 className="text-base font-mono truncate">{credential.name}</h2>
                   {getBrand(credential.provider).cli && (
                     <Badge
                       variant="outline"
@@ -394,9 +415,9 @@ export function CredentialDetailSheet({
                     </Badge>
                   )}
                 </div>
-                <DialogDescription className="text-xs truncate">
+                <p className="text-xs truncate">
                   {credential.account_label || credential.description || credential.provider}
-                </DialogDescription>
+                </p>
               </div>
               {onEdit && canUpdate && (
                 <Button
@@ -417,7 +438,7 @@ export function CredentialDetailSheet({
                 ))}
               </div>
             )}
-          </DialogHeader>
+          </div>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1 flex flex-col">
             <TabsList className="px-3 mt-2 justify-start bg-transparent border-b border-white/10 rounded-none h-9">
@@ -969,8 +990,8 @@ export function CredentialDetailSheet({
               </TabsContent>
             </div>
           </Tabs>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
 
       <RevealDialog
         workspaceId={workspaceId}
