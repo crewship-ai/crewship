@@ -537,6 +537,43 @@ is right instead of saving a channel and finding out later.
 	},
 }
 
+// notifyDeliveryRow is the delivery-log row this CLI decodes and renders.
+//
+// A named type rather than an anonymous struct inside the command, because
+// the anonymous one silently dropped `title` — the API had always returned
+// it, nothing failed to compile, and the one question the delivery log exists
+// to answer had no answer short of a database shell. A named type is
+// something a test can hold.
+type notifyDeliveryRow struct {
+	ID        string `json:"id"`
+	ChannelID string `json:"channel_id"`
+	UserID    string `json:"user_id"`
+	Category  string `json:"category"`
+	// Title is the wording the recipient actually saw, message template
+	// included — the log's whole point when someone asks why a notification
+	// said something other than they expected.
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	Error     string `json:"error"`
+	Attempts  int    `json:"attempts"`
+	CreatedAt string `json:"created_at"`
+}
+
+// notifyDeliveryColumns is the rendered table's header, and
+// notifyDeliveryCells the matching row. Kept adjacent so a column added to
+// one without the other is visible in a single diff.
+var notifyDeliveryColumns = []string{
+	"ID", "CHANNEL", "USER", "CATEGORY", "TITLE", "STATUS", "ATTEMPTS", "CREATED",
+}
+
+func notifyDeliveryCells(d notifyDeliveryRow) []string {
+	return []string{
+		truncateString(d.ID, 20), truncateString(d.ChannelID, 20), truncateString(d.UserID, 16),
+		d.Category, truncateString(d.Title, 36), d.Status,
+		fmt.Sprintf("%d", d.Attempts), d.CreatedAt,
+	}
+}
+
 // notifyChannelDeliveriesCmd surfaces the delivery log — "why didn't my
 // notification arrive?" Admin-only server-side (see NotifyDeliveriesHandler).
 var notifyChannelDeliveriesCmd = &cobra.Command{
@@ -581,36 +618,17 @@ var notifyChannelDeliveriesCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Deliveries []struct {
-				ID        string `json:"id"`
-				ChannelID string `json:"channel_id"`
-				UserID    string `json:"user_id"`
-				Category  string `json:"category"`
-				// The title the recipient actually saw, template included.
-				// The API has always returned it; this decoder dropped it,
-				// so "why did that message say something else?" had no
-				// answer short of a database shell.
-				Title     string `json:"title"`
-				Status    string `json:"status"`
-				Error     string `json:"error"`
-				Attempts  int    `json:"attempts"`
-				CreatedAt string `json:"created_at"`
-			} `json:"deliveries"`
+			Deliveries []notifyDeliveryRow `json:"deliveries"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
 		}
 		f := newFormatter()
-		headers := []string{"ID", "CHANNEL", "USER", "CATEGORY", "TITLE", "STATUS", "ATTEMPTS", "CREATED"}
 		rows := make([][]string, 0, len(body.Deliveries))
 		for _, d := range body.Deliveries {
-			rows = append(rows, []string{
-				truncateString(d.ID, 20), truncateString(d.ChannelID, 20), truncateString(d.UserID, 16),
-				d.Category, truncateString(d.Title, 36), d.Status,
-				fmt.Sprintf("%d", d.Attempts), d.CreatedAt,
-			})
+			rows = append(rows, notifyDeliveryCells(d))
 		}
-		return f.Auto(body.Deliveries, headers, rows)
+		return f.Auto(body.Deliveries, notifyDeliveryColumns, rows)
 	},
 }
 

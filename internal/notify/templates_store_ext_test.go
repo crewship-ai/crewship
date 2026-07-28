@@ -16,10 +16,12 @@ package notify_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -29,30 +31,50 @@ import (
 
 var tmplTestCounter atomic.Int64
 
-func newTemplateStore(t *testing.T) (*notify.TemplateStore, string) {
-	t.Helper()
-	t.Setenv("ENCRYPTION_KEY", strings.Repeat("0123456789abcdef", 4))
-	name := fmt.Sprintf("%s/templates-%d.db", t.TempDir(), tmplTestCounter.Add(1))
-	db, err := database.Open("file:" + name)
+// sharedTemplateDB migrates ONCE for the whole file.
+//
+// Running the real migrations is the point of this file, and it is also the
+// expensive part: nine tests each migrating from scratch added minutes to a
+// CI job that already finished within a minute of its timeout. Isolation
+// comes from a fresh WORKSPACE per test instead — which is the boundary the
+// store is scoped to anyway, so the tests exercise that scoping rather than
+// relying on a private database to hide a leak.
+var sharedTemplateDB = sync.OnceValues(func() (*sql.DB, error) {
+	os.Setenv("ENCRYPTION_KEY", strings.Repeat("0123456789abcdef", 4))
+	dir, err := os.MkdirTemp("", "notify-templates")
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		return nil, err
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, err := database.Open("file:" + dir + "/templates.db")
+	if err != nil {
+		return nil, err
+	}
 	quiet := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	if err := database.Migrate(context.Background(), db.DB, quiet); err != nil {
-		t.Fatalf("migrate: %v", err)
+		return nil, err
 	}
-	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','WS','ws1')`); err != nil {
+	return db.DB, nil
+})
+
+func newTemplateStore(t *testing.T) (*notify.TemplateStore, string) {
+	t.Helper()
+	db, err := sharedTemplateDB()
+	if err != nil {
+		t.Fatalf("shared template db: %v", err)
+	}
+	ws := fmt.Sprintf("ws_%d", tmplTestCounter.Add(1))
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?,?,?)`, ws, ws, ws); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
 	// A real channel row, because channel_id is a real foreign key. Seeding
 	// it is the point of testing against the migrated schema rather than a
 	// hand-rolled table that would have accepted anything.
 	if _, err := db.Exec(
-		`INSERT INTO notification_channels (id, workspace_id, type) VALUES ('nch_1','ws1','webhook')`); err != nil {
+		`INSERT INTO notification_channels (id, workspace_id, type) VALUES (?,?,'webhook')`,
+		"nch_"+ws, ws); err != nil {
 		t.Fatalf("seed channel: %v", err)
 	}
-	return notify.NewTemplateStore(db.DB), "ws1"
+	return notify.NewTemplateStore(db), ws
 }
 
 func TestTemplateStore_UpsertIsIdempotentPerScope(t *testing.T) {
@@ -93,7 +115,7 @@ func TestTemplateStore_ChannelScopeIsSeparateFromAllChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.Upsert(ctx, ws, notify.MessageTemplate{
-		Category: notify.CategoryRoutinesFailed, ChannelID: "nch_1", Title: "just this one",
+		Category: notify.CategoryRoutinesFailed, ChannelID: "nch_" + ws, Title: "just this one",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -111,9 +133,9 @@ func TestTemplateStore_ResolvePrefersTheChannelSpecificRow(t *testing.T) {
 	ctx := context.Background()
 
 	_ = s.Upsert(ctx, ws, notify.MessageTemplate{Category: notify.CategoryRoutinesFailed, Title: "everywhere"})
-	_ = s.Upsert(ctx, ws, notify.MessageTemplate{Category: notify.CategoryRoutinesFailed, ChannelID: "nch_1", Title: "pager"})
+	_ = s.Upsert(ctx, ws, notify.MessageTemplate{Category: notify.CategoryRoutinesFailed, ChannelID: "nch_" + ws, Title: "pager"})
 
-	got, err := s.Resolve(ctx, ws, notify.CategoryRoutinesFailed, "nch_1")
+	got, err := s.Resolve(ctx, ws, notify.CategoryRoutinesFailed, "nch_"+ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +154,7 @@ func TestTemplateStore_ResolveWithNoTemplateIsNotAnError(t *testing.T) {
 	// Almost every notification takes this path — no template configured —
 	// so it has to be cheap and quiet, not an error the caller handles.
 	s, ws := newTemplateStore(t)
-	got, err := s.Resolve(context.Background(), ws, notify.CategoryRoutinesFailed, "nch_1")
+	got, err := s.Resolve(context.Background(), ws, notify.CategoryRoutinesFailed, "nch_"+ws)
 	if err != nil {
 		t.Fatalf("resolve with nothing stored: %v", err)
 	}
