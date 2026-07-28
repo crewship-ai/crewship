@@ -187,6 +187,23 @@ type mcpCredEntry struct {
 	// once the deadline passes — the only way lease expiry can reach a
 	// crew-shared, credential-scoped store that has no per-agent dimension.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
+	// §2.2), already named by credential_field_delivery.go. omitempty is
+	// load-bearing for compatibility: a credential with no parts — every
+	// credential that exists today — serialises exactly as it did before the
+	// key existed, so an older sidecar sees a byte-identical payload.
+	Fields []mcpCredFieldEntry `json:"fields,omitempty"`
+}
+
+// mcpCredFieldEntry is one part of a multi-part credential in the boot payload.
+// Key rides along beside EnvVar because the name is derived and the key is not:
+// an operator reading a support bundle needs to map AWS_ACCESS_KEY_ID back to
+// the `access_key_id` row they can actually edit.
+type mcpCredFieldEntry struct {
+	Key      string `json:"key"`
+	EnvVar   string `json:"env_var"`
+	Value    string `json:"value"`
+	IsSecret bool   `json:"is_secret"`
 }
 
 // InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.

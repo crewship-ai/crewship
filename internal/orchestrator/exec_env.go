@@ -41,6 +41,7 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	if activeCred != nil {
 		envVar := resolveEnvVar(activeCred)
 		env = append(env, envVar+"="+activeCred.PlainValue)
+		env = appendCredentialFields(env, *activeCred, true)
 	}
 
 	for _, cred := range req.Credentials {
@@ -59,6 +60,10 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 			if !alreadySet {
 				env = append(env, envVar+"="+cred.PlainValue)
 			}
+			// The credential's parts go wherever its value goes. There is no
+			// sidecar on this path, so no isolation to respect and no
+			// secret/identifier distinction to make.
+			env = appendCredentialFields(env, cred, true)
 		}
 	}
 
@@ -67,6 +72,71 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	}
 
 	return env
+}
+
+// appendCredentialFields adds a credential's named parts (PRD-CREDENTIALS-V2
+// §2.2) to an env block. secretsToo decides whether the parts that ARE
+// credential material come along; identifier parts always do.
+//
+// Why the split. A non-secret part is a region, an account id, a host — stored
+// cleartext by design, and there is no channel here that could carry it for us:
+// the sidecar reverse proxy injects a credential into an outbound HTTP request,
+// it cannot inject a region into the agent's environment. Withholding it would
+// mean the AWS-shaped credential the whole feature exists for arrives without
+// the one part that says which account it is. A SECRET part, by contrast, is the
+// same kind of thing as the credential's value, so it goes exactly where the
+// value goes and nowhere else.
+//
+// A part NEVER overwrites a name already in the block. The API tier resolved
+// collisions against everything it could see (internal/api/credential_field_delivery.go),
+// but it cannot see what this package adds at mount time — HOME, the proxy
+// fence, the dummy provider keys — so this is the last-line check, and it must
+// stay a check rather than becoming an override.
+func appendCredentialFields(env []string, cred Credential, secretsToo bool) []string {
+	for _, f := range cred.Fields {
+		if f.EnvVar == "" || f.Value == "" {
+			continue
+		}
+		if f.IsSecret && !secretsToo {
+			continue
+		}
+		if envHasName(env, f.EnvVar) {
+			continue
+		}
+		env = append(env, f.EnvVar+"="+f.Value)
+	}
+	return env
+}
+
+// envHasName reports whether the block already assigns name.
+func envHasName(env []string, name string) bool {
+	prefix := name + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// envHasAssignment reports whether the block assigns exactly name=value.
+//
+// This is how the sidecar path decides whether a credential's SECRET parts may
+// be delivered: they go to the agent env if and only if the credential's own
+// plaintext already did. Asking the finished env block, rather than re-deriving
+// the rules (OAuth vs proxy-injected vs CLI token vs Keeper), means a future
+// change to those rules carries the parts with it automatically. The
+// value-equality check is the whole point — ANTHROPIC_API_KEY is present for a
+// proxy-isolated credential too, holding the dummy, and a name-only check would
+// read that as "the real key is exposed, so its parts may be as well".
+func envHasAssignment(env []string, name, value string) bool {
+	assignment := name + "=" + value
+	for _, e := range env {
+		if e == assignment {
+			return true
+		}
+	}
+	return false
 }
 
 // injectMCPCredentialEnvVars adds the actual credential values for env vars
@@ -400,6 +470,27 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		}
 	}
 
+	// Multi-part credentials (PRD-CREDENTIALS-V2 §2.2), delivered LAST so every
+	// runtime name above — the proxy fence, the dummy provider keys, the OAuth
+	// token, the identity block — is already claimed and a part cannot take one.
+	//
+	// A SECRET part is delivered if and only if its credential's own plaintext
+	// reached the env, which is asked of the finished block rather than
+	// re-derived from the OAuth / proxy / CLI-token / Keeper rules above. That
+	// keeps the two in step by construction: a change to which credentials land
+	// in env moves their parts with them, with nothing to remember.
+	//
+	// Identifier parts (region, account id, host) always come. They are not
+	// credential material — cleartext at rest by design — and no channel here
+	// can carry them: the reverse proxy injects a key into a request, it cannot
+	// tell the agent which region its account lives in.
+	for i := range req.Credentials {
+		cred := req.Credentials[i]
+		valueReachedEnv := cred.PlainValue != "" &&
+			envHasAssignment(env, resolveEnvVar(&cred), cred.PlainValue)
+		env = appendCredentialFields(env, cred, valueReachedEnv)
+	}
+
 	if e, ok := localModelConfigEnv(req); ok {
 		env = append(env, e)
 	}
@@ -579,6 +670,22 @@ type CredentialEnvExposure struct {
 func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []CredentialEnvExposure {
 	var out []CredentialEnvExposure
 
+	// Credentials whose plaintext lands in the env. BuildEnvVarsSidecar
+	// delivers a credential's SECRET parts on exactly that condition, so the
+	// same set drives the part exposures appended at the end. nil until a
+	// branch below actually fires — the no-exposure case must still allocate
+	// nothing.
+	var exposedCreds map[string]bool
+	markExposed := func(id string) {
+		if id == "" {
+			return
+		}
+		if exposedCreds == nil {
+			exposedCreds = map[string]bool{}
+		}
+		exposedCreds[id] = true
+	}
+
 	// OAuth: BuildEnvVarsSidecar injects only the FIRST matching token as
 	// CLAUDE_CODE_OAUTH_TOKEN and stops; mirror that so we don't over-report.
 	for _, cred := range req.Credentials {
@@ -589,6 +696,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				Type:       "AI_CLI_TOKEN",
 				Reason:     "OAuth token authenticates inside an HTTPS CONNECT tunnel the sidecar cannot inject into, so it must live in the agent env",
 			})
+			markExposed(cred.ID)
 			break
 		}
 	}
@@ -612,6 +720,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				Type:       "API_KEY",
 				Reason:     "adapter " + req.CLIAdapter + " reaches its upstream over an HTTPS CONNECT tunnel, so the real API key is written to env (the sidecar reverse-proxy injects only for api.anthropic.com, api.openai.com and generativelanguage.googleapis.com)",
 			})
+			markExposed(cred.ID)
 		}
 	}
 
@@ -624,6 +733,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 				Type:       "CLI_TOKEN",
 				Reason:     "CLI tools read credentials from env vars, which cannot be proxied",
 			})
+			markExposed(cred.ID)
 		}
 	}
 
@@ -660,7 +770,34 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 					Reason:     "Keeper is disabled; enable it (set KEEPER_MODEL / KEEPER_OLLAMA_URL) to isolate this credential behind /keeper/request",
 					Actionable: true,
 				})
+				markExposed(cred.ID)
 			}
+		}
+	}
+
+	// SECRET parts of an exposed credential are exposed with it — same env
+	// block, same /proc/self/environ. Reported per part so an operator reading
+	// the posture sees the actual variable names present, not just the
+	// credential's own.
+	//
+	// Identifier parts are NOT reported. They are in the env too, but this list
+	// is the inverse of the credential-isolation guarantee, and a region or an
+	// account id is not credential material — the same reason
+	// credentials.username has never appeared here. Padding it with identifiers
+	// makes the exposures an operator MUST act on harder to see.
+	for _, cred := range req.Credentials {
+		if !exposedCreds[cred.ID] {
+			continue
+		}
+		for _, f := range cred.Fields {
+			if !f.IsSecret || f.EnvVar == "" || f.Value == "" {
+				continue
+			}
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: f.EnvVar,
+				Type:       cred.Type,
+				Reason:     "a secret part of a credential whose value is already in the agent env; it is delivered on exactly the same terms",
+			})
 		}
 	}
 

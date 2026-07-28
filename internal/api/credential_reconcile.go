@@ -42,20 +42,43 @@ var (
 // credential occupies, mirroring buildCredFileScript's per-type layout
 // (internal/orchestrator/exec_sidecar.go). API_KEY / AI_CLI_TOKEN / OAUTH2 and
 // unknown types return nil — those never touch disk (sidecar-injected).
-func credSecretPaths(agentSlug, envVar, credType string) []string {
+//
+// fieldKeys are the credential's multi-part field keys (PRD §2.2). Each becomes
+// one more flat file, named by deliveredFieldEnvVar — the SAME function the
+// delivery path used to write it, because a revoke that spells the name its own
+// way removes nothing and, being a best-effort `rm -f`, reports success anyway.
+// Without this a revoked AWS credential would leave its secret access key on
+// disk in a live container while the vault showed it gone.
+//
+// A key whose derived name fails the charset check is skipped rather than
+// interpolated: delivery refused to write that file for the same reason, so
+// there is nothing to remove, and the one outcome that matters is that it never
+// reaches the shell.
+func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []string {
 	dir := "/secrets/" + agentSlug
+	var paths []string
 	switch credType {
 	case "SSH_KEY":
-		return []string{dir + "/ssh/" + envVar}
+		paths = []string{dir + "/ssh/" + envVar}
 	case "CERTIFICATE":
-		return []string{dir + "/certs/" + envVar + ".pem"}
+		paths = []string{dir + "/certs/" + envVar + ".pem"}
 	case "USERPASS":
-		return []string{dir + "/" + envVar + "_USERNAME", dir + "/" + envVar + "_PASSWORD"}
+		paths = []string{dir + "/" + envVar + "_USERNAME", dir + "/" + envVar + "_PASSWORD"}
 	case "CLI_TOKEN", "SECRET", "GENERIC_SECRET":
-		return []string{dir + "/" + envVar}
+		paths = []string{dir + "/" + envVar}
 	default:
+		// The credential itself never touches disk, so neither do its parts —
+		// buildCredFileScript skips the whole credential before reaching them.
 		return nil
 	}
+	for _, key := range fieldKeys {
+		name := deliveredFieldEnvVar(envVar, key)
+		if !credEnvVarRE.MatchString(name) {
+			continue
+		}
+		paths = append(paths, dir+"/"+name)
+	}
+	return paths
 }
 
 // buildCredRemoveScript emits the `sh -c` body that removes a credential's
@@ -66,8 +89,8 @@ func credSecretPaths(agentSlug, envVar, credType string) []string {
 // reads secrets by path and .env is advisory, so a now-dangling entry is inert
 // (the file it points at is gone) and rewriting a 0400 file adds shell/portability
 // risk for no security gain. It clears on the next container boot.
-func buildCredRemoveScript(agentSlug, envVar, credType string) string {
-	paths := credSecretPaths(agentSlug, envVar, credType)
+func buildCredRemoveScript(agentSlug, envVar, credType string, fieldKeys []string) string {
+	paths := credSecretPaths(agentSlug, envVar, credType, fieldKeys)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -143,13 +166,44 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 		return
 	}
 
+	// The credential's multi-part field keys (PRD §2.2), read once for all
+	// targets — they belong to the credential, not to the grant, so the same
+	// list applies to every agent holding it. Only the KEYS are read; the
+	// values are irrelevant to a delete and there is no reason to pull a
+	// secret's ciphertext into this process to build an `rm`.
+	//
+	// A read failure means an incomplete removal, which is exactly the case that
+	// must be loud: it is the difference between "the secret is gone from the
+	// container" and "the operator believes it is". The primary file is still
+	// removed below — a partial revoke beats none.
+	var fieldKeys []string
+	if fieldRows, ferr := db.QueryContext(ctx,
+		`SELECT key FROM credential_fields WHERE credential_id = ? ORDER BY ordinal ASC, key ASC`,
+		credentialID); ferr != nil {
+		logger.Warn("revoke reconcile: field keys — multi-part files may survive in running containers",
+			"credential_id", credentialID, "error", ferr)
+	} else {
+		for fieldRows.Next() {
+			var key string
+			if serr := fieldRows.Scan(&key); serr != nil {
+				logger.Warn("revoke reconcile: scan field key", "credential_id", credentialID, "error", serr)
+				break
+			}
+			fieldKeys = append(fieldKeys, key)
+		}
+		if ierr := fieldRows.Err(); ierr != nil {
+			logger.Warn("revoke reconcile: iterate field keys", "credential_id", credentialID, "error", ierr)
+		}
+		fieldRows.Close()
+	}
+
 	for _, t := range targets {
 		if !credSlugRE.MatchString(t.agentSlug) || !credEnvVarRE.MatchString(t.envVar) {
 			logger.Warn("revoke reconcile: skipping unsafe identifiers",
 				"agent_slug", t.agentSlug, "env_var", t.envVar)
 			continue
 		}
-		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType)
+		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, fieldKeys)
 		if script == "" {
 			continue // type has no on-disk form
 		}

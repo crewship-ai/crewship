@@ -286,6 +286,42 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			})
 			envLines = append(envLines, c.EnvVarName+"="+path)
 		}
+
+		// Multi-part credentials (PRD-CREDENTIALS-V2 §2.2). USERPASS already
+		// established that one credential can become several delivered files;
+		// this is that idea without a bespoke type — one flat 0400 file per
+		// part, named by the API tier, .env mapping name → path like every
+		// other file here.
+		//
+		// Flat regardless of the credential's type, on purpose. The per-type
+		// layouts above encode what the PRIMARY value is: an SSH key needs 0600
+		// under ssh/ because OpenSSH refuses anything looser, a certificate
+		// wants a .pem the tooling can find. A passphrase or an account id is
+		// neither of those, and giving it the key's layout would put a
+		// non-key in ssh/ where the next reader assumes everything is a key.
+		//
+		// Reached only for a credential that is itself file-delivered and not
+		// withheld: the Keeper gate and the credpolicy FileMounted() check are
+		// both above, and both `continue`, so a part cannot be written for a
+		// credential whose own value was not.
+		for _, f := range c.Fields {
+			if f.EnvVar == "" || f.Value == "" {
+				continue
+			}
+			if !envVarNameRE.MatchString(f.EnvVar) {
+				// Same hard failure as the primary name. It matters more here:
+				// the API tier already drops any part it could not name
+				// legally, so a bad name arriving at this point means an
+				// unsanitised value reached the delivery path — and this
+				// script is about to be interpolated into `sh -c`.
+				return "", 0, fmt.Errorf("invalid credential field env var name: %q", f.EnvVar)
+			}
+			fieldPath := secretsAgentDir + "/" + f.EnvVar
+			specs = append(specs, credFileSpec{
+				EnvVar: f.EnvVar, Value: f.Value, Path: fieldPath, Mode: "0400",
+			})
+			envLines = append(envLines, f.EnvVar+"="+fieldPath)
+		}
 	}
 
 	if len(specs) == 0 {
