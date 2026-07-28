@@ -317,6 +317,35 @@ Every agent send lands on the [Activity](/guides/activity) timeline as `notifica
 Agent messages are **not** routed through the per-user preference matrix. The pairing is the authorization — a human already decided this agent may post here — so letting someone's mute silently swallow it would make an approved grant look broken from both ends.
 </Note>
 
+## Changing what a notification says
+
+A routine's [`notify` step](/guides/routines#notify) has always written its own message. Everything Crewship generates itself — "Pipeline nightly completed", "Scheduled routine failed: deploy" — had its wording computed in Go, one string per producer, with no way to change it. Templates are the override.
+
+```bash
+crewship notify templates set --category routines.failed \
+  --title "{{ vars.pipeline_slug }} failed" \
+  --body  "after {{ vars.total_duration_ms }}ms — {{ source.body }}"
+
+crewship notify templates list
+crewship notify templates rm --category routines.failed
+```
+
+Two namespaces are available, and the syntax is the same `{{ … }}` a routine step uses, so there is nothing new to learn:
+
+| Reference | What it is |
+| --- | --- |
+| `{{ vars.<fact> }}` | The source event's own facts — `pipeline_slug`, `run_id`, `total_duration_ms`, whatever that producer records. Which ones exist depends on the event; the webhook payload's `vars` object shows what a given notification carried. |
+| `{{ source.title }}` · `{{ source.body }}` | What the producer computed. This is what lets a template **add** to a message — `"[{{ source.category }}] {{ source.title }}"` prefixes without rewriting. |
+| `{{ source.category }}` · `{{ source.kind }}` | The category, and the producer kind the notification came from. |
+
+**Nothing is lost when a reference misses.** A fact this particular event does not carry renders empty, and a template that renders to *nothing* falls back to the producer's own wording — so a notification never arrives with a blank subject line, which on a push service is a blank entry on someone's lock screen.
+
+**Scope is the category**, optionally narrowed to one channel with `--channel`. Wording is a property of the event: "a routine failed" reads the same wherever it goes. The narrowing exists for the case where one destination genuinely wants something different — a terse line for a pager, a fuller one for e-mail — and a channel-specific template wins over the all-channels one.
+
+**Templates never rewrite somebody else's words.** A routine's `notify` step and an agent's message carry an author's text, and an operator's category template does not touch them. Those already say what their author chose.
+
+Setting a template is **ADMIN+**: a preference is "do I want to hear about this", a template is "what everyone sees". Clearing both fields removes the override and restores the shipped wording. An unknown category, or a reference to a namespace that does not exist, is rejected when you save it rather than when a notification fails to arrive.
+
 ## Payload safety
 
 Every author-influenced field of a notification — title, body, link labels and every value in `vars`, including nested ones — is passed through the secret **scrubber** (the same redaction the `notify` step uses) before it leaves the instance. Bodies are additionally capped. API keys and tokens in a run's output, a journal summary or an agent's reply never reach a webhook body, an email, or a chat message.

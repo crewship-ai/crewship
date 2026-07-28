@@ -28,6 +28,7 @@ type Router struct {
 	channels   *notify.ChannelStore
 	prefs      *PrefStore
 	deliveries *DeliveryStore
+	templates  *notify.TemplateStore
 	dispatcher *notify.Dispatcher
 	presence   PresenceChecker // nil = no presence gate (never suppress)
 	limiter    *RateLimiter    // nil = no rate limiting
@@ -50,6 +51,7 @@ func NewRouter(db *sql.DB, dispatcher *notify.Dispatcher, presence PresenceCheck
 		channels:   notify.NewChannelStore(db),
 		prefs:      NewPrefStore(db),
 		deliveries: NewDeliveryStore(db),
+		templates:  notify.NewTemplateStore(db),
 		dispatcher: dispatcher,
 		presence:   presence,
 		limiter:    limiter,
@@ -241,38 +243,45 @@ func (r *Router) routeToUser(ctx context.Context, category string, item inbox.It
 	}
 }
 
+// applyTemplate rewrites a message's wording from the operator's template for
+// its category, when one exists.
+//
+// Only for notifications the PRODUCT computes. A message that arrives as inbox
+// kind "message" was written by somebody — a routine author's notify step, an
+// agent's chat reply — and an operator's category template has no business
+// overwriting another person's words. That would be a different feature, and a
+// worse one, wearing this one's name.
+//
+// Applied BEFORE delivery so the envelope scrub still covers whatever the
+// template pulled in: a template can reference any fact, including one holding
+// a secret, and it must not become a way around redaction.
+//
+// A template that cannot be read is not a reason to lose the notification. The
+// producer's own wording is a correct message; failing the delivery over a
+// missing override would trade a cosmetic problem for a silent one.
+func (r *Router) applyTemplate(ctx context.Context, msg notify.CategoryMessage, channelID string) notify.CategoryMessage {
+	if r.templates == nil || msg.SourceKind == inbox.KindMessage {
+		return msg
+	}
+	tmpl, err := r.templates.Resolve(ctx, msg.WorkspaceID, msg.Category, channelID)
+	if err != nil {
+		r.logger.Warn("notifyroute: resolve message template",
+			"error", err, "category", msg.Category, "channel_id", channelID)
+		return msg
+	}
+	return tmpl.Apply(msg)
+}
+
 // deliverToChannel runs the rate gate, writes the outbox row (coalescing
 // on (channel_id, dedup_key)), attempts delivery, and updates the log.
 func (r *Router) deliverToChannel(ctx context.Context, category string, item inbox.Item, uid string, ch notify.Channel, dedupKey string) {
-	d := Delivery{
-		WorkspaceID: item.WorkspaceID,
-		ChannelID:   ch.ID,
-		UserID:      uid,
-		Category:    category,
-		DedupKey:    dedupKey,
-		SourceKind:  item.Kind,
-		SourceID:    item.SourceID,
-		Title:       item.Title,
-	}
-
-	if !notify.BypassesRateGate(category) && r.limiter != nil && !r.limiter.Allow(uid, ch.ID, category) {
-		if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedRate); err != nil {
-			r.logger.Warn("notifyroute: log dropped_rate", "error", err)
-		}
-		r.emitDeliveryJournal(ctx, journal.EntryNotificationDropped, journal.SeverityNotice,
-			ch, category, item.Title, "rate limit")
-		return
-	}
-
-	id, created, err := r.deliveries.InsertPending(ctx, d)
-	if err != nil {
-		r.logger.Warn("notifyroute: insert pending delivery", "error", err)
-		return
-	}
-	if !created {
-		return // coalesced: an identical (channel, dedup_key) delivery already exists
-	}
-
+	// The message is composed FIRST, template included, so everything that
+	// records a title records the one the recipient will actually see. The
+	// outbox row and the Activity timeline used to capture the producer's
+	// title, taken before the template ran — leaving an operator asking "why
+	// did that message say something else?" reading a log showing the wording
+	// they did not receive, which is the one question this log exists to
+	// answer.
 	links, vars := notificationFacts(item.Kind, item.Payload)
 	msg := notify.CategoryMessage{
 		WorkspaceID: item.WorkspaceID,
@@ -285,6 +294,36 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		Links:       links,
 		Vars:        vars,
 	}
+	msg = r.applyTemplate(ctx, msg, ch.ID)
+
+	d := Delivery{
+		WorkspaceID: item.WorkspaceID,
+		ChannelID:   ch.ID,
+		UserID:      uid,
+		Category:    category,
+		DedupKey:    dedupKey,
+		SourceKind:  item.Kind,
+		SourceID:    item.SourceID,
+		Title:       msg.Title,
+	}
+
+	if !notify.BypassesRateGate(category) && r.limiter != nil && !r.limiter.Allow(uid, ch.ID, category) {
+		if err := r.deliveries.InsertDropped(ctx, d, StatusDroppedRate); err != nil {
+			r.logger.Warn("notifyroute: log dropped_rate", "error", err)
+		}
+		r.emitDeliveryJournal(ctx, journal.EntryNotificationDropped, journal.SeverityNotice,
+			ch, category, msg.Title, "rate limit")
+		return
+	}
+
+	id, created, err := r.deliveries.InsertPending(ctx, d)
+	if err != nil {
+		r.logger.Warn("notifyroute: insert pending delivery", "error", err)
+		return
+	}
+	if !created {
+		return // coalesced: an identical (channel, dedup_key) delivery already exists
+	}
 
 	if err := r.dispatcher.DeliverCategoryMessage(ctx, ch, msg); err != nil {
 		if merr := r.deliveries.MarkFailed(ctx, id, err.Error()); merr != nil {
@@ -292,12 +331,12 @@ func (r *Router) deliverToChannel(ctx context.Context, category string, item inb
 		}
 		r.logger.Warn("notifyroute: delivery failed", "error", err, "channel_id", ch.ID, "category", category)
 		r.emitDeliveryJournal(ctx, journal.EntryNotificationFailed, journal.SeverityError,
-			ch, category, item.Title, err.Error())
+			ch, category, msg.Title, err.Error())
 		return
 	}
 	if err := r.deliveries.MarkSent(ctx, id); err != nil {
 		r.logger.Warn("notifyroute: mark delivery sent", "error", err)
 	}
 	r.emitDeliveryJournal(ctx, journal.EntryNotificationDelivered, journal.SeverityInfo,
-		ch, category, item.Title, "")
+		ch, category, msg.Title, "")
 }

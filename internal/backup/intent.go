@@ -147,6 +147,19 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"notification_channel_agents": IntentInclude,
 	"notification_deliveries":     IntentExcludeOperational,
 
+	// notification_templates is the operator's own wording for what those
+	// notifications SAY — authored configuration in the same sense as the
+	// channels themselves. Losing it on restore would silently revert every
+	// message to the shipped default, and the only symptom would be that the
+	// words changed, which no alert catches.
+	//
+	// Listed separately from the block above because it does NOT share that
+	// block's premise: it declares workspace_id REFERENCES workspaces(id), so
+	// the FK walk DOES reach it and a --replace restore clears it. Sitting
+	// under a comment saying discovery never surfaces these tables read as a
+	// claim about this one too. See TestReplace_DiscoversNotificationTemplates.
+	"notification_templates": IntentInclude,
+
 	// === Discovered via drift detection (2026-05-25) ===============
 	// Every workspace-scoped table the FK walk currently surfaces.
 	// Default classification leans toward IntentInclude because the
