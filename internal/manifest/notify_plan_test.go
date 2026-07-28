@@ -168,3 +168,34 @@ func TestNotifyPlan_GrantsAreSeparateItems(t *testing.T) {
 		t.Errorf("expected a separate grant item; got %s", planKinds(plan))
 	}
 }
+
+func TestNotifyPlan_AnEmptyEnvValueCountsAsMissing(t *testing.T) {
+	// The shape people actually hit: the variable is DECLARED in .env.local
+	// but left blank. Treating a present-but-empty value as supplied would
+	// create a Discord channel whose webhook is the empty string — enabled,
+	// looking configured, delivering nowhere. Both secret sources agree on
+	// this, so the placeholder behaves the same whether it comes from the
+	// process environment or a --secrets-file.
+	b := notifyPlanDoc(discordChannel())
+
+	for name, src := range map[string]CredentialSource{
+		"secrets-file": MapSecretsSource{"DISCORD_WEBHOOK_URL": ""},
+		"from-env":     EnvSecretsSource{Lookup: func(string) (string, bool) { return "", true }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			plan, err := planFor(t, b, Options{Secrets: src})
+			if err != nil {
+				t.Fatalf("Plan: %v", err)
+			}
+			if findPlanItem(plan, "notification_channel", "eng-alerts") != nil {
+				t.Error("a blank value must not create the channel")
+			}
+			if len(plan.SkippedChannels) != 1 {
+				t.Fatalf("want the channel reported as skipped, got %v", plan.SkippedChannels)
+			}
+			if !strings.Contains(plan.SkippedChannels[0], "DISCORD_WEBHOOK_URL") {
+				t.Errorf("the skip must name the variable to fill in, got %q", plan.SkippedChannels[0])
+			}
+		})
+	}
+}
