@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import {
   User, Building, Users,
   Box, Link2, Activity,
-  Shield, Bell, BellRing,
+  Shield, Bell, BellRing, KeyRound,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isManagerTier } from "@/lib/permissions/tiers"
@@ -88,6 +88,13 @@ const sections: NavSection[] = [
       // The roster is readable by every role; the invite/role controls inside
       // are gated separately.
       { key: "members", label: "Members", icon: Users },
+      // Workspace-wide secret policy (PRD-CREDENTIALS-V2-2026 §2.6). MANAGER
+      // reads it — they have to know the rules they work under — and the
+      // controls inside go read-only for them and for ADMIN, because the
+      // reveal switch is OWNER-only server-side. MEMBER and VIEWER cannot
+      // read the policy at all (GET is MANAGER+), so the row is hidden
+      // rather than rendered over a 403.
+      { key: "access-secrets", label: "Access & Secrets", icon: KeyRound, visibleTo: isManagerTier },
       // The audit log is not readable below MANAGER, so the pane would be
       // empty — the one section where hiding beats read-only.
       { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isManagerTier },

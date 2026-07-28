@@ -6,16 +6,15 @@ import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
   Key, Plus, Pencil, Trash2, Clock, AlertTriangle,
-  ArrowUpDown, RefreshCw, Link2,
+  ArrowUpDown, RefreshCw, Link2, PackageX, CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { SidebarSearch } from "@/components/layout/sidebar-kit"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TabBar } from "@/components/ui/tab-bar"
 import {
   Select,
   SelectContent,
@@ -39,13 +38,27 @@ import {
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { ConnectOAuthDialog } from "@/components/features/credentials/connect-oauth-dialog"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
+import { CredentialsSidebar } from "@/components/features/credentials/credentials-sidebar"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatRelativeTime } from "@/lib/time"
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useCredentialReadiness, type CredentialToolGap } from "@/hooks/use-credential-readiness"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import {
+  EMPTY_CREDENTIAL_FILTERS,
+  EXPIRY_WARNING_DAYS,
+  applyCredentialFilters,
+  buildCategoryFacet,
+  buildScopeFacet,
+  daysUntilExpiry,
+  deriveCredentialStatus,
+  needsAttention,
+  type CredentialFilters,
+  type CredentialListStatus,
+} from "@/lib/credentials/facets"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -79,42 +92,17 @@ interface Credential {
   _count_agent_credentials: number
   agent_names: string[]
   mcp_used: boolean
+  /** Server-declared probe support — see credentials.go `testable`. */
+  testable?: boolean
 }
 
-// 5-state status taxonomy from CONNECTIONS.md §3.4 (Datadog parity), plus
-// "Pending" for an agent-proposed credential awaiting human approval.
-type DerivedStatus = "Available" | "Detected" | "Connected" | "Error" | "Stale" | "Pending"
-
-const STALE_THRESHOLD_DAYS = 90
-
-function deriveStatus(c: Credential): DerivedStatus {
-  // Agent-proposed, not yet approved: not usable by any agent until a human
-  // approves the linked escalation. Surfaced as a distinct "Pending" state.
-  if (c.status === "PENDING_APPROVAL") return "Pending"
-  if (c.status === "EXPIRED" || c.status === "REVOKED" || c.status === "ERROR" || c.status === "RATE_LIMITED") return "Error"
-  if (c.token_expires_at) {
-    const exp = new Date(c.token_expires_at).getTime()
-    if (!Number.isNaN(exp) && exp < Date.now()) return "Error"
-  }
-  if (c.last_used_at) {
-    const last = new Date(c.last_used_at).getTime()
-    if (!Number.isNaN(last) && Date.now() - last > STALE_THRESHOLD_DAYS * 24 * 3600 * 1000) {
-      return "Stale"
-    }
-  }
-  return "Connected"
-}
-
-const STATUS_DOT_COLOR: Record<DerivedStatus, string> = {
-  Available: "bg-muted-foreground/40",
-  // #1162: migrated to the #749 semantic palette (bg-info/bg-success/bg-warn).
-  Detected: "bg-info",
+const STATUS_DOT_COLOR: Record<CredentialListStatus, string> = {
+  // #1162: the #749 semantic palette (bg-info/bg-success/bg-warn).
   Connected: "bg-success",
   Error: "bg-destructive",
   Stale: "bg-warn",
   Pending: "bg-warn",
 }
-
 
 const TYPE_LABEL: Record<Credential["type"], string> = {
   AI_CLI_TOKEN: "ai cli",
@@ -153,10 +141,8 @@ export default function CredentialsPage() {
   // Hiding what would 403 beats letting users click into dead-ends.
   const canUpdate = abilities.can("update", "Credential")
   const canDelete = abilities.can("delete", "Credential")
-  const [activeTab, setActiveTab] = React.useState<"all" | "needs">("all")
-  const [search, setSearch] = React.useState("")
-  const [filterTag, setFilterTag] = React.useState<string>("all")
-  const [filterScope, setFilterScope] = React.useState<string>("all")
+  const [filters, setFilters] = React.useState<CredentialFilters>(EMPTY_CREDENTIAL_FILTERS)
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
   const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
@@ -166,6 +152,11 @@ export default function CredentialsPage() {
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
   const [bulkDeleting, setBulkDeleting] = React.useState(false)
+
+  // Tool readiness (§2.3, blocker #3): "the secret is valid" and "the CLI that
+  // reads it exists in the container" are different questions, and only the
+  // second one predicts whether the agent's next command works.
+  const readiness = useCredentialReadiness(workspaceId)
 
   // Cancel an in-flight fetch when the workspace changes so a slower
   // response from the previous workspace can't resolve later and overwrite
@@ -196,6 +187,7 @@ export default function CredentialsPage() {
       last_used_at: c.last_used_at ?? null,
       last_used_ips: Array.isArray(c.last_used_ips) ? c.last_used_ips : [],
       tags: Array.isArray(c.tags) ? c.tags : [],
+      crew_ids: Array.isArray(c.crew_ids) ? c.crew_ids : [],
     }))
     setCredentials(normalised)
     // #1085: any successful load clears a stale error — otherwise a full-page
@@ -236,12 +228,14 @@ export default function CredentialsPage() {
     return () => { abortRef.current?.abort() }
   }, [loadData])
 
-  // Bulk-select is per-workspace state: without this, switching workspaces
-  // leaves stale ids selected, floating the "N selected" bar over the new
-  // workspace's rows and letting bulk-delete fire DELETEs against the
-  // previous workspace's credential ids.
+  // Bulk-select and facets are per-workspace state: without this, switching
+  // workspaces leaves stale ids selected, floating the "N selected" bar over
+  // the new workspace's rows and letting bulk-delete fire DELETEs against the
+  // previous workspace's credential ids. The facets reset for the same
+  // reason — a crew id from the old workspace filters the new one to nothing.
   React.useEffect(() => {
     setSelectedIds(new Set())
+    setFilters(EMPTY_CREDENTIAL_FILTERS)
   }, [workspaceId])
 
   const handleRefresh = React.useCallback(() => {
@@ -344,45 +338,27 @@ export default function CredentialsPage() {
 
   // KPI counts
   const kpis = React.useMemo(() => {
-    let active = 0, errors = 0, expiring = 0, linked = 0
-    const now = Date.now()
-    const expiringWindow = 30 * 24 * 3600 * 1000
+    let active = 0, expiring = 0, linked = 0
     for (const c of credentials) {
-      const s = deriveStatus(c)
-      if (s === "Connected") active++
-      if (s === "Error") errors++
-      if (c.token_expires_at) {
-        const exp = new Date(c.token_expires_at).getTime()
-        if (!Number.isNaN(exp) && exp > now && exp - now < expiringWindow) expiring++
-      }
+      if (deriveCredentialStatus(c) === "Connected") active++
+      const days = daysUntilExpiry(c)
+      if (days !== null && days >= 0 && days < EXPIRY_WARNING_DAYS) expiring++
       if ((c._count_agent_credentials ?? 0) > 0) linked++
     }
-    return { active, errors, expiring, linked }
+    return { active, expiring, linked }
   }, [credentials])
 
-  const needsAttention = React.useMemo(
-    () => credentials.filter((c) => {
-      const s = deriveStatus(c)
-      // Pending = agent-proposed, waiting for the human to approve/reject.
-      if (s === "Error" || s === "Stale" || s === "Pending") return true
-      if (c.token_expires_at) {
-        const exp = new Date(c.token_expires_at).getTime()
-        if (!Number.isNaN(exp) && exp - Date.now() < 30 * 24 * 3600 * 1000) return true
-      }
-      return false
-    }),
-    [credentials],
-  )
+  const attentionList = React.useMemo(() => credentials.filter(needsAttention), [credentials])
 
   // How many of the needs-attention items are agent-proposed pending approvals
   // (vs true problem states) — drives the banner copy so we don't tell an
   // operator to "rotate/revoke" a credential that just needs approve/reject.
   const pendingCount = React.useMemo(
-    () => credentials.filter((c) => deriveStatus(c) === "Pending").length,
+    () => credentials.filter((c) => deriveCredentialStatus(c) === "Pending").length,
     [credentials],
   )
 
-  // Distinct tags from data — drives the filter dropdown so we never
+  // Distinct tags from data — drives the sidebar's Tag facet so we never
   // show tags the workspace doesn't have.
   const tagsInUse = React.useMemo(() => {
     const set = new Set<string>()
@@ -392,27 +368,29 @@ export default function CredentialsPage() {
     return Array.from(set).sort()
   }, [credentials])
 
-  const filtered = React.useMemo(() => {
-    const base = activeTab === "needs" ? needsAttention : credentials
-    return base.filter((c) => {
-      if (filterTag !== "all" && !c.tags.includes(filterTag)) return false
-      if (filterScope !== "all" && c.scope !== filterScope) return false
-      if (search.trim()) {
-        const q = search.toLowerCase()
-        const hay = [c.name, c.account_label ?? "", c.description ?? "", ...(c.tags ?? [])].join(" ").toLowerCase()
-        if (!hay.includes(q)) return false
-      }
-      return true
-    })
-  }, [credentials, needsAttention, activeTab, filterTag, filterScope, search])
+  const missingToolCount = React.useMemo(
+    () => credentials.filter((c) => readiness.missingToolIds.has(c.id)).length,
+    [credentials, readiness.missingToolIds],
+  )
+
+  const categories = React.useMemo(() => buildCategoryFacet(credentials), [credentials])
+  const scopes = React.useMemo(
+    () => buildScopeFacet(credentials, readiness.crewNames),
+    [credentials, readiness.crewNames],
+  )
+
+  const filtered = React.useMemo(
+    () => applyCredentialFilters(credentials, filters, readiness.missingToolIds),
+    [credentials, filters, readiness.missingToolIds],
+  )
 
   const sorted = React.useMemo(() => {
     const out = [...filtered]
     out.sort((a, b) => {
       // Errors always rank to the top so users see breakage on every
       // sort, regardless of which key they picked.
-      const aErr = deriveStatus(a) === "Error" ? 0 : 1
-      const bErr = deriveStatus(b) === "Error" ? 0 : 1
+      const aErr = deriveCredentialStatus(a) === "Error" ? 0 : 1
+      const bErr = deriveCredentialStatus(b) === "Error" ? 0 : 1
       if (aErr !== bErr) return aErr - bErr
       if (sortKey === "name") return a.name.localeCompare(b.name)
       if (sortKey === "created") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -436,15 +414,19 @@ export default function CredentialsPage() {
   ) : null
 
   // Canonical page chrome: the SubBar (identity + actions) directly under the
-  // global top bar, then a scrollable, padded content region — the same shape
-  // journal/admin/routines use. SubBar provides no padding of its own, so the
-  // content wrapper supplies it.
+  // global top bar, then the explorer rail + a scrollable, padded content
+  // region — the same shape Integrations uses.
   const subBar = (
     <SubBar
       icon={Key}
       title="Credentials"
       ariaLabel="Credentials"
-      description="Shared secrets, API keys, and CLI tokens for your agents"
+      description={
+        credentials.length === 0
+          ? "Shared secrets, API keys, and CLI tokens for your agents"
+          : `${credentials.length} secret${credentials.length === 1 ? "" : "s"}` +
+            (missingToolCount > 0 ? ` · ${missingToolCount} waiting on a tool` : "")
+      }
       actions={headerActions}
     />
   )
@@ -464,11 +446,46 @@ export default function CredentialsPage() {
     )
   }
 
+  // The rail is a filter surface. With nothing to filter (empty vault) or
+  // nothing loaded (error), it would be a column of zeroes next to a message
+  // asking the user to do something else.
+  const showSidebar = !loadError && credentials.length > 0
+
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {subBar}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-4 md:p-6">
+      <div className="flex flex-1 overflow-hidden">
+        {showSidebar && (
+          <aside
+            className={cn(
+              "shrink-0 border-r border-white/[0.06] bg-card transition-all",
+              sidebarCollapsed ? "w-9 overflow-hidden" : "w-[280px]",
+            )}
+          >
+            {sidebarCollapsed ? (
+              <div className="flex h-full flex-col items-center pt-1.5">
+                <SidebarCollapseButton collapsed onToggle={() => setSidebarCollapsed(false)} />
+              </div>
+            ) : (
+              <CredentialsSidebar
+                filters={filters}
+                onFiltersChange={setFilters}
+                counts={{
+                  all: credentials.length,
+                  attention: attentionList.length,
+                  missingTool: missingToolCount,
+                }}
+                categories={categories}
+                scopes={scopes}
+                tags={tagsInUse}
+                onToggleCollapse={() => setSidebarCollapsed(true)}
+              />
+            )}
+          </aside>
+        )}
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="p-4 md:p-6">
       {loadError ? (
         // Load failure — visually and semantically distinct from the
         // empty state: red accent, explicit error copy, and a Retry
@@ -508,42 +525,24 @@ export default function CredentialsPage() {
             <KpiCard label="Active" value={kpis.active}
               valueColor={kpis.active > 0 ? "rgb(52, 211, 153)" : undefined}
               subtitle={`of ${credentials.length} total`} />
+            <KpiCard label="Tools missing" value={missingToolCount}
+              valueColor={missingToolCount > 0 ? "rgb(248, 113, 113)" : undefined}
+              subtitle={
+                readiness.loading
+                  ? "checking crews…"
+                  : readiness.crewsChecked === 0
+                    ? "no crew reported"
+                    : `across ${readiness.crewsChecked} crew${readiness.crewsChecked === 1 ? "" : "s"}`
+              } />
             <KpiCard label="Expiring" value={kpis.expiring}
               valueColor={kpis.expiring > 0 ? "rgb(251, 191, 36)" : undefined}
               subtitle="next 30 days" />
-            <KpiCard label="Errors" value={kpis.errors}
-              valueColor={kpis.errors > 0 ? "rgb(248, 113, 113)" : undefined}
-              subtitle={kpis.errors > 0 ? "needs attention" : "all healthy"} />
             <KpiCard label="Linked agents" value={kpis.linked}
               subtitle={`across ${credentials.length} credential${credentials.length === 1 ? "" : "s"}`} />
           </div>
 
-          {/* Tab strip */}
-          <TabBar
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as typeof activeTab)}
-            layoutId="credentials-tabs-indicator"
-            ariaLabel="Credential filter"
-            className="h-9"
-          >
-            <TabBar.Item value="all">
-              <span className="inline-flex items-center gap-1.5">
-                All
-                <span className="text-[10px] font-mono opacity-60">{credentials.length}</span>
-              </span>
-            </TabBar.Item>
-            <TabBar.Item value="needs">
-              <span className="inline-flex items-center gap-1.5">
-                Needs attention
-                {needsAttention.length > 0 && (
-                  <Badge variant="destructive" className="h-4 px-1.5 text-[10px]">{needsAttention.length}</Badge>
-                )}
-              </span>
-            </TabBar.Item>
-          </TabBar>
-
           {/* Banner */}
-          {needsAttention.length > 0 && activeTab === "all" && (
+          {attentionList.length > 0 && filters.status === "all" && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -551,49 +550,27 @@ export default function CredentialsPage() {
             >
               <AlertTriangle className="h-3.5 w-3.5 text-warn shrink-0" />
               <span className="text-foreground/90">
-                <strong>{needsAttention.length}</strong> credential{needsAttention.length === 1 ? "" : "s"}
+                <strong>{attentionList.length}</strong> credential{attentionList.length === 1 ? "" : "s"}
                 {" "}need attention &mdash;{" "}
-                {pendingCount === needsAttention.length
+                {pendingCount === attentionList.length
                   ? "approve or reject the agent-proposed ones."
                   : pendingCount > 0
                     ? "approve the pending ones; rotate, refresh, or revoke the rest before they break agent runs."
                     : "rotate, refresh, or revoke them before they break agent runs."}
               </span>
-              <button onClick={() => setActiveTab("needs")} className="ml-auto text-warn hover:text-warn font-medium">
+              <button
+                onClick={() => setFilters((f) => ({ ...f, status: "attention" }))}
+                className="ml-auto text-warn hover:text-warn font-medium"
+              >
                 Review →
               </button>
             </motion.div>
           )}
 
-          {/* Filter row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <SidebarSearch
-              value={search}
-              onValueChange={setSearch}
-              placeholder="Search by name, tag, or description…"
-              className="min-w-[200px] max-w-md"
-            />
-            <Select value={filterTag} onValueChange={setFilterTag}>
-              <SelectTrigger className="h-8 w-[140px] text-xs">
-                <SelectValue placeholder="Tags" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All tags</SelectItem>
-                {tagsInUse.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={filterScope} onValueChange={setFilterScope}>
-              <SelectTrigger className="h-8 w-[120px] text-xs">
-                <SelectValue placeholder="Scope" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All scopes</SelectItem>
-                <SelectItem value="WORKSPACE">Workspace</SelectItem>
-                <SelectItem value="CREW">Crew</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Sort row. Search, category, scope and tag all live in the rail —
+              two places to narrow one list is how the old filter row and the
+              tab strip ended up disagreeing. */}
+          <div className="flex items-center gap-2 flex-wrap justify-end">
             <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
               <SelectTrigger className="h-8 w-[150px] text-xs">
                 <ArrowUpDown className="h-3 w-3 mr-1.5 opacity-60" />
@@ -618,15 +595,16 @@ export default function CredentialsPage() {
                   screens; the Table's built-in overflow-x-auto container
                   (see components/ui/table.tsx) turns that into horizontal
                   scroll instead of column crush. */}
-              <Table className="min-w-[720px]">
+              <Table className="min-w-[800px]">
                 <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur">
                   <TableRow>
                     <TableHead className="w-[28px]"></TableHead>
                     <TableHead className="w-[36px]"></TableHead>
                     <TableHead>Name</TableHead>
-                    <TableHead className="w-[180px]">Tags</TableHead>
-                    <TableHead className="w-[140px]">Used by</TableHead>
-                    <TableHead className="w-[140px]">Last used</TableHead>
+                    <TableHead className="w-[170px]">Readiness</TableHead>
+                    <TableHead className="w-[150px]">Tags</TableHead>
+                    <TableHead className="w-[120px]">Used by</TableHead>
+                    <TableHead className="w-[130px]">Last used</TableHead>
                     <TableHead className="w-[80px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -638,6 +616,8 @@ export default function CredentialsPage() {
                       selected={selectedIds.has(cred.id)}
                       canUpdate={canUpdate}
                       canDelete={canDelete}
+                      gaps={readiness.gapsByCredential.get(cred.id) ?? []}
+                      readinessKnown={readiness.crewsChecked > 0}
                       onToggleSelect={() => toggleSelected(cred.id)}
                       onOpen={() => { setDetailCredential(cred); setDetailOpen(true) }}
                       onEdit={() => handleEdit(cred)}
@@ -758,6 +738,7 @@ export default function CredentialsPage() {
           knownTags={tagsInUse}
         />
       )}
+          </div>
         </div>
       </div>
     </div>
@@ -771,6 +752,10 @@ interface CredentialRowProps {
   canUpdate: boolean
   /** CASL "delete" on Credential — shows Delete + the bulk-select checkbox. */
   canDelete: boolean
+  /** Crews that can use this credential but lack the CLI that reads it. */
+  gaps: CredentialToolGap[]
+  /** False when no crew answered the readiness endpoint — see below. */
+  readinessKnown: boolean
   onToggleSelect: () => void
   onOpen: () => void
   onEdit: () => void
@@ -779,13 +764,14 @@ interface CredentialRowProps {
 
 // Single row, single style. Provider is an icon prefix on the name —
 // not a column, not a group header. Type is a tiny inline badge.
-function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, onOpen, onEdit, onDelete }: CredentialRowProps) {
-  const derived = deriveStatus(cred)
+function CredentialRow({
+  cred, selected, canUpdate, canDelete, gaps, readinessKnown,
+  onToggleSelect, onOpen, onEdit, onDelete,
+}: CredentialRowProps) {
+  const derived = deriveCredentialStatus(cred)
   const brand = getBrand(cred.provider)
   const BrandIcon = brand.Icon
-  const expiresIn = cred.token_expires_at
-    ? Math.floor((new Date(cred.token_expires_at).getTime() - Date.now()) / (24 * 3600 * 1000))
-    : null
+  const expiresIn = daysUntilExpiry(cred)
   const lastUsed = cred.last_used_at ? formatRelativeTime(cred.last_used_at) : null
 
   return (
@@ -867,6 +853,9 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
         </div>
       </TableCell>
       <TableCell>
+        <ReadinessCell gaps={gaps} known={readinessKnown} />
+      </TableCell>
+      <TableCell>
         <div className="flex items-center gap-1 flex-wrap">
           {cred.tags.length === 0 ? (
             <span className="text-[10px] text-muted-foreground-soft">—</span>
@@ -917,5 +906,40 @@ function CredentialRow({ cred, selected, canUpdate, canDelete, onToggleSelect, o
         </div>
       </TableCell>
     </TableRow>
+  )
+}
+
+/**
+ * The readiness cell has THREE states, not two. "No gap reported" and "nobody
+ * reported" look identical in the data and mean opposite things — a green
+ * "ready" we did not earn is exactly the false reassurance §2.3 exists to
+ * remove, so an unchecked workspace gets an em dash and a tooltip.
+ */
+function ReadinessCell({ gaps, known }: { gaps: CredentialToolGap[]; known: boolean }) {
+  if (gaps.length > 0) {
+    const tools = Array.from(new Set(gaps.map((g) => g.tool).filter(Boolean)))
+    const crews = Array.from(new Set(gaps.map((g) => g.crewName)))
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full border border-warn/35 bg-warn/[0.08] px-2 py-0.5 text-[10px] text-warn"
+        title={`Missing in ${crews.join(", ")} — add the devcontainer feature and rebuild`}
+      >
+        <PackageX className="h-3 w-3" />
+        {tools.length > 0 ? `needs ${tools.join(", ")}` : "tool missing"}
+      </span>
+    )
+  }
+  if (!known) {
+    return (
+      <span className="text-[10px] text-muted-foreground-soft" title="No crew reported its tool inventory yet.">
+        —
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/[0.08] px-2 py-0.5 text-[10px] text-success">
+      <CheckCircle2 className="h-3 w-3" />
+      ready
+    </span>
   )
 }
