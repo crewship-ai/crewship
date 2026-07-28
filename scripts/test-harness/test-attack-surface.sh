@@ -132,6 +132,23 @@ _is_public_url() {
     *:*)    host="${host%%:*}" ;;
   esac
   host="$(printf '%s' "$host" | /usr/bin/tr '[:upper:]' '[:lower:]')"
+  # One address has many spellings, and the literal patterns below only know a
+  # couple of them. Fold the rest in first, or `[::ffff:192.168.1.201]` — dev2
+  # reached through a v4-mapped literal — reads as public and B1–B6 go at an
+  # internal endpoint.
+  case "$host" in
+    *:*.*.*.*) host="${host##*:}" ;;      # ::ffff:192.168.1.201 → 192.168.1.201
+    *:*)
+      # ::1 and 0:0:0:0:0:0:0:1 are one address, as are :: and 0:0:…:0. Drop
+      # every zero and separator: loopback leaves "1", unspecified leaves
+      # nothing, and anything else keeps hex for the prefix cases below. `1::`
+      # also strips to "1" and would be called private — a false SKIP, which is
+      # the harmless direction: we decline to test rather than test the wrong
+      # layer, and it is loud in the summary either way.
+      local z="${host//:/}"; z="${z//0/}"
+      [[ -z "$z" || "$z" == "1" ]] && return 1
+      ;;
+  esac
   case "$host" in
     ''|localhost|*.localhost|*.local|*.internal) return 1 ;;
     127.*|0.0.0.0|::1|::|169.254.*) return 1 ;;
