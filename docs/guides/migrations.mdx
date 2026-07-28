@@ -182,7 +182,7 @@ Rules the build enforces (`internal/database/migrate_version_scheme.go`, and the
 
 Two guards stand between a collision and your data, and they work at different times.
 
-**At review time**, `scripts/lint-migrations` (CI job "Lint migrations") fingerprints every migration entry — version, name, *and the body of the referenced SQL* — and compares against the PR's base ref. Changing an entry that already exists on `main` fails the check. So a forked schema does not reach `main`.
+**At review time**, `scripts/lint-migrations` (workflow **Migration Lint**, job "Lint migrations") fingerprints every migration entry — version, name, *and the body of the referenced SQL* — and compares against the PR's base ref. Changing an entry that already exists on `main` fails the check. So a forked schema does not reach `main`.
 
 **At startup**, the collision guard refuses to run when the database has a version applied under a different name than the binary declares:
 
