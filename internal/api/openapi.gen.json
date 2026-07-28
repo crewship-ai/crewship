@@ -1719,6 +1719,36 @@
         ]
       }
     },
+    "/api/v1/agents/{agentId}/credential-bindings": {
+      "get": {
+        "operationId": "get_api_v1_agents_agentId_credential-bindings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
     "/api/v1/agents/{agentId}/credentials": {
       "get": {
         "operationId": "get_api_v1_agents_agentId_credentials",
@@ -4262,6 +4292,83 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/bindings": {
+      "get": {
+        "operationId": "get_api_v1_credentials_bindings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_credentials_bindings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/bindings/{bindingId}": {
+      "delete": {
+        "operationId": "delete_api_v1_credentials_bindings_bindingId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bindingId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

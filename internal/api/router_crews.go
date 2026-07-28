@@ -414,6 +414,23 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("PUT", "/api/v1/credentials/reveal-policy", roleInline, reveal.SetPolicy)
 	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/sensitivity", roleInline, reveal.SetSensitivity)
 
+	// Credential bindings — (scope, slot) → credential (PRD §2.5b). Literal
+	// paths, registered before the /{credentialId} wildcard for the same
+	// reason reveal-policy is: Go 1.22's mux prefers the more specific
+	// literal, so "bindings" is never read as a credential id.
+	//
+	// roleManage on the mutating pair, the same tier as deleting a credential:
+	// a binding decides which account lands in a container, which is not the
+	// create tier that lets a MANAGER add one. The handlers repeat the check
+	// rather than trust the wiring — this file is exactly the place a route
+	// gets re-registered and quietly loses its gate (#809).
+	bindings := NewCredentialBindingHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/credentials/bindings", authed(wsCtx(http.HandlerFunc(bindings.List))))
+	r.authedMut("POST", "/api/v1/credentials/bindings", roleManage, bindings.Create)
+	r.authedMut("DELETE", "/api/v1/credentials/bindings/{bindingId}", roleManage, bindings.Delete)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/credential-bindings",
+		authed(wsCtx(http.HandlerFunc(bindings.ResolveForAgent))))
+
 	// Credential custom fields (PRD-CREDENTIALS-V2-2026 §2.2). The multi-part
 	// half of a credential: AWS wants access key id + secret + region, a
 	// service account wants a blob + a filename, and one `encrypted_value`
@@ -430,6 +447,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/fields", roleCreate, fields.Create)
 	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/fields/{fieldKey}", roleCreate, fields.Update)
 	r.authedMut("DELETE", "/api/v1/credentials/{credentialId}/fields/{fieldKey}", roleCreate, fields.Delete)
+
 	// #1083: wrap in wsCtx like every other credentials route. The response
 	// carries no tenant data, but requiring workspace membership keeps this
 	// route uniform with the rest of the credentials surface.

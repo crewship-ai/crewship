@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -129,7 +130,7 @@ func TestRepairLedger_DryRunShowsThePlanAndChangesNothing(t *testing.T) {
 }
 
 func TestRepairLedger_RepairsAndLetsTheDatabaseBoot(t *testing.T) {
-	_, _, to := stageRenumberedLedger(t)
+	_, from, to := stageRenumberedLedger(t)
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Precondition: this database really is unbootable. Without it the test
@@ -162,10 +163,26 @@ func TestRepairLedger_RepairsAndLetsTheDatabaseBoot(t *testing.T) {
 		t.Errorf("highest applied version = %d, want %d", got, to)
 	}
 
-	// The point of the exercise: it boots now, and the migration whose
-	// number was freed actually runs rather than being skipped.
+	// The point of the exercise: the collision is gone, and the migration
+	// whose number was freed is queued to run rather than being skipped.
+	//
+	// Migrate must return nil, not merely stop complaining about a collision.
+	// That is only assertable because staging goes through MigrateSkipping,
+	// which produces a database on which the freed migration genuinely never
+	// ran. The weaker "no collision in the error" reading was needed while the
+	// fixture staged itself by migrating to head and deleting a ledger row —
+	// there the freed migration's SQL HAD run, so the final Migrate re-applied
+	// it, and that only worked while it happened to be idempotent. The first
+	// `ALTER TABLE ... ADD COLUMN` to land in that slot failed the test for a
+	// reason that had nothing to do with the repair.
 	if err := database.Migrate(context.Background(), openStagedDB(t), quiet); err != nil {
-		t.Fatalf("still refuses to migrate after the repair: %v", err)
+		t.Fatalf("migrate after repair: %v", err)
+	}
+	if !strings.Contains(out, "apply") {
+		t.Errorf("output should list the freed version as pending, got:\n%s", out)
+	}
+	if !strings.Contains(out, "v"+strconv.Itoa(from)) {
+		t.Errorf("output should name the freed version v%d, got:\n%s", from, out)
 	}
 }
 
