@@ -19,7 +19,9 @@ import {
   ListTree,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -357,13 +359,19 @@ export function CredentialDetailSheet({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="sm:max-w-[520px] p-0 flex flex-col">
-          <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+      {/* Centred, like New crew and Add a credential. A side sheet reads as an
+          inspector docked beside the list, which is why this one kept the list
+          visible behind it — but the detail view is where rotation, reveal and
+          classification live, and those deserve the screen rather than a
+          glance sideways. Wider than the create dialog because this one is
+          tabbed: Fields and Used-by are tables, not field lists. */}
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[760px] max-h-[85vh] p-0 overflow-hidden flex flex-col">
+          <DialogHeader className="px-5 pt-4 pb-3 border-b border-white/10">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <SheetTitle className="text-base font-mono truncate">{credential.name}</SheetTitle>
+                  <DialogTitle className="text-base font-mono truncate">{credential.name}</DialogTitle>
                   {getBrand(credential.provider).cli && (
                     <Badge
                       variant="outline"
@@ -386,9 +394,9 @@ export function CredentialDetailSheet({
                     </Badge>
                   )}
                 </div>
-                <SheetDescription className="text-xs truncate">
+                <DialogDescription className="text-xs truncate">
                   {credential.account_label || credential.description || credential.provider}
-                </SheetDescription>
+                </DialogDescription>
               </div>
               {onEdit && canUpdate && (
                 <Button
@@ -409,7 +417,7 @@ export function CredentialDetailSheet({
                 ))}
               </div>
             )}
-          </SheetHeader>
+          </DialogHeader>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1 flex flex-col">
             <TabsList className="px-3 mt-2 justify-start bg-transparent border-b border-white/10 rounded-none h-9">
@@ -961,8 +969,8 @@ export function CredentialDetailSheet({
               </TabsContent>
             </div>
           </Tabs>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <RevealDialog
         workspaceId={workspaceId}

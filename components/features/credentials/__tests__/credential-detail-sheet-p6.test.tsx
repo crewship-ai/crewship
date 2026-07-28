@@ -379,3 +379,26 @@ describe("classification control", () => {
     expect(screen.queryByRole("button", { name: "SEALED" })).not.toBeInTheDocument()
   })
 })
+
+// The detail view opens centred, like New crew and like Add a credential.
+// One create/inspect shape across the app, not two.
+//
+// role="dialog" is not the assertion: Radix builds Sheet on the Dialog
+// primitive, so a right-hand panel answers that query too — a first attempt at
+// this test passed against the very sheet it was written to replace. The
+// ui-kit's data-slot is what separates them.
+describe("container", () => {
+  it("is a centred dialog, not a side sheet", () => {
+    h.role = "OWNER"
+    renderSheet()
+    const shell = screen.getByRole("dialog")
+    expect(shell).toHaveAttribute("data-slot", "dialog-content")
+    expect(shell).not.toHaveAttribute("data-slot", "sheet-content")
+  })
+
+  it("still names itself by the credential, so the modal is not an unlabelled box", () => {
+    h.role = "OWNER"
+    renderSheet()
+    expect(screen.getByRole("dialog", { name: /GH_TOKEN|cred/i })).toBeInTheDocument()
+  })
+})

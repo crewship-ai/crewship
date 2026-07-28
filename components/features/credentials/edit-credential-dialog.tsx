@@ -5,7 +5,9 @@
 // difference is "leave Value empty to preserve the existing secret".
 
 import * as React from "react"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog"
 import { CredentialForm, type CredentialFormValues, type CredentialType } from "./credential-form"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -82,15 +84,19 @@ export function EditCredentialDialog({
     }
   }
 
+  // Centred like every other create/edit surface. This one was NAMED Dialog
+  // and rendered as a side sheet, so Edit slid out from the right even after
+  // the detail view stopped doing it — the name hid the inconsistency from
+  // anyone grepping for it.
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-[480px] p-0 flex flex-col">
-        <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
-          <SheetTitle className="text-base font-mono">{credential.name}</SheetTitle>
-          <SheetDescription className="text-xs">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[560px] max-h-[85vh] p-0 overflow-hidden flex flex-col">
+        <DialogHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+          <DialogTitle className="text-base font-mono">{credential.name}</DialogTitle>
+          <DialogDescription className="text-xs">
             Update metadata or paste a new value to rotate the secret.
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <CredentialForm
@@ -103,7 +109,7 @@ export function EditCredentialDialog({
             knownTags={knownTags}
           />
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }
