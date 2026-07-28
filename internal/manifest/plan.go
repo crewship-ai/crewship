@@ -53,11 +53,21 @@ type Plan struct {
 	// plan will leave as PENDING (no value supplied). The CLI prints
 	// this list at the end so the user knows to fill values in.
 	PendingCredentials []string
-	// SkippedChannels names notification channels the manifest declared but
-	// this run could not build — the secret they read from was not supplied.
-	// Reported rather than silently dropped: an operator who forgot
-	// --from-env needs to see which variables would have been read.
-	SkippedChannels []string
+	// Skipped names things the manifest declared that this run cannot
+	// apply, and what has to be supplied to change that — a notification
+	// channel whose secret was not provided, a Composio grant with no
+	// connected account to act as.
+	//
+	// They are reported rather than silently dropped, and reported rather
+	// than PLANNED: a grant with no user_id used to be planned as a create,
+	// refused by the server, downgraded to a warning and counted as applied,
+	// so every run printed "1 created" for something that never existed and
+	// the plan never settled.
+	//
+	// One list, because they are one fact — "declared, not applied, here is
+	// what you owe it" — and a reader scanning the output should not have to
+	// learn two places to look.
+	Skipped []string
 	// Warnings carries non-fatal advisories surfaced during plan
 	// construction. They do NOT block apply; the CLI prints them
 	// before exit so the operator sees them next to the summary.

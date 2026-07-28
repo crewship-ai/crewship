@@ -142,7 +142,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		// the preview someone reads before committing, and the first version
 		// of this printed skips only on the real run — so the plan quietly
 		// omitted the one channel it was not going to create.
-		printSkippedChannels(plan)
+		printSkipped(plan)
 		printWarnings(plan)
 		return nil
 	}
@@ -176,7 +176,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// fool downstream tooling into thinking apply succeeded.
 	if err != nil {
 		printSummary(plan, result)
-		printSkippedChannels(plan)
+		printSkipped(plan)
 		printWarnings(plan)
 		if errors.Is(err, manifest.ErrConfirmationRequired) {
 			return fmt.Errorf("aborted: destructive plan requires confirmation (pass --yes)")
@@ -199,7 +199,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stdout, "  - %s\n", env)
 		}
 	}
-	printSkippedChannels(plan)
+	printSkipped(plan)
 	printWarnings(plan)
 
 	provisionHintForCrews(bundle)
@@ -312,20 +312,19 @@ func provisionHintForCrews(b *manifest.Bundle) {
 	}
 }
 
-// printSkippedChannels reports channels the manifest declared and this run
-// could not build.
+// printSkipped reports things the manifest declared that this run could not
+// apply, each naming what has to be supplied.
 //
 // Deliberately not folded into warnings: a warning is advisory, this is a
 // thing the file asked for and the run did not do. Naming the variable is
 // what turns "why is Discord not there?" into a one-line answer.
-func printSkippedChannels(plan *manifest.Plan) {
-	if plan == nil || len(plan.SkippedChannels) == 0 {
+func printSkipped(plan *manifest.Plan) {
+	if plan == nil || len(plan.Skipped) == 0 {
 		return
 	}
 	fmt.Fprintln(os.Stdout)
-	fmt.Fprintf(os.Stdout, "%sSKIPPED notification channels (no value supplied — pass --from-env or --secrets-file):%s\n",
-		cli.Yellow, cli.Reset)
-	for _, line := range plan.SkippedChannels {
+	fmt.Fprintf(os.Stdout, "%sSKIPPED (declared but not applied):%s\n", cli.Yellow, cli.Reset)
+	for _, line := range plan.Skipped {
 		fmt.Fprintf(os.Stdout, "  - %s\n", line)
 	}
 }

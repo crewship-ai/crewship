@@ -92,11 +92,14 @@ func TestDemoManifest_PlansTheChannelWhenSecretsAreSupplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
+	// No composio_grant here on purpose: the demo's grant carries no
+	// user_id, so it is reported as skipped rather than planned. Supplying
+	// the API key does not change that — the key configures the workspace,
+	// the user_id names a connected account nobody has connected.
 	for _, want := range []struct{ kind, needle string }{
 		{"notification_channel", "demo-alerts"},
 		{"notification_grant", "demo-alerts:demo-riley"},
 		{"composio", "api-key"},
-		{"composio_grant", "demo-riley:gmail"},
 	} {
 		if findPlanItem(plan, want.kind, want.needle) == nil {
 			t.Errorf("plan is missing %s %q; got %s", want.kind, want.needle, planKinds(plan))
@@ -113,8 +116,15 @@ func TestDemoManifest_ReportsWhatItSkippedWithoutSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPlan without secrets must still succeed: %v", err)
 	}
-	if len(plan.SkippedChannels) != 1 || !strings.Contains(plan.SkippedChannels[0], "DISCORD_WEBHOOK_URL") {
-		t.Errorf("want the channel reported as skipped naming its variable, got %v", plan.SkippedChannels)
+	// Two: the channel with no webhook URL, and the Composio grant with no
+	// connected account. Asserted by content rather than by count so adding
+	// a third skippable thing to the demo does not fail this for the wrong
+	// reason.
+	joinedSkips := strings.Join(plan.Skipped, " | ")
+	for _, want := range []string{"DISCORD_WEBHOOK_URL", "user_id"} {
+		if !strings.Contains(joinedSkips, want) {
+			t.Errorf("the skip list must name %q, got %v", want, plan.Skipped)
+		}
 	}
 	joined := strings.Join(plan.Warnings, " | ")
 	if !strings.Contains(joined, "COMPOSIO_API_KEY") {

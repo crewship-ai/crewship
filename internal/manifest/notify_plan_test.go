@@ -97,8 +97,8 @@ func TestNotifyPlan_SkipsAChannelWhoseSecretIsMissing(t *testing.T) {
 	if item := findPlanItem(plan, "notification_channel", "eng-alerts"); item != nil {
 		t.Errorf("channel was planned despite having no value: %s", item.Description)
 	}
-	if len(plan.SkippedChannels) != 1 || !strings.Contains(plan.SkippedChannels[0], "DISCORD_WEBHOOK_URL") {
-		t.Errorf("the skip must be reported and name the missing variable, got %v", plan.SkippedChannels)
+	if len(plan.Skipped) != 1 || !strings.Contains(plan.Skipped[0], "DISCORD_WEBHOOK_URL") {
+		t.Errorf("the skip must be reported and name the missing variable, got %v", plan.Skipped)
 	}
 }
 
@@ -191,11 +191,11 @@ func TestNotifyPlan_AnEmptyEnvValueCountsAsMissing(t *testing.T) {
 			if findPlanItem(plan, "notification_channel", "eng-alerts") != nil {
 				t.Error("a blank value must not create the channel")
 			}
-			if len(plan.SkippedChannels) != 1 {
-				t.Fatalf("want the channel reported as skipped, got %v", plan.SkippedChannels)
+			if len(plan.Skipped) != 1 {
+				t.Fatalf("want the channel reported as skipped, got %v", plan.Skipped)
 			}
-			if !strings.Contains(plan.SkippedChannels[0], "DISCORD_WEBHOOK_URL") {
-				t.Errorf("the skip must name the variable to fill in, got %q", plan.SkippedChannels[0])
+			if !strings.Contains(plan.Skipped[0], "DISCORD_WEBHOOK_URL") {
+				t.Errorf("the skip must name the variable to fill in, got %q", plan.Skipped[0])
 			}
 		})
 	}

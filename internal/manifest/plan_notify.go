@@ -64,8 +64,9 @@ func (pb *planBuilder) planNotificationChannel(ch *NotificationChannel, remote [
 		// --from-env needs to know which variables would have been read, and
 		// the plan is where they are looking.
 		sort.Strings(missing)
-		pb.plan.SkippedChannels = append(pb.plan.SkippedChannels, fmt.Sprintf(
-			"%s (needs %s)", ch.Slug, strings.Join(missing, ", ")))
+		pb.plan.Skipped = append(pb.plan.Skipped, fmt.Sprintf(
+			"notification channel %s (needs %s — pass --from-env or --secrets-file)",
+			ch.Slug, strings.Join(missing, ", ")))
 		return
 	}
 
@@ -289,16 +290,17 @@ func (pb *planBuilder) planComposioGrants(agentSlug string, grants []ComposioToo
 			pb.appendItem(ActionUnchanged, "composio_grant", agentSlug+":"+g.Toolkit, nil)
 			continue
 		}
-		// Warned HERE, not from inside Exec. Exec-time warnings land on the
-		// plan object Apply builds internally, which is not the one the CLI
-		// prints — so they were invisible. This condition is knowable up
-		// front anyway: the bind endpoint requires a user_id, so a grant
-		// without one cannot succeed, and saying so in the plan is better
-		// than discovering it after the run.
+		// Decided HERE, not by trying. The bind endpoint requires a user_id,
+		// so a grant without one cannot succeed — planning a create for it
+		// meant the server refused, the refusal was downgraded to a warning
+		// nobody saw (Exec-time warnings land on Apply's internal plan, not
+		// the printed one), and the run reported "1 created" for a grant
+		// that never existed. Every apply, forever.
 		if g.UserID == "" {
-			pb.plan.Warnings = append(pb.plan.Warnings, fmt.Sprintf(
-				"composio: %s → %s has no user_id, so it stays pending. The id belongs to a connected account: connect one in Integrations → Tools, then set user_id on the grant.",
+			pb.plan.Skipped = append(pb.plan.Skipped, fmt.Sprintf(
+				"composio grant %s → %s (no user_id — connect an account in Integrations → Tools, then set user_id on the grant)",
 				agentSlug, g.Toolkit))
+			continue
 		}
 		pb.appendItem(ActionCreate, "composio_grant", agentSlug+":"+g.Toolkit,
 			func(ctx context.Context, c *Client, _ Options) error {
