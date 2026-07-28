@@ -266,6 +266,13 @@ func (r *Router) emitDeliveryJournal(ctx context.Context, entryType journal.Entr
 	if ch.Provider != "" {
 		target = ch.Provider
 	}
+	// The title reaching here is the producer's, unredacted — the delivery
+	// path scrubs a COPY of the envelope, not this. A journal entry is a
+	// second egress: the Activity timeline renders it, exports and backups
+	// carry it. See notify.ScrubText.
+	title = notify.ScrubText(title)
+	detail = notify.ScrubText(detail)
+
 	payload := map[string]any{
 		"channel_id":   ch.ID,
 		"channel_type": string(ch.Type),

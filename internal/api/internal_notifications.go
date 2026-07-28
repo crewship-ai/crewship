@@ -266,12 +266,21 @@ func (h *AgentNotifyHandler) emitJournal(ctx context.Context, req agentNotifySen
 	if ch.Provider != "" {
 		target = ch.Provider
 	}
+	// Scrubbed HERE as well as at delivery. DeliverCategoryMessage takes its
+	// CategoryMessage by value, so the redaction it performs is on a copy —
+	// this function still holds the agent's raw title, and the journal is a
+	// second way out of the instance: it is rendered on the Activity
+	// timeline, exported, and captured in backups. #1518 removed this scrub
+	// believing the envelope one had replaced it.
+	title := notify.ScrubText(req.Title)
+	detail = notify.ScrubText(detail)
+
 	payload := map[string]any{
 		"channel_id":   ch.ID,
 		"channel_type": string(ch.Type),
 		"target":       target,
 		"category":     notify.CategoryAgentsMessage,
-		"title":        req.Title,
+		"title":        title,
 		"agent_id":     req.AgentID,
 	}
 	if detail != "" {

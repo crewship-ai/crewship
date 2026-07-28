@@ -30,16 +30,49 @@ import (
 //     silence everyone else.
 //   - Only the matching category counts. Reporting a result under some other
 //     category is not saying "I finished" in the row being suppressed.
-func announcesOwnCompletion(dsl *DSL) bool {
+func announcesOwnCompletion(dsl *DSL, stepOutputs map[string]string) bool {
 	if dsl == nil {
 		return false
 	}
 	for i := range dsl.Steps {
-		if stepAnnouncesCompletion(dsl.Steps[i]) {
+		st := dsl.Steps[i]
+		if !stepAnnouncesCompletion(st) {
+			continue
+		}
+		// And it has to have actually LANDED. The first version stopped at
+		// the DSL text, which describes intent, not outcome: a notify step
+		// drops its notice once the per-recipient cap is reached, and its
+		// inbox write is best-effort behind a timeout. A routine that emitted
+		// progress notices first could therefore lose its own completion
+		// message AND have the generic journal notification suppressed behind
+		// it — the run reports COMPLETED and no channel receives anything.
+		//
+		// The step records what happened in its own output, so the outcome is
+		// available at the moment the claim is made.
+		if noticeLanded(stepOutputs[st.ID]) {
 			return true
 		}
 	}
 	return false
+}
+
+// noticeLanded reports whether a notify step's recorded output means the
+// notice reached someone.
+//
+// The markers are the step's own vocabulary (runner_notify.go): "capped",
+// "error", "skipped" and "preview" all mean nobody was written to.
+// "degraded" DID reach someone — the target could not be resolved and the
+// notice fell back to a workspace notice, which is precisely the audience the
+// journal notification would have reached.
+func noticeLanded(output string) bool {
+	if !strings.HasPrefix(output, "notified:") {
+		return false // the step did not run, or is not a notify step
+	}
+	switch strings.TrimPrefix(output, "notified:") {
+	case "capped", "error", "skipped", "preview":
+		return false
+	}
+	return true
 }
 
 func stepAnnouncesCompletion(st Step) bool {

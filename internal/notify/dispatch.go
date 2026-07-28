@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -479,7 +480,31 @@ func EventTypeForStatus(status string) string {
 	}
 }
 
-// ScrubText used to live here so the agent-send handler could redact a title
-// the delivery path did not cover. DeliverCategoryMessage now scrubs the
-// whole envelope for every producer, so the workaround — and the second
-// scrubber instance it constructed per call — is gone.
+// sharedScrubber is the one scrubber ScrubText uses. The version this
+// replaces compiled seventeen patterns on every call, on a path that runs
+// once per delivery.
+var sharedScrubber = sync.OnceValue(scrubber.New)
+
+// scrubberOnce exposes the shared instance so a test can prove it is shared.
+func scrubberOnce() *scrubber.Scrubber { return sharedScrubber() }
+
+// ScrubText redacts secrets in text that is about to leave the instance by
+// some route OTHER than a delivered notification.
+//
+// DeliverCategoryMessage redacts the whole envelope, but it takes
+// CategoryMessage by value — the copy it scrubs is not the caller's. A caller
+// that also writes the title to the Activity timeline, or into an error it
+// journals, is writing the raw one. Delivery is one egress; the journal is
+// another, and it is rendered in the UI, exported, and captured in backups.
+//
+// This existed before #1518 and was removed there, on the reasoning that the
+// envelope scrub had made it redundant. It had not: the agent-send handler
+// and the delivery-log journal both kept writing unredacted titles for
+// another release. Reinstated with the reason stated, so the next person to
+// find it does not draw the same conclusion.
+func ScrubText(s string) string {
+	if s == "" {
+		return ""
+	}
+	return sharedScrubber().Scrub(s)
+}

@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
 )
 
@@ -63,7 +66,14 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Source inbox item is gone — nothing left to render. Bump the
 			// attempt count so the row ages out instead of looping forever.
-			_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: source inbox item no longer exists")
+			// Named per producer: telling someone an inbox item is gone
+			// when the delivery never had one makes the loss
+			// unattributable.
+			source := "inbox item"
+			if strings.HasPrefix(d.SourceKind, journalKindPrefix) {
+				source = "journal entry"
+			}
+			_ = r.deliveries.MarkFailed(ctx, d.ID, "recovery: source "+source+" no longer exists")
 		} else {
 			r.logger.Warn("notifyroute: recovery: derive message", "error", err, "delivery_id", d.ID)
 		}
@@ -111,6 +121,18 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 // what let the live path and this one drift into reading a single hardcoded
 // key each.
 func (r *Router) deriveMessage(ctx context.Context, kind, sourceID string) (body, priority string, payload map[string]any, err error) {
+	// The journal bridge is a producer with NO inbox row — journalItem says
+	// so in its own comment — so re-deriving it from inbox_items could only
+	// ever return sql.ErrNoRows. Every observational category was therefore
+	// non-durable: one transient receiver failure lost the notification for
+	// good, while approvals and escalations retried, and the delivery log
+	// recorded a reason ("source inbox item no longer exists") that was not
+	// true of those rows. The journal is durable by construction; reading it
+	// is just reading the source the bridge actually used.
+	if strings.HasPrefix(kind, journalKindPrefix) {
+		return r.deriveJournalMessage(ctx, sourceID)
+	}
+
 	var payloadJSON string
 	err = r.db.QueryRowContext(ctx,
 		`SELECT COALESCE(body_md,''), priority, COALESCE(payload_json,'{}')
@@ -127,6 +149,38 @@ func (r *Router) deriveMessage(ctx context.Context, kind, sourceID string) (body
 		payload = nil
 	}
 	return body, priority, payload, nil
+}
+
+// deriveJournalMessage rebuilds a journal-sourced notification from its
+// journal entry, the same way journalItem built it in the first place — body
+// from the entry's own facts, priority from its severity.
+//
+// sql.ErrNoRows here means the entry has been archived or pruned, which the
+// caller ages out exactly as it does for a vanished inbox item; the message it
+// records names the journal, because naming an inbox item this delivery never
+// had made the loss unattributable.
+func (r *Router) deriveJournalMessage(ctx context.Context, entryID string) (string, string, map[string]any, error) {
+	var (
+		severity    string
+		payloadJSON string
+	)
+	err := r.db.QueryRowContext(ctx,
+		`SELECT severity, COALESCE(payload,'{}') FROM journal_entries WHERE id = ?`,
+		entryID).Scan(&severity, &payloadJSON)
+	if err != nil {
+		// %w, not a bare return: recoverOne distinguishes sql.ErrNoRows (the
+		// entry is gone — age the row out) from a transient read failure
+		// (leave it for the next sweep), and wrapping keeps that check
+		// working while naming what was being read.
+		return "", "", nil, fmt.Errorf("read journal entry %q: %w", entryID, err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		r.logger.Warn("notifyroute: recovery: journal payload not JSON",
+			"error", err, "entry_id", entryID)
+		payload = nil
+	}
+	return journalBody(payload), severityPriority(journal.Severity(severity)), payload, nil
 }
 
 // RunRecoveryLoop drives RecoverStuckDeliveries on a ticker until ctx is

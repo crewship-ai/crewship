@@ -65,6 +65,7 @@ package kinds
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -720,7 +721,9 @@ func issueSameLabelSet(declared []string, remote []issueRemoteLabel) bool {
 // /api/v1/issues would also work but loads all crews.
 func LookupIssueRemoteBySlug(ctx context.Context, c internalapi.Client, slug, crewSlug, title string) (*IssueRemote, error) {
 	crewID, err := issueLookupCrewIDBySlug(ctx, c, crewSlug)
-	if err != nil {
+	var notFound *crewNotFoundError
+	switch {
+	case errors.As(err, &notFound):
 		// A crew that does not exist yet cannot hold an issue, so the honest
 		// answer is "no remote row" — which plans a create. This is the
 		// normal state during the first apply of a file that declares both
@@ -728,6 +731,13 @@ func LookupIssueRemoteBySlug(ctx context.Context, c internalapi.Client, slug, cr
 		// impossible. A crew that never materialises still fails, later, in
 		// the create's own Exec, where the message can name it.
 		return nil, nil
+	case err != nil:
+		// Anything else is a failure to LOOK, not a finding that nothing is
+		// there. The first version of this swallowed both, so a 500 or an
+		// expired token during apply planned a create for every issue in the
+		// file — and issues have no unique-slug constraint to stop the
+		// duplicates landing.
+		return nil, fmt.Errorf("look up crew %q for issue %q: %w", crewSlug, slug, err)
 	}
 	rows, err := issueListForCrew(ctx, c, crewID)
 	if err != nil {
@@ -768,7 +778,20 @@ func issueLookupCrewIDBySlug(ctx context.Context, c internalapi.Client, slug str
 			return cr.ID, nil
 		}
 	}
-	return "", fmt.Errorf("crew with slug %q not found", slug)
+	return "", &crewNotFoundError{slug: slug}
+}
+
+// crewNotFoundError says the crew list was read successfully and the crew was
+// not in it — as distinct from the list not being readable at all.
+//
+// A distinct type rather than a wrapped sentinel so the message stays byte
+// identical to the one callers and tests have always seen; only the ability to
+// tell the two apart is new. Callers that plan a create when a crew is missing
+// must not do so when the lookup merely failed.
+type crewNotFoundError struct{ slug string }
+
+func (e *crewNotFoundError) Error() string {
+	return fmt.Sprintf("crew with slug %q not found", e.slug)
 }
 
 // issueResolveOptionalProjectID returns "" + nil when slug is empty

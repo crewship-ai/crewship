@@ -1,6 +1,11 @@
 package notify
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
+)
 
 // Link is a deep link carried on a notification: where a person goes to act
 // on what the message is telling them.
@@ -122,10 +127,116 @@ func scrubMessage(m *CategoryMessage, scrub func(string) string) {
 		m.Links[i].Path = scrub(m.Links[i].Path)
 	}
 	if m.Vars != nil {
-		if out, ok := scrubValue(m.Vars, scrub).(map[string]any); ok {
+		if out, ok := scrubValue(jsonNormalise(m.Vars), scrub).(map[string]any); ok {
 			m.Vars = out
+		} else {
+			// Unreachable in practice, but the safe direction is explicit:
+			// facts we could not normalise are facts we cannot redact.
+			m.Vars = nil
 		}
 	}
+}
+
+// bytesToText replaces every []byte anywhere in a producer payload with its
+// text form, BEFORE the value reaches json.Marshal.
+//
+// json.Marshal encodes a []byte as base64, so a secret in one arrives at
+// scrubValue as a string that matches no pattern and leaves as base64 — an
+// encoding, not a redaction, and one anyone can undo. Converting first means
+// the scrubber sees the bytes as the text they are.
+//
+// Reflection because a []byte can sit anywhere: a field of a struct, an
+// element of a slice, a value in a typed map. Only values are read and a new
+// value is always returned, so the caller's data is never modified. Kinds
+// that cannot contain one (numbers, bools) are returned as they are.
+func bytesToText(v reflect.Value) any {
+	if !v.IsValid() {
+		return nil
+	}
+	switch v.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if v.IsNil() {
+			return nil
+		}
+		return bytesToText(v.Elem())
+	case reflect.Slice, reflect.Array:
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			// The one case this exists for.
+			if v.Kind() == reflect.Array {
+				out := reflect.New(v.Type()).Elem()
+				reflect.Copy(out, v)
+				v = out.Slice(0, v.Len())
+			}
+			return string(v.Bytes())
+		}
+		out := make([]any, v.Len())
+		for i := range out {
+			out[i] = bytesToText(v.Index(i))
+		}
+		return out
+	case reflect.Map:
+		out := make(map[string]any, v.Len())
+		for _, k := range v.MapKeys() {
+			out[fmt.Sprint(k.Interface())] = bytesToText(v.MapIndex(k))
+		}
+		return out
+	case reflect.Struct:
+		out := make(map[string]any, v.NumField())
+		t := v.Type()
+		for i := range v.NumField() {
+			f := t.Field(i)
+			if !f.IsExported() {
+				continue
+			}
+			out[jsonFieldName(f)] = bytesToText(v.Field(i))
+		}
+		return out
+	default:
+		return v.Interface()
+	}
+}
+
+// jsonFieldName honours a field's json tag so the normalised shape matches
+// what the webhook would have serialised.
+func jsonFieldName(f reflect.StructField) string {
+	tag := f.Tag.Get("json")
+	if tag == "" || tag == "-" {
+		return f.Name
+	}
+	if name, _, _ := strings.Cut(tag, ","); name != "" {
+		return name
+	}
+	return f.Name
+}
+
+// jsonNormalise converts a producer's payload into the JSON-native shapes
+// scrubValue can walk: string, map[string]any, []any, and scalars.
+//
+// Vars comes from Go producers, not from decoded JSON, so it holds Go values —
+// lookout writes `Payload["findings"] = result.Findings`, a []lookout.Finding.
+// scrubValue's type switch only knew string, map[string]any and []any, so
+// every other shape fell to its default branch and was returned untouched: a
+// []string of hosts, a map[string]string of headers, a slice of structs
+// carrying an excerpt of the prompt that tripped a guardrail. The body and
+// title of the same message were redacted, so nothing in the delivered text
+// showed it — only the webhook JSON carried it.
+//
+// Round-tripping through JSON is what the webhook serialiser does anyway, so
+// this normalises to exactly the shape that would be sent, and no earlier.
+// Reflection would work too and would mutate values the caller still owns.
+//
+// A payload that cannot be marshalled (a channel, a func) is a producer bug;
+// returning nil drops the facts rather than forwarding something unredactable.
+func jsonNormalise(v map[string]any) any {
+	raw, err := json.Marshal(bytesToText(reflect.ValueOf(v)))
+	if err != nil {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // scrubValue walks a Vars tree redacting every string it reaches.
@@ -141,7 +252,10 @@ func scrubValue(v any, scrub func(string) string) any {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, val := range t {
-			out[k] = scrubValue(val, scrub)
+			// Keys too. A payload keyed by a token — or a header map built
+			// the wrong way round — put the secret on the left-hand side,
+			// where scrubbing only values never reached it.
+			out[scrub(k)] = scrubValue(val, scrub)
 		}
 		return out
 	case []any:
