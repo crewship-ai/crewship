@@ -151,6 +151,16 @@ spec:
         headers:
           User-Agent: crewship-demo
         max_response_bytes: 20000
+    # Pull the ONE fact worth telling someone out of the response.
+    # Pasting a whole JSON document into a chat message is not a
+    # notification, it is a log line with a bell on it — and it is the
+    # difference between "example.com is 104.20.23.154" and forty
+    # characters of punctuation someone has to parse by eye.
+    - id: address
+      type: transform
+      transform:
+        input: "{{ steps.fetch.output }}"
+        expression: .Answer[0].data
     - id: report
       type: notify
       notify:
@@ -166,9 +176,9 @@ spec:
         # to render as an empty string, so this notice went out reading
         # "→ HTTP" with nothing after it while the run reported success.
         body: |-
-          GET {{ inputs.url }}
+          example.com resolves to {{ steps.address.output }}
 
-          {{ steps.fetch.output }}
+          via {{ inputs.url }}
         priority: low
 
 ---

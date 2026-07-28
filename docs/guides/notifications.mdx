@@ -196,6 +196,8 @@ CREWSHIP_PUBLIC_URL=https://crewship.example.com
 
 Without it, links are delivered as app-relative paths (`/issues/CS-12`). Those work in the in-app inbox and are useless in a chat client, which has no origin to resolve them against. Crewship will not guess a hostname — a link that looks right and 404s costs more than an obviously relative one.
 
+**Discord arrives as one message.** shoutrrr's Discord service defaults to sending each line of a message as its own embedded item, which turns an ordinary notification into a stack of disconnected boxes — title in one, each body line in another, the link in a third. Crewship overrides that on the way out, so channels created before this change are fixed too without being re-added. A message still splits on Discord's own 2000-character limit.
+
 Links point only where a page actually resolves. An issue, a mission timeline, a chat session and an agent's approvals have their own routes and are linked precisely; a failed run gets the runs list, because there is no per-run page to send you to yet. No notification links to an invented filter that the destination silently ignores.
 
 Verify it (Go):

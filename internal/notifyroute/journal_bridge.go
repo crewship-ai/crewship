@@ -3,6 +3,7 @@ package notifyroute
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -135,10 +136,19 @@ func journalItem(e journal.Entry, category string) inbox.Item {
 	if title == "" {
 		title = string(e.Type)
 	}
-	payload := map[string]any{
-		"journal_entry_id": e.ID,
-		"entry_type":       string(e.Type),
+	// The entry's OWN facts first — duration, cost, which routine, which
+	// finding. This used to be dropped: the payload was built from the
+	// entry's identity alone, so a notification had nothing to say beyond
+	// its summary and nothing for a template to say it with either.
+	payload := make(map[string]any, len(e.Payload)+5)
+	for k, v := range e.Payload {
+		payload[k] = v
 	}
+	// Identity second, so it wins: these are what links resolve from, and an
+	// entry whose payload happens to carry "run_id" must not be able to
+	// repoint the notification's bookkeeping at something else.
+	payload["journal_entry_id"] = e.ID
+	payload["entry_type"] = string(e.Type)
 	for k, v := range map[string]string{
 		"crew_id":    e.CrewID,
 		"agent_id":   e.AgentID,
@@ -149,6 +159,7 @@ func journalItem(e journal.Entry, category string) inbox.Item {
 		}
 	}
 	return inbox.Item{
+		BodyMD:      journalBody(e.Payload),
 		WorkspaceID: e.WorkspaceID,
 		// Not a real inbox kind — nothing is written to inbox_items on this
 		// path. It labels the delivery-log row's source, and the prefix keeps
@@ -162,6 +173,58 @@ func journalItem(e journal.Entry, category string) inbox.Item {
 		Priority:   severityPriority(e.Severity),
 		Payload:    payload,
 	}
+}
+
+// journalBodyMaxFacts bounds how many facts a journal-sourced notification
+// prints. A payload is producer-authored and can be large — a lookout entry
+// carries every finding — while a notification is a chat message someone
+// glances at.
+const journalBodyMaxFacts = 12
+
+// journalBody renders an entry's payload as the body of its notification.
+//
+// Journal-sourced messages had no body at all: they arrived as a bare summary
+// line, which told a reader that something happened and nothing about what.
+// The facts to fix that were already on the entry.
+//
+// Keys ending in _id are omitted. They are how links and machines find things,
+// and a chat message that spends a line on "crew_id: crew_8f2a" has traded
+// something a person can act on for something they cannot. The suffix is the
+// convention every producer in this codebase already follows, so the rule does
+// not need a list that lags them.
+//
+// This is deliberately a plain fact list rather than per-entry-type prose.
+// Wording belongs to the message-template layer; this exists so that until it
+// lands, a notification says something.
+func journalBody(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(payload))
+	for k := range payload {
+		if strings.HasSuffix(k, "_id") {
+			continue
+		}
+		if s, ok := payload[k].(string); ok && strings.TrimSpace(s) == "" {
+			continue // an empty value is not a fact
+		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys) // stable output; a map's order would change per send
+	if len(keys) > journalBodyMaxFacts {
+		keys = keys[:journalBodyMaxFacts]
+	}
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "%s: %v", k, payload[k])
+	}
+	return b.String()
 }
 
 // emitDeliveryJournal records an outbound delivery attempt on the journal so

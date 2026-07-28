@@ -164,5 +164,5 @@ func (d *Dispatcher) deliverCategoryShoutrrr(ctx context.Context, ch Channel, ms
 	if lines := linkLines(msg.resolveLinks(d.publicURL)); lines != "" {
 		message += "\n\n" + lines
 	}
-	return provider.Send(ctx, ch.Secret, message)
+	return provider.Send(ctx, ServiceURLForDelivery(ch.Secret), message)
 }

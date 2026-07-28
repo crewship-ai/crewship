@@ -325,7 +325,7 @@ func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev Notific
 				return err
 			}
 		}
-		if err := provider.Send(ctx, ch.Secret, message); err != nil {
+		if err := provider.Send(ctx, ServiceURLForDelivery(ch.Secret), message); err != nil {
 			lastErr = err
 			continue
 		}
