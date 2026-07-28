@@ -193,17 +193,33 @@ func TestRepairThenMigrate_RecoversARenumberedDatabase(t *testing.T) {
 	defer db.Close()
 
 	logger := quietLogger()
-	if err := Migrate(ctx, db, logger); err != nil {
-		t.Fatalf("initial migrate: %v", err)
-	}
 
-	// Recreate dev3's ledger exactly: the last migration was authored under
-	// the previous one's number, so it sits at `other.version` and nothing
-	// occupies its declared version.
+	// Recreate dev3's state exactly: branch B's migration ran under branch A's
+	// version number, and A's migration NEVER RAN on this database.
+	//
+	// That second half is the part worth being careful about. Staging it by
+	// migrating everything and then deleting A's ledger row produces a
+	// database where A's SQL HAS run but the ledger denies it — which is not
+	// dev3's situation and not anything the repair command can produce, and it
+	// forces the final Migrate to re-run A. That only works while A happens to
+	// be idempotent; the first ALTER TABLE ADD COLUMN to land in that position
+	// fails the test for a reason that has nothing to do with the repair.
+	//
+	// So: apply the chain WITHOUT A, using the registry seam applyRegistry
+	// exists for, and then move B's ledger row onto A's version.
 	victim := migrations[len(migrations)-1] // authored as, and renumbered from…
 	other := migrations[len(migrations)-2]  // …this version, which main then took
-	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = ?`, other.version); err != nil {
-		t.Fatalf("stage collision: %v", err)
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		t.Fatalf("create ledger: %v", err)
+	}
+	staged := append(append([]migration{}, migrations[:len(migrations)-2]...), victim)
+	if err := applyRegistry(ctx, db, staged, logger); err != nil {
+		t.Fatalf("stage chain without %s: %v", other.name, err)
 	}
 	if _, err := db.Exec(`UPDATE _migrations SET version = ? WHERE version = ?`,
 		other.version, victim.version); err != nil {

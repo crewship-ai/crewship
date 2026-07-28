@@ -451,6 +451,17 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("remove credential assignments on delete", "credential_id", credID, "error", err)
 	}
 
+	// Same reasoning for credential_bindings, and one consequence more (§2.5b).
+	// A binding IS the claim on a slot: leave it behind and "crew acme's
+	// GH_TOKEN" stays occupied by a credential that no longer exists, so the
+	// replacement account cannot be bound — the write is refused with a 409
+	// naming a credential the vault no longer lists. Deleting the account has
+	// to free the slot it filled.
+	if _, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM credential_bindings WHERE credential_id = ?", credID); err != nil {
+		h.logger.Warn("remove credential bindings on delete", "credential_id", credID, "error", err)
+	}
+
 	// Stamp the timeline so the audit tab still answers "who deleted
 	// this and when" after the row is soft-deleted. credential_audit
 	// rows survive soft-delete (no FK cascade), so the historical
