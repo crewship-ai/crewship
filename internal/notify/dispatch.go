@@ -21,7 +21,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/webhook"
-	"github.com/nicholas-fedor/shoutrrr"
+	"github.com/nicholas-fedor/shoutrrr/pkg/router"
+	"github.com/nicholas-fedor/shoutrrr/pkg/types"
 )
 
 // Provider is the seam behind which the shoutrrr delivery mechanism sits
@@ -31,9 +32,13 @@ import (
 type Provider interface {
 	// Send delivers message via the Apprise-style service url (e.g.
 	// "slack://hook:TOKEN@webhook"). ctx governs cancellation only —
-	// shoutrrr.Send itself is synchronous with no context parameter, so
+	// the underlying send is synchronous with no context parameter, so
 	// Send runs it in a goroutine and races it against ctx.Done().
-	Send(ctx context.Context, url, message string) error
+	//
+	// params carries the fields a service renders NATIVELY rather than as
+	// message text — "title" above all, which on a push service is the line
+	// that appears on a lock screen. See shoutrrrMessage.
+	Send(ctx context.Context, url, message string, params map[string]string) error
 }
 
 // shoutrrrProvider is the production Provider: github.com/nicholas-fedor/
@@ -44,10 +49,24 @@ type Provider interface {
 // format per provider.
 type shoutrrrProvider struct{}
 
-func (shoutrrrProvider) Send(ctx context.Context, rawURL, message string) error {
+// shoutrrrRouter locates a service for a delivery url. The package's own
+// default router is unexported and its Send helper hardcodes an empty params
+// map, so a title could never reach a service through it.
+var shoutrrrRouter = router.ServiceRouter{Timeout: router.DefaultTimeout}
+
+func (shoutrrrProvider) Send(ctx context.Context, rawURL, message string, params map[string]string) error {
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- shoutrrr.Send(rawURL, message)
+		// shoutrrr.Send is Locate + service.Send with an EMPTY params map,
+		// so it can never carry a native title. Doing the same two steps
+		// here is what makes params reachable at all.
+		svc, err := shoutrrrRouter.Locate(rawURL)
+		if err != nil {
+			errCh <- fmt.Errorf("locating service for notification url: %w", err)
+			return
+		}
+		p := types.Params(params)
+		errCh <- svc.Send(message, &p)
 	}()
 	select {
 	case err := <-errCh:
@@ -313,10 +332,10 @@ func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev Notific
 	if ch.Secret == "" {
 		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
 	}
-	message := fmt.Sprintf("Crewship: routine %s %s (run %s)", ev.RoutineSlug, ev.Status, ev.RunID)
-	if ev.OutputPreview != "" {
-		message += "\n\n" + ev.OutputPreview
-	}
+	url := ServiceURLForDelivery(ch.Secret)
+	message, params := shoutrrrMessage(url,
+		fmt.Sprintf("Crewship: routine %s %s (run %s)", ev.RoutineSlug, ev.Status, ev.RunID),
+		ev.OutputPreview)
 
 	var lastErr error
 	for attempt := 0; attempt < d.maxAttempts; attempt++ {
@@ -325,7 +344,7 @@ func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev Notific
 				return err
 			}
 		}
-		if err := provider.Send(ctx, ServiceURLForDelivery(ch.Secret), message); err != nil {
+		if err := provider.Send(ctx, url, message, params); err != nil {
 			lastErr = err
 			continue
 		}

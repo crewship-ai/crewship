@@ -19,12 +19,13 @@ type fakeProvider struct {
 type fakeSend struct {
 	URL     string
 	Message string
+	Params  map[string]string
 }
 
-func (f *fakeProvider) Send(_ context.Context, url, message string) error {
+func (f *fakeProvider) Send(_ context.Context, url, message string, params map[string]string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sent = append(f.sent, fakeSend{URL: url, Message: message})
+	f.sent = append(f.sent, fakeSend{URL: url, Message: message, Params: params})
 	return f.erron
 }
 

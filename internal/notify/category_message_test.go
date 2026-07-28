@@ -50,11 +50,20 @@ func TestDeliverCategoryMessage_ScrubsEveryAuthoredField(t *testing.T) {
 	if strings.Contains(calls[0].Message, testSecret) {
 		t.Errorf("a secret reached the channel unscrubbed:\n%s", calls[0].Message)
 	}
-	// Each of the three fields must carry a redaction marker — an assertion
-	// that only found one would pass while the other two leaked.
-	if got := strings.Count(calls[0].Message, "[REDACTED"); got != 3 {
-		t.Errorf("want title, body and link label all redacted (3 markers), got %d:\n%s",
+	// Body and link label travel as message text; the title now travels as a
+	// native param. Both routes leave the instance, so both are checked here
+	// — a title that stopped being scrubbed when it moved would be the same
+	// leak in a place nobody was looking.
+	if got := strings.Count(calls[0].Message, "[REDACTED"); got != 2 {
+		t.Errorf("want body and link label redacted (2 markers), got %d:\n%s",
 			got, calls[0].Message)
+	}
+	title := calls[0].Params["title"]
+	if strings.Contains(title, testSecret) {
+		t.Errorf("a secret reached the channel through the title param: %q", title)
+	}
+	if !strings.Contains(title, "[REDACTED") {
+		t.Errorf("title param was not scrubbed: %q", title)
 	}
 }
 

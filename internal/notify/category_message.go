@@ -157,12 +157,14 @@ func (d *Dispatcher) deliverCategoryShoutrrr(ctx context.Context, ch Channel, ms
 	if ch.Secret == "" {
 		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
 	}
-	message := msg.Title
-	if msg.Body != "" {
-		message += "\n\n" + msg.Body
-	}
+	body := msg.Body
 	if lines := linkLines(msg.resolveLinks(d.publicURL)); lines != "" {
-		message += "\n\n" + lines
+		if body != "" {
+			body += "\n\n"
+		}
+		body += lines
 	}
-	return provider.Send(ctx, ServiceURLForDelivery(ch.Secret), message)
+	url := ServiceURLForDelivery(ch.Secret)
+	message, params := shoutrrrMessage(url, msg.Title, body)
+	return provider.Send(ctx, url, message, params)
 }
