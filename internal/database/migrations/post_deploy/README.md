@@ -24,6 +24,12 @@ requests. So:
 3. **It must be idempotent and resumable.** It commits per batch, so a restart
    re-enters partway through. `UPDATE … WHERE col IS NULL` is the shape that
    works; `SET counter = counter + 1` is the shape that corrupts.
+4. **Exactly one statement per file.** Enforced at build time, not advice.
+   Progress is measured by how many rows the statement changed, and SQLite
+   reports only the *last* statement's count — so a trailing statement that
+   happens to touch no rows makes the runner conclude the backfill is finished
+   after one batch, record it as applied, and leave most of the table
+   unmigrated. Silently, and permanently. Two things to do means two files.
 
 If any of those three is uncomfortable, the migration belongs in the normal
 lane and takes its downtime honestly.

@@ -124,11 +124,20 @@ func loadFileMigrations() ([]migration, error) {
 				"and do nothing", file)
 		}
 
+		isPostDeploy := dir == postDeployDir
+		if isPostDeploy {
+			// Enforced at load, so a multi-statement backfill fails the build
+			// rather than silently stopping after one batch in production.
+			if stErr := checkSingleStatement(string(body)); stErr != nil {
+				return fmt.Errorf("post-deployment migration %q %w", file, stErr)
+			}
+		}
+
 		out = append(out, migration{
 			version:    version,
 			name:       name,
 			sql:        string(body),
-			postDeploy: dir == postDeployDir,
+			postDeploy: isPostDeploy,
 		})
 		return nil
 	})

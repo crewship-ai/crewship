@@ -234,3 +234,85 @@ func TestMigrate_DefersPostDeployWithoutRecordingIt(t *testing.T) {
 		t.Errorf("ledger = %v, want only the non-deferred migration", applied)
 	}
 }
+
+// --- findings from review ---------------------------------------------------
+
+// A normal shutdown mid-backfill is not a failure. runOnePostDeploy returned
+// nil on cancellation, so the caller moved to the NEXT pending migration with
+// a dead context, that one failed at BeginTx, and a clean stop was reported as
+// "post-deployment migrations did not complete".
+func TestPostDeploy_CleanShutdownIsNotReportedAsFailure(t *testing.T) {
+	const rows = 2000
+	db, m := postDeployFixture(t, rows, convergingBackfill)
+
+	// Two pending migrations, so the "moved on to the next one" bug can show.
+	second := m
+	second.version = m.version + 10000
+	second.name = m.name + "_two"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := runPendingPostDeploy(ctx, db, []migration{m, second}, pdLogger()); err != nil {
+		t.Fatalf("a cancelled context is a shutdown, not an error: %v", err)
+	}
+}
+
+// The batch driver reads RowsAffected of the whole Exec. With more than one
+// statement in the file, SQLite reports the LAST statement's count — so a
+// converging UPDATE followed by a statement that happens to touch no rows
+// reports 0, and the backfill is marked complete after one pass with most of
+// the table untouched. Verified against this driver before writing the guard.
+func TestPostDeploy_RejectsMultipleStatements(t *testing.T) {
+	cases := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{"single statement", `UPDATE w SET a = 1 WHERE a IS NULL`, false},
+		{"trailing semicolon is still one statement", `UPDATE w SET a = 1 WHERE a IS NULL;`, false},
+		{"semicolon inside a string literal", `UPDATE w SET a = 'x;y' WHERE a IS NULL`, false},
+		{"comment mentioning a semicolon", "-- ends with ; here\nUPDATE w SET a = 1 WHERE a IS NULL", false},
+		{"two statements", `UPDATE w SET a = 1 WHERE a IS NULL;
+UPDATE w SET b = 2 WHERE 1 = 0;`, true},
+		{"update plus analyze", `UPDATE w SET a = 1 WHERE a IS NULL;
+ANALYZE;`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkSingleStatement(tc.sql)
+			if tc.wantErr && err == nil {
+				t.Errorf("want a refusal for:\n%s", tc.sql)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected refusal: %v\nfor:\n%s", err, tc.sql)
+			}
+		})
+	}
+}
+
+// A backfill that happens to finish on exactly the pass limit was aborted with
+// "not converging" — a claim the runner had no evidence for, since it never
+// asked whether anything was left.
+func TestPostDeploy_DoesNotAccuseABackfillThatFinishesOnTheLimit(t *testing.T) {
+	// Batch size 500, limit lowered for the test via the same code path.
+	const rows = 1000
+	db, m := postDeployFixture(t, rows, convergingBackfill)
+
+	// Exactly two passes are needed, so a limit of 2 is the boundary case.
+	if err := runOnePostDeployWithLimit(context.Background(), db, m, pdLogger(), 2); err != nil {
+		t.Fatalf("a backfill that finishes on the last allowed pass is not a failure: %v", err)
+	}
+	if got := countFilled(t, db); got != rows {
+		t.Errorf("filled %d of %d", got, rows)
+	}
+}
+
+// The limit still has to fire on something genuinely non-converging.
+func TestPostDeploy_LimitStillCatchesRunaway(t *testing.T) {
+	db, m := postDeployFixture(t, 10, `UPDATE widgets SET label = 'filled'`)
+	err := runOnePostDeployWithLimit(context.Background(), db, m, pdLogger(), 3)
+	if err == nil || !strings.Contains(err.Error(), "not converging") {
+		t.Fatalf("err = %v, want a non-convergence refusal", err)
+	}
+}

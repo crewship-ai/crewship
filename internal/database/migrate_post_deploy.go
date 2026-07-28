@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -106,11 +107,29 @@ func RunPostDeployMigrations(ctx context.Context, db *sql.DB, logger *slog.Logge
 		byVersion[m.version] = m
 	}
 
+	todo := make([]migration, 0, len(pending))
 	for _, p := range pending {
 		if p.Applied {
 			continue
 		}
-		m := byVersion[p.Version]
+		todo = append(todo, byVersion[p.Version])
+	}
+	return runPendingPostDeploy(ctx, db, todo, logger)
+}
+
+// runPendingPostDeploy applies the given migrations in order. Split out so the
+// shutdown behaviour can be tested with more than one pending migration, which
+// is the only way the bug it fixes is visible.
+func runPendingPostDeploy(ctx context.Context, db *sql.DB, todo []migration, logger *slog.Logger) error {
+	for _, m := range todo {
+		// Checked before each migration, not only inside one. A cancelled
+		// context previously returned nil from runOnePostDeploy, so the loop
+		// moved to the NEXT migration with a dead context, that one failed at
+		// BeginTx, and an ordinary shutdown was logged as "post-deployment
+		// migrations did not complete".
+		if ctx.Err() != nil {
+			return nil
+		}
 		if err := runOnePostDeploy(ctx, db, m, logger); err != nil {
 			// Reported, not retried in a loop: a failing post-deploy migration
 			// needs a human, and hammering it would just fill the log. The
@@ -122,6 +141,13 @@ func RunPostDeployMigrations(ctx context.Context, db *sql.DB, logger *slog.Logge
 }
 
 func runOnePostDeploy(ctx context.Context, db *sql.DB, m migration, logger *slog.Logger) error {
+	return runOnePostDeployWithLimit(ctx, db, m, logger, postDeployPassLimit)
+}
+
+// runOnePostDeployWithLimit is runOnePostDeploy with the safety valve exposed,
+// so the boundary between "finished on the last allowed pass" and "genuinely
+// runaway" can be tested without ten thousand batches.
+func runOnePostDeployWithLimit(ctx context.Context, db *sql.DB, m migration, logger *slog.Logger, limit int) error {
 	logger.Info("starting post-deployment migration", "version", m.version, "name", m.name)
 	started := time.Now()
 
@@ -146,12 +172,25 @@ func runOnePostDeploy(ctx context.Context, db *sql.DB, m migration, logger *slog
 		passes++
 		touched += n
 
-		if passes >= postDeployPassLimit {
+		if passes >= limit {
+			// Do not accuse the statement without evidence. Reaching the limit
+			// means the last pass changed rows; it does NOT mean any remain. A
+			// backfill needing exactly `limit` passes was previously aborted as
+			// "not converging" when the next pass would have returned zero.
+			final, probeErr := postDeployPass(ctx, db, m)
+			if probeErr != nil {
+				return probeErr
+			}
+			if final == 0 {
+				break
+			}
+			touched += final
 			return fmt.Errorf(
-				"stopped after %d passes having changed %d rows and still matching more — "+
-					"the statement is not converging, which usually means its WHERE clause does "+
-					"not exclude the rows it has already handled (see migrations/post_deploy/README.md)",
-				passes, touched)
+				"stopped after %d passes having changed %d rows, and the next pass still "+
+					"changed %d more — the statement is not converging, which usually means its "+
+					"WHERE clause does not exclude the rows it has already handled "+
+					"(see migrations/post_deploy/README.md)",
+				passes, touched-final, final)
 		}
 		// Every pass logs at DEBUG; INFO every 20 keeps a long backfill
 		// visible without drowning the log.
@@ -205,4 +244,82 @@ func postDeployPass(ctx context.Context, db *sql.DB, m migration) (int64, error)
 		return 0, fmt.Errorf("commit batch: %w", err)
 	}
 	return n, nil
+}
+
+// checkSingleStatement rejects post-deployment SQL containing more than one
+// statement.
+//
+// The batch driver measures progress with RowsAffected of the whole Exec, and
+// SQLite reports the LAST statement's count. Verified against this driver: a
+// converging UPDATE followed by a statement that happens to touch no rows
+// reports zero, so the runner concludes there is nothing left, records the
+// migration as applied, and leaves most of the table unmigrated — silently and
+// permanently. The README documented "a single row-changing statement"; nothing
+// enforced it.
+//
+// String literals and comments are stripped before counting, because a
+// semicolon inside either is not a statement boundary and rejecting it would
+// send authors hunting for a problem that is not there.
+func checkSingleStatement(sqlText string) error {
+	stripped := stripSQLNoise(sqlText)
+	statements := 0
+	for _, part := range strings.Split(stripped, ";") {
+		if strings.TrimSpace(part) != "" {
+			statements++
+		}
+	}
+	if statements > 1 {
+		return fmt.Errorf(
+			"contains %d statements; a post-deployment migration must be exactly one "+
+				"row-changing statement. Progress is measured by how many rows the statement "+
+				"changed, and SQLite reports only the LAST statement's count — so a trailing "+
+				"statement that touches no rows makes the runner stop after one batch and mark "+
+				"the backfill complete. Split it into separate migrations",
+			statements)
+	}
+	return nil
+}
+
+// stripSQLNoise removes -- line comments, /* */ block comments and
+// single-quoted string literals, replacing each with a space. Crude by design:
+// it only has to make semicolon counting trustworthy, not parse SQL.
+func stripSQLNoise(s string) string {
+	var out strings.Builder
+	for i := 0; i < len(s); {
+		switch {
+		case strings.HasPrefix(s[i:], "--"):
+			j := strings.IndexByte(s[i:], '\n')
+			if j < 0 {
+				return out.String()
+			}
+			out.WriteByte('\n')
+			i += j + 1
+		case strings.HasPrefix(s[i:], "/*"):
+			j := strings.Index(s[i+2:], "*/")
+			if j < 0 {
+				return out.String()
+			}
+			out.WriteByte(' ')
+			i += 2 + j + 2
+		case s[i] == '\'':
+			// Doubled '' is an escaped quote inside a literal, not the end.
+			i++
+			for i < len(s) {
+				if s[i] == '\'' {
+					if i+1 < len(s) && s[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+			out.WriteByte(' ')
+		default:
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
 }
