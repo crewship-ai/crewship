@@ -283,6 +283,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := seedCredentials(ctx, client, agentIDs); err != nil {
 		return err
 	}
+	// Demo vault: one credential of every shape, all inert. Non-fatal — a
+	// workspace without the demo tour is still a working workspace, and a
+	// failed demo credential is not worth aborting a seed over.
+	if err := seedDemoCredentials(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "  ! Demo credentials: %v\n", err)
+	}
 
 	// ── Phase 8–9: Integrations + Bindings ──
 	if err := ctx.Err(); err != nil {
