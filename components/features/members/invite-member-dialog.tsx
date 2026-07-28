@@ -166,7 +166,13 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{result ? "Send them this link" : "Add member"}</DialogTitle>
+          {/* Keyed off setup_url like everything else in this dialog. The
+              heading is part of the claim: "Send them this link" above a
+              dialog that deliberately issues no link says the opposite of
+              the paragraph underneath it. */}
+          <DialogTitle>
+            {!result ? "Add member" : result.setup_url ? "Send them this link" : "Member added"}
+          </DialogTitle>
           <DialogDescription>
             {result
               ? result.setup_url
@@ -182,9 +188,16 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
              only copy of something that cannot be shown again. */
           <div className="space-y-4">
             <p className="text-body text-muted-foreground">
+              {/* Keyed off setup_url, not created_user. They answer different
+                  questions: an account that exists but was never set up gets
+                  created_user=false AND a fresh link, so branching on the
+                  former printed "no setup link is issued" directly above the
+                  setup link. */}
               {result.created_user
                 ? `Account created for ${result.email}. They set their own password through this link.`
-                : `${result.email} already had an account and has been added to this workspace. They sign in with their existing password — no setup link is issued, because one would let anybody holding it change that password.`}
+                : result.setup_url
+                  ? `${result.email} already had an account here but had never set it up, so this link is a fresh one. The previous link, if any, no longer works.`
+                  : `${result.email} already had an account and has been added to this workspace. They sign in with the credential they already have — no setup link is issued, because one would let anybody holding it take the account over.`}
             </p>
             {result.setup_url ? (
             <div className="space-y-2">

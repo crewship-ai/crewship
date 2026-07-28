@@ -80,12 +80,30 @@ describe("InviteMemberDialog", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SETUP_URL))
   })
 
-  it("says when an existing person was added rather than a new account created", async () => {
+  // `created_user` and `setup_url` answer different questions, and this
+  // copy used to key off the first while the link rendered off the second.
+  // An existing-but-unclaimed account gets created_user=false AND a link,
+  // so the paragraph announced "no setup link is issued" directly above the
+  // setup link. Found on dev3 against the real server.
+  it("does not deny the link it is showing, for an existing unclaimed account", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ setup_url: SETUP_URL, created_user: false, email: "old@example.com" }, 201))
     await submit("old@example.com")
-    // They already have a password; sending them a setup link would be
-    // confusing at best.
+
+    expect((await screen.findByLabelText("Setup link")).getAttribute("value")).toBe(SETUP_URL)
+    expect(screen.queryByText(/no setup link is issued/i)).toBeNull()
+    expect(screen.queryByText(/existing password/i)).toBeNull()
+  })
+
+  it("says an existing person was added, and issues nothing, when the account is claimed", async () => {
+    apiFetch.mockResolvedValue(jsonResponse({ created_user: false, email: "claimed@example.com" }, 201))
+    await submit("claimed@example.com")
+
     expect(await screen.findByText(/already had an account|existing account/i)).toBeTruthy()
+    expect(screen.queryByLabelText("Setup link")).toBeNull()
+    // The heading is part of the same claim. "Send them this link" over a
+    // dialog that deliberately issues no link is the conflation this pair of
+    // commits exists to remove, one surface at a time.
+    expect(screen.queryByText("Send them this link")).toBeNull()
   })
 
   it("surfaces the server's reason for a refusal", async () => {
@@ -208,8 +226,8 @@ describe("InviteMemberDialog — existing account", () => {
   it("shows no link when the server withholds one", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ created_user: false, email: "old@example.com" }, 201))
     await submit("old@example.com")
-    expect(await screen.findByText(/existing password/i)).toBeTruthy()
-    expect(screen.queryByLabelText(/setup link/i)).toBeNull()
+    expect(await screen.findByText(/credential they already have/i)).toBeTruthy()
+    expect(screen.queryByLabelText("Setup link")).toBeNull()
     expect(screen.queryByRole("button", { name: /copy/i })).toBeNull()
   })
 })
