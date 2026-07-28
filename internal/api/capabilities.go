@@ -49,6 +49,26 @@ const (
 	// blanket "add anything to the vault" reach.
 	CapabilityCredentialRotate = "credential.rotate"
 
+	// CapabilityCredentialReveal gates disclosure of a stored secret's
+	// plaintext to a human (PRD-CREDENTIALS-V2-2026 §2.6 L2).
+	//
+	// Two things about it are deliberate and load-bearing:
+	//
+	//  1. The wire string is colon-separated, unlike every other
+	//     capability here. §2.6 names it `credentials:reveal` and is
+	//     the standard the rest of Crewship is meant to cite; a
+	//     capability string is a stable wire identifier that cannot be
+	//     renamed later without a data migration, so it is spelled the
+	//     way the security document spells it rather than the way the
+	//     local convention would.
+	//  2. It appears in NO bundle — not even BundleAdmin, which is the
+	//     role-derived fallback for OWNER and ADMIN. That is the whole
+	//     point of the layer: role is a necessary condition for reveal
+	//     and never a sufficient one, so an OWNER whose membership row
+	//     has never been touched must NOT come out holding it. If you
+	//     add it to a bundle you have deleted L2.
+	CapabilityCredentialReveal = "credentials:reveal"
+
 	// CapabilityIssueCreate gates issue.Create. Issues are the
 	// lowest-stakes write action — even chat-only members commonly
 	// want to file a ticket from a conversation — so a default-grant
@@ -77,6 +97,7 @@ var allCapabilities = map[string]struct{}{
 	CapabilitySkillCreate:      {},
 	CapabilityCredentialCreate: {},
 	CapabilityCredentialRotate: {},
+	CapabilityCredentialReveal: {},
 	CapabilityIssueCreate:      {},
 	CapabilityMemoryWrite:      {},
 }

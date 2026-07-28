@@ -4299,6 +4299,53 @@
         ]
       }
     },
+    "/api/v1/credentials/reveal-policy": {
+      "get": {
+        "operationId": "get_api_v1_credentials_reveal-policy",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_credentials_reveal-policy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
     "/api/v1/credentials/test": {
       "post": {
         "operationId": "post_api_v1_credentials_test",
@@ -4490,6 +4537,45 @@
         ]
       }
     },
+    "/api/v1/credentials/{credentialId}/reveal": {
+      "post": {
+        "operationId": "post_api_v1_credentials_credentialId_reveal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
     "/api/v1/credentials/{credentialId}/rotate": {
       "post": {
         "operationId": "post_api_v1_credentials_credentialId_rotate",
@@ -4542,6 +4628,45 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/sensitivity": {
+      "put": {
+        "operationId": "put_api_v1_credentials_credentialId_sensitivity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

@@ -13,6 +13,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // registerCrewsRoutes wires the entire "crews + agents + connections"
@@ -385,6 +386,33 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
+
+	// Credential reveal (PRD-CREDENTIALS-V2-2026 §2.6). Separate handler
+	// because it needs a synchronous journal emitter the other credential
+	// routes do not — the chained audit write is a precondition of the
+	// disclosure, and a batched Emit cannot express that (see
+	// internal/journal/emit_sync.go).
+	//
+	// The type assertion is the fail-closed wiring: an emitter that cannot
+	// write synchronously (the noop used in early init and in tests that
+	// skip WithJournal) is NOT wired, which leaves the handler refusing
+	// every reveal with a 500. Silently accepting an async emitter here
+	// would delete L4 at the one place nobody would look for it.
+	reveal := NewCredentialRevealHandler(r.db, r.logger)
+	if sync, ok := r.Journal().(journal.SyncEmitter); ok {
+		reveal.SetJournal(sync)
+	}
+	// roleInline on all three: each runs a layered gate the route
+	// middleware must not pre-empt (capability + crew scope +
+	// classification for reveal; OWNER-only for the policy; the
+	// raise/lower role split for sensitivity).
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/reveal", roleInline, reveal.Reveal)
+	// Literal path registered alongside /{credentialId}; Go 1.22's mux
+	// prefers the more specific literal, the same way default-env-var
+	// above coexists with the wildcard.
+	r.mux.Handle("GET /api/v1/credentials/reveal-policy", authed(wsCtx(http.HandlerFunc(reveal.GetPolicy))))
+	r.authedMut("PUT", "/api/v1/credentials/reveal-policy", roleInline, reveal.SetPolicy)
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/sensitivity", roleInline, reveal.SetSensitivity)
 	// #1083: wrap in wsCtx like every other credentials route. The response
 	// carries no tenant data, but requiring workspace membership keeps this
 	// route uniform with the rest of the credentials surface.
