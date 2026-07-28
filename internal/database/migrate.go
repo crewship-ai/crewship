@@ -42,9 +42,17 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 			// expects another, and silently continuing would leave prod and dev
 			// on diverged schemas.
 			if appliedName != m.name {
+				// Two audiences for one error. A developer seeing this in a PR
+				// needs to renumber; an operator whose server will not boot
+				// needs a way out, and the pre-migration snapshot is not one
+				// (it carries the same ledger). Name both.
 				return fmt.Errorf(
-					"migration version %d collision: database has %q applied, code expects %q — "+
-						"rename the new migration to the next free version",
+					"migration version %d collision: database has %q applied, code expects %q. "+
+						"If you are adding a migration, give it a timestamp version "+
+						"(date -u +%%Y%%m%%d%%H%%M%%S) instead of reusing this number. "+
+						"If this database is refusing to start after running a branch whose "+
+						"migration was renumbered, run `crewship db repair-ledger --dry-run` "+
+						"to see the fix — it moves the ledger row without touching the schema",
 					m.version, appliedName, m.name,
 				)
 			}

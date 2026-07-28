@@ -292,24 +292,43 @@ migration.
 ```
 failed to run migrations: migration version 65 collision:
 database has "add_backup_schedules_and_destinations" applied,
-code expects "add_skill_bootstrap_fields" — rename the new migration
-to the next free version
+code expects "add_skill_bootstrap_fields". … run
+`crewship db repair-ledger --dry-run` to see the fix
 ```
 
+**Try the repair first — it is not destructive.** When the two names are
+both migrations this binary knows about, the number recording one of them
+is simply wrong, and moving it fixes the boot without touching a single
+table:
+
+```bash
+crewship db repair-ledger --dry-run   # show the plan, change nothing
+crewship db repair-ledger             # apply it (stop crewshipd first)
+```
+
+The repair refuses if the database names a migration this binary does not
+have at all. That means a *different* Crewship migrated it, not a
+renumbered one, and no renumbering can make this binary's assumptions
+true. Then, and only then:
+
 <Warning>
-**For end users:** restore your last backup with the matching binary,
-or wipe the DB if you have no data to preserve. Wiping the DB is
-destructive — move it aside (don't delete) so you can recover if needed.
+Restore your last backup with the matching binary
+(`crewship db restore-snapshot`), or install a binary new enough to
+include the migration. Wiping the DB is the last resort and destroys your
+data — move it aside, never delete it.
 </Warning>
 
 ```bash
 crewship doctor                                  # confirm the issue
+crewship db restore-snapshot --list              # prefer this over wiping
 mv ~/.crewship/crewship.db ~/.crewship/crewship.db.bak
 crewship start                                   # fresh DB, replays migrations
 ```
 
-**Maintainer-side:** the `migration-lint` CI workflow now catches this
-class of bug pre-merge, so it should not recur in v0.1+ releases.
+**Maintainer-side:** two guards cover this now. The **Migration Lint** CI
+workflow catches a colliding version pre-merge, and new migrations take
+timestamp version numbers (`YYYYMMDDHHMMSS`), so two branches can no
+longer reach for the same one. See [Migrations](/guides/migrations).
 
 </Accordion>
 

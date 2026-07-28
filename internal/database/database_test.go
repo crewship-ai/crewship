@@ -317,6 +317,12 @@ func TestMigrateVersionCollision(t *testing.T) {
 	if !strings.Contains(msg, "sibling_pr_claimed_this_slot") {
 		t.Errorf("error message missing applied name: %q", msg)
 	}
+	// An operator reading this has a server that will not boot, and the
+	// pre-migration snapshot cannot help them (it carries the same ledger).
+	// The message must name the one thing that can.
+	if !strings.Contains(msg, "crewship db repair-ledger") {
+		t.Errorf("error message does not point at the recovery command: %q", msg)
+	}
 }
 
 // TestMigrateIdempotentWithMatchingNames is the happy-path counterpart: when

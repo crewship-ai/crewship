@@ -139,7 +139,7 @@ INFO  applying migration  version=62  name=add_paymaster_billing_modes
 ```
 
 <Note>
-The `_migrations` table records the applied set and refuses to apply a version-name pair that disagrees with what the code expects — this catches the classic "two PRs both claimed version N with different SQL" footgun loudly at startup.
+The `_migrations` table records the applied set and refuses to apply a version-name pair that disagrees with what the code expects — this catches the classic "two PRs both claimed version N with different SQL" footgun loudly at startup. See [Collisions and how to get out of one](#collisions-and-how-to-get-out-of-one).
 </Note>
 
 ### Version-skew guard (no accidental downgrade)
@@ -156,6 +156,63 @@ database file).
 
 The `*.pre-migrate-*.bak` snapshot is the one Crewship takes automatically before applying pending migrations (see below) — so a bad upgrade is a one-step rollback: put the old binary back **and** restore the matching snapshot.
 
+## Authoring a migration — version numbers are timestamps now
+
+Versions **v1–v169** were allocated sequentially: the author took the next free integer. Everything after that is a **UTC timestamp**, `YYYYMMDDHHMMSS`:
+
+```go
+{version: 20260728143000, name: "add_widget_flag", sql: migrationAddWidgetFlag},
+```
+
+Generate one with:
+
+```bash
+date -u +%Y%m%d%H%M%S
+```
+
+Why the change: with sequential numbers, two branches open at the same time both take the *same* next integer, and neither author can tell. That is not an unlucky edge case — it is the default outcome of ordinary parallel work. Timestamps make a collision require two authors generating a migration in the same second. Rails, Django and Flyway all use this scheme for the same reason.
+
+Rules the build enforces (`internal/database/migrate_version_scheme.go`, and the tests beside it):
+
+- Versions must be **strictly ascending**, which for timestamps means chronological — so **append, never insert**.
+- Nothing new may be added **at or below v169**. That block is closed; those numbers are applied in databases nobody controls.
+- A version above the ceiling must be a plausible `YYYYMMDDHHMMSS` stamp. Writing `{version: 170, …}` out of habit fails the build with an explanation rather than shipping a collision.
+
+## Collisions and how to get out of one
+
+Two guards stand between a collision and your data, and they work at different times.
+
+**At review time**, `scripts/lint-migrations` (workflow **Migration Lint**, job "Lint migrations") fingerprints every migration entry — version, name, *and the body of the referenced SQL* — and compares against the PR's base ref. Changing an entry that already exists on `main` fails the check. So a forked schema does not reach `main`.
+
+**At startup**, the collision guard refuses to run when the database has a version applied under a different name than the binary declares:
+
+```
+failed to run migrations: migration version 168 collision: database has
+"account_setup_purpose" applied, code expects "rate_limit_overrides". If you
+are adding a migration, give it a timestamp version (date -u +%Y%m%d%H%M%S)
+instead of reusing this number. If this database is refusing to start after
+running a branch whose migration was renumbered, run `crewship db
+repair-ledger --dry-run` to see the fix — it moves the ledger row without
+touching the schema
+```
+
+<Warning>
+The startup guard is what you hit on a machine that ran a **feature branch** whose migration was later renumbered before merging — the branch's number is already recorded in that database. A pre-migration snapshot does **not** rescue this: it carries the same ledger.
+</Warning>
+
+The repair is `crewship db repair-ledger`:
+
+```bash
+crewship db repair-ledger --dry-run   # show the plan, change nothing
+crewship db repair-ledger             # apply it, after confirming
+```
+
+It moves the ledger row to the version this binary declares for that migration name. **No schema or table data is touched** — the migration already ran; only the number recording it was wrong. Any version the move frees up is then applied normally on the next start, so nothing is skipped.
+
+It **refuses** when the ledger names a migration the binary does not have at all. That is not a renumbering — the database was migrated by a different Crewship — and the fix there is a newer binary or [`crewship db restore-snapshot`](/guides/upgrades).
+
+Stop `crewshipd` before applying: a running server holds the database open. `--dry-run` is safe either way.
+
 ## Restoring from a backup that pre-dates a column
 
 The backup subsystem (`internal/backup/runner.go`) records the migrations applied at backup time. On restore, every migration the **target** has but the **source** lacked runs its `restoreBackfill` hook (when defined) against the freshly-inserted rows — so a restore from a v59 bundle into a v62 server populates the new columns sanely instead of leaving them at the SQL DEFAULT. Pure `ADD COLUMN` migrations that rely on the DB default need no hook; complex ones (e.g. backfilling a JSON column) provide one.
@@ -163,6 +220,7 @@ The backup subsystem (`internal/backup/runner.go`) records the migrations applie
 ## Related
 
 - [Architecture — Schema footprint](/architecture#schema-footprint).
+- [Upgrades](/guides/upgrades) — `crewship db restore-snapshot`, the other half of a bad-migration rollback.
 - [Crew Journal](/guides/crew-journal) — what v52, v55, v60, v61 mean for the audit stream.
 - [Paymaster](/guides/paymaster) — what v62 means for cost accounting.
 - [Episodic memory](/guides/episodic-memory) — what v54 + v55 mean for recall.
