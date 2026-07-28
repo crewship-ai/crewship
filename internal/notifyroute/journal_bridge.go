@@ -84,6 +84,30 @@ func CategoryForJournalType(t journal.EntryType) string {
 	return journalCategories[t]
 }
 
+// CategoryForJournalEntry resolves an entry to its category, taking into
+// account what the entry itself says about whether it is worth announcing.
+//
+// Today that is one claim: a completed run whose routine already told the
+// whole workspace it finished. That message says what happened AND carries
+// the result; the generic "Pipeline x completed" behind it is the same news
+// said worse, and getting both for every run is how a channel earns a mute.
+//
+// The claim is made by the producer (the executor knows its own steps) rather
+// than inferred here, and it applies only to the entry type it is about — a
+// payload carrying self_announced on something else must not silence that.
+func CategoryForJournalEntry(e journal.Entry) string {
+	category := CategoryForJournalType(e.Type)
+	if category == "" {
+		return ""
+	}
+	if e.Type == journal.EntryPipelineRunCompleted {
+		if claimed, _ := e.Payload["self_announced"].(bool); claimed {
+			return ""
+		}
+	}
+	return category
+}
+
 // severityPriority maps a journal severity onto the priority scale a
 // channel's min_priority floor compares against. An observational event
 // carries no priority of its own, and defaulting everything to "medium"
@@ -114,7 +138,7 @@ func (r *Router) ObserveJournal(entries []journal.Entry) {
 		return
 	}
 	for i := range entries {
-		category := CategoryForJournalType(entries[i].Type)
+		category := CategoryForJournalEntry(entries[i])
 		if category == "" {
 			continue
 		}

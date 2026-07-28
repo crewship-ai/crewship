@@ -84,6 +84,42 @@ func TestJournalItem_BodyListsTheFactsAPersonWants(t *testing.T) {
 	}
 }
 
+func TestCategoryForJournalEntry_SkipsARunThatAnnouncedItself(t *testing.T) {
+	// A routine that unconditionally tells the workspace it finished has
+	// already delivered this news, with its result attached. The generic
+	// "Pipeline x completed" behind it is the same thing said worse.
+	e := journal.Entry{
+		WorkspaceID: "w1",
+		Type:        journal.EntryPipelineRunCompleted,
+		Payload:     map[string]any{"self_announced": true},
+	}
+	if got := CategoryForJournalEntry(e); got != "" {
+		t.Errorf("category = %q, want none — the run announced itself", got)
+	}
+}
+
+func TestCategoryForJournalEntry_StillNotifiesAQuietRun(t *testing.T) {
+	// The case this notification exists for: a routine with no notify step
+	// of its own. Nothing else would report that it finished.
+	e := journal.Entry{WorkspaceID: "w1", Type: journal.EntryPipelineRunCompleted}
+	if got := CategoryForJournalEntry(e); got != "routines.completed" {
+		t.Errorf("category = %q, want routines.completed", got)
+	}
+}
+
+func TestCategoryForJournalEntry_ClaimOnlyAppliesToCompletion(t *testing.T) {
+	// self_announced is about the run-completed notice. A payload carrying
+	// it on some other entry type must not silence that type.
+	e := journal.Entry{
+		WorkspaceID: "w1",
+		Type:        journal.EntryBudgetExceed,
+		Payload:     map[string]any{"self_announced": true},
+	}
+	if got := CategoryForJournalEntry(e); got != "agents.budget" {
+		t.Errorf("category = %q, want agents.budget — the claim does not transfer", got)
+	}
+}
+
 func TestJournalItem_NoFactsMeansNoBody(t *testing.T) {
 	// An entry with nothing but identity has nothing to say beyond its
 	// summary. An empty "Details:" heading is worse than no body.
