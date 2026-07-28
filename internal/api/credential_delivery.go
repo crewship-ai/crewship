@@ -147,8 +147,16 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	      SELECT 1 FROM agent_credentials ac2
 	      WHERE ac2.agent_id = s.agent_id AND ac2.credential_id = c.id
 	  )
+	  -- Suppress the crew-link ONLY when a binding actually delivers this
+	  -- credential (it is in resolved_bindings), not merely when it has one.
+	  -- A binding that LOSES its slot to a more specific binding leaves the
+	  -- credential undelivered by the binding arm; suppressing here against
+	  -- applicable_bindings — every binding, winner or not — dropped it from
+	  -- the crew arm too, so a crew-linked secret with a losing binding
+	  -- reached the container under no variable at all. The crew link is
+	  -- independent of the binding's slot contest and must survive it.
 	  AND NOT EXISTS (
-	      SELECT 1 FROM applicable_bindings ab WHERE ab.credential_id = c.id
+	      SELECT 1 FROM resolved_bindings rb WHERE rb.credential_id = c.id
 	  )
 
 	ORDER BY priority ASC, source_rank ASC

@@ -361,3 +361,78 @@ func TestMultiAccount_CrossTenantGuardHoldsWithoutTheTriggers(t *testing.T) {
 		}
 	}
 }
+
+// TestMultiAccount_CrewLinkSurvivesALosingBinding is the HIGH bug the merge
+// review caught. A credential that is crew-linked AND has a binding that LOSES
+// its slot to a more specific binding was delivered nowhere: the crew-link arm
+// suppressed it because it had an applicable binding, and the binding arm only
+// delivers the winner. So an operator who crew-links a secret and later adds an
+// unrelated binding for it silently loses it from the container.
+func TestMultiAccount_CrewLinkSurvivesALosingBinding(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+
+	// X is crew-linked to crew A, and bound X→S at WORKSPACE scope.
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cred-x", "X_NAME", "x-secret")
+	linkCredToCrew(t, db, "cred-x", e.crewA)
+	seedBinding(t, db, "b-x-ws", e.wsID, "cred-x", "WORKSPACE", "", "", "SHARED_SLOT")
+
+	// Y wins SHARED_SLOT with a more specific CREW binding.
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cred-y", "Y_NAME", "y-secret")
+	seedBinding(t, db, "b-y-crew", e.wsID, "cred-y", "CREW", e.crewA, "", "SHARED_SLOT")
+
+	got := bootEnvValues(bootCreds(t, db, e.agentA))
+	if got["SHARED_SLOT"] != "y-secret" {
+		t.Errorf("SHARED_SLOT = %q, want y-secret (Y's CREW binding beats X's WORKSPACE binding)", got["SHARED_SLOT"])
+	}
+	// X lost the slot but is still crew-linked, so it must arrive under its
+	// crew-link name. Delivered-nowhere is the bug.
+	if got["X_NAME"] != "x-secret" {
+		t.Errorf("X_NAME = %q, want x-secret — X lost SHARED_SLOT but its crew link is independent "+
+			"of that binding and must still deliver", got["X_NAME"])
+	}
+}
+
+// TestMultiAccount_ListingMatchesDeliveryForCrewLinkedAndBound is the MEDIUM
+// bug: a credential that is both crew-linked and bound is listed twice by
+// `agent credentials` while delivery yields it once, so the listing shows a
+// phantom env var no container ever sets. The listing's own comment claims it
+// mirrors the delivery query; this pins that it does.
+func TestMultiAccount_ListingMatchesDeliveryForCrewLinkedAndBound(t *testing.T) {
+	db := setupTestDB(t)
+	e := seedCrewDeliveryEnv(t, db)
+
+	seedCredentialEnc(t, db, e.wsID, e.userID, "cred-x", "SHARED_SECRET", "x-secret")
+	linkCredToCrew(t, db, "cred-x", e.crewA)
+	seedBinding(t, db, "b-x", e.wsID, "cred-x", "CREW", e.crewA, "", "GH_TOKEN")
+
+	// Delivery is the truth: X arrives once, under the binding slot.
+	deliv := bootEnvValues(bootCreds(t, db, e.agentA))
+	if deliv["GH_TOKEN"] != "x-secret" || deliv["SHARED_SECRET"] != "" {
+		t.Fatalf("delivery = %v, want only GH_TOKEN=x-secret (the crew link is shadowed by the binding)", deliv)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/agents/"+e.agentA+"/credentials", nil)
+	req.SetPathValue("agentId", e.agentA)
+	req = req.WithContext(withWorkspace(req.Context(), e.wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	NewAgentHandler(db, newTestLogger()).ListCredentials(rr, req)
+
+	var got []struct {
+		CredName   string `json:"credential_name"`
+		EnvVarName string `json:"env_var_name"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	n := 0
+	for _, r := range got {
+		if r.CredName == "SHARED_SECRET" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("credential SHARED_SECRET listed %d times, want 1 — the crew-link row is a phantom "+
+			"when a binding already delivers the same credential. Rows: %s", n, rr.Body.String())
+	}
+}

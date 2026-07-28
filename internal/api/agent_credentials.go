@@ -104,6 +104,28 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		      SELECT 1 FROM agent_credentials ac2
 		      WHERE ac2.agent_id = a.id AND ac2.credential_id = c.id
 		  )
+		  -- Suppress the crew-link row when a binding ALREADY DELIVERS this
+		  -- credential — i.e. it has a binding that WINS its slot. Mirrors the
+		  -- delivery query's crew arm, which suppresses against resolved (not
+		  -- merely applicable) bindings. Without this the credential is listed
+		  -- twice — once as the binding slot, once as its crew name — while
+		  -- delivery hands it over once, so the listing showed a phantom
+		  -- variable no container sets. A binding that LOSES its slot does NOT
+		  -- suppress: the crew link still delivers it, and this must agree.
+		  AND NOT EXISTS (
+		      SELECT 1 FROM credential_bindings b
+		      WHERE b.workspace_id = a.workspace_id AND b.credential_id = c.id
+		        AND (   (b.scope = 'AGENT'     AND b.agent_id = a.id)
+		             OR (b.scope = 'CREW'      AND b.crew_id  = a.crew_id)
+		             OR  b.scope = 'WORKSPACE')
+		        AND NOT EXISTS (
+		            SELECT 1 FROM credential_bindings b2
+		            WHERE b2.workspace_id = a.workspace_id AND b2.slot = b.slot
+		              AND (   (b2.scope = 'AGENT' AND b2.agent_id = a.id AND b.scope IN ('CREW','WORKSPACE'))
+		                   OR (b2.scope = 'CREW'  AND b2.crew_id  = a.crew_id AND b.scope = 'WORKSPACE'))
+		              AND b2.id != b.id
+		        )
+		  )
 
 		UNION ALL
 
