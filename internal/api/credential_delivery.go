@@ -173,6 +173,17 @@ type deliveredCredential struct {
 	// that needs to distinguish an explicit grant from a workspace-wide
 	// binding does not have to re-derive it from the shape of the row.
 	Source int
+	// Fields are the credential's additional named parts (credential_fields,
+	// PRD §2.2), with their env-var names already derived from THIS row's
+	// EnvVar and already checked against every other name in the delivery.
+	// Nil for a credential with no parts, which is every credential that
+	// exists today — see credential_field_delivery.go.
+	Fields []deliveredCredentialField
+	// FieldConflicts are the parts that were refused a name. Carried rather
+	// than logged at the source so the caller, which knows the agent and has a
+	// logger, can report them; a part that vanishes with no trace is the exact
+	// failure this design is built to avoid.
+	FieldConflicts []deliveredFieldConflict
 }
 
 // loadDeliveredCredentials runs the shared derivation for one agent.
@@ -231,5 +242,23 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// The parts of a multi-part credential hang off the row's resolved EnvVar,
+	// so they are attached HERE — after the set and its slots are final and
+	// before any consumer sees it. A consumer that derived part names itself
+	// would be the second resolution path, and the second path is always the one
+	// that misses a filter (see the notes above on how many resolvers had to be
+	// fixed for the ACTIVE status and the #1373 lease gate).
+	//
+	// rows must be closed before this runs: SQLite serialises writes against an
+	// open read cursor, and holding one across a second query is how a delivery
+	// path acquires a deadlock nobody can reproduce.
+	rows.Close()
+	if err := attachDeliveredCredentialFields(ctx, db, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

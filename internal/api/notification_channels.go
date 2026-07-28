@@ -423,6 +423,18 @@ func (h *NotifyChannelHandler) TestDraft(w http.ResponseWriter, r *http.Request)
 			replyError(w, http.StatusBadRequest, "fill in the provider's fields before testing")
 			return
 		}
+		// A raw URL must belong to the provider that was just checked against
+		// the workspace allowlist. Composition can only ever yield that
+		// provider's scheme, but a supplied URL can name any service shoutrrr
+		// routes — `generic://` is an arbitrary HTTP POST, `smtp://` a mail
+		// relay — so without this the allowlist decided nothing and any
+		// authenticated member could aim the server's outbound request
+		// anywhere, persisting no record of it. ChannelStore.Create has always
+		// performed this check; this endpoint did not.
+		if err := notify.ValidateServiceURLForProvider(raw, body.Provider); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		ch.Provider = body.Provider
 		ch.Secret = raw
 	default:

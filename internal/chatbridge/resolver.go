@@ -179,6 +179,22 @@ type credentialResponse struct {
 	// threaded through to the orchestrator or the crew sidecar receives no
 	// deadline and holds a leased key for the container's whole life.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
+	// §2.2). Absent for every credential that has none, so an unchanged
+	// credential decodes to an unchanged struct. Dropping this key here would
+	// be a silent half-delivery: the API resolves the parts and the container
+	// never sees them, with nothing logged on either side.
+	Fields []credentialFieldEntry `json:"fields,omitempty"`
+}
+
+// credentialFieldEntry mirrors the API's mcpCredFieldEntry. The env var name is
+// derived and checked server-side (internal/api/credential_field_delivery.go);
+// nothing on this side of the socket rewrites it.
+type credentialFieldEntry struct {
+	Key      string `json:"key"`
+	EnvVar   string `json:"env_var"`
+	Value    string `json:"value"`
+	IsSecret bool   `json:"is_secret"`
 }
 
 // CreateChatRequest holds the parameters for creating a new chat session.
@@ -438,6 +454,11 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			Type:           c.Type,
 			Username:       c.Username,
 			LeaseExpiresAt: c.LeaseExpiresAt,
+		}
+		for _, f := range c.Fields {
+			creds[i].Fields = append(creds[i].Fields, orchestrator.CredentialField{
+				EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+			})
 		}
 	}
 

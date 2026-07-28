@@ -43,24 +43,58 @@ func TestCredSecretPaths(t *testing.T) {
 		{"AI_CLI_TOKEN", nil}, // ditto
 	}
 	for _, c := range cases {
-		got := credSecretPaths("writer", "GH_TOKEN", c.credType)
+		got := credSecretPaths("writer", "GH_TOKEN", c.credType, nil)
 		if strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("%s: paths = %v, want %v", c.credType, got, c.want)
 		}
 	}
 }
 
+// TestCredSecretPaths_IncludesMultiPartFields is the revoke half of P4 delivery.
+// A multi-part credential writes one file per part (exec_sidecar.go), so a
+// revoke that removed only the primary would leave the secret access key on
+// disk in a live container while the vault reported the credential gone — the
+// operator's revoke would be a lie until the container next restarted.
+//
+// The names are derived with the SAME function delivery used; a second spelling
+// here would remove the wrong paths and, being a best-effort `rm -f`, would say
+// nothing about it.
+func TestCredSecretPaths_IncludesMultiPartFields(t *testing.T) {
+	got := credSecretPaths("writer", "AWS", "GENERIC_SECRET", []string{"region", "secret_access_key"})
+	want := []string{
+		"/secrets/writer/AWS",
+		"/secrets/writer/AWS_REGION",
+		"/secrets/writer/AWS_SECRET_ACCESS_KEY",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("paths = %v, want %v", got, want)
+	}
+
+	// A type with no on-disk form has no on-disk parts either: buildCredFileScript
+	// skips the whole credential before it ever looks at the fields.
+	if got := credSecretPaths("writer", "ANTHROPIC", "API_KEY", []string{"region"}); got != nil {
+		t.Errorf("API_KEY paths = %v, want none — the credential itself never touches disk", got)
+	}
+
+	// An unsafe derived name is dropped rather than interpolated into the `rm`.
+	// Delivery would have refused to write it, so there is nothing to remove,
+	// and the one thing that must not happen is it reaching a shell.
+	if got := credSecretPaths("writer", "AWS", "SECRET", []string{"a;rm -rf /"}); strings.Join(got, "|") != "/secrets/writer/AWS" {
+		t.Errorf("paths = %v, want only the primary — an unsafe part name must not reach the shell", got)
+	}
+}
+
 func TestBuildCredRemoveScript(t *testing.T) {
-	if s := buildCredRemoveScript("writer", "GH_TOKEN", "SECRET"); s != "rm -f '/secrets/writer/GH_TOKEN'" {
+	if s := buildCredRemoveScript("writer", "GH_TOKEN", "SECRET", nil); s != "rm -f '/secrets/writer/GH_TOKEN'" {
 		t.Errorf("SECRET script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "DB", "USERPASS"); s != "rm -f '/secrets/writer/DB_USERNAME' '/secrets/writer/DB_PASSWORD'" {
+	if s := buildCredRemoveScript("writer", "DB", "USERPASS", nil); s != "rm -f '/secrets/writer/DB_USERNAME' '/secrets/writer/DB_PASSWORD'" {
 		t.Errorf("USERPASS script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "KEY", "SSH_KEY"); s != "rm -f '/secrets/writer/ssh/KEY'" {
+	if s := buildCredRemoveScript("writer", "KEY", "SSH_KEY", nil); s != "rm -f '/secrets/writer/ssh/KEY'" {
 		t.Errorf("SSH_KEY script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "X", "API_KEY"); s != "" {
+	if s := buildCredRemoveScript("writer", "X", "API_KEY", nil); s != "" {
 		t.Errorf("API_KEY (no disk form) script = %q, want empty", s)
 	}
 }

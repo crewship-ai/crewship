@@ -660,6 +660,27 @@ func validateWebhookURL(raw string) error {
 // happens at send time, and a malformed URL then fails the test-send with a
 // clear error rather than silently rejecting a shape shoutrrr itself would
 // accept).
+// ValidateServiceURLForProvider checks that a pre-composed delivery URL
+// actually belongs to the named provider.
+//
+// Composing a URL from a provider's fields can only ever produce that
+// provider's scheme. A caller that supplies the URL directly can produce
+// anything shoutrrr knows how to route — `generic://` is an arbitrary HTTP
+// POST, `smtp://` is a mail relay — so on that path the binding between the
+// provider a workspace enabled and the service actually contacted has to be
+// checked rather than assumed.
+//
+// Exported because the draft-test endpoint takes the same raw URL that Create
+// does and was not performing this check, which let any authenticated member
+// aim the server's outbound request wherever they liked.
+func ValidateServiceURLForProvider(raw, provider string) error {
+	spec, ok := ProviderByName(provider)
+	if !ok {
+		return fmt.Errorf("notify: unknown provider %q", provider)
+	}
+	return validateShoutrrrURL(raw, spec.Scheme)
+}
+
 func validateShoutrrrURL(raw, wantScheme string) error {
 	if raw == "" {
 		return fmt.Errorf("notify: shoutrrr channel needs a url")

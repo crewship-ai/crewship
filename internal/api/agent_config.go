@@ -639,6 +639,8 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		return nil, err
 	}
 
+	logDeliveredFieldConflicts(h.logger, agentID, delivered)
+
 	creds := []mcpCredEntry{}
 	for _, d := range delivered {
 		ce := mcpCredEntry{
@@ -662,6 +664,21 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			continue
 		}
 		ce.Value = dec
+
+		// The credential's parts, through the SAME opener its value just went
+		// through. A failure drops the whole credential rather than one part:
+		// half an AWS credential fails at the point of use with an error about
+		// the wrong thing, which costs more to diagnose than its absence.
+		fields, err := decryptDeliveredFields(d, decryptCredential)
+		if err != nil {
+			h.logger.Error("decrypt credential field for resolve", "id", ce.ID, "error", err)
+			continue
+		}
+		for _, f := range fields {
+			ce.Fields = append(ce.Fields, mcpCredFieldEntry{
+				Key: f.Key, EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+			})
+		}
 		creds = append(creds, ce)
 	}
 	return creds, nil
@@ -1355,9 +1372,34 @@ func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, wsID, serve
 // gated — see internal/credpolicy). Caller must gate on h.keeperEnabled.Load().
 func withholdKeeperSecretValues(creds []mcpCredEntry) {
 	for i := range creds {
-		if credpolicy.IsKeeperGated(creds[i].Type) {
-			creds[i].Value = ""
+		if !credpolicy.IsKeeperGated(creds[i].Type) {
+			continue
 		}
+		creds[i].Value = ""
+		// A SECRET part is credential material and is withheld with the value:
+		// the agent's prompt states the credential is NOT in its environment,
+		// and a passphrase sitting in /proc/self/environ under a derived name
+		// would make that statement false while routing around the
+		// /keeper/request audit gate.
+		//
+		// NON-secret parts stay. They are identifiers — region, account id,
+		// host — cleartext at rest by design, on exactly the footing as
+		// credentials.username, which Keeper has never withheld either. Keeper
+		// gates access to secrets, not to the shape of the account.
+		if len(creds[i].Fields) == 0 {
+			continue
+		}
+		kept := creds[i].Fields[:0]
+		for _, f := range creds[i].Fields {
+			if !f.IsSecret {
+				kept = append(kept, f)
+			}
+		}
+		if len(kept) == 0 {
+			creds[i].Fields = nil
+			continue
+		}
+		creds[i].Fields = kept
 	}
 }
 

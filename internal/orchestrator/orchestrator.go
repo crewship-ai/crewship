@@ -164,6 +164,36 @@ type Credential struct {
 	// evict the credential once its lease lapses — the server-side gates only
 	// cover the moment of delivery, not the container's whole lifetime.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
+	// §2.2): AWS = access key id + secret + region, a service account = blob +
+	// filename. Nil for every credential that has none, which is the shape the
+	// entire install base is in.
+	//
+	// A sub-list rather than N sibling Credential entries, deliberately. A
+	// synthetic sibling would inherit Type and then be treated as a credential
+	// in its own right by everything that scans this slice: the OAuth-token
+	// selector would pick a part's value as the agent's session, the USERPASS
+	// layout would demand a username the part does not have, and the sidecar
+	// CredStore's provider mapping would register an AWS region as an Anthropic
+	// API key. Keeping the parts subordinate means only code that has been
+	// taught about them can see them.
+	Fields []CredentialField `json:"fields,omitempty"`
+}
+
+// CredentialField is one named part of a multi-part credential, resolved to
+// cleartext and already named by the API tier (<SLOT>_<KEY UPCASED>, checked
+// against every other name in the delivery — see
+// internal/api/credential_field_delivery.go). Nothing in this package derives
+// or rewrites the name; it is the delivery contract, not a suggestion.
+type CredentialField struct {
+	EnvVar string `json:"env_var"`
+	Value  string `json:"value"`
+	// IsSecret says whether this part is credential material (encrypted at
+	// rest) or an identifier (cleartext at rest — region, account id, host).
+	// It is the flag every isolation decision keys off: a secret part follows
+	// its credential's channel exactly, an identifier is delivered as an env
+	// var regardless, because no channel here can carry an identifier for us.
+	IsSecret bool `json:"is_secret"`
 }
 
 // RunState tracks the runtime state of an active agent run, persisted in the

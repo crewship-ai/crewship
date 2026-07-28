@@ -558,6 +558,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
+	logDeliveredFieldConflicts(h.logger, agentID, delivered)
 
 	var creds []orchestrator.Credential
 	for _, d := range delivered {
@@ -576,6 +577,20 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			continue
 		}
 		c.PlainValue = dec
+		// The credential's parts (PRD §2.2), through the same opener. This
+		// loader's policy for a failed decrypt is to fail the whole peer query
+		// rather than to run one credential short, and a part is no different:
+		// a run that answers with a broken tool call is worse than one that
+		// says it could not start.
+		fields, err := decryptDeliveredFields(d, encryption.Decrypt)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range fields {
+			c.Fields = append(c.Fields, orchestrator.CredentialField{
+				EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+			})
+		}
 		creds = append(creds, c)
 	}
 	return creds, nil
