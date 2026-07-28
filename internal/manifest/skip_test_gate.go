@@ -32,14 +32,26 @@ import (
 // hatch the server already exposes (`skip_governance_gate`) is forwarded the
 // same way, behind its own flag — the operator has to ask for it, and asking
 // for one gate does not silently open the other.
+//
+// Each gate is its OWN field, because that last sentence used to be false.
+// The first version carried only `governance` and treated the wrapper's
+// existence as meaning "skip the test gate", so wrapping a plain client for
+// the governance gate alone forwarded both.
 type skipTestGateClient struct {
 	inner internalapi.Client
-	// governance forwards skip_governance_gate alongside skip_test_gate.
+	// testGate forwards skip_test_gate.
+	testGate bool
+	// governance forwards skip_governance_gate.
 	governance bool
 }
 
+// withSkipTestGate forwards skip_test_gate on routine saves.
 func withSkipTestGate(c internalapi.Client) internalapi.Client {
-	return &skipTestGateClient{inner: c}
+	if existing, ok := c.(*skipTestGateClient); ok {
+		existing.testGate = true
+		return existing
+	}
+	return &skipTestGateClient{inner: c, testGate: true}
 }
 
 // withSkipGovernanceGate forwards skip_governance_gate on routine saves, so a
@@ -58,7 +70,7 @@ func (c *skipTestGateClient) Get(ctx context.Context, path string) (*internalapi
 
 func (c *skipTestGateClient) Post(ctx context.Context, path string, body any) (*internalapi.Response, error) {
 	if isPipelineSavePath(path) {
-		body = mergeSkipTestGate(body, c.governance)
+		body = mergeGateFlags(body, c.testGate, c.governance)
 	}
 	return c.inner.Post(ctx, path, body)
 }
@@ -87,8 +99,8 @@ func isPipelineSavePath(path string) bool {
 	return strings.HasSuffix(path, "/pipelines/save")
 }
 
-// mergeSkipTestGate returns a copy of body with skip_test_gate=true
-// added. Bodies that aren't map[string]any pass through unchanged —
+// mergeGateFlags returns a copy of body with the gate flags the caller
+// actually asked for. Bodies that aren't map[string]any pass through unchanged —
 // every caller in the manifest layer uses maps today, and silently
 // hijacking some other body shape would be more surprising than the
 // flag failing to apply.
@@ -97,7 +109,7 @@ func isPipelineSavePath(path string) bool {
 // computation for allocation may overflow" gate quiet. Go grows the
 // map on the one extra Set call below, so the runtime cost is the
 // same one bucket reallocation either way.
-func mergeSkipTestGate(body any, governance bool) any {
+func mergeGateFlags(body any, testGate, governance bool) any {
 	m, ok := body.(map[string]any)
 	if !ok {
 		return body
@@ -106,7 +118,12 @@ func mergeSkipTestGate(body any, governance bool) any {
 	for k, v := range m {
 		out[k] = v
 	}
-	out["skip_test_gate"] = true
+	// Each flag is set ONLY when its own gate was asked for. The version
+	// this replaces set skip_test_gate unconditionally, so a caller who
+	// wanted the governance gate opened got the test gate opened too.
+	if testGate {
+		out["skip_test_gate"] = true
+	}
 	if governance {
 		out["skip_governance_gate"] = true
 	}

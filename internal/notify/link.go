@@ -1,6 +1,9 @@
 package notify
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Link is a deep link carried on a notification: where a person goes to act
 // on what the message is telling them.
@@ -122,10 +125,44 @@ func scrubMessage(m *CategoryMessage, scrub func(string) string) {
 		m.Links[i].Path = scrub(m.Links[i].Path)
 	}
 	if m.Vars != nil {
-		if out, ok := scrubValue(m.Vars, scrub).(map[string]any); ok {
+		if out, ok := scrubValue(jsonNormalise(m.Vars), scrub).(map[string]any); ok {
 			m.Vars = out
+		} else {
+			// Unreachable in practice, but the safe direction is explicit:
+			// facts we could not normalise are facts we cannot redact.
+			m.Vars = nil
 		}
 	}
+}
+
+// jsonNormalise converts a producer's payload into the JSON-native shapes
+// scrubValue can walk: string, map[string]any, []any, and scalars.
+//
+// Vars comes from Go producers, not from decoded JSON, so it holds Go values —
+// lookout writes `Payload["findings"] = result.Findings`, a []lookout.Finding.
+// scrubValue's type switch only knew string, map[string]any and []any, so
+// every other shape fell to its default branch and was returned untouched: a
+// []string of hosts, a map[string]string of headers, a slice of structs
+// carrying an excerpt of the prompt that tripped a guardrail. The body and
+// title of the same message were redacted, so nothing in the delivered text
+// showed it — only the webhook JSON carried it.
+//
+// Round-tripping through JSON is what the webhook serialiser does anyway, so
+// this normalises to exactly the shape that would be sent, and no earlier.
+// Reflection would work too and would mutate values the caller still owns.
+//
+// A payload that cannot be marshalled (a channel, a func) is a producer bug;
+// returning nil drops the facts rather than forwarding something unredactable.
+func jsonNormalise(v map[string]any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // scrubValue walks a Vars tree redacting every string it reaches.

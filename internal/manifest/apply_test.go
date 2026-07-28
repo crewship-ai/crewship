@@ -28,6 +28,8 @@ type fakeAPIClient struct {
 	integrationsByCrew map[string]map[string]map[string]any
 	agentSkillBindings map[string][]map[string]any // agentID → bindings
 	routinesBySlug     map[string]map[string]any   // routine drift fixtures
+	notifyChannels     []map[string]any            // existing notification channels
+	failChannelList    bool                        // make the channel list return 500
 	composioBindings   []map[string]any            // agent→toolkit grants
 	agentCredBindings  map[string][]map[string]any
 
@@ -58,6 +60,7 @@ func newFakeAPI(t *testing.T) *fakeAPIClient {
 		agentSkillBindings: map[string][]map[string]any{},
 		agentCredBindings:  map[string][]map[string]any{},
 		routinesBySlug:     map[string]map[string]any{},
+		notifyChannels:     []map[string]any{},
 	}
 }
 
@@ -80,6 +83,13 @@ func resp(status int, v any) *http.Response {
 func (f *fakeAPIClient) Get(_ context.Context, path string) (*http.Response, error) {
 	f.record("GET", path, nil)
 	switch {
+	case strings.HasSuffix(path, "/notification-channels"):
+		// Channel drift detection reads this. Empty by default; a test that
+		// wants an existing channel seeds notifyChannels.
+		if f.failChannelList {
+			return resp(500, map[string]any{"error": "upstream unavailable"}), nil
+		}
+		return resp(200, map[string]any{"channels": f.notifyChannels}), nil
 	case path == "/api/v1/crews":
 		var out []map[string]any
 		for _, c := range f.crewsBySlug {

@@ -2,9 +2,13 @@ package manifest
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // Planning for notification channels, their agent grants, and the Composio
@@ -32,6 +36,17 @@ func (pb *planBuilder) planNotifications(ctx context.Context, ws *WorkspaceDocum
 		// A workspace that has never had a channel can 404 or answer with an
 		// empty body depending on how the route is wired; neither is a reason
 		// to abort a plan that is mostly about crews and agents.
+		//
+		// Anything else IS. This used to swallow every error and carry on with
+		// remote = nil, so a 500, a timeout or an expired token read as "no
+		// channels exist" — and every declared channel planned as a create.
+		// Re-running apply during a blip duplicated the workspace's Slack,
+		// Discord and webhook channels, and channels have no slug to
+		// reconcile them by afterwards. A plan that cannot tell "there are
+		// none" from "I could not look" is not one to act on.
+		if !isNotFound(err) {
+			return fmt.Errorf("list notification channels: %w", err)
+		}
 		remote = nil
 	}
 
@@ -39,6 +54,18 @@ func (pb *planBuilder) planNotifications(ctx context.Context, ws *WorkspaceDocum
 		pb.planNotificationChannel(&ws.Spec.NotificationChannels[i], remote)
 	}
 	return nil
+}
+
+// isNotFound reports whether err is a 404 from the API.
+//
+// The distinction it draws is the whole point of the callers that use it: a
+// route answering "there is nothing here" is information, and a route
+// answering 500, 401 or nothing at all is the absence of information. Treating
+// the second as the first is how a planner decides to create things that
+// already exist.
+func isNotFound(err error) bool {
+	var apiErr *cli.APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
 }
 
 // planComposioKey sets the workspace's Composio project key.
@@ -58,18 +85,15 @@ func (pb *planBuilder) planComposioKey(envVar string) {
 
 // planNotificationChannel plans one channel plus its agent grants.
 func (pb *planBuilder) planNotificationChannel(ch *NotificationChannel, remote []NotifyChannelResponse) {
-	body, missing := pb.notificationBody(ch)
-	if len(missing) > 0 {
-		// Reported rather than silently dropped: an operator who ran without
-		// --from-env needs to know which variables would have been read, and
-		// the plan is where they are looking.
-		sort.Strings(missing)
-		pb.plan.Skipped = append(pb.plan.Skipped, fmt.Sprintf(
-			"notification channel %s (needs %s — pass --from-env or --secrets-file)",
-			ch.Slug, strings.Join(missing, ", ")))
-		return
-	}
-
+	// Look for the channel BEFORE asking whether its secret is available.
+	//
+	// The secret is only needed to CREATE one: matching uses type, provider
+	// and to-address, all declared in the manifest, and the destination of an
+	// existing channel is deliberately never patched. Checking for the secret
+	// first meant a re-apply without --from-env returned here and never
+	// reached the agent grants and preferences declared alongside the
+	// channel — reporting "needs SLACK_WEBHOOK_URL", which reads as "the
+	// channel was not created" rather than "your pairing was dropped".
 	if existing := matchRemoteChannel(ch, remote); existing != nil {
 		// Identity is (type, provider, destination) — the server has no slug
 		// column for channels — so a match means "this channel is already
@@ -97,8 +121,21 @@ func (pb *planBuilder) planNotificationChannel(ch *NotificationChannel, remote [
 		return
 	}
 
-	// Create. The id is only known at exec time, so the grants that follow
-	// read it from this cell rather than from a value captured at plan time.
+	// Not there — so it has to be created, and creating needs the
+	// destination. Reported rather than silently dropped: an operator who ran
+	// without --from-env needs to know which variables would have been read,
+	// and the plan is where they are looking.
+	body, missing := pb.notificationBody(ch)
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		pb.plan.Skipped = append(pb.plan.Skipped, fmt.Sprintf(
+			"notification channel %s (needs %s — pass --from-env or --secrets-file)",
+			ch.Slug, strings.Join(missing, ", ")))
+		return
+	}
+
+	// The id is only known at exec time, so the grants that follow read it
+	// from this cell rather than from a value captured at plan time.
 	created := new(string)
 	pb.appendItem(ActionCreate, "notification_channel", ch.Slug,
 		func(ctx context.Context, c *Client, _ Options) error {

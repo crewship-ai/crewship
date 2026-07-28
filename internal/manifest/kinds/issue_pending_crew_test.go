@@ -73,6 +73,29 @@ func TestIssue_Plan_CrewThatNeverAppearsStillFails(t *testing.T) {
 	}
 }
 
+func TestLookupIssueRemote_ALookupFAILUREIsNotTheSameAsNoCrew(t *testing.T) {
+	// Deferring the crew resolution (above) traded one bug for another: the
+	// replacement swallowed EVERY error from issueLookupCrewIDBySlug, not
+	// just "not found". That helper errors on any failure of issueListCrews —
+	// a 500, a 401 after the token expired, a timeout — so a transient blip
+	// during `crewship apply` read as "this issue does not exist yet" and the
+	// planner planned a create for every issue in the file. Issues have no
+	// unique-slug constraint, so the operator gets a duplicate of each one
+	// and the plan reports them as created.
+	//
+	// The sibling helper added in the same commit, LookupRoutineRemoteBySlug,
+	// refuses exactly this: a plan that cannot tell "not there" from "could
+	// not look" is not one to trust.
+	for _, status := range []int{500, 401, 403, 429} {
+		client := newIssueFake()
+		client.listCrewsStatus = status
+		_, err := LookupIssueRemoteBySlug(context.Background(), client, "some-slug", "engineering", "Some title")
+		if err == nil {
+			t.Errorf("a %d from the crew list must surface, not read as 'no remote issue'", status)
+		}
+	}
+}
+
 func TestLookupIssueRemote_MissingCrewMeansNoRemoteIssue(t *testing.T) {
 	// A crew that does not exist yet cannot hold an issue, so the honest
 	// answer is "no remote row" — which plans a create. Returning an error

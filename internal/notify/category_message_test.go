@@ -107,6 +107,68 @@ func TestDeliverCategoryMessage_ScrubsVarsIncludingNested(t *testing.T) {
 	}
 }
 
+// scrubValue's type switch handled string, map[string]any and []any, and
+// returned everything else untouched. Producer payloads are Go values, not
+// decoded JSON, so a concretely-typed one walks straight through: lookout
+// writes Payload["findings"] = result.Findings ([]lookout.Finding), the
+// journal bridge copies it into Vars verbatim, and deliverCategoryWebhook
+// marshals it — including the excerpt of the offending prompt each finding
+// carries — into the security webhook's `vars`.
+//
+// The body and title of the same message ARE redacted, so nothing about the
+// delivered text shows the leak; only the JSON carries it.
+func TestDeliverCategoryMessage_ScrubsTypedPayloadValues(t *testing.T) {
+	type finding struct {
+		Kind    string   `json:"kind"`
+		Matched string   `json:"matched"`
+		Tags    []string `json:"tags"`
+	}
+	var (
+		mu   sync.Mutex
+		body []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		body = b
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	d := fastDispatcher(t, staticLister{}, nil)
+	ch := Channel{ID: "c1", Type: ChannelWebhook, URL: srv.URL, Secret: "topsecret", Enabled: true}
+
+	err := d.DeliverCategoryMessage(context.Background(), ch, CategoryMessage{
+		WorkspaceID: "w", Category: CategorySecurity, Title: "Guardrail hit",
+		Vars: map[string]any{
+			// A slice of structs, a typed string slice and a typed map —
+			// the shapes a Go producer actually builds.
+			"findings":  []finding{{Kind: "prompt_injection", Matched: "leak " + testSecret, Tags: []string{testSecret}}},
+			"hosts":     []string{"a.test", testSecret},
+			"headers":   map[string]string{"authorization": testSecret},
+			"attempts":  3,
+			"truncated": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Contains(string(body), testSecret) {
+		t.Errorf("a typed value carried a secret into the webhook payload:\n%s", body)
+	}
+	// Non-string values must survive as themselves — redaction is not
+	// permission to flatten the payload.
+	for _, want := range []string{`"attempts":3`, `"truncated":true`, `"a.test"`, `"prompt_injection"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("payload lost %s:\n%s", want, body)
+		}
+	}
+}
+
 func TestDeliverCategoryMessage_ShoutrrrCarriesAbsoluteLinks(t *testing.T) {
 	fp := &fakeProvider{}
 	defer SetProviderForTesting(fp)()

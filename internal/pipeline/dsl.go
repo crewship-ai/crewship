@@ -368,13 +368,19 @@ func collectReachableNeeds(stepID string, stepByID map[string]*Step, out map[str
 // validate pass.
 func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}, errs *ValidationErrors) {
 	base := fmt.Sprintf("/steps/%d", i)
-	walk := func(path, s string) {
+	check := func(path, s string, ours bool) {
 		if s == "" {
 			return
 		}
 		matches := templateRE.FindAllStringSubmatch(s, -1)
 		for _, m := range matches {
 			ref := strings.TrimSpace(m[1])
+			// A field that carries text for ANOTHER program may legitimately
+			// hold that program's template syntax. Judging it is not ours to
+			// do — see walkForeign.
+			if !ours && !usesOurNamespace(ref) {
+				continue
+			}
 			if err := checkTemplateRef(ref, inputs, earlier); err != nil {
 				*errs = append(*errs, &ValidationError{
 					Path:    path,
@@ -383,6 +389,23 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 			}
 		}
 	}
+	// walk validates every {{ ... }} it finds, including one whose namespace
+	// we do not recognise. Used for the fields that have always been checked
+	// this way; leniency there would retire a real check.
+	walk := func(path, s string) { check(path, s, true) }
+	// walkForeign validates only the refs that name one of OUR namespaces.
+	//
+	// Used for fields whose content is handed to another program — a script
+	// step's argv, a notify body someone writes prose in. Those were never
+	// walked before #1518, so widening the walk to them started rejecting
+	// text that had always been saveable: `args: ["ps","--format","{{.Names}}"]`
+	// is a Docker format string, not a broken Crewship ref, and rejecting it
+	// made `apply` abort on routines the operator never touched.
+	//
+	// What the widening was FOR is kept: `{{ steps.fetch.status }}` names a
+	// namespace we own and gets it wrong, so it is still caught. The line is
+	// "did the author mean us", not "which field is this".
+	walkForeign := func(path, s string) { check(path, s, false) }
 
 	// agent_run prompt + nested inputs (recursive: NestedInputs can be
 	// nested objects/arrays — call_pipeline forwards a structured map
@@ -438,19 +461,19 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 	// the one step whose entire output is text a person reads, which makes
 	// it the worst place to skip this check.
 	if st.Notify != nil {
-		walk(base+"/notify/to", st.Notify.To)
-		walk(base+"/notify/title", st.Notify.Title)
-		walk(base+"/notify/body", st.Notify.Body)
+		walkForeign(base+"/notify/to", st.Notify.To)
+		walkForeign(base+"/notify/title", st.Notify.Title)
+		walkForeign(base+"/notify/body", st.Notify.Body)
 	}
 
 	// Script step fields — args and env are documented as
 	// template-substituted and were unchecked for the same reason.
 	if st.Script != nil {
 		for k, v := range st.Script.Env {
-			walk(base+"/script/env/"+k, v)
+			walkForeign(base+"/script/env/"+k, v)
 		}
 		for ai, a := range st.Script.Args {
-			walk(fmt.Sprintf("%s/script/args/%d", base, ai), a)
+			walkForeign(fmt.Sprintf("%s/script/args/%d", base, ai), a)
 		}
 	}
 
@@ -483,6 +506,25 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 			bodyEarlier[bs.ID] = struct{}{}
 		}
 	}
+}
+
+// ourNamespaces is the set of first segments a Crewship template ref may
+// start with. It mirrors the cases resolveRef handles; anything else is
+// syntax belonging to some other tool that happens to share the {{ }}
+// delimiters.
+var ourNamespaces = map[string]bool{
+	"inputs": true, "steps": true, "env": true,
+	"run": true, "secrets": true, "routine": true,
+}
+
+// usesOurNamespace reports whether a template ref is addressed to Crewship at
+// all. `{{ steps.fetch.status }}` is (and is wrong); `{{.Names}}` is not.
+func usesOurNamespace(ref string) bool {
+	head, _, found := strings.Cut(ref, ".")
+	if !found {
+		return false
+	}
+	return ourNamespaces[head]
 }
 
 // checkTemplateRef validates a single template body like
