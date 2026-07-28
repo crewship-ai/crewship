@@ -163,3 +163,35 @@ func TestTemplate_ATemplatedTitleIsStillScrubbed(t *testing.T) {
 		t.Errorf("a templated title escaped redaction: %q", got)
 	}
 }
+
+func TestTemplate_TheDeliveryLogRecordsWhatWasActuallySent(t *testing.T) {
+	// The outbox row and the Activity timeline both carry a title, and both
+	// were filled from the PRODUCER's title — captured before the template
+	// ran. So an operator asking "why did that message say something else?"
+	// would read a log showing the wording they did not receive, which is
+	// the one question this log exists to answer.
+	db := newRouteTestDB(t)
+	rs := newRecordingWebhookServer(t)
+	ch := seedWebhookChannel(t, db, rs.URL)
+	seedImmediatePref(t, db, notify.CategoryRoutinesCompleted, ch.ID)
+	seedTemplate(t, db, notify.CategoryRoutinesCompleted, "", "{{ vars.pipeline_slug }} is done", "")
+
+	r := newTestRouter(db, nil, nil)
+	item := journalItem(journal.Entry{
+		ID: "je_5", WorkspaceID: "ws1", Type: journal.EntryPipelineRunCompleted,
+		Severity: journal.SeverityInfo, Summary: "Pipeline nightly completed",
+		Payload: map[string]any{"pipeline_slug": "nightly"},
+	}, notify.CategoryRoutinesCompleted)
+	r.route(context.Background(), notify.CategoryRoutinesCompleted, item)
+
+	rows, err := NewDeliveryStore(db).List(context.Background(), "ws1", ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 delivery row, got %d", len(rows))
+	}
+	if rows[0].Title != "nightly is done" {
+		t.Errorf("logged title = %q, want what the recipient actually saw", rows[0].Title)
+	}
+}
