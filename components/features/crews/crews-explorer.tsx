@@ -206,8 +206,8 @@ export function CrewsExplorer({
                       />
                     </span>
                     <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
-                    <span className="text-[12px] font-medium truncate flex-1">{crew.name}</span>
-                    <span className="text-[10px] text-muted-foreground-soft tabular-nums shrink-0">
+                    <span className="type-row font-semibold truncate flex-1">{crew.name}</span>
+                    <span className="type-meta text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
                     </span>
                     {/* Mini status dots */}
@@ -249,8 +249,8 @@ export function CrewsExplorer({
                           className="h-5 w-5 rounded-full shrink-0"
                         />
                         <div className="flex-1 min-w-0">
-                          <span className="text-[11px] font-medium truncate block">{agent.name}</span>
-                          <span className="text-[10px] text-muted-foreground truncate block">
+                          <span className="type-row font-medium truncate block">{agent.name}</span>
+                          <span className="type-meta text-muted-foreground truncate block">
                             {agent.role_title || agent.agent_role}
                           </span>
                         </div>
@@ -264,7 +264,7 @@ export function CrewsExplorer({
                               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
                             </span>
                           )}
-                          <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                          <span className={cn("type-meta", badge.className)}>{badge.label}</span>
                         </div>
                       </SidebarRow>
                     )
@@ -276,7 +276,7 @@ export function CrewsExplorer({
             {/* Unassigned */}
             {unassigned.length > 0 && (
               <div className="mt-2 pt-2 border-t border-border">
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
+                <div className="type-section px-2 py-1 text-muted-foreground-soft">
                   Unassigned
                 </div>
                 {unassigned.map((agent) => {
@@ -302,8 +302,8 @@ export function CrewsExplorer({
                         className="h-5 w-5 rounded-full shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-medium truncate block">{agent.name}</span>
-                        <span className="text-[10px] text-muted-foreground truncate block">
+                        <span className="type-row font-medium truncate block">{agent.name}</span>
+                        <span className="type-meta text-muted-foreground truncate block">
                           {agent.role_title || agent.agent_role}
                         </span>
                       </div>
@@ -311,7 +311,7 @@ export function CrewsExplorer({
                         {agent.ephemeral && !ghost && (
                           <Clock className="h-2.5 w-2.5 text-notice/80" aria-label="Ephemeral hire" />
                         )}
-                        <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                        <span className={cn("type-meta", badge.className)}>{badge.label}</span>
                       </div>
                     </SidebarRow>
                   )
