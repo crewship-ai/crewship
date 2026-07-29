@@ -351,8 +351,8 @@ body {
      so adopting a role is a visual no-op there and a correction
      everywhere else.
 
-       .type-title    26px  page heading
-       .type-row      15px  list rows, field values, prose
+       .type-title    24px  page heading
+       .type-row      14px  list rows, field values, prose
        .type-section  13px  UPPERCASE card + section headers, labels
        .type-meta     12px  timestamps, ids, stat captions, badges
 
@@ -371,14 +371,14 @@ body {
      This is the whole reason the roles exist: four values here, and every
      detail surface in the product moves together. */
   .type-title {
-    font-size: 1.625rem;
-    line-height: 2.125rem;
+    font-size: 1.5rem;
+    line-height: 2rem;
     font-weight: 650;
     letter-spacing: -0.02em;
   }
   .type-row {
-    font-size: 0.9375rem;
-    line-height: 1.375rem;
+    font-size: 0.875rem;
+    line-height: 1.3rem;
   }
   .type-section {
     font-size: 0.8125rem;
