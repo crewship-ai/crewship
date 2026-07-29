@@ -185,6 +185,8 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditFromRequest(r, h.db, "crew.delete", "CREW", crewID, nil)
+
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 
 	h.broadcastCrewEvent("crew.deleted", workspaceID, map[string]string{"id": crewID})

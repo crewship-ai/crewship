@@ -29,6 +29,7 @@ var auditCmd = &cobra.Command{
 
 Filters mirror the server-side /api/v1/audit query params:
   --action          Domain verb (agent.run, workspace.create, …)
+  --source          Which trail: workspace (default) · crews · credentials · keeper
   --entity-type     Entity kind (AGENT, BACKUP, CREDENTIAL, …)
   --entity-id       Narrow to a specific entity row
   --user            User ID (or a member's email, resolved for you) who performed the action
@@ -40,6 +41,7 @@ Examples:
   crewship audit
   crewship audit --action agent.run --lines 100
   crewship audit --entity-type CREDENTIAL --since 24h
+  crewship audit --source keeper --lines 100
   crewship audit --search rotate --until 2026-05-01T00:00:00Z
   crewship audit --user u_abc123 --page 2`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,8 +63,12 @@ Examples:
 		until, _ := cmd.Flags().GetString("until")
 		search, _ := cmd.Flags().GetString("search")
 		page, _ := cmd.Flags().GetInt("page")
+		source, _ := cmd.Flags().GetString("source")
 
 		q := url.Values{}
+		if source != "" {
+			q.Set("source", source)
+		}
 		q.Set("limit", fmt.Sprintf("%d", lines))
 		if page > 0 {
 			q.Set("page", fmt.Sprintf("%d", page))
@@ -243,6 +249,10 @@ func init() {
 	// Filter flags map 1:1 to /api/v1/audit query params. Names match the
 	// admin UI's filter chips so a user clicking through the dashboard can
 	// reproduce the same view from the CLI by reading the URL bar.
+	// A workspace keeps four audit trails and they answer different
+	// questions; the server projects each onto one row shape so this is a
+	// switch rather than four commands.
+	auditCmd.Flags().String("source", "", "Which trail to read: workspace (default), crews, credentials, keeper")
 	auditCmd.Flags().String("action", "", "Filter by action (domain verb, e.g. agent.run, workspace.create)")
 	auditCmd.Flags().String("entity-type", "", "Filter by entity type (AGENT, BACKUP, CREDENTIAL, …)")
 	auditCmd.Flags().String("entity-id", "", "Filter by entity ID")

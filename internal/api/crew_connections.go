@@ -157,6 +157,9 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "update crew connection", err)
 			return
 		}
+		auditFromRequest(r, h.db, "crew_link.update", "CREW_LINK", existingID, map[string]interface{}{
+			"from_crew_id": req.FromCrewID, "to_crew_id": req.ToCrewID, "direction": direction,
+		})
 		writeJSON(w, http.StatusOK, map[string]string{"id": existingID})
 		return
 	case !errors.Is(err, sql.ErrNoRows):
@@ -173,6 +176,10 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusConflict, "Connection already exists or constraint violation")
 		return
 	}
+
+	auditFromRequest(r, h.db, "crew_link.create", "CREW_LINK", id, map[string]interface{}{
+		"from_crew_id": req.FromCrewID, "to_crew_id": req.ToCrewID, "direction": req.Direction,
+	})
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
@@ -197,6 +204,9 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusNotFound, "Connection not found")
 		return
 	}
+
+	auditFromRequest(r, h.db, "crew_link.delete", "CREW_LINK", connID, nil)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 

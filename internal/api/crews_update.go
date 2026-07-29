@@ -421,6 +421,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The changed FIELDS, not their values: a crew update can carry an
+	// allowed-domain list or an MCP config, and the audit log is read by more
+	// people than those settings are meant for. What changed is the question
+	// the log has to answer; the current value is one GET away.
+	auditFromRequest(r, h.db, "crew.update", "CREW", crewID, map[string]interface{}{
+		"name": c.Name, "fields": changedCrewFields(&req),
+	})
+
 	writeJSON(w, http.StatusOK, c)
 
 	h.broadcastCrewEvent("crew.updated", workspaceID, map[string]string{
@@ -456,3 +464,39 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete soft-deletes a crew and all its associated agents.
 // DELETE /api/v1/crews/{crewId}
+
+// changedCrewFields names the fields a PATCH actually carried.
+//
+// The audit row records WHICH settings moved, not what they moved to: a crew
+// update can carry an allowed-domain list, an MCP config or an escalation
+// policy, and the audit log has a wider readership than any of those. "Who
+// touched the network policy, and when" is the question it must answer; the
+// current value is one GET away for anyone entitled to it.
+func changedCrewFields(req *updateCrewRequest) []string {
+	fields := make([]string, 0, 8)
+	add := func(name string, set bool) {
+		if set {
+			fields = append(fields, name)
+		}
+	}
+	add("name", req.Name != nil)
+	add("slug", req.Slug != nil)
+	add("description", req.Description != nil)
+	add("color", req.Color != nil)
+	add("icon", req.Icon != nil)
+	add("avatar_style", req.AvatarStyle != nil)
+	add("container_memory_mb", req.ContainerMemoryMB != nil)
+	add("container_cpus", req.ContainerCPUs != nil)
+	add("container_ttl_hours", req.ContainerTTLHours != nil)
+	add("network_mode", req.NetworkMode != nil)
+	add("allowed_domains", req.AllowedDomains != nil)
+	add("allow_private_endpoints", req.AllowPrivateEndpoints != nil)
+	add("mcp_config_json", req.MCPConfigJSON != nil)
+	add("escalation_config", req.EscalationConfig != nil)
+	add("issue_prefix", req.IssuePrefix != nil)
+	add("runtime_image", req.RuntimeImage != nil)
+	add("devcontainer_config", req.DevcontainerConfig != nil)
+	add("mise_config", req.MiseConfig != nil)
+	add("services_json", req.ServicesJSON != nil)
+	return fields
+}

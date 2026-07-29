@@ -229,5 +229,30 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.fillNestedCount()
 
+	// Which settings moved. allow_privileged_credentials gets called out by
+	// name because it is the one that removes the fail-closed boundary between
+	// privileged crews and stored secrets — if a single row in this log ever
+	// matters, it is that one.
+	changed := make([]string, 0, 4)
+	if req.Name != nil {
+		changed = append(changed, "name")
+	}
+	if req.Slug != nil {
+		changed = append(changed, "slug")
+	}
+	if req.PreferredLanguage != nil {
+		changed = append(changed, "preferred_language")
+	}
+	if req.RunRetentionDays != nil {
+		changed = append(changed, "run_retention_days")
+	}
+	meta := map[string]interface{}{"fields": changed}
+	if req.AllowPrivilegedCredentials != nil {
+		changed = append(changed, "allow_privileged_credentials")
+		meta["fields"] = changed
+		meta["allow_privileged_credentials"] = *req.AllowPrivilegedCredentials
+	}
+	auditFromRequest(r, h.db, "workspace.update", "WORKSPACE", workspaceID, meta)
+
 	writeJSON(w, http.StatusOK, ws)
 }

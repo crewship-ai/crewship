@@ -32,7 +32,34 @@ type auditResponse struct {
 	CreatedAt   string  `json:"created_at"`
 	UserEmail   *string `json:"user_email,omitempty"`
 	UserName    *string `json:"user_name,omitempty"`
+	// EntityName is the display name of the row's target, resolved per
+	// entity_type because entity_id is polymorphic. Null when the target has
+	// no name to give (a backup path, a hard-deleted row) — the reader falls
+	// back to the id, which is still better than a wrong name.
+	EntityName *string `json:"entity_name,omitempty"`
 }
+
+// auditEntityNameExpr resolves the name of whatever a row points at.
+//
+// entity_id is polymorphic — one column addressing agents, crews,
+// credentials, members, workspaces and a few things that are not rows at all
+// (a backup path, an encryption-key version) — so this is a CASE over the
+// type rather than a join. Deliberately NOT filtered on deleted_at: "who
+// deleted Riley" is asked after Riley is gone, and a blank name there is the
+// one place the log has to keep speaking.
+//
+// UPPER() because the existing call sites disagree on casing: the agent
+// handlers write "AGENT", the backup and connector ones write lower-case. A
+// lookup that depends on which caller happened to run is not a lookup.
+const auditEntityNameExpr = `
+	CASE UPPER(a.entity_type)
+		WHEN 'AGENT'      THEN (SELECT name  FROM agents      WHERE id = a.entity_id)
+		WHEN 'CREW'       THEN (SELECT name  FROM crews       WHERE id = a.entity_id)
+		WHEN 'CREDENTIAL' THEN (SELECT name  FROM credentials WHERE id = a.entity_id)
+		WHEN 'WORKSPACE'  THEN (SELECT name  FROM workspaces  WHERE id = a.entity_id)
+		WHEN 'WORKSPACEMEMBER' THEN (SELECT email FROM users  WHERE id = a.entity_id)
+		WHEN 'USER'       THEN (SELECT email FROM users       WHERE id = a.entity_id)
+	END AS entity_name`
 
 type auditListResponse struct {
 	Data       []auditResponse `json:"data"`
@@ -47,6 +74,20 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	if !canRole(role, "manage") {
 		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	// Which trail to read. The tables stay separate — the keeper ledger is
+	// append-only by design and merging it into a general log would weaken
+	// exactly the guarantee it exists for — but an operator asking "what
+	// happened here" should not have to know there are four of them.
+	source := r.URL.Query().Get("source")
+	if source == "" {
+		source = auditSourceWorkspace
+	}
+	if _, ok := auditSourceQueries[source]; !ok {
+		writeProblem(w, r, http.StatusBadRequest,
+			"source must be one of: workspace, crews, credentials, keeper")
 		return
 	}
 
@@ -77,13 +118,19 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	dateTo := r.URL.Query().Get("date_to")
 	search := r.URL.Query().Get("search")
 
+	if source != auditSourceWorkspace {
+		h.listAlternateSource(w, r, source, workspaceID, page, limit, offset)
+		return
+	}
+
 	// The count query also joins `users` so the `search` filter (which
 	// references u.email / u.full_name) can reuse the same clauses without
 	// diverging. LEFT JOIN keeps rows where user_id is NULL (system events).
 	query := `
 		SELECT a.id, a.workspace_id, a.user_id, a.action, a.entity_type, a.entity_id,
 			a.metadata, a.ip_address, a.user_agent, a.created_at,
-			u.email, u.full_name
+			u.email, u.full_name,
+			` + auditEntityNameExpr + `
 		FROM audit_logs a
 		LEFT JOIN users u ON u.id = a.user_id
 		WHERE a.workspace_id = ?`
@@ -157,7 +204,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		var a auditResponse
 		if err := rows.Scan(&a.ID, &a.WorkspaceID, &a.UserID, &a.Action,
 			&a.EntityType, &a.EntityID, &a.Metadata, &a.IPAddress,
-			&a.UserAgent, &a.CreatedAt, &a.UserEmail, &a.UserName); err != nil {
+			&a.UserAgent, &a.CreatedAt, &a.UserEmail, &a.UserName, &a.EntityName); err != nil {
 			replyInternalError(w, h.logger, "scan audit log", err)
 			return
 		}
