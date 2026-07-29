@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { motion, useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 
@@ -23,6 +24,49 @@ import { cn } from "@/lib/utils"
 // The type roles (.type-title / .type-row / .type-section / .type-meta) live in
 // app/globals.css. Nothing in here hardcodes a pixel size.
 // =============================================================================
+
+export interface AppearProps {
+  /** Position in the group — drives the stagger so cards arrive in reading order. */
+  order?: number
+  /** Also glide to a new slot when the grid reflows. Grid children only. */
+  reflow?: boolean
+  className?: string
+  children: React.ReactNode
+}
+
+/**
+ * The one entrance in the kit.
+ *
+ * `reflow` animates POSITION only, never size. Framer's full layout animation
+ * tweens the box by scaling it, which stretches the text inside for the length
+ * of the tween — cards visibly squashing and snapping back as a column is
+ * added. Sliding to the new slot while the width changes in one step reads as
+ * calm and never distorts a glyph.
+ *
+ * Honours prefers-reduced-motion by rendering a plain div: the stagger is
+ * decoration, and nothing here depends on it having run.
+ */
+export function Appear({ order = 0, reflow = false, className, children }: AppearProps) {
+  const reduce = useReducedMotion()
+  if (reduce) return <div className={className}>{children}</div>
+
+  return (
+    <motion.div
+      layout={reflow ? "position" : undefined}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: 0.34,
+        ease: [0.22, 1, 0.36, 1],
+        delay: Math.min(order, 9) * 0.045,
+        layout: { duration: 0.38, ease: [0.22, 1, 0.36, 1] },
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  )
+}
 
 export type DetailTone = "default" | "success" | "destructive" | "warn" | "blue" | "purple"
 

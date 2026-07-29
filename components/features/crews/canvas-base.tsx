@@ -200,7 +200,11 @@ export function CanvasShell({ loading, error, notLoadedLabel, children }: Canvas
     )
   }
   return (
-    <div className="px-6 md:px-8 lg:px-12 py-6 space-y-6 detail-width">
+    // @container, not viewport breakpoints: the grids inside answer to how
+    // wide THIS pane is. The sidebar collapses, the list pane takes a slice,
+    // a drawer can open — the window width never described the room the cards
+    // actually had.
+    <div className="@container px-6 md:px-8 lg:px-12 py-6 space-y-6 detail-width">
       {children}
     </div>
   )

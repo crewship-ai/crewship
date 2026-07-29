@@ -239,8 +239,9 @@ export function OverviewTab({
           that the track count goes to six and the two wide cells fold up onto
           the same row, so a wide monitor buys a denser screen instead of
           wider cards over an empty half-page. */}
-      <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4 min-[1920px]:grid-cols-6">
+      <div className="grid gap-3.5 @xl:grid-cols-2 @4xl:grid-cols-3 @6xl:grid-cols-4 @8xl:grid-cols-5 @10xl:grid-cols-6">
         <DetailCell
+          order={0}
           title="Issues"
           count={issues.length}
           filters={[
@@ -254,6 +255,7 @@ export function OverviewTab({
           footerHref="/orchestration/issues"
         />
         <DetailCell
+          order={1}
           title="Routines"
           count={agentPipelines.length}
           filters={[{ id: "all", label: "All" }]}
@@ -262,6 +264,7 @@ export function OverviewTab({
           footerHref="/routines"
         />
         <DetailCell
+          order={2}
           title="Triggers"
           count={triggers.length}
           filters={[
@@ -274,6 +277,7 @@ export function OverviewTab({
           footerOnClick={onOpenConfig}
         />
         <DetailCell
+          order={3}
           title="Credentials"
           count={credentials.length}
           warn={credentials.some((c) => c.credential_status !== "ACTIVE")}
@@ -288,7 +292,8 @@ export function OverviewTab({
         />
 
         <DetailCell
-          className="md:col-span-2 xl:col-span-4 min-[1920px]:col-span-2"
+          className="@xl:col-span-2 @4xl:col-span-3 @6xl:col-span-4 @8xl:col-span-5 @10xl:col-span-2"
+          order={4}
           title="Runs"
           count={runs?.length ?? 0}
           filters={[
@@ -304,7 +309,8 @@ export function OverviewTab({
 
         {peerMessages.length > 0 && (
           <DetailCell
-            className="md:col-span-2 xl:col-span-4 min-[1920px]:col-span-2"
+            className="@xl:col-span-2 @4xl:col-span-3 @6xl:col-span-4 @8xl:col-span-5 @10xl:col-span-2"
+            order={5}
             title="From peers"
             count={peerMessages.length}
             filters={[{ id: "all", label: "All" }]}

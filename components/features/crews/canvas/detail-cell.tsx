@@ -6,7 +6,7 @@ import { motion } from "motion/react"
 import { ArrowUpRight, Search } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
-import { DetailCard } from "@/components/ui/detail"
+import { Appear, DetailCard } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 
 // =============================================================================
@@ -70,13 +70,15 @@ export interface DetailCellProps {
   /** Used instead of `footerHref` when the destination is in-page. */
   footerOnClick?: () => void
   className?: string
+  /** Position in the grid — drives the entrance stagger. */
+  order?: number
 }
 
 const ALL = (filters: DetailCellFilter[]) => filters[0]?.id ?? "all"
 
 export function DetailCell({
   title, count, warn = false, filters, items, tall = false,
-  footerLabel, footerHref, footerOnClick, className,
+  footerLabel, footerHref, footerOnClick, className, order = 0,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
   const [searchOpen, setSearchOpen] = useState(false)
@@ -103,12 +105,13 @@ export function DetailCell({
   }
 
   return (
+    <Appear order={order} reflow className={cn("flex min-w-0", className)}>
     <DetailCard
       title={title}
       subtitle={String(count ?? items.length)}
       bare
       tone={warn ? "warn" : "default"}
-      className={cn("flex flex-col", className)}
+      className="flex w-full flex-col"
       action={
         <button
           type="button"
@@ -195,6 +198,7 @@ export function DetailCell({
         )}
       </div>
     </DetailCard>
+    </Appear>
   )
 }
 
