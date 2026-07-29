@@ -156,7 +156,19 @@ func buildSecurityPosture(allowSignup, oauthConfigured, emailConfigured, rateLim
 	if p.RateLimitEffectivelyDisabled {
 		p.Warnings = append(p.Warnings, postureWarning{
 			Key: "rate_limit_disabled", Severity: "medium",
-			Message: "The API rate limiter is OFF. Credential-stuffing and the /credentials/test validation oracle are unthrottled.",
+			// Scope matters here. The flag short-circuits
+			// RateLimiter.Middleware, which is the per-IP HTTP group and
+			// nothing else: the login lockout lives in the signin handler
+			// (checkAndLockoutOnFail) and never reads this flag, and neither
+			// do the notification, provisioning or webhook limiters. Saying
+			// "credential stuffing is unthrottled" is both wrong and
+			// self-defeating — an operator who knows the lockout still works
+			// learns to discount this panel, and then ignores a real warning
+			// on it later.
+			Message: "The per-IP HTTP rate limits are OFF, so /credentials/test and " +
+				"/credentials/{id}/reveal can be hammered from one address. The login " +
+				"lockout, notification, provisioning and webhook limits are unaffected " +
+				"and still apply.",
 		})
 	} else if p.RateLimitDisabled && prod {
 		// Not a vulnerability — the guard held — but it means someone's intent
