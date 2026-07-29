@@ -331,24 +331,33 @@ export function AgentCanvas({
         transition={{ duration: 0.16, ease: "easeOut" }}
         className="border-b border-border pb-3"
       >
+      {/* The avatar stands beside BOTH header lines rather than inside the
+          first. It used to be a 32px square next to a 24px name, which made
+          the face — now that agents wear real portraits — the smallest thing
+          in its own title bar. At 48px it spans the name and the status line
+          together, which is also what makes a style like Croodles legible at
+          all: those are line drawings, and a line drawing at 20px is a smudge. */}
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={() => setAvatarPickerOpen(true)}
+          className="group mt-0.5 shrink-0"
+          title="Change avatar"
+        >
+          <AgentAvatar
+            seed={agent.avatar_seed || agent.name}
+            style={agent.avatar_style || agent.crew?.avatar_style}
+            agentId={agent.id}
+            avatarUrl={agent.avatar_url}
+            className={cn(
+              "h-12 w-12 rounded-xl transition-transform group-hover:scale-[1.06]",
+              isRunning && "ring-2 ring-success/40",
+            )}
+          />
+        </button>
+
+        <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setAvatarPickerOpen(true)}
-            className="group shrink-0"
-            title="Change avatar"
-          >
-            <AgentAvatar
-              seed={agent.avatar_seed || agent.name}
-              style={agent.avatar_style || agent.crew?.avatar_style}
-              agentId={agent.id}
-              avatarUrl={agent.avatar_url}
-              className={cn(
-                "h-8 w-8 rounded-lg transition-transform group-hover:scale-[1.06]",
-                isRunning && "ring-2 ring-success/40",
-              )}
-            />
-          </button>
           <h1 className="type-title leading-none">{agent.name}</h1>
           <span className="type-row font-mono text-muted-foreground">{agent.slug}</span>
 
@@ -435,7 +444,7 @@ export function AgentCanvas({
           </div>
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <Pill tone={STATUS_PILL_TONE[statusKey] ?? "default"}>
             <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
             {status.label}
@@ -476,6 +485,8 @@ export function AgentCanvas({
             )}
           </span>
         </div>
+        </div>
+      </div>
 
         {agent.description && (
           <p className="type-row mt-2 max-w-prose text-muted-foreground">{agent.description}</p>

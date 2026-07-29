@@ -205,7 +205,7 @@ export function CrewsExplorer({
                         )}
                       />
                     </span>
-                    <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
+                    <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="md" />
                     <span className="type-row font-semibold truncate flex-1">{crew.name}</span>
                     <span className="type-meta text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
@@ -254,7 +254,7 @@ export function CrewsExplorer({
                           style={agent.avatar_style || agent.crew?.avatar_style}
                           agentId={agent.id}
                           avatarUrl={agent.avatar_url}
-                          className="h-5 w-5 rounded-full shrink-0"
+                          className="h-8 w-8 rounded-lg shrink-0"
                         />
                         <div className="flex-1 min-w-0">
                           <span className="type-row font-medium truncate block">{agent.name}</span>
@@ -309,7 +309,7 @@ export function CrewsExplorer({
                         style={agent.avatar_style}
                         agentId={agent.id}
                         avatarUrl={agent.avatar_url}
-                        className="h-5 w-5 rounded-full shrink-0"
+                        className="h-8 w-8 rounded-lg shrink-0"
                       />
                       <div className="flex-1 min-w-0">
                         <span className="type-row font-medium truncate block">{agent.name}</span>
