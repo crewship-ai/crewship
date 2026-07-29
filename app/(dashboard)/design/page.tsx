@@ -1,234 +1,319 @@
 "use client"
 
 import { useState } from "react"
-import {
-  AlertTriangle, Check, CircleDot, Clock, Gauge, ListTodo, Shield,
-  ShieldCheck, UserCog, X,
-} from "lucide-react"
+import { ChevronRight, Clock, Terminal } from "lucide-react"
 
-import { DetailCard, Pill } from "@/components/ui/detail"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 
 // =============================================================================
 // /design — a live wireframe bench, not a product screen.
+// Real components, real type roles. Unlinked from the sidebar; delete before
+// merge.
 //
-// Renders with the real kit and the real type roles, so whatever is picked here
-// is already implementable. Unlinked from the sidebar; delete before merge.
+// ── the question: how small can the crews rail get ─────────────────────────
 //
-// ── the question on the bench: the Keeper admin screens ─────────────────────
+// Measured on the current rail: an agent row is 44px (32px portrait + 6px
+// padding either side), a crew row is 52px (40px mark). Nine rows fill 420px.
 //
-// Measured on dev3 (2026-07-29), not guessed:
+// Two things are worth knowing before choosing:
 //
-//   crewship keeper status
-//     Status:       enabled
-//     Ollama URL:   http://127.0.0.1:11434
-//     Model:        qwen2.5:7b
-//     Ollama:       offline          ← the judge has no brain
-//     Gov model:    — (server default)
-//     Watchdog:     disabled
-//   crewship keeper requests → (no results)   ← nothing ever evaluated
+// 1. The chevron is nearly redundant — clicking a crew row already selects it
+//    AND expands it. But NOT collapses: the chevron is the only way back with
+//    a mouse (keyboard has ArrowLeft). So "just delete it" silently removes
+//    the only collapse affordance. Each variant below says what it does about
+//    that rather than pretending the problem is not there.
 //
-// The capability is all there and the CLI drives it fine: provider is
-// ollama | anthropic | openai_compat, the endpoint (IP:port) and the API key
-// both come from vault credentials, and with no judge the gatekeeper denies at
-// risk 10 rather than failing open. Setting it to anthropic/claude-haiku-4-5
-// worked first try.
-//
-// What is wrong is the screen. Today:
-//
-//   Admin → Keeper          status rows + 4 KPI cards + the whole 752-line
-//                           governance form + recent requests + live activity
-//   Admin → Keeper reviews  the pending-review queue, on its own
-//
-// Two nav entries for one subject, and on the first one the single most
-// important fact — "the judge is offline, so everything denies" — is a grey
-// status row between an Ollama URL you cannot edit there and a counter.
+// 2. The height is in the AGENT rows, not the crew rows — there are more of
+//    them. Shrinking the crew mark feels tidier and saves almost nothing;
+//    putting an agent on one line saves half of everything.
 // =============================================================================
 
-const JUDGE_OFFLINE = {
-  provider: "ollama",
-  model: "qwen2.5:7b",
-  endpoint: "http://127.0.0.1:11434",
-  reachable: false,
-}
+const CREWS = [
+  {
+    name: "Ops", icon: Terminal, running: 0, error: 0,
+    agents: [
+      { name: "Riley", role: "Platform Engineer", seed: "riley", style: "bottts-neutral" },
+      { name: "Morgan", role: "SRE / Ops Lead", seed: "morgan", style: "fun-emoji" },
+    ],
+  },
+  {
+    name: "Engineering", icon: Terminal, running: 2, error: 1,
+    agents: [
+      { name: "Robin", role: "Frontend Engineer", seed: "robin", style: "notionists" },
+      { name: "Sam", role: "Backend Engineer", seed: "sam", style: "croodles" },
+      { name: "AlexXXXXXX", role: "Engineering Lead", seed: "alex", style: "open-peeps" },
+    ],
+  },
+]
 
-const JUDGE_ONLINE = {
-  provider: "anthropic",
-  model: "claude-haiku-4-5",
-  endpoint: "vault: ANTHROPIC_API_KEY",
-  reachable: true,
-}
-
-function Row({
-  label, hint, children, tone,
-}: { label: string; hint?: string; children: React.ReactNode; tone?: "warn" }) {
+function Marks({ running, error }: { running: number; error: number }) {
   return (
-    <div className="grid min-h-[38px] grid-cols-1 items-center gap-3.5 border-b border-border px-3 py-1.5 last:border-b-0 md:grid-cols-[minmax(0,1fr)_248px]">
-      <div className="min-w-0">
-        <span className={cn("type-row block font-medium", tone === "warn" && "text-warn")}>{label}</span>
-        {hint && <span className="type-meta mt-0.5 block leading-snug text-muted-foreground-soft">{hint}</span>}
-      </div>
-      <div className="flex min-w-0 items-center gap-2">{children}</div>
-    </div>
+    <span className="flex shrink-0 items-center gap-1">
+      {error > 0 && (
+        <span className="type-meta inline-flex items-center gap-1 text-destructive">
+          <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+          {error > 1 && error}
+        </span>
+      )}
+      {running > 0 && (
+        <span className="type-meta inline-flex items-center gap-1 text-success">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
+          {running > 1 && running}
+        </span>
+      )}
+    </span>
   )
 }
 
-const Val = ({ children, mono }: { children: React.ReactNode; mono?: boolean }) => (
-  <span className={cn("type-row truncate", mono && "font-mono")}>{children}</span>
+const Face = ({ a, px }: { a: (typeof CREWS)[0]["agents"][0]; px: string }) => (
+  <AgentAvatar seed={a.seed} style={a.style} agentId={a.seed} className={cn(px, "shrink-0 rounded-lg")} />
 )
 
-/* ── band 1: can it judge at all ──────────────────────────────────────────── */
-function CanItJudge({ judge }: { judge: typeof JUDGE_OFFLINE }) {
+/* ── A · chevron on hover ────────────────────────────────────────────────── */
+function VariantA() {
+  const [open, setOpen] = useState<string[]>(["Ops", "Engineering"])
+  const toggle = (n: string) => setOpen((o) => (o.includes(n) ? o.filter((x) => x !== n) : [...o, n]))
   return (
-    <div className="space-y-3.5">
-      {!judge.reachable && (
-        <DetailCard tone="warn" className="bg-warn/[.06]">
-          <div className="flex flex-wrap items-center gap-3">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-warn" />
-            <div className="type-row min-w-0 flex-1 basis-72 leading-snug">
-              <b className="font-semibold">The judge is unreachable, so the Keeper is denying everything.</b>{" "}
-              {judge.model} at {judge.endpoint} did not answer. Access requests fall through to
-              DENY at risk 10 — safe, but nothing is being evaluated.
-              <span className="type-meta mt-0.5 block text-muted-foreground">
-                This is the state dev3 has been in. It was a grey status row.
-              </span>
+    <Rail>
+      {CREWS.map((c) => (
+        <div key={c.name}>
+          <button
+            type="button"
+            onClick={() => toggle(c.name)}
+            className="group mx-1.5 flex w-[calc(100%-12px)] items-center gap-2 rounded-md px-2 py-1.5 hover:bg-white/[.04]"
+          >
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 shrink-0 text-muted-foreground-soft opacity-0 transition-all group-hover:opacity-100",
+                open.includes(c.name) && "rotate-90",
+              )}
+            />
+            <c.icon className="h-4 w-4 shrink-0 text-primary" />
+            <span className="type-row flex-1 truncate text-left font-semibold">{c.name}</span>
+            <span className="type-meta tabular-nums text-muted-foreground-soft">{c.agents.length}</span>
+            <Marks running={c.running} error={c.error} />
+          </button>
+          {open.includes(c.name) && (
+            <div className="ml-[1.1rem] border-l border-border/70 pl-1">
+              {c.agents.map((a) => (
+                <div key={a.name} className="mx-1.5 flex items-center gap-2 rounded-md px-2 py-1.5">
+                  <Face a={a} px="h-7 w-7" />
+                  <span className="min-w-0 flex-1">
+                    <span className="type-row block truncate font-medium">{a.name}</span>
+                    <span className="type-meta block truncate text-muted-foreground">{a.role}</span>
+                  </span>
+                  <span className="type-meta text-muted-foreground-soft">Idle</span>
+                </div>
+              ))}
             </div>
+          )}
+        </div>
+      ))}
+    </Rail>
+  )
+}
+
+/* ── B · crew as a section label ─────────────────────────────────────────── */
+function VariantB() {
+  return (
+    <Rail>
+      {CREWS.map((c) => (
+        <div key={c.name} className="mb-1">
+          <div className="flex items-center gap-2 px-3 pb-1 pt-2.5">
+            <span className="type-section flex-1 truncate text-muted-foreground-soft">{c.name}</span>
+            <span className="type-meta tabular-nums text-muted-foreground-soft">{c.agents.length}</span>
+            <Marks running={c.running} error={c.error} />
           </div>
-        </DetailCard>
-      )}
-
-      <div className="grid gap-3.5 @xl:grid-cols-2">
-        <DetailCard bare icon={Shield} title="Watchdog" subtitle="this workspace">
-          <Row label="Enabled" hint="Off by default — opt in per workspace.">
-            <Pill tone="default">off</Pill>
-          </Row>
-          <Row label="Security contact" hint="Must be an OWNER or ADMIN of this workspace.">
-            <Val>— (MANAGER fanout)</Val>
-          </Row>
-          <Row label="Second approver" hint="A human must co-sign an ALLOW.">
-            <Pill tone="default">off</Pill>
-          </Row>
-        </DetailCard>
-
-        <DetailCard
-          bare
-          icon={judge.reachable ? ShieldCheck : AlertTriangle}
-          title="The judge"
-          subtitle={judge.reachable ? "reachable" : "unreachable"}
-          tone={judge.reachable ? "success" : "warn"}
-          footer="Endpoint and API key both come from vault credentials, so the IP:port of a local Ollama is a credential, not a config file."
-        >
-          <Row label="Provider">
-            <Val>{judge.provider}</Val>
-          </Row>
-          <Row label="Model">
-            <Val mono>{judge.model}</Val>
-          </Row>
-          <Row label="Endpoint" hint="ENDPOINT_URL credential, or the server default.">
-            <Val mono>{judge.endpoint}</Val>
-          </Row>
-          <Row label="Answering" tone={judge.reachable ? undefined : "warn"}>
-            {judge.reachable
-              ? <Pill tone="success"><Check className="h-3 w-3" />yes</Pill>
-              : <Pill tone="warn"><X className="h-3 w-3" />no</Pill>}
-          </Row>
-        </DetailCard>
-      </div>
-    </div>
+          {c.agents.map((a) => (
+            <div key={a.name} className="mx-1.5 flex items-center gap-2 rounded-md px-2 py-1.5">
+              <Face a={a} px="h-7 w-7" />
+              <span className="min-w-0 flex-1">
+                <span className="type-row block truncate font-medium">{a.name}</span>
+                <span className="type-meta block truncate text-muted-foreground">{a.role}</span>
+              </span>
+              <span className="type-meta text-muted-foreground-soft">Idle</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </Rail>
   )
 }
 
-/* ── band 2: what it decides ──────────────────────────────────────────────── */
-function WhatItDecides() {
+/* ── C · one line per agent ──────────────────────────────────────────────── */
+function VariantC() {
   return (
-    <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-3">
-      <DetailCard bare icon={Gauge} title="Thresholds">
-        <Row label="Notify on DENY at risk ≥" hint="1–10.">
-          <Val>7</Val>
-        </Row>
-        <Row label="Auto-issue leases" hint="Grants expire instead of standing forever.">
-          <Pill tone="default">off</Pill>
-        </Row>
-        <Row label="Lease TTL">
-          <Val>—</Val>
-        </Row>
-      </DetailCard>
-
-      <DetailCard bare icon={ListTodo} title="Watch rules" subtitle="presets + custom">
-        <Row label="Presets"><Val>3 of 7 on</Val></Row>
-        <Row label="Custom rules"><Val>2</Val></Row>
-        <Row label="Applies to"><Val>every agent in the workspace</Val></Row>
-      </DetailCard>
-
-      <DetailCard
-        bare icon={UserCog} title="Who hears about it"
-        footer="Verified in internal/api/keeper_governance.go: the contact must hold OWNER or ADMIN, and the MANAGER fanout stays as a fallback so a missing contact never means nobody."
-      >
-        <Row label="Security contact"><Val>— not set</Val></Row>
-        <Row label="Falls back to"><Val>MANAGER fanout</Val></Row>
-        <Row label="Delivered as"><Val>blocking inbox item</Val></Row>
-      </DetailCard>
-    </div>
-  )
-}
-
-/* ── band 3: what it has decided ─────────────────────────────────────────── */
-function WhatItDecided({ merged }: { merged: boolean }) {
-  return (
-    <div className="space-y-3.5">
-      {merged && (
-        <DetailCard
-          bare icon={ListTodo} title="Waiting for a human" subtitle="0"
-          footer="This is the whole of the old 'Keeper reviews' page. It is the only part of the subject that is ever actionable, so it belongs at the top of the evidence, not behind a second nav entry."
-        >
-          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">
-            Nothing is waiting.
-          </p>
-        </DetailCard>
-      )}
-
-      <div className="grid gap-3.5 @xl:grid-cols-4">
-        {[
-          ["Requests", "0", "lifetime"],
-          ["Allowed", "0", "decisions"],
-          ["Denied", "0", "decisions"],
-          ["Escalated", "0", "to a human"],
-        ].map(([label, value, note]) => (
-          <div key={label} className="rounded-xl border border-border/60 bg-card px-4 py-3">
-            <div className="type-meta uppercase tracking-wide text-muted-foreground-soft">{label}</div>
-            <div className="type-title mt-0.5 tabular-nums">{value}</div>
-            <div className="type-meta text-muted-foreground-soft">{note}</div>
+    <Rail>
+      {CREWS.map((c) => (
+        <div key={c.name} className="mb-1">
+          <div className="flex items-center gap-2 px-3 pb-1 pt-2.5">
+            <span className="type-section flex-1 truncate text-muted-foreground-soft">{c.name}</span>
+            <span className="type-meta tabular-nums text-muted-foreground-soft">{c.agents.length}</span>
+            <Marks running={c.running} error={c.error} />
           </div>
-        ))}
-      </div>
-
-      <DetailCard
-        bare icon={CircleDot} title="Decision history" subtitle="0"
-        footer="Append-only. Every row keeps the prompt and the raw model response, which is what makes a denial arguable after the fact."
-      >
-        <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">
-          Nothing has been evaluated on this instance yet.
-        </p>
-      </DetailCard>
-    </div>
+          {c.agents.map((a) => (
+            <div key={a.name} className="mx-1.5 flex items-center gap-2 rounded-md px-2 py-1">
+              <Face a={a} px="h-6 w-6" />
+              <span className="type-row min-w-0 flex-1 truncate">
+                <span className="font-medium">{a.name}</span>
+                <span className="type-meta ml-1.5 text-muted-foreground">{a.role}</span>
+              </span>
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" title="idle" />
+            </div>
+          ))}
+        </div>
+      ))}
+    </Rail>
   )
 }
 
-function Band({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
+/* ── D · faces first, role only when selected ────────────────────────────── */
+function VariantD() {
+  const [sel, setSel] = useState("Sam")
   return (
-    <section>
-      <div className="mb-2 flex items-baseline gap-2">
-        <h2 className="type-section text-foreground/70">{title}</h2>
-        <span className="type-meta text-muted-foreground-soft">{note}</span>
-      </div>
+    <Rail>
+      {CREWS.map((c) => (
+        <div key={c.name} className="mb-1">
+          <div className="flex items-center gap-2 px-3 pb-1 pt-2.5">
+            <span className="type-section flex-1 truncate text-muted-foreground-soft">{c.name}</span>
+            <span className="type-meta tabular-nums text-muted-foreground-soft">{c.agents.length}</span>
+            <Marks running={c.running} error={c.error} />
+          </div>
+          {c.agents.map((a) => (
+            <button
+              key={a.name}
+              type="button"
+              onClick={() => setSel(a.name)}
+              className={cn(
+                "mx-1.5 flex w-[calc(100%-12px)] items-center gap-2 rounded-md px-2 py-1 text-left",
+                sel === a.name ? "bg-primary/10" : "hover:bg-white/[.04]",
+              )}
+            >
+              <Face a={a} px="h-7 w-7" />
+              <span className="min-w-0 flex-1">
+                <span className="type-row block truncate font-medium">{a.name}</span>
+                {sel === a.name && (
+                  <span className="type-meta block truncate text-muted-foreground">{a.role}</span>
+                )}
+              </span>
+              <span className="type-meta text-muted-foreground-soft">Idle</span>
+            </button>
+          ))}
+        </div>
+      ))}
+    </Rail>
+  )
+}
+
+/* ── E · a navigation register of its own ────────────────────────────────── */
+function VariantE() {
+  const [open, setOpen] = useState<string[]>(["Ops", "Engineering"])
+  const toggle = (n: string) => setOpen((o) => (o.includes(n) ? o.filter((x) => x !== n) : [...o, n]))
+  return (
+    <Rail>
+      {CREWS.map((c) => (
+        <div key={c.name}>
+          <button
+            type="button"
+            onClick={() => toggle(c.name)}
+            className="mx-1.5 flex w-[calc(100%-12px)] items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[.04]"
+          >
+            <c.icon className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="flex-1 truncate text-left text-[0.8125rem] font-semibold leading-5">{c.name}</span>
+            <span className="text-[0.6875rem] tabular-nums leading-4 text-muted-foreground-soft">
+              {c.agents.length}
+            </span>
+            <Marks running={c.running} error={c.error} />
+          </button>
+          {open.includes(c.name) && (
+            <div className="ml-[0.95rem] border-l border-border/70 pl-1">
+              {c.agents.map((a) => (
+                <div key={a.name} className="mx-1.5 flex items-center gap-2 rounded-md px-2 py-1">
+                  <Face a={a} px="h-6 w-6" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[0.8125rem] font-medium leading-[1.15rem]">{a.name}</span>
+                    <span className="block truncate text-[0.6875rem] leading-[0.95rem] text-muted-foreground">
+                      {a.role}
+                    </span>
+                  </span>
+                  <span className="text-[0.6875rem] leading-4 text-muted-foreground-soft">Idle</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </Rail>
+  )
+}
+
+function Rail({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="w-[272px] shrink-0 overflow-hidden rounded-xl border border-border/60 bg-card py-1.5">
       {children}
-    </section>
+    </div>
   )
 }
+
+const VARIANTS = [
+  {
+    id: "A",
+    title: "A · chevron only on hover",
+    height: "unchanged",
+    blurb:
+      "Least disruptive. The chevron stops being ink at rest but is still there when you reach for " +
+      "it, so collapsing still works with a mouse. The crew mark drops from 40px to a bare 16px " +
+      "icon — the rail is quieter without any behaviour changing.",
+    render: () => <VariantA />,
+  },
+  {
+    id: "B",
+    title: "B · crew as a section label",
+    height: "−18%",
+    blurb:
+      "The crew stops being a row and becomes a heading, the way the admin rail already labels " +
+      "PLATFORM and ORGANIZATIONS. No icon, no chevron, no guide line — a heading does not need to " +
+      "explain that what follows belongs to it. Cost: crews are no longer collapsible or " +
+      "selectable, so a crew page needs another way in.",
+    render: () => <VariantB />,
+  },
+  {
+    id: "C",
+    title: "C · one line per agent",
+    height: "−38%",
+    blurb:
+      "Where the height actually is. Name and role share a line, portrait drops to 24px, status " +
+      "becomes a dot. Nine rows fit in the space six used to take. Cost: long role titles truncate " +
+      "early, and the portrait is back to the size where a line-drawing style is a smudge.",
+    render: () => <VariantC />,
+  },
+  {
+    id: "D",
+    title: "D · faces first",
+    height: "−22%",
+    blurb:
+      "The role line only appears on the row you have selected. Scanning is by face and name, which " +
+      "is how people actually find an agent they already know; the role is there when you need to " +
+      "confirm. Cost: rows change height as you move, which some people find restless.",
+    render: () => <VariantD />,
+  },
+  {
+    id: "E",
+    title: "E · a navigation register",
+    height: "−28%",
+    blurb:
+      "Keeps every affordance and shrinks the type instead: 13px names, 11px roles, tighter rows, " +
+      "24px portraits. A rail is a different reading task from a detail card, so it gets its own " +
+      "register — but if this wins it becomes a NAMED role in globals.css, not sizes typed into " +
+      "this file. That distinction is the whole reason the product stopped drifting.",
+    render: () => <VariantE />,
+  },
+]
 
 export default function DesignBench() {
-  const [online, setOnline] = useState(false)
-  const judge = online ? JUDGE_ONLINE : JUDGE_OFFLINE
+  const [id, setId] = useState("A")
+  const active = VARIANTS.find((v) => v.id === id) ?? VARIANTS[0]
 
   return (
     <div className="@container min-h-screen space-y-6 px-6 py-6 md:px-8 lg:px-12">
@@ -239,54 +324,82 @@ export default function DesignBench() {
       </div>
 
       <div>
-        <h1 className="type-title">Keeper — one screen instead of two</h1>
+        <h1 className="type-title">The crews rail — five ways to make it smaller</h1>
         <p className="type-row mt-2 max-w-3xl text-muted-foreground">
-          Measured on dev3 rather than guessed. The capability is all there and the CLI drives it
-          fine: provider is <b className="font-medium text-foreground">ollama | anthropic |
-          openai_compat</b>, the endpoint (an IP:port) and the API key both come from vault
-          credentials, and with no judge the gatekeeper denies at risk 10 rather than failing open.
-          Pointing it at <code className="font-mono">anthropic / claude-haiku-4-5</code> worked
-          first try.
+          Measured on the current rail: an agent row is 44px, a crew row 52px, nine rows fill 420px.
+          The height is in the <b className="font-medium text-foreground">agent</b> rows, because
+          there are more of them — shrinking the crew mark feels tidier and saves almost nothing.
         </p>
         <p className="type-row mt-2 max-w-3xl text-muted-foreground">
-          What is wrong is the screen. <b className="font-medium text-foreground">Admin → Keeper</b> carries
-          status rows, four counters, the entire 752-line governance form, recent requests and a
-          live feed; <b className="font-medium text-foreground">Admin → Keeper reviews</b> carries the
-          queue on its own. Two nav entries for one subject — and on the first one, the single most
-          important fact, <i>the judge is offline so everything denies</i>, is a grey row between an
-          Ollama URL you cannot edit there and a counter.
-        </p>
-        <p className="type-row mt-2 max-w-3xl text-muted-foreground">
-          Three bands, same shape as the agent screen: can it judge · what it decides · what it has
-          decided. The queue is the only actionable part, so it opens the evidence band instead of
-          living behind a second nav entry.
+          About the chevron: you are right that it is nearly redundant, but not entirely. Clicking a
+          crew row already selects it <i>and</i> expands it — it does not collapse. The chevron is
+          the only way back with a mouse. So each variant says what it does about that instead of
+          deleting it and hoping.
         </p>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setOnline((v) => !v)}
-        className="type-row rounded-lg border border-border px-3 py-1.5 text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
-      >
-        {online ? "Show it as dev3 actually is (judge offline)" : "Show it with a reachable judge"}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        {VARIANTS.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            onClick={() => setId(v.id)}
+            className={cn(
+              "type-row rounded-lg border px-3 py-1.5 transition-colors",
+              v.id === id
+                ? "border-primary bg-primary/15 text-primary-hover"
+                : "border-border text-muted-foreground hover:border-foreground/25 hover:text-foreground",
+            )}
+          >
+            {v.title}
+            <span className="type-meta ml-2 text-muted-foreground-soft">{v.height}</span>
+          </button>
+        ))}
+      </div>
 
-      <div className="space-y-5 rounded-xl border border-border/60 bg-background p-4">
-        <Band title="Can it judge" note="is it on, and does the model answer">
-          <CanItJudge judge={judge} />
-        </Band>
-        <Band title="What it decides" note="the rules it applies, and who hears about them">
-          <WhatItDecides />
-        </Band>
-        <Band title="What it has decided" note="the queue, the counters, the audit trail">
-          <WhatItDecided merged />
-        </Band>
+      <p className="type-row max-w-3xl text-muted-foreground">{active.blurb}</p>
+
+      <div className="flex flex-wrap items-start gap-6">
+        <div>
+          <p className="type-meta mb-1.5 text-muted-foreground-soft">Proposed</p>
+          {active.render()}
+        </div>
+        <div>
+          <p className="type-meta mb-1.5 text-muted-foreground-soft">Today, for comparison</p>
+          <Rail>
+            {CREWS.map((c) => (
+              <div key={c.name}>
+                <div className="mx-1.5 flex items-center gap-2 rounded-md px-2 py-1.5">
+                  <ChevronRight className="h-3 w-3 shrink-0 rotate-90 text-muted-foreground-soft" />
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/15">
+                    <c.icon className="h-5 w-5 text-primary" />
+                  </span>
+                  <span className="type-row flex-1 truncate font-semibold">{c.name}</span>
+                  <span className="type-meta tabular-nums text-muted-foreground-soft">{c.agents.length}</span>
+                  <Marks running={c.running} error={c.error} />
+                </div>
+                <div className="ml-[1.1rem] border-l border-border/70 pl-1">
+                  {c.agents.map((a) => (
+                    <div key={a.name} className="mx-1.5 flex items-center gap-2 rounded-md px-2 py-1.5">
+                      <Face a={a} px="h-8 w-8" />
+                      <span className="min-w-0 flex-1">
+                        <span className="type-row block truncate font-medium">{a.name}</span>
+                        <span className="type-meta block truncate text-muted-foreground">{a.role}</span>
+                      </span>
+                      <span className="type-meta text-muted-foreground-soft">Idle</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </Rail>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
         <Clock className="h-3.5 w-3.5 text-muted-foreground-soft" />
         <span className="type-meta text-muted-foreground-soft">
-          Not implemented yet — this is the proposal. Nothing in the product has changed.
+          Nothing in the product has changed. Say a letter.
         </span>
       </div>
     </div>
