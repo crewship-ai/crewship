@@ -116,7 +116,9 @@ const SETTINGS_LINKS = [
   { title: "General", href: "/settings?tab=general", icon: Settings },
   { title: "Members", href: "/settings?tab=members", icon: Users },
   { title: "Privacy & Memory", href: "/settings?tab=privacy", icon: Lock },
-  { title: "Connections", href: "/settings?tab=connections", icon: Network },
+  // "Crew links" here and in the nav; Integrations owns the word "connections"
+  // for the services this instance is hooked up to.
+  { title: "Crew links", href: "/settings?tab=connections", icon: Network },
   { title: "Audit Log", href: "/settings?tab=audit", icon: Shield },
 ]
 

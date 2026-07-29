@@ -278,6 +278,16 @@ export function AddIntegrationDialog({
                   )
                 })
               )}
+
+              {/* A greyed-out service is an instance decision, not a bug in
+                  this dialog — say where it was made instead of leaving the
+                  reader to guess why Slack is not clickable. */}
+              {matching.some((s) => !s.available) && (
+                <p className="px-2 pb-2 pt-1 text-[11px] text-muted-foreground/70">
+                  Dimmed services are switched off for this instance. An admin can enable them in{" "}
+                  <span className="text-foreground/70">Admin → Notifications</span>.
+                </p>
+              )}
             </div>
           </>
         )}

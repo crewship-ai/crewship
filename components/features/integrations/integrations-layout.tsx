@@ -31,7 +31,7 @@ import { useNotificationChannels } from "@/hooks/use-notification-channels"
 import { useNotificationProviders } from "@/hooks/use-notification-providers"
 import { useNotificationDeliveries } from "@/hooks/use-notification-deliveries"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { NotificationPrefsSection } from "@/components/features/settings/sections/notification-prefs-section"
+import { NotificationPrefsSection } from "./notification-prefs-section"
 import { ComposioIntegrations, type ComposioStatus } from "./composio-integrations"
 import { brandLogo } from "./composio/shared"
 import type { TabKey } from "./composio/types"
@@ -129,6 +129,34 @@ const MCP_SECTIONS: Omit<ExplorerSection<TabKey>, "count">[] = [
 type IntegrationsTab = (typeof TABS)[number]["id"]
 
 /**
+ * Where a `?tab=&section=` link opens.
+ *
+ * This page is the single home for notification channels, the preference
+ * matrix and Composio's tool views, which only works if a link can name a
+ * section: /settings forwards two retired tabs here, and the docs point at
+ * individual views. Unknown or cross-tab values fall back to the defaults
+ * rather than leaving a panel selecting a section its tab does not own.
+ */
+export function initialIntegrationsRoute(search: string): {
+  tab: IntegrationsTab
+  notifySection: NotifySection
+  mcpSection: TabKey
+} {
+  const p = new URLSearchParams(search)
+  const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : "notifications"
+  const section = p.get("section")
+
+  const notifyMatch = NOTIFY_SECTIONS.find((s) => s.key === section)
+  const mcpMatch = MCP_SECTIONS.find((s) => s.key === section)
+
+  return {
+    tab,
+    notifySection: tab === "notifications" && notifyMatch ? notifyMatch.key : "connections",
+    mcpSection: tab === "tools" && mcpMatch ? (mcpMatch.key as TabKey) : "accounts",
+  }
+}
+
+/**
  * What the Tools panel shows before a key is saved. Offering the six real
  * sections would be six dead ends; one row that says what to do is not.
  */
@@ -162,6 +190,11 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   // their destinations redacted and their actions off.
   const [includeEveryone, setIncludeEveryone] = React.useState(false)
 
+  // This page is statically prerendered, so the first render must not read
+  // the URL: the served HTML was built without one, and a client that renders
+  // a different tab from it is a hydration mismatch. The URL is applied in a
+  // layout effect instead — before paint, so a deep link still opens on the
+  // section it named rather than flashing the default.
   const [tab, setTab] = React.useState<IntegrationsTab>("notifications")
   const [notifySection, setNotifySection] = React.useState<NotifySection>("connections")
   // Which item the left panel has open — a connection, or a tool account.
@@ -192,6 +225,33 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     agents: [],
     bindings: {},
   })
+
+  // Apply the incoming ?tab=&section= once, before paint.
+  React.useLayoutEffect(() => {
+    const r = initialIntegrationsRoute(window.location.search)
+    setTab(r.tab)
+    setNotifySection(r.notifySection)
+    setMcpSection(r.mcpSection)
+  }, [])
+
+  // Keep the URL naming what is on screen, so any view here can be linked to —
+  // by /settings' retired tabs, by the docs, by a colleague pasting "look at
+  // Deliveries". replaceState, not a route push: this is the same page.
+  //
+  // Skips its first run: that one fires with the pre-URL defaults still in
+  // state and would overwrite the very link the layout effect just read.
+  const urlSynced = React.useRef(false)
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    if (!urlSynced.current) {
+      urlSynced.current = true
+      return
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.set("tab", tab)
+    url.searchParams.set("section", tab === "notifications" ? notifySection : mcpSection)
+    window.history.replaceState(null, "", url.toString())
+  }, [tab, notifySection, mcpSection])
 
   const {
     channels,

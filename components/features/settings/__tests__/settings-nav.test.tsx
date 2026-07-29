@@ -13,15 +13,19 @@ import { SettingsNav, isSettingsSectionVisible } from "../settings-nav"
 
 // Privacy is deliberately absent — it is `enabled: false` until peer-card
 // extraction stops being a no-op. See the dedicated test below.
-const ACCOUNT_ITEMS = ["Profile", "Notification Prefs"]
+const ACCOUNT_ITEMS = ["Profile"]
 const WORKSPACE_ITEMS = [
   "General",
-  "Crews & Containers",
-  "Connections",
-  "Notifications",
+  "Crew links",
   "Members",
+  "Access & Secrets",
   "Audit Log",
 ]
+
+// Sections that moved to the page that owns the object they configure. A nav
+// row promises a pane; these have none, so the row is gone and only the
+// `?tab=` key survives for old links (see the redirect tests at the bottom).
+const MOVED_AWAY = ["Notifications", "Notification Prefs", "Crews & Containers"]
 
 function renderNav(role: string | null) {
   return render(<SettingsNav activeTab="profile" onTabChange={vi.fn()} role={role} />)
@@ -42,28 +46,40 @@ describe("SettingsNav visibility by role", () => {
     }
   })
 
-  it("hides Connections and Audit Log from a MEMBER", () => {
+  it("hides Crew links and Audit Log from a MEMBER", () => {
     renderNav("MEMBER")
-    // Connections is a roleCreate (MANAGER+) route; the audit log is not
+    // Crew links is a roleCreate (MANAGER+) route; the audit log is not
     // readable at all below MANAGER, so its pane would render empty.
-    expect(row("Connections")).toBeNull()
+    expect(row("Crew links")).toBeNull()
     expect(row("Audit Log")).toBeNull()
   })
 
-  it("keeps General, Crews, Members and Notifications visible to a MEMBER", () => {
+  it("keeps General and Members visible to a MEMBER", () => {
     renderNav("MEMBER")
-    // Read-only, but readable: workspace identity + counts, the crew roster,
-    // the member roster. Notifications is role-OR-capability on the server,
-    // so the role alone must never hide it.
-    for (const label of ["General", "Crews & Containers", "Notifications", "Members", ...ACCOUNT_ITEMS]) {
+    // Read-only, but readable: workspace identity + counts, the member roster.
+    for (const label of ["General", "Members", ...ACCOUNT_ITEMS]) {
       expect(row(label), `MEMBER should still see ${label}`).toBeTruthy()
     }
   })
 
-  it("gives a MANAGER Connections and Audit Log", () => {
+  it("gives a MANAGER Crew links and Audit Log", () => {
     renderNav("MANAGER")
-    expect(row("Connections")).toBeTruthy()
+    expect(row("Crew links")).toBeTruthy()
     expect(row("Audit Log")).toBeTruthy()
+  })
+
+  it("offers no row for a section that moved, at any role", () => {
+    // Notifications and the preference matrix live on /integrations; crew
+    // container limits and network policy live on the crew's own Settings tab,
+    // where the rest of that crew's configuration already is. A nav row that
+    // only bounces you elsewhere is a promise of a pane that does not exist.
+    for (const role of ["OWNER", "ADMIN", "MANAGER", "MEMBER", "VIEWER"]) {
+      cleanup()
+      renderNav(role)
+      for (const label of MOVED_AWAY) {
+        expect(row(label), `${role} should not see ${label}`).toBeNull()
+      }
+    }
   })
 
   it("no longer offers Auxiliary Models at any role — it lives in Admin now", () => {
@@ -79,7 +95,7 @@ describe("SettingsNav visibility by role", () => {
 
   it("treats a VIEWER like a MEMBER for the manager-tier sections", () => {
     renderNav("VIEWER")
-    expect(row("Connections")).toBeNull()
+    expect(row("Crew links")).toBeNull()
     expect(row("Audit Log")).toBeNull()
     expect(row("Members")).toBeTruthy()
   })
@@ -88,7 +104,7 @@ describe("SettingsNav visibility by role", () => {
     // Showing a row and retracting it a beat later is worse than showing it
     // late — matches isAdminTier/isManagerTier's own null handling.
     renderNav(null)
-    expect(row("Connections")).toBeNull()
+    expect(row("Crew links")).toBeNull()
     expect(row("Audit Log")).toBeNull()
     expect(row("Profile")).toBeTruthy()
   })
@@ -108,13 +124,20 @@ describe("isSettingsSectionVisible", () => {
     expect(isSettingsSectionVisible("connections", "MEMBER")).toBe(false)
     expect(isSettingsSectionVisible("general", "MEMBER")).toBe(true)
     expect(isSettingsSectionVisible("members", "VIEWER")).toBe(true)
-    expect(isSettingsSectionVisible("notifications", "MEMBER")).toBe(true)
   })
 
   it("leaves ungated keys alone", () => {
     // Unknown keys are the URL parser's problem, not the gate's.
     expect(isSettingsSectionVisible("profile", null)).toBe(true)
     expect(isSettingsSectionVisible("does-not-exist", "MEMBER")).toBe(true)
+  })
+
+  it("lets a moved section's key through so the redirect can run", () => {
+    // The gate must not swallow `?tab=crews` into the Profile fallback — the
+    // layout has to see the key to know where the section went.
+    for (const key of ["notifications", "notification-prefs", "crews"]) {
+      expect(isSettingsSectionVisible(key, "MEMBER"), key).toBe(true)
+    }
   })
 
   // Peer-card extraction runs NoopExtractor in production, so the Privacy
@@ -130,7 +153,22 @@ describe("isSettingsSectionVisible", () => {
 
 /* ------------------------------------------------------- deep-link fallback */
 
-const h = vi.hoisted(() => ({ role: "MEMBER" as string | null }))
+const h = vi.hoisted(() => ({ role: "MEMBER" as string | null, replace: vi.fn() }))
+
+// The global setup mock hands out a fresh router per call, which cannot be
+// asserted on. This one keeps the same `replace` so a redirect is observable.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    replace: h.replace,
+    push: vi.fn(),
+    prefetch: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+  }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/settings",
+}))
 
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "w1", role: h.role, loading: false }),
@@ -189,4 +227,33 @@ describe("SettingsLayout deep-link into a hidden section", () => {
 
     await waitFor(() => expect(screen.getByTestId("audit-section")).toBeTruthy())
   })
+})
+
+/* ------------------------------------------------------- moved-section links */
+
+describe("SettingsLayout deep-link into a section that moved", () => {
+  beforeEach(() => {
+    cleanup()
+    h.replace.mockClear()
+    h.role = "OWNER"
+  })
+
+  const cases: Array<[string, string]> = [
+    ["notifications", "/integrations?tab=notifications&section=connections"],
+    ["notification-prefs", "/integrations?tab=notifications&section=preferences"],
+    ["crews", "/crews"],
+  ]
+
+  for (const [tab, href] of cases) {
+    it(`sends ?tab=${tab} to ${href}`, async () => {
+      window.history.replaceState(null, "", `/settings?tab=${tab}`)
+      const { SettingsLayout } = await import("../settings-layout")
+      render(<SettingsLayout />)
+
+      // The bookmark keeps resolving; it just lands where the object lives now.
+      await waitFor(() => expect(h.replace).toHaveBeenCalledWith(href))
+      // …and never renders the Profile pane behind the jump.
+      expect(screen.queryByTestId("profile-section")).toBeNull()
+    })
+  }
 })

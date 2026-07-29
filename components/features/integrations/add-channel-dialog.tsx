@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { NOTIFICATION_CATEGORY_GROUPS } from "@/lib/notification-categories"
-import { ProviderForm } from "@/components/features/settings/sections/provider-form"
+import { ProviderForm } from "./provider-form"
 import type {
   ChannelCreateBody,
   ChannelDraftTestBody,

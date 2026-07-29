@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import { Menu, Settings as SettingsIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -17,11 +18,10 @@ import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
 import { MembersSection } from "./sections/members-section"
-import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
-import { MovedToIntegrations } from "./sections/moved-to-integrations"
+import { SectionMoved } from "./sections/section-moved"
 
 interface Org {
   id: string
@@ -43,10 +43,7 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   profile: { title: "Profile", description: "Your account details" },
   privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
-  crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
-  connections: { title: "Connections", description: "Cross-crew communication links" },
-  notifications: { title: "Notifications", description: "Moved to Integrations" },
-  "notification-prefs": { title: "Notification Prefs", description: "Moved to Integrations" },
+  connections: { title: "Crew links", description: "Cross-crew communication links" },
   members: { title: "Members", description: "Team members and permissions" },
   "access-secrets": {
     title: "Access & Secrets",
@@ -55,13 +52,40 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
   audit: { title: "Audit Log", description: "Track workspace activity" },
 }
 
+/**
+ * Sections that used to live here and now live on the page that owns the
+ * object they configure.
+ *
+ * They keep no nav row — a row promises a pane, and these have none — but the
+ * `?tab=` key stays resolvable, because a bookmark, a doc link or a toolbar
+ * entry written before the move must land where the section went rather than
+ * on the Profile fallback that an unknown key gets.
+ */
+export const MOVED_SECTIONS: Record<string, { href: string; label: string }> = {
+  // One place to manage a channel. Two surfaces for the same object drift, and
+  // an admin auditing "what is this instance wired into" would have to check
+  // both.
+  notifications: {
+    href: "/integrations?tab=notifications&section=connections",
+    label: "Integrations",
+  },
+  "notification-prefs": {
+    href: "/integrations?tab=notifications&section=preferences",
+    label: "Integrations",
+  },
+  // Container limits, network policy and allowed domains are crew config, and
+  // the crew's own Settings tab already edits them — plus the MCP servers,
+  // image, escalations and `allow_private_endpoints` this copy never had.
+  crews: { href: "/crews", label: "Crews & Agents" },
+}
+
 // Resolve the initial tab from the URL `?tab=` param, falling back to
 // "profile" for missing/unknown values. This is what makes deep-links like
 // /settings?tab=audit (from the command palette and toolbar nav) land on the
 // right section instead of always opening Profile.
 export function initialSettingsTab(search: string): string {
   const t = new URLSearchParams(search).get("tab")
-  return t && t in sectionTitles ? t : "profile"
+  return t && (t in sectionTitles || t in MOVED_SECTIONS) ? t : "profile"
 }
 
 export function SettingsLayout() {
@@ -81,6 +105,15 @@ export function SettingsLayout() {
   // pane for a frame. While the role is loading nothing is judged, so an
   // OWNER's deep link survives the round trip.
   const activeTab = wsLoading || isSettingsSectionVisible(requestedTab, role) ? requestedTab : "profile"
+
+  // A section that moved forwards immediately — before the workspace fetch,
+  // before the role is known, before anything renders — so a stale link costs
+  // one frame rather than a page of the wrong content.
+  const moved = MOVED_SECTIONS[activeTab]
+  const router = useRouter()
+  useEffect(() => {
+    if (moved) router.replace(moved.href)
+  }, [moved, router])
 
   // The active tab used to be mirrored into the zustand store on every change
   // (plus an initial-set / clear-on-unmount effect) for one reader: the global
@@ -104,7 +137,8 @@ export function SettingsLayout() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    if (!workspaceId) return
+    // No workspace fetch for a tab we are already leaving.
+    if (!workspaceId || moved) return
     let cancelled = false
 
     async function fetchData() {
@@ -131,7 +165,7 @@ export function SettingsLayout() {
 
     fetchData()
     return () => { cancelled = true }
-  }, [workspaceId, refreshKey])
+  }, [workspaceId, refreshKey, moved])
 
   const handleOrgUpdated = useCallback((updated: { name: string; slug: string; preferred_language: string | null }) => {
     setOrg((prev) => prev ? { ...prev, ...updated } : prev)
@@ -145,6 +179,9 @@ export function SettingsLayout() {
   const section = sectionTitles[activeTab]
 
   function renderContent() {
+    // Before the skeleton: a moved section has nothing to load.
+    if (moved) return <SectionMoved href={moved.href} label={moved.label} />
+
     if (isLoading) {
       return (
         <div className="space-y-4">
@@ -180,18 +217,8 @@ export function SettingsLayout() {
     if (activeTab === "privacy" && workspaceId) {
       return <PrivacySection workspaceId={workspaceId} />
     }
-    if (activeTab === "crews" && workspaceId) {
-      return <CrewsContainersSection workspaceId={workspaceId} />
-    }
     if (activeTab === "connections" && workspaceId) {
       return <ConnectionsSection workspaceId={workspaceId} />
-    }
-    // Notifications moved to Integrations. Both tabs redirect rather than
-    // render, so there is exactly ONE place to manage a channel — two places
-    // for the same object is worse than one inconvenient place — while
-    // existing links, bookmarks and docs keep working.
-    if (activeTab === "notifications" || activeTab === "notification-prefs") {
-      return <MovedToIntegrations />
     }
     if (activeTab === "access-secrets" && workspaceId) {
       return <AccessSecretsSection workspaceId={workspaceId} role={role} members={members} />

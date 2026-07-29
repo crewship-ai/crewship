@@ -3,8 +3,7 @@
 import { useMemo, useState } from "react"
 import {
   User, Building, Users,
-  Box, Link2, Activity,
-  Shield, Bell, BellRing, KeyRound,
+  Link2, Activity, Shield, KeyRound,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isManagerTier } from "@/lib/permissions/tiers"
@@ -63,28 +62,30 @@ const sections: NavSection[] = [
       // Flip to true in the same PR that wires the aux-LLM extractor; the
       // section, its endpoints and its tests are all kept working.
       { key: "privacy", label: "Privacy", icon: Shield, enabled: false },
-      { key: "notification-prefs", label: "Notification Prefs", icon: BellRing },
     ],
   },
   {
     label: "Workspace",
     items: [
-      // General and Crews stay open to everyone: identity, usage counts and
-      // the crew/container roster are readable at any tier, the forms inside
-      // go read-only for non-admins.
+      // General stays open to everyone: identity, usage counts and the
+      // workspace-wide switches are readable at any tier, the forms inside go
+      // read-only for non-admins.
       { key: "general", label: "General", icon: Building },
-      { key: "crews", label: "Crews & Containers", icon: Box },
-      // Auxiliary Models moved to Admin → Keeper. It showed process-wide
-      // config from a workspace-scoped screen, so a new workspace never
-      // changed it, and it belongs beside the governance panel that
-      // actually overrides those judges.
+      // What this settings page is FOR: the workspace itself, its people, and
+      // the record of what they did. Everything that configures an object
+      // lives with that object —
+      //   · crew container limits / network policy → /crews → crew → Settings
+      //   · notification channels + preferences    → /integrations
+      //   · credentials                            → /credentials
+      //   · auxiliary models, providers, limits    → /admin
+      // A second editor for someone else's object is how the two drift apart;
+      // the crew one already had, hiding `allow_private_endpoints` from anyone
+      // who edited egress from here.
+      //
       // Cross-crew links are a roleCreate mutation with nothing useful to read
-      // underneath for a MEMBER.
-      { key: "connections", label: "Connections", icon: Link2, visibleTo: isManagerTier },
-      // Deliberately ungated: channels are a roleInline (role-OR-capability)
-      // route, so a MEMBER holding an explicit grant may manage them. Judging
-      // by role alone here would hide a tab they are allowed to use.
-      { key: "notifications", label: "Notifications", icon: Bell },
+      // underneath for a MEMBER. Named "Crew links" and not "Connections":
+      // Integrations owns that word for the things Crewship is hooked up to.
+      { key: "connections", label: "Crew links", icon: Link2, visibleTo: isManagerTier },
       // The roster is readable by every role; the invite/role controls inside
       // are gated separately.
       { key: "members", label: "Members", icon: Users },
