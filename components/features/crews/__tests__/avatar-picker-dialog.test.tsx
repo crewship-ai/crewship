@@ -102,10 +102,13 @@ describe("<AvatarPickerDialog>", () => {
     expect(AVATAR_STYLES[arg.avatar_style]).toBeDefined()
   })
 
-  it("Inherit option saves null (so backend can fall through to crew)", async () => {
-    // Start the dialog with a non-null style, then click Inherit.
+  it("following the crew saves null (so backend can fall through to crew)", async () => {
+    // Start the dialog with a non-null style, then choose to follow the crew.
+    // The control is labelled "Follow the crew" rather than "Inherit": it is a
+    // reference, not a twelfth style, and its old tile drew the identical face
+    // as the Robots tile whenever the crew had no style of its own.
     render(<AvatarPickerDialog {...baseProps} style="lorelei" />)
-    fireEvent.click(screen.getByText("Inherit").closest("button")!)
+    fireEvent.click(screen.getByRole("button", { name: /Follow the crew/i }))
 
     fireEvent.click(screen.getByRole("button", { name: /Save avatar/ }))
 

@@ -102,27 +102,45 @@ export function AvatarPickerDialog({
         </div>
 
         {/* Style switcher — small previews so the user can compare faces. */}
+        {/* Inherit is not a style, so it does not sit in the grid of styles.
+            It used to, as a twelfth tile whose preview renders
+            crewStyle ?? DEFAULT_AVATAR_STYLE — and the default is
+            bottts-neutral, labelled "Robots" one tile over. For any agent
+            whose crew has no style set, that was two adjacent tiles with the
+            identical face and nothing saying why. It is a REFERENCE, so it
+            says out loud what it currently resolves to. */}
         <div>
-          <div className="text-xs text-muted-foreground mb-1.5">Style</div>
-          <div className="grid grid-cols-3 gap-1.5">
-            <button
-              type="button"
-              onClick={() => setDraftStyle(null)}
-              className={cn(
-                "rounded border text-xs transition-colors p-1.5 flex items-center gap-2",
-                draftStyle === null
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-white/10 hover:bg-white/5",
-              )}
-              title={crewStyle ? `Inherit from crew: ${crewStyle}` : "Inherit from crew"}
-            >
-              <img
-                src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
-                alt=""
-                className="w-7 h-7 rounded"
-              />
-              <span className="text-left flex-1 truncate">Inherit</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setDraftStyle(null)}
+            className={cn(
+              "flex w-full items-center gap-2.5 rounded-lg border p-2 text-left transition-colors",
+              draftStyle === null
+                ? "border-primary bg-primary/10"
+                : "border-white/10 hover:bg-white/5",
+            )}
+          >
+            <img
+              src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
+              alt=""
+              className="h-8 w-8 rounded"
+            />
+            <span className="min-w-0 flex-1">
+              <span className={cn("type-row block font-medium", draftStyle === null && "text-primary")}>
+                Follow the crew
+              </span>
+              <span className="type-meta block truncate text-muted-foreground">
+                {crewStyle
+                  ? `currently ${AVATAR_STYLES[crewStyle]?.label ?? crewStyle}`
+                  : `the crew has none set, so: ${AVATAR_STYLES[DEFAULT_AVATAR_STYLE].label} (the default)`}
+              </span>
+            </span>
+          </button>
+        </div>
+
+        <div>
+          <div className="type-meta mb-1.5 text-muted-foreground">Or pick one for this agent</div>
+          <div data-testid="avatar-style-grid" className="grid grid-cols-3 gap-1.5">
             {STYLE_OPTIONS.map((s) => (
               <button
                 key={s.value}
