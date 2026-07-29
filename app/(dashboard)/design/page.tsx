@@ -248,6 +248,66 @@ function VariantE() {
   )
 }
 
+
+/* ── what actually shipped: D's role-on-selected + A's hover chevron ─────── */
+function VariantShipped() {
+  const [open, setOpen] = useState<string[]>(["Ops", "Engineering"])
+  const [sel, setSel] = useState("Sam")
+  const toggle = (n: string) => setOpen((o) => (o.includes(n) ? o.filter((x) => x !== n) : [...o, n]))
+  return (
+    <Rail>
+      {CREWS.map((c) => (
+        <div key={c.name}>
+          <button
+            type="button"
+            onClick={() => toggle(c.name)}
+            className="group/crew mx-1.5 flex w-[calc(100%-12px)] items-center gap-2 rounded-md px-2 py-1.5 hover:bg-white/[.04]"
+          >
+            <ChevronRight
+              className={cn(
+                "h-3 w-3 shrink-0 text-muted-foreground-soft transition-all",
+                open.includes(c.name)
+                  ? "rotate-90 opacity-0 group-hover/crew:opacity-100"
+                  : "opacity-100",
+              )}
+            />
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15">
+              <c.icon className="h-3.5 w-3.5 text-primary" />
+            </span>
+            <span className="type-row flex-1 truncate text-left font-semibold">{c.name}</span>
+            <span className="type-meta tabular-nums text-muted-foreground-soft">{c.agents.length}</span>
+            <Marks running={c.running} error={c.error} />
+          </button>
+          {open.includes(c.name) && (
+            <div className="ml-[1.1rem] border-l border-border/70 pl-1">
+              {c.agents.map((a) => (
+                <button
+                  key={a.name}
+                  type="button"
+                  onClick={() => setSel(a.name)}
+                  className={cn(
+                    "mx-1.5 flex w-[calc(100%-12px)] items-center gap-2 rounded-md px-2 py-1.5 text-left",
+                    sel === a.name ? "bg-primary/10" : "hover:bg-white/[.04]",
+                  )}
+                >
+                  <Face a={a} px="h-8 w-8" />
+                  <span className="min-w-0 flex-1">
+                    <span className="type-row block truncate font-medium leading-tight">{a.name}</span>
+                    {sel === a.name && (
+                      <span className="type-meta block truncate text-muted-foreground">{a.role}</span>
+                    )}
+                  </span>
+                  <span className="type-meta text-muted-foreground-soft">Idle</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </Rail>
+  )
+}
+
 function Rail({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-[272px] shrink-0 overflow-hidden rounded-xl border border-border/60 bg-card py-1.5">
@@ -331,10 +391,17 @@ export default function DesignBench() {
           there are more of them — shrinking the crew mark feels tidier and saves almost nothing.
         </p>
         <p className="type-row mt-2 max-w-3xl text-muted-foreground">
-          About the chevron: you are right that it is nearly redundant, but not entirely. Clicking a
-          crew row already selects it <i>and</i> expands it — it does not collapse. The chevron is
-          the only way back with a mouse. So each variant says what it does about that instead of
-          deleting it and hoping.
+          About the chevron: nearly redundant, not entirely. Clicking a crew row already selects it{" "}
+          <i>and</i> expands it — it does not collapse. The chevron is the only way back with a
+          mouse. So each variant says what it does about that instead of deleting it and hoping.
+        </p>
+        <p className="type-row mt-2 max-w-3xl text-foreground">
+          <b className="font-medium">Settled:</b> D&rsquo;s role-on-selected plus A&rsquo;s
+          hover chevron. The measurement decided it — the row was 49px with a 29px portrait and a
+          38px text column, so the <i>text</i> set the height, not the face. Cutting the second line
+          made the portrait the tallest thing in the row and took it to 40px at the same time. Not
+          C: −38% is the biggest number here, and it buys it by putting the portrait back to 24px,
+          which is where a line-drawing style stops being a face.
         </p>
       </div>
 
@@ -365,7 +432,11 @@ export default function DesignBench() {
           {active.render()}
         </div>
         <div>
-          <p className="type-meta mb-1.5 text-muted-foreground-soft">Today, for comparison</p>
+          <p className="type-meta mb-1.5 text-success">Shipped — this is the rail today</p>
+          <VariantShipped />
+        </div>
+        <div>
+          <p className="type-meta mb-1.5 text-muted-foreground-soft">Before, for comparison</p>
           <Rail>
             {CREWS.map((c) => (
               <div key={c.name}>
