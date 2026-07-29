@@ -9,7 +9,7 @@ import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provid
 
 import { Button } from "@/components/ui/button"
 import { Appear, DetailCard } from "@/components/ui/detail"
-import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
+import { AGENT_EXTERNAL_TRIGGERS, AGENT_SELF_LEARNING } from "@/lib/feature-gates"
 
 import {
   ConfigCards, ConfigPresets, ConfigReadOnly, ConfigSelect, ConfigSwitch, ConfigText,
@@ -290,16 +290,19 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
         />
       </Appear>
 
-      <Appear order={7}>
-        <div data-testid="learning-card">
-          <DetailCard
-            bare icon={Sparkles} title="Learning posture"
-            footer="Per agent, and separate from the crew's autonomy level. Every flip is recorded with its reason."
-          >
-            <AgentLearningToggle bare agentId={agent.id} workspaceId={agent.workspace_id} />
-          </DetailCard>
-        </div>
-      </Appear>
+      {AGENT_SELF_LEARNING && (
+        <Appear order={7}>
+          <div data-testid="learning-card">
+            <DetailCard
+              bare icon={Sparkles} title="Learning posture"
+              footer="Per agent, and separate from the crew's autonomy level. Every flip is recorded with its reason."
+            >
+              <AgentLearningToggle bare agentId={agent.id} workspaceId={agent.workspace_id} />
+            </DetailCard>
+          </div>
+        </Appear>
+      )}
+
     </div>
   )
 }

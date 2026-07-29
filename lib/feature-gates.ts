@@ -23,3 +23,27 @@
  * from the UI.
  */
 export const AGENT_EXTERNAL_TRIGGERS = false
+
+/**
+ * Self-improving mode — the per-agent switch deciding whether a keeper lesson
+ * or a persona change applies immediately or waits for approval.
+ *
+ * Off because only half of it is demonstrable. The switch itself is proven
+ * end to end (PATCH persists with an audit trail, the reload reads it back),
+ * and the gate is proven at the handler: with it on a lesson lands in
+ * lessons.md, with it off a blocking inbox item is queued instead — Go tests
+ * assert both against the real filesystem.
+ *
+ * What nobody has shown is that a LIVE agent run ever reaches those handlers.
+ * That chain runs sidecar → POST /api/v1/internal/keeper/behavior → evaluator
+ * → lesson proposal, it is internal-auth only, there is no CLI for it, and no
+ * harness suite covers it. Offering a switch for a behaviour we cannot
+ * demonstrate is the same promise the external-trigger card was making.
+ *
+ * Turn back on with: a test-harness suite that drives a real run through to a
+ * lesson (and to an inbox item with the flag off), plus the missing CLI for
+ * GET/PATCH /api/v1/agents/{id}/learning — the endpoints have no command
+ * today, which breaks the repo's API↔CLI parity rule and is why this could
+ * not be verified outside a browser in the first place.
+ */
+export const AGENT_SELF_LEARNING = false

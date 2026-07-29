@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 
 import { ConfigTab } from "@/components/features/crews/agent-canvas-tabs/config-tab"
 import type { AgentRecord } from "@/components/features/crews/agent-canvas-tabs/types"
@@ -95,10 +95,17 @@ describe("agent configuration", () => {
     expect(screen.queryByText(/rotate-webhook-secret/)).not.toBeInTheDocument()
   })
 
-  it("carries the system prompt and learning posture as cards, not a trailing panel", () => {
+  it("carries the system prompt as a card, not a trailing panel", () => {
     renderTab()
-    const prompt = screen.getByText("System prompt")
-    expect(prompt.className).toContain("type-section")
-    expect(within(screen.getByTestId("learning-card")).getByTestId("learning-toggle")).toBeInTheDocument()
+    expect(screen.getByText("System prompt").className).toContain("type-section")
+  })
+
+  // Self-improving mode is gated off (lib/feature-gates.ts). The switch and
+  // the gate are both proven, but nothing demonstrates that a live agent run
+  // reaches the handler they gate, so it is not offered yet.
+  it("does not offer self-improving mode while the gate is off", () => {
+    renderTab()
+    expect(screen.queryByTestId("learning-card")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Learning posture/i)).not.toBeInTheDocument()
   })
 })
