@@ -12,6 +12,12 @@ import { GeneralSection } from "../general-section"
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 
+// The privileged-credentials override has its own test file and its own fetch;
+// here it only has to prove it landed on this section.
+vi.mock("../privileged-credentials-card", () => ({
+  PrivilegedCredentialsCard: () => <div data-testid="privileged-credentials-card" />,
+}))
+
 const onUpdated = vi.fn()
 
 type SectionProps = ComponentProps<typeof GeneralSection>
@@ -191,5 +197,20 @@ describe("GeneralSection — role gating of the Identity card", () => {
   it("hides the Danger zone from a MEMBER", () => {
     renderSection({ role: "MEMBER" })
     expect(screen.queryByText(/danger zone/i)).toBeNull()
+  })
+
+  // It used to sit under "Crews & Containers", which read as per-crew config
+  // it is not: it is a workspace-wide, fail-closed isolation boundary. General
+  // is where workspace-wide switches live, so this is where an owner looks.
+  it("carries the workspace-wide privileged-credentials override", () => {
+    renderSection({ role: "OWNER" })
+    expect(screen.getByTestId("privileged-credentials-card")).toBeInTheDocument()
+  })
+
+  it("shows the override to a MEMBER too — read-only, but not a secret", () => {
+    // Same rule as the identity card: a role that may read the state keeps
+    // seeing it; the card gates its own switch on the caller's abilities.
+    renderSection({ role: "MEMBER" })
+    expect(screen.getByTestId("privileged-credentials-card")).toBeInTheDocument()
   })
 })

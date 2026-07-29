@@ -145,6 +145,20 @@ test.describe("B. Legacy redirects", () => {
     await page.waitForURL(/\/settings\?tab=audit/, { timeout: 10_000 })
     expect(page.url()).toMatch(/\/settings\?tab=audit/)
   })
+
+  // Settings sections that moved to the page owning the object they configure.
+  // The row is gone; the link must still land on the right thing.
+  test("/settings?tab=notification-prefs → the Integrations preference matrix", async ({ page }) => {
+    await login(page)
+    await page.goto("/settings?tab=notification-prefs")
+    await page.waitForURL(/\/integrations\?tab=notifications&section=preferences/, { timeout: 10_000 })
+  })
+
+  test("/settings?tab=crews → /crews", async ({ page }) => {
+    await login(page)
+    await page.goto("/settings?tab=crews")
+    await page.waitForURL(/\/crews/, { timeout: 10_000 })
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -64,8 +64,9 @@ in via `allow_privileged_credentials` (default **off**).
 
 The toggle is workspace-scoped and admin-gated (OWNER/ADMIN):
 
-- **UI:** **Settings → Crews & Containers → Privileged credentials → "Load
-  credentials into privileged crews."**
+- **UI:** **Settings → General → Privileged credentials → "Load credentials
+  into privileged crews."** (It is workspace-wide, not per-crew — a crew's own
+  Settings tab configures that crew, this switch governs the whole workspace.)
 - **API:** `PATCH /api/v1/workspaces/{id}` with
   `{"allow_privileged_credentials": true}` (read it back on
   `GET /api/v1/workspaces/{id}`).

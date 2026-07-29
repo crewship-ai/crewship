@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { MessageSquare } from "lucide-react"
+import Link from "next/link"
+import { ArrowUpRight, MessageSquare } from "lucide-react"
 import { toast } from "sonner"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -118,6 +119,22 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
       <p className="text-[11px] text-muted-foreground">
         Email and signed-webhook channels are always available — this toggle only governs Slack, Discord,
         and Telegram (shoutrrr) channel creation.
+      </p>
+
+      {/* This tab decides what MAY be connected; the channels themselves live
+          on /integrations. That split is deliberate — instance policy is not
+          workspace usage — but an admin who lands here looking for "is Slack
+          connected?" should not have to guess where the other half is. */}
+      <p className="text-[11px] text-muted-foreground">
+        Looking for the channels themselves?{" "}
+        <Link
+          href="/integrations?tab=notifications&section=connections"
+          className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+        >
+          Integrations → Notifications
+          <ArrowUpRight className="size-3" />
+        </Link>{" "}
+        lists every connection on this workspace, who owns it, and whether it is delivering.
       </p>
     </div>
   )

@@ -21,6 +21,7 @@ import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow, SettingsDangerCard } from "../shared"
+import { PrivilegedCredentialsCard } from "./privileged-credentials-card"
 
 interface GeneralSectionProps {
   workspaceId: string
@@ -276,6 +277,14 @@ export function GeneralSection({
           </span>
         </SettingsRow>
       </SettingsCard>
+
+      {/* ── Security ──
+          Workspace-wide, fail-closed, and nothing to do with any one crew —
+          it used to sit under "Crews & Containers", where it read as per-crew
+          container config and an owner had no reason to look for it. It sits
+          above the danger zone because it is the other switch on this page
+          that changes what the whole workspace is allowed to do. */}
+      <PrivilegedCredentialsCard workspaceId={workspaceId} />
 
       {/* ── Danger Zone ── */}
       {isOwner(role) && (

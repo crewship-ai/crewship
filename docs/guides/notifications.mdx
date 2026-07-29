@@ -23,7 +23,20 @@ The **Filter** popover is the one every faceted page in the app uses (`sidebar-k
 
 Managed tool accounts are **not** in the Notifications connection list. They were, and it was the most confusing thing on the page: a Discord webhook and a Gmail tool account sat in one table under one word, with different owners, different lifecycles and different meanings of "connected".
 
-It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings → Notifications now redirects, so there is exactly one place rather than two that drift apart. **Notifications** and **Deliveries** stay here rather than moving back: the preference matrix is a grid *over these connections*, and "why didn't it arrive" is a question about them — splitting either from the list it refers to is the same two-places-for-one-thing this page was built to undo.
+It used to live under Settings. That door reads as "my personal preferences", which is wrong for a set of connections a whole org depends on, and it made the thing an admin most needs — one view of everything this instance is wired into — impossible to build. Settings no longer carries a Notifications row at all (a nav row promises a pane; a row that only bounces you elsewhere does not), but the old links still resolve: `/settings?tab=notifications` forwards to the connection list and `/settings?tab=notification-prefs` to the preference matrix. So there is exactly one place rather than two that drift apart. **Notifications** and **Deliveries** stay here rather than moving back: the preference matrix is a grid *over these connections*, and "why didn't it arrive" is a question about them — splitting either from the list it refers to is the same two-places-for-one-thing this page was built to undo.
+
+### Linking to a view
+
+Every tab and section is addressable, so a view can be shared, bookmarked or linked to from elsewhere in the app:
+
+```
+/integrations?tab=notifications&section=connections   # what is hooked up
+/integrations?tab=notifications&section=preferences   # your preference matrix
+/integrations?tab=notifications&section=deliveries    # why it did or did not arrive
+/integrations?tab=tools&section=accounts              # Composio connected accounts
+```
+
+The URL is rewritten as you move, and an unknown or cross-tab `section` falls back to that tab's default rather than leaving the panel pointing at a section it does not own.
 
 ### Adding something: one door
 

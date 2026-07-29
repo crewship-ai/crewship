@@ -14,7 +14,7 @@ import {
   NOTIFICATION_CATEGORY_GROUPS,
   labelForCategory,
 } from "@/lib/notification-categories"
-import { SettingsCard, SettingsEmpty } from "../shared"
+import { SettingsCard, SettingsEmpty } from "@/components/features/settings/shared"
 
 interface NotificationPrefsSectionProps {
   workspaceId: string
