@@ -225,13 +225,14 @@ export function OverviewTab({
         />
       )}
 
-      {/* One grid, not three stacked blocks, and no breakpoints: auto-fit with
-          a minimum track says "a cell is at least 248px wide, fit as many as
-          you can". The count then steps 1 → 2 → 4 → 6 on its own as the pane
-          grows, at every width in between, instead of at five places I picked.
-          auto-FIT rather than auto-fill so six cells never leave empty tracks
-          hanging on an ultrawide. */}
-      <div className="grid gap-3.5 grid-cols-[repeat(auto-fit,minmax(15.5rem,1fr))]">
+      {/* Column counts that DIVIDE the six cells: 1 → 2 → 3 → 6.
+          auto-fit was more elegant and produced five tracks at a 1479px pane,
+          which left Sessions stranded alone on a second row while four cells
+          shared the first. Fitting as many as possible is the wrong goal when
+          the count is known and small; landing on an even split is the right
+          one, so a row is never one card and a gap.
+          Thresholds are container sizes — this pane, not the window. */}
+      <div className="grid gap-3.5 @xl:grid-cols-2 @4xl:grid-cols-3 @9xl:grid-cols-6">
         <DetailCell
           order={0}
           title="Issues"
@@ -284,7 +285,6 @@ export function OverviewTab({
         />
 
         <DetailCell
-          className="@xl:col-span-2 @8xl:col-span-1"
           order={4}
           title="Runs"
           count={runs?.length ?? 0}
@@ -294,7 +294,6 @@ export function OverviewTab({
             { id: "run", label: "Running" },
           ]}
           items={runItems}
-          tall
           footerLabel="Open in Journal"
           footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
         />
@@ -308,7 +307,6 @@ export function OverviewTab({
             screen keeps getting punished for. Both cells read data the canvas
             already fetched, so the pair costs no extra request. */}
         <DetailCell
-          className="@xl:col-span-2 @8xl:col-span-1"
           order={5}
           title="Sessions"
           count={chats?.length ?? 0}
@@ -323,15 +321,13 @@ export function OverviewTab({
             tag: "all",
             href: `/chat/${encodeURIComponent(agent.slug)}`,
           }))}
-          tall
           footerLabel="Open chat"
           footerHref={`/chat/${encodeURIComponent(agent.slug)}`}
         />
 
         {peerMessages.length > 0 && (
           <DetailCell
-            className="@xl:col-span-2 @8xl:col-span-1"
-            order={6}
+              order={6}
             title="From peers"
             count={peerMessages.length}
             filters={[{ id: "all", label: "All" }]}

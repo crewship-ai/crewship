@@ -307,6 +307,7 @@
      at equal specificity and silently did nothing — no error, just the old
      layout. Named sizes sort by value with the rest of the scale. */
   --container-8xl: 90rem;    /* 1440px */
+  --container-9xl: 100rem;   /* 1600px */
   --container-10xl: 108rem;  /* 1728px */
 
   /* ── Typography scale → Tailwind text-* utilities ── */
