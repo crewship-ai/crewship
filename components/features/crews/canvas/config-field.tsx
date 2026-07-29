@@ -149,11 +149,13 @@ export interface ConfigSelectProps<T extends string> {
   options: Array<{ value: T; label: string }>
   /** Rendered before the select — provider marks, crew colour, etc. */
   adornment?: React.ReactNode
+  /** Trailing affordance on the row — a link out to whatever owns the value. */
+  action?: React.ReactNode
   onSave: (next: T) => Promise<void> | void
 }
 
 export function ConfigSelect<T extends string>({
-  label, hint, value, options, adornment, onSave,
+  label, hint, value, options, adornment, action, onSave,
 }: ConfigSelectProps<T>) {
   const id = useId()
   const { local, commit } = useOptimistic(value, label, onSave)
@@ -178,6 +180,7 @@ export function ConfigSelect<T extends string>({
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
+      {action}
     </ConfigRow>
   )
 }

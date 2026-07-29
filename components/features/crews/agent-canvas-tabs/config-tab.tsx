@@ -1,6 +1,6 @@
 "use client"
 
-import { Bot, CalendarClock, Settings2, Shield, Sparkles, Webhook, Wrench } from "lucide-react"
+import { Bot, CalendarClock, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
 
 import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
@@ -114,10 +114,20 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
               detached the agent from its crew — silently. */}
           {crews.length > 0 ? (
             <ConfigSelect
-              label="Crew" hint="Decides the container, the network and the shared memory."
+              label="Crew"
+              hint="Decides the container, the network and the shared memory — a change there hits every agent in the crew."
               value={agent.crew_id ?? ""}
               options={[{ value: "", label: "(no crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
               onSave={(v) => patch({ crew_id: v || null })}
+              action={agent.crew ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectCrew(agent.crew!.slug)}
+                  className="type-meta shrink-0 whitespace-nowrap text-primary hover:underline"
+                >
+                  Open crew
+                </button>
+              ) : undefined}
             />
           ) : (
             <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="loading" />
@@ -267,29 +277,6 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           </DetailCard>
         </Appear>
       )}
-
-      <Appear order={5}>
-        <DetailCard
-          bare icon={Shield} title="Environment"
-          subtitle={agent.crew ? `owned by crew ${agent.crew.name}` : "no crew"}
-          footer={agent.crew
-            ? <>The container, memory and network belong to the crew — a change would hit all of its agents.</>
-            : <>An agent with no crew runs in an isolated workspace container.</>}
-        >
-          <ConfigReadOnly
-            label="Crew"
-            value={agent.crew?.name ?? "—"}
-            note={agent.crew ? "open" : undefined}
-          />
-          {agent.crew && (
-            <div className="px-3 pb-3">
-              <Button variant="outline" size="sm" onClick={() => onSelectCrew(agent.crew!.slug)}>
-                Open crew settings
-              </Button>
-            </div>
-        )}
-        </DetailCard>
-      </Appear>
 
       {/* The system prompt is the longest thing on this screen and the one
           people actually read, so it takes a column of its own instead of
