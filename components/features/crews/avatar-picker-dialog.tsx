@@ -84,7 +84,7 @@ export function AvatarPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Avatar — {agentName}</DialogTitle>
           <DialogDescription>
@@ -138,27 +138,47 @@ export function AvatarPickerDialog({
           </button>
         </div>
 
+        {/* The catalogue is 25 styles. As a three-column list of
+            icon-beside-label tiles that was nine rows of mostly whitespace, and
+            the labels won the eye over the faces — which are the thing being
+            chosen. Face on top, name under it, five across: the grid becomes
+            something you scan rather than read, and it fits without the dialog
+            turning into a page. */}
         <div>
-          <div className="type-meta mb-1.5 text-muted-foreground">Or pick one for this agent</div>
-          <div data-testid="avatar-style-grid" className="grid grid-cols-3 gap-1.5">
+          <div className="type-meta mb-1.5 flex items-baseline gap-2 text-muted-foreground">
+            <span>Or pick one for this agent</span>
+            <span className="text-muted-foreground-soft">{STYLE_OPTIONS.length} styles</span>
+          </div>
+          <div
+            data-testid="avatar-style-grid"
+            className="grid max-h-[280px] grid-cols-4 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-5"
+          >
             {STYLE_OPTIONS.map((s) => (
               <button
                 key={s.value}
                 type="button"
                 onClick={() => setDraftStyle(s.value)}
+                title={s.label}
                 className={cn(
-                  "rounded border text-xs transition-colors p-1.5 flex items-center gap-2",
+                  "flex flex-col items-center gap-1 rounded-lg border p-1.5 transition-colors",
                   draftStyle === s.value
-                    ? "border-primary bg-primary/10 text-primary"
+                    ? "border-primary bg-primary/10"
                     : "border-white/10 hover:bg-white/5",
                 )}
               >
                 <img
                   src={getAgentAvatarUrl(draftSeed, s.value)}
                   alt=""
-                  className="w-7 h-7 rounded"
+                  className="h-10 w-10 rounded-md"
                 />
-                <span className="text-left flex-1 truncate">{s.label}</span>
+                <span
+                  className={cn(
+                    "type-meta w-full truncate text-center leading-tight",
+                    draftStyle === s.value ? "text-primary" : "text-muted-foreground",
+                  )}
+                >
+                  {s.label}
+                </span>
               </button>
             ))}
           </div>

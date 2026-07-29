@@ -14,6 +14,10 @@ import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-di
 //
 // It is a REFERENCE: follow whatever the crew uses. So it says what it
 // currently resolves to, and it sits outside the grid of actual styles.
+//
+// (The default's label used to be the invented "Robots". It is DiceBear's own
+// "Bottts Neutral" now — the invention became actively wrong the moment the
+// sibling collection "bottts" joined the catalogue.)
 // =============================================================================
 
 const base = {
@@ -32,10 +36,10 @@ describe("avatar style — inherit", () => {
 
   it("admits when following the crew just means the default", () => {
     // The case that looked like a duplicate: no crew style, so inheriting
-    // resolves to the same Robots face the grid shows one tile over.
+    // resolves to the same face the default tile shows one row down.
     render(<AvatarPickerDialog {...base} style={null} crewStyle={null} />)
     const tile = screen.getByRole("button", { name: /Follow the crew/i })
-    expect(tile).toHaveTextContent(/Robots/i)
+    expect(tile).toHaveTextContent(/Bottts Neutral/i)
     expect(tile).toHaveTextContent(/default/i)
   })
 
@@ -44,6 +48,6 @@ describe("avatar style — inherit", () => {
     render(<AvatarPickerDialog {...base} style={null} crewStyle={null} />)
     const grid = screen.getByTestId("avatar-style-grid")
     expect(grid.textContent).not.toMatch(/Follow the crew/i)
-    expect(grid.textContent).toMatch(/Robots/)
+    expect(grid.textContent).toMatch(/Bottts Neutral/)
   })
 })
