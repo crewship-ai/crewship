@@ -700,8 +700,8 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 	promptBuf.WriteString(req.SystemPrompt)
 
 	// Inject lead crew context into system prompt (before memory, after conversation history)
-	if req.AgentRole == "LEAD" && len(req.CrewMembers) > 0 {
-		if leadCtx := BuildLeadContext(req.CrewMembers); leadCtx != "" {
+	if req.AgentRole == "LEAD" && (len(req.CrewMembers) > 0 || len(req.ConnectedCrews) > 0) {
+		if leadCtx := BuildLeadContext(req.CrewMembers, req.ConnectedCrews); leadCtx != "" {
 			promptBuf.WriteString("\n\n")
 			promptBuf.WriteString(leadCtx)
 		}

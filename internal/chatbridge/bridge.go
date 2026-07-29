@@ -97,6 +97,9 @@ type ChatInfo struct {
 	WorkspaceID           string
 	MemoryEnabled         bool
 	CrewMembers           []orchestrator.CrewMember
+	// ConnectedCrews is what a LEAD may dispatch across. Empty for every
+	// other role: only a lead orchestrates.
+	ConnectedCrews        []orchestrator.ConnectedCrew
 	NetworkMode           string
 	AllowedDomains        []string
 	AllowPrivateEndpoints bool

@@ -99,6 +99,31 @@ func TestAssignmentCreateCov_CrossCrewWithoutConnection403(t *testing.T) {
 	}
 }
 
+// The other half of the gate: with an active link the dispatch is allowed
+// through. Until the sidecar learned to name a target crew nothing could
+// reach this branch at all, so the "allowed" side had never been asserted —
+// only the refusal had.
+func TestAssignmentCreateCov_CrossCrewWithConnection_PassesTheGate(t *testing.T) {
+	h, wsID, crewID, _, _, chatID := covAsgRig(t)
+	otherCrew := seedCrewRow(t, h.db, "crew-asg-linked", wsID, "Linked", "asg-linked")
+	seedAgentRow(t, h.db, "agent-asg-linked", wsID, otherCrew, "L", "asg-linked-a", "AGENT")
+	if _, err := h.db.Exec(
+		`INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at)
+		 VALUES ('cc-asg', ?, ?, ?, 'bidirectional', 'active', datetime('now'), datetime('now'))`,
+		wsID, crewID, otherCrew); err != nil {
+		t.Fatalf("seed connection: %v", err)
+	}
+
+	rr := covAsgPost(t, h, `{"target_slug":"asg-linked-a","task":"t","crew_id":"`+otherCrew+`","workspace_id":"`+wsID+`","chat_id":"`+chatID+`"}`)
+
+	if rr.Code == http.StatusForbidden {
+		t.Fatalf("status = 403 with an active link; body=%s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "not connected") {
+		t.Fatalf("connection gate refused a linked pair: %s", rr.Body.String())
+	}
+}
+
 func TestAssignmentCreateCov_HappyPath_NoOrchestrator(t *testing.T) {
 	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
 	longTask := strings.Repeat("T", 150) // exercises the summary truncation

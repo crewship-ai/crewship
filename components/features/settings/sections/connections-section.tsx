@@ -1,27 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import {
-  Link2,
-  Unlink2,
-  ArrowLeftRight,
-  ArrowRight,
-  Trash2,
-} from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
-import { Button } from "@/components/ui/button"
-import { StatusBadge } from "@/components/ui/status-badge"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { ArrowLeftRight, ArrowLeft, ArrowRight, Minus } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import { resolveCrewColor } from "@/lib/colors"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import { useAbilities } from "@/hooks/use-abilities"
 import { isManagerTier } from "@/lib/permissions/tiers"
-import { SettingsCard, SettingsRow } from "../shared"
+import { SettingsCard } from "../shared"
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -30,35 +21,60 @@ interface Crew {
   name: string
   slug: string
   color?: string | null
+  /** The icon picked in Crews & Agents. A crew must look the same wherever it
+   *  appears, or the reader has to fall back to reading names. */
+  icon?: string | null
 }
 
 interface Connection {
   id: string
   from_crew_id: string
-  from_crew_name: string
-  from_crew_slug: string
   to_crew_id: string
-  to_crew_name: string
-  to_crew_slug: string
   direction: string
   status: string
-  created_at: string
 }
 
 interface ConnectionsSectionProps {
   workspaceId: string
 }
 
-// ── CrewDot ──────────────────────────────────────────────────────────
+/**
+ * The state of one pair, read from the SELECTED crew's side.
+ *
+ * The stored row has an orientation and the reader does not think in
+ * orientations — they think "can Engineering hand work to Ops, and can Ops
+ * hand work back". These four states are that question, and every one of them
+ * is a real state the table can hold.
+ */
+type PairState = "none" | "out" | "in" | "both"
 
-function CrewDot({ color }: { color?: string | null }) {
-  const hex = resolveCrewColor(color)
-  return (
-    <span
-      className="inline-block size-2 rounded-sm shrink-0"
-      style={{ backgroundColor: hex }}
-    />
-  )
+const PAIR_LABELS: Record<PairState, string> = {
+  none: "Not linked",
+  out: "Sends work →",
+  in: "← Receives work",
+  both: "Both ways",
+}
+
+const PAIR_ICONS: Record<PairState, typeof Minus> = {
+  none: Minus,
+  out: ArrowRight,
+  in: ArrowLeft,
+  both: ArrowLeftRight,
+}
+
+/** What each state means, in terms of what an agent can actually do. */
+const PAIR_HINTS: Record<PairState, string> = {
+  none: "Neither crew can reach the other",
+  out: "This crew can hand work to them",
+  in: "They can hand work to this crew",
+  both: "Either crew can hand work to the other",
+}
+
+/** How the selected crew sees a stored row. */
+function stateOf(conn: Connection | undefined, selfID: string): PairState {
+  if (!conn) return "none"
+  if (conn.direction === "bidirectional") return "both"
+  return conn.from_crew_id === selfID ? "out" : "in"
 }
 
 // ── Component ────────────────────────────────────────────────────────
@@ -75,13 +91,8 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const [crews, setCrews] = useState<Crew[]>([])
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
-
-  // form state
-  const [fromCrewId, setFromCrewId] = useState("")
-  const [toCrewId, setToCrewId] = useState("")
-  const [direction, setDirection] = useState<"bidirectional" | "unidirectional">("bidirectional")
-  const [connecting, setConnecting] = useState(false)
-  const [disconnectingId, setDisconnectingId] = useState<string | null>(null)
+  const [selectedID, setSelectedID] = useState<string | null>(null)
+  const [pendingPair, setPendingPair] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -98,256 +109,213 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const handleConnect = useCallback(async () => {
-    if (!fromCrewId || !toCrewId || fromCrewId === toCrewId) return
-    setConnecting(true)
+  const selected = useMemo(
+    () => crews.find((c) => c.id === selectedID) ?? crews[0],
+    [crews, selectedID],
+  )
+
+  /** The stored row for a pair, in whichever orientation it was written. */
+  const connectionFor = useCallback(
+    (a: string, b: string) =>
+      connections.find(
+        (c) =>
+          (c.from_crew_id === a && c.to_crew_id === b) ||
+          (c.from_crew_id === b && c.to_crew_id === a),
+      ),
+    [connections],
+  )
+
+  /** How many other crews this crew can reach or be reached by. */
+  const linkCount = useCallback(
+    (id: string) => connections.filter((c) => c.from_crew_id === id || c.to_crew_id === id).length,
+    [connections],
+  )
+
+  const applyState = useCallback(async (other: Crew, next: PairState) => {
+    if (!selected) return
+    const existing = connectionFor(selected.id, other.id)
+    const current = stateOf(existing, selected.id)
+    if (current === next) return
+
+    setPendingPair(other.id)
     try {
+      // "not linked" is the one state with no row, so it is a plain delete.
+      if (next === "none") {
+        if (!existing) return
+        const res = await apiFetch(
+          `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}`,
+          { method: "DELETE" },
+        )
+        if (!res.ok) { toast.error("Failed to unlink"); return }
+        toast.success(`${selected.name} and ${other.name} unlinked`)
+        await fetchData()
+        return
+      }
+
+      // Both ways is orientation-free: the server upserts whichever row
+      // exists, in either orientation, and widens it.
+      const from = next === "in" ? other.id : selected.id
+      const to = next === "in" ? selected.id : other.id
+      const direction = next === "both" ? "bidirectional" : "unidirectional"
+
+      // A one-way link has to point the right way. If the stored row points
+      // the other way (or is bidirectional), there is no update that narrows
+      // it — POST would read as "link this way too" and widen it back — so
+      // the pair is replaced.
+      const needsReplace =
+        existing !== undefined &&
+        direction === "unidirectional" &&
+        (existing.direction === "bidirectional" || existing.from_crew_id !== from)
+      if (needsReplace && existing) {
+        const del = await apiFetch(
+          `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}`,
+          { method: "DELETE" },
+        )
+        if (!del.ok) { toast.error("Failed to change the link"); return }
+      }
+
       const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from_crew_id: fromCrewId,
-          to_crew_id: toCrewId,
-          direction,
-        }),
+        body: JSON.stringify({ from_crew_id: from, to_crew_id: to, direction }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        toast.error(body?.error ?? "Failed to create connection")
+        toast.error(body?.detail ?? body?.error ?? "Failed to change the link")
         return
       }
-      toast.success("Connection created")
-      setFromCrewId("")
-      setToCrewId("")
-      setDirection("bidirectional")
+      toast.success(`${selected.name} → ${other.name}: ${PAIR_LABELS[next].replace(/[←→]/g, "").trim()}`)
       await fetchData()
     } catch {
-      toast.error("Failed to create connection")
+      toast.error("Failed to change the link")
     } finally {
-      setConnecting(false)
+      setPendingPair(null)
     }
-  }, [fromCrewId, toCrewId, direction, workspaceId, fetchData])
-
-  const handleDisconnect = useCallback(async (connId: string) => {
-    if (!window.confirm("Disconnect these crews?")) return
-    setDisconnectingId(connId)
-    try {
-      const res = await apiFetch(`/api/v1/crew-connections/${connId}?workspace_id=${workspaceId}`, {
-        method: "DELETE",
-      })
-      if (!res.ok) {
-        toast.error("Failed to disconnect")
-        return
-      }
-      toast.success("Connection removed")
-      await fetchData()
-    } catch {
-      toast.error("Failed to disconnect")
-    } finally {
-      setDisconnectingId(null)
-    }
-  }, [workspaceId, fetchData])
-
-  const crewMap = new Map(crews.map((c) => [c.id, c]))
-  const toCrews = crews.filter((c) => c.id !== fromCrewId)
-  const canConnect = fromCrewId && toCrewId && fromCrewId !== toCrewId && !connecting
+  }, [selected, connectionFor, workspaceId, fetchData])
 
   if (loading) {
     return (
       <div className="space-y-5">
-        <Skeleton className="h-[200px] rounded-xl" />
-        <Skeleton className="h-[120px] rounded-xl" />
+        <Skeleton className="h-[280px] rounded-xl" />
       </div>
     )
   }
 
-  return (
-    <div className="space-y-5">
-      {/* ── Create Connection ── */}
-      {/* Unlike Members, this card has no read-only content of its own —
-          it's a bare mutation form. Below MANAGER there's nothing worth
-          leaving on screen (a form with no reachable submit isn't "the
-          list"), so omit the whole card and say why once, quietly. */}
-      {canManage ? (
+  if (crews.length < 2) {
+    return (
       <SettingsCard
-        title="Create connection"
-        description="Link two crews so agents on one can dispatch tasks to the other"
+        title="Crew links"
+        description="Which crews may hand work to which"
       >
-        <SettingsRow label="From" description="Source crew">
-          <Select value={fromCrewId} onValueChange={(v) => {
-            setFromCrewId(v)
-            if (v === toCrewId) setToCrewId("")
-          }}>
-            <SelectTrigger className="w-[200px] h-7 text-xs">
-              <SelectValue placeholder="Select crew" />
-            </SelectTrigger>
-            <SelectContent>
-              {crews.map((c) => (
-                <SelectItem key={c.id} value={c.id} className="text-xs">
-                  <span className="flex items-center gap-2">
-                    <CrewDot color={c.color} />
-                    {c.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-
-        <SettingsRow label="Direction" description="How tasks can flow">
-          <div
-            className="flex rounded-md overflow-hidden border border-border/60"
-            role="radiogroup"
-            aria-label="Connection direction"
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={direction === "bidirectional"}
-              aria-pressed={direction === "bidirectional"}
-              onClick={() => setDirection("bidirectional")}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 h-7 text-xs font-medium transition-colors",
-                direction === "bidirectional"
-                  ? "bg-accent text-foreground"
-                  : "bg-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <ArrowLeftRight className="size-3" />
-              Both ways
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={direction === "unidirectional"}
-              aria-pressed={direction === "unidirectional"}
-              onClick={() => setDirection("unidirectional")}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 h-7 text-xs font-medium transition-colors border-l border-border/60",
-                direction === "unidirectional"
-                  ? "bg-accent text-foreground"
-                  : "bg-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <ArrowRight className="size-3" />
-              One-way
-            </button>
-          </div>
-        </SettingsRow>
-
-        <SettingsRow label="To" description="Target crew">
-          <Select value={toCrewId} onValueChange={setToCrewId} disabled={!fromCrewId}>
-            <SelectTrigger className="w-[200px] h-7 text-xs">
-              <SelectValue placeholder={fromCrewId ? "Select crew" : "Select source first"} />
-            </SelectTrigger>
-            <SelectContent>
-              {toCrews.map((c) => (
-                <SelectItem key={c.id} value={c.id} className="text-xs">
-                  <span className="flex items-center gap-2">
-                    <CrewDot color={c.color} />
-                    {c.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-
-        <div className="flex items-center justify-end px-4 py-2.5">
-          <Button
-            type="button"
-            size="sm"
-            className="h-7 px-2.5 text-xs"
-            disabled={!canConnect}
-            onClick={handleConnect}
-          >
-            {connecting ? (
-              <Spinner className="mr-1.5 size-3" />
-            ) : (
-              <Link2 className="mr-1.5 size-3" />
-            )}
-            Connect
-          </Button>
+        <div className="px-4 py-10 text-center text-[11px] text-muted-foreground">
+          A link joins two crews. This workspace has {crews.length === 0 ? "none" : "one"}.
         </div>
       </SettingsCard>
-      ) : (
-        <p className="text-[11px] text-muted-foreground px-1">
-          Only managers and admins can create or remove crew connections.
-        </p>
-      )}
+    )
+  }
 
-      {/* ── Active Connections ── */}
-      <SettingsCard
-        title="Active connections"
-        description={connections.length === 0 ? "No connections yet" : `${connections.length} active link${connections.length === 1 ? "" : "s"}`}
+  const others = crews.filter((c) => c.id !== selected?.id)
+
+  return (
+    <SettingsCard
+      title="Crew links"
+      description="Which crews may hand work to which — agents can only dispatch, message and share files across a link"
+    >
+      <section
+        aria-label="Crew links"
+        className="flex min-h-[260px] flex-col sm:flex-row"
       >
-        {connections.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-center">
-            <div className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center mb-2">
-              <Unlink2 className="h-3.5 w-3.5 text-muted-foreground" />
-            </div>
-            <div className="text-xs font-medium text-foreground/80">No connections</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5 max-w-xs">
-              Connect crews to enable cross-crew task dispatch in missions.
-            </div>
-          </div>
-        ) : (
-          connections.map((conn, i) => {
-            const fromCrew = crewMap.get(conn.from_crew_id)
-            const toCrew = crewMap.get(conn.to_crew_id)
-            const isLast = i === connections.length - 1
-            const isDisconnecting = disconnectingId === conn.id
-            const isActive = conn.status === "active"
+        {/* Pick the crew you are thinking about. Everything to the right is
+            stated from ITS point of view, which is how the question arrives:
+            "who can Engineering hand work to?" — not "list all edges". */}
+        <div className="shrink-0 border-b border-border/40 sm:w-[180px] sm:border-b-0 sm:border-r">
+          {crews.map((c) => {
+            const isSelected = c.id === selected?.id
+            const n = linkCount(c.id)
             return (
-              <div
-                key={conn.id}
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setSelectedID(c.id)}
+                aria-pressed={isSelected}
+                // Name the crew, not "Engineering 2": the link count beside it
+                // is a glance aid, not part of what this button is.
+                aria-label={c.name}
                 className={cn(
-                  "flex items-center justify-between gap-4 px-4 py-2.5",
-                  !isLast && "border-b border-border/40",
+                  "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
+                  isSelected ? "bg-accent/60" : "hover:bg-white/[0.02]",
                 )}
               >
-                <div className="flex items-center gap-2 text-xs text-foreground min-w-0">
-                  <CrewDot color={fromCrew?.color} />
-                  <span className="truncate">{conn.from_crew_name}</span>
-                  {conn.direction === "bidirectional" ? (
-                    <ArrowLeftRight className="size-3 text-muted-foreground shrink-0" />
-                  ) : (
-                    <ArrowRight className="size-3 text-muted-foreground shrink-0" />
-                  )}
-                  <CrewDot color={toCrew?.color} />
-                  <span className="truncate">{conn.to_crew_name}</span>
+                <CrewIcon icon={c.icon || "briefcase"} color={c.color} size="sm" />
+                <span className="min-w-0 flex-1 truncate text-xs font-medium">{c.name}</span>
+                <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                  {n || ""}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* One row per other crew, one control per row. */}
+        <div className="min-w-0 flex-1">
+          {others.map((other, i) => {
+            const state = stateOf(connectionFor(selected!.id, other.id), selected!.id)
+            const StateIcon = PAIR_ICONS[state]
+            return (
+              <div
+                key={other.id}
+                className={cn(
+                  "flex items-center justify-between gap-3 px-4 py-2.5",
+                  i < others.length - 1 && "border-b border-border/40",
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <CrewIcon icon={other.icon || "briefcase"} color={other.color} size="sm" />
+                  <div className="min-w-0">
+                    <div className="truncate text-xs text-foreground">{other.name}</div>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {PAIR_HINTS[state]}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <StatusBadge
-                    status={isActive ? "COMPLETED" : "PENDING"}
-                    label={conn.status}
-                    className="text-[10px]"
-                  />
-                  {/* The connection graph stays readable for everyone;
-                      only the disconnect action is MANAGER+. */}
-                  {canManage && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={isDisconnecting}
-                      onClick={() => handleDisconnect(conn.id)}
-                      aria-label={`Disconnect ${conn.from_crew_name} ${conn.direction === "bidirectional" ? "↔" : "→"} ${conn.to_crew_name}`}
-                      className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+
+                {canManage ? (
+                  <Select
+                    value={state}
+                    disabled={pendingPair === other.id}
+                    onValueChange={(v) => void applyState(other, v as PairState)}
+                  >
+                    <SelectTrigger
+                      className="h-7 w-[170px] text-xs"
+                      aria-label={`Link between ${selected!.name} and ${other.name}`}
                     >
-                      {isDisconnecting ? (
-                        <Spinner className="size-3" />
-                      ) : (
-                        <Trash2 className="size-3" />
-                      )}
-                    </Button>
-                  )}
-                </div>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(PAIR_LABELS) as PairState[]).map((s) => (
+                        <SelectItem key={s} value={s} className="text-xs">
+                          {PAIR_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <StateIcon className="size-3" />
+                    {PAIR_LABELS[state]}
+                  </span>
+                )}
               </div>
             )
-          })
-        )}
-      </SettingsCard>
-    </div>
+          })}
+        </div>
+      </section>
+
+      {!canManage && (
+        <div className="border-t border-border/40 px-4 py-2 text-[11px] text-muted-foreground">
+          Only managers and admins can change a link.
+        </div>
+      )}
+    </SettingsCard>
   )
 }

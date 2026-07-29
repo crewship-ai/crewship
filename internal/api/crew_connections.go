@@ -41,13 +41,17 @@ type crewConnectionResponse struct {
 func (h *CrewConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
+	// Crews are soft-deleted and their links are not, so a workspace that has
+	// been reseeded a few times accumulates rows pointing at crews nobody can
+	// see. Those are not links — nothing can act on them — and listing them
+	// buried the three real rows on dev2 under twenty-four dead ones.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT cc.id, cc.workspace_id, cc.from_crew_id, cc.to_crew_id,
 		       cc.direction, cc.status, cc.created_at, cc.updated_at,
 		       fc.name, fc.slug, tc.name, tc.slug
 		FROM crew_connections cc
-		JOIN crews fc ON fc.id = cc.from_crew_id
-		JOIN crews tc ON tc.id = cc.to_crew_id
+		JOIN crews fc ON fc.id = cc.from_crew_id AND fc.deleted_at IS NULL
+		JOIN crews tc ON tc.id = cc.to_crew_id  AND tc.deleted_at IS NULL
 		WHERE cc.workspace_id = ?
 		ORDER BY cc.created_at DESC`, wsID)
 	if err != nil {
@@ -119,14 +123,52 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := generateConnID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := h.db.ExecContext(r.Context(), `
+	// A pair is ONE edge, whichever end you name first. Look for the edge in
+	// either orientation before inserting:
+	//
+	//   · same orientation  → this is a re-link; keep the row, take the new
+	//     direction. Asking for a link that already exists is not a conflict,
+	//     it is the same request twice, and a 409 would push "does a row exist
+	//     already" onto every caller.
+	//   · reverse orientation → the caller wants the way back as well, so the
+	//     stored edge becomes bidirectional. Inserting instead would leave two
+	//     rows that each claim to be one-way while together meaning both ways
+	//     (UNIQUE(from,to) does not catch the reverse).
+	var existingID, existingDir string
+	var reversed bool
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT id, direction, from_crew_id <> ? FROM crew_connections
+		WHERE workspace_id = ?
+		  AND ((from_crew_id = ? AND to_crew_id = ?) OR (from_crew_id = ? AND to_crew_id = ?))`,
+		req.FromCrewID, wsID,
+		req.FromCrewID, req.ToCrewID, req.ToCrewID, req.FromCrewID,
+	).Scan(&existingID, &existingDir, &reversed)
+	switch {
+	case err == nil:
+		direction := req.Direction
+		if reversed {
+			direction = "bidirectional"
+		}
+		if _, err := h.db.ExecContext(r.Context(),
+			`UPDATE crew_connections SET direction = ?, status = 'active', updated_at = ? WHERE id = ?`,
+			direction, now, existingID); err != nil {
+			internalError(w, r, h.logger, "update crew connection", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": existingID})
+		return
+	case !errors.Is(err, sql.ErrNoRows):
+		internalError(w, r, h.logger, "look up crew connection", err)
+		return
+	}
+
+	id := generateConnID()
+	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-		id, wsID, req.FromCrewID, req.ToCrewID, req.Direction, now, now)
-	if err != nil {
+		id, wsID, req.FromCrewID, req.ToCrewID, req.Direction, now, now); err != nil {
 		h.logger.Error("create crew connection", "error", err)
 		writeProblem(w, r, http.StatusConflict, "Connection already exists or constraint violation")
 		return

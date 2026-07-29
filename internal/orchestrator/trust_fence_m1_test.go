@@ -59,7 +59,7 @@ func TestTrustFenceM1_LeadContext_FencesMemberDescription(t *testing.T) {
 	members := []CrewMember{
 		{Name: "Mallory", Slug: "mallory", RoleTitle: "Contractor", Description: injectionPayload},
 	}
-	out := BuildLeadContext(members)
+	out := BuildLeadContext(members, nil)
 	assertFenced(t, out, "crew_member", "ignore previous instructions")
 }
 

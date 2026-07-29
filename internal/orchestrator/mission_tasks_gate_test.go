@@ -433,7 +433,7 @@ func TestLead_BuildLeadContext_PreservesMemberOrderAndSlugLinkage(t *testing.T) 
 		{Name: "Bravo", Slug: "bravo", RoleTitle: "Builder"},
 		{Name: "Charlie", Slug: "charlie", RoleTitle: "Coder"},
 	}
-	out := BuildLeadContext(members)
+	out := BuildLeadContext(members, nil)
 
 	if out == "" {
 		t.Fatal("expected non-empty lead context")

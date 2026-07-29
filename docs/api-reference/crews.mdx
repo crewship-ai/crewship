@@ -700,7 +700,14 @@ crewship crew credential-readiness <slug-or-id>
 
 ## Connections
 
-Crew connections define which crews can communicate with each other for cross-crew task assignment and messaging.
+Crew connections ("crew links" in the UI) define which crews can reach each other. A link is what
+allows cross-crew **task assignment**, **messages** and **shared files**; without one every attempt is
+refused server-side.
+
+`direction` is read from `from_crew_id`'s side: `unidirectional` means `from` may hand work to `to` and
+not the reverse; `bidirectional` means either may.
+
+Links to a soft-deleted crew are never listed and are removed when the crew is deleted.
 
 ### List Connections
 
@@ -753,17 +760,23 @@ POST /api/v1/crew-connections?workspace_id={workspaceId}
 }
 ```
 
-**Response:** `201 Created`
+**Response:** `201 Created` for a new link, `200 OK` when one already existed.
 
 ```json
 { "id": "cc_abc" }
 ```
 
+The call is an upsert on the PAIR, not an insert: a pair is one edge whichever end you name first.
+
+- Same pair, same orientation → the stored link keeps its id and takes the new `direction`.
+- Same pair, reverse orientation → the stored link becomes `bidirectional` (you asked for the way back
+  as well). To make a link one-way in the *other* direction, delete it and create it again.
+
 | Status | Condition |
 |---|---|
+| `200` | The pair was already linked; direction updated in place |
 | `400` | Missing IDs, same source/target, or invalid `direction` |
 | `404` | One or both crews not found in this workspace |
-| `409` | Connection already exists (or other UNIQUE/constraint violation) |
 
 ### Delete Connection
 

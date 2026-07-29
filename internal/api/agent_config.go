@@ -218,6 +218,12 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		// Non-fatal: continue with empty members
 	}
 
+	// Only a LEAD orchestrates, so only a LEAD pays for the link lookup.
+	var connectedCrews []connectedCrewEntry
+	if data.agentRole.Valid && data.agentRole.String == "LEAD" && data.crewID.Valid {
+		connectedCrews = h.resolveConnectedCrews(r, data.wsID, data.crewID.String)
+	}
+
 	networkMode, allowedDomains := h.resolveNetworkPolicy(data)
 
 	memoryMB, cpus, ttlHours := h.resolveContainerResources(data)
@@ -372,6 +378,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"preferred_language":      data.preferredLanguage,
 		"memory_enabled":          data.memoryEnabled,
 		"crew_members":            crewMembers,
+		"connected_crews":         connectedCrews,
 		"network_mode":            networkMode,
 		"allowed_domains":         allowedDomains,
 		"allow_private_endpoints": data.crewAllowPrivateEndpoints != 0,
@@ -1500,4 +1507,111 @@ func buildConnectedIntegrationsBlock(servers []mcpServerEntry) string {
 	b.WriteString("\nWhen a request relates to one of these apps, use the matching tools directly to fulfil it. Do NOT tell the user you have no access, and do NOT ask them to do it themselves. Only state that a specific operation isn't possible AFTER you have checked the tools available for that app and confirmed none of them cover it.\n")
 	b.WriteString("[END CONNECTED INTEGRATIONS]")
 	return b.String()
+}
+
+// connectedAgentEntry is one agent in a crew the caller's crew is linked to.
+type connectedAgentEntry struct {
+	Slug      string `json:"slug"`
+	RoleTitle string `json:"role_title,omitempty"`
+	IsLead    bool   `json:"is_lead,omitempty"`
+}
+
+// connectedCrewEntry is a crew reachable from the caller's crew.
+//
+// Direction is stated from the CALLER's side: "bidirectional" and
+// "unidirectional" mean work can go out, "inbound" means the stored link
+// points the other way and this crew may not dispatch across it.
+type connectedCrewEntry struct {
+	Slug      string                `json:"slug"`
+	Name      string                `json:"name"`
+	Direction string                `json:"direction"`
+	Agents    []connectedAgentEntry `json:"agents,omitempty"`
+}
+
+// resolveConnectedCrews lists the crews linked to crewID, with their agents.
+//
+// This is what makes a link usable: the gate on cross-crew dispatch has always
+// been enforced, but nothing ever told the model that another crew was
+// reachable or who was in it, so a lead would report a linked crew as
+// unreachable. Errors are logged and swallowed — a lead that loses this list
+// degrades to same-crew work, which is strictly better than failing the run.
+func (h *InternalHandler) resolveConnectedCrews(r *http.Request, wsID, crewID string) []connectedCrewEntry {
+	if crewID == "" || wsID == "" {
+		return nil
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT c.id, c.slug, c.name,
+		       CASE
+		         WHEN cc.from_crew_id = ?1 THEN cc.direction
+		         WHEN cc.direction = 'bidirectional' THEN 'bidirectional'
+		         ELSE 'inbound'
+		       END AS side
+		FROM crew_connections cc
+		JOIN crews c
+		  ON c.id = CASE WHEN cc.from_crew_id = ?1 THEN cc.to_crew_id ELSE cc.from_crew_id END
+		 AND c.deleted_at IS NULL
+		WHERE cc.status = 'active'
+		  AND cc.workspace_id = ?2
+		  AND (cc.from_crew_id = ?1 OR cc.to_crew_id = ?1)
+		ORDER BY c.name`, crewID, wsID)
+	if err != nil {
+		h.logger.Error("resolve connected crews", "crew_id", crewID, "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var out []connectedCrewEntry
+	byID := map[string]int{}
+	for rows.Next() {
+		var id string
+		var e connectedCrewEntry
+		if err := rows.Scan(&id, &e.Slug, &e.Name, &e.Direction); err != nil {
+			h.logger.Error("scan connected crew", "error", err)
+			continue
+		}
+		byID[id] = len(out)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (connected crews)", "error", err)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+
+	// One batch query for every linked crew's roster rather than one per crew:
+	// a workspace can link a crew to all of its siblings.
+	ids := make([]any, 0, len(byID))
+	placeholders := make([]string, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+		placeholders = append(placeholders, "?")
+	}
+	agentRows, err := h.db.QueryContext(r.Context(), `
+		SELECT a.crew_id, a.slug, COALESCE(a.role_title, ''), a.agent_role
+		FROM agents a
+		WHERE a.crew_id IN (`+strings.Join(placeholders, ",")+`) AND a.deleted_at IS NULL
+		ORDER BY a.agent_role = 'LEAD' DESC, a.name`, ids...)
+	if err != nil {
+		h.logger.Error("resolve connected crew agents", "error", err)
+		return out
+	}
+	defer agentRows.Close()
+	for agentRows.Next() {
+		var crew, role string
+		var a connectedAgentEntry
+		if err := agentRows.Scan(&crew, &a.Slug, &a.RoleTitle, &role); err != nil {
+			h.logger.Error("scan connected crew agent", "error", err)
+			continue
+		}
+		a.IsLead = role == "LEAD"
+		if i, ok := byID[crew]; ok {
+			out[i].Agents = append(out[i].Agents, a)
+		}
+	}
+	if err := agentRows.Err(); err != nil {
+		h.logger.Error("rows iteration (connected crew agents)", "error", err)
+	}
+	return out
 }

@@ -51,6 +51,11 @@ type AgentRunRequest struct {
 	MaxTurns              int
 	MemoryEnabled         bool
 	CrewMembers           []CrewMember      // Populated by bridge for LEAD agents
+	// ConnectedCrews lists the crews this crew is linked to, for LEAD agents.
+	// Without it a link is invisible to the model: it cannot learn another
+	// crew is reachable, so it refuses the work or guesses a crew-local
+	// endpoint and reports the crew as unreachable.
+	ConnectedCrews        []ConnectedCrew
 	SkipSidecar           bool              // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
 	ApprovalMode          string            // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
 	SkipConvHistory       bool              // When true, skip injecting conversation history (used by assignment sub-agents)

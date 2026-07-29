@@ -61,6 +61,7 @@ type chatResolveResponse struct {
 	PreferredLanguage     string                   `json:"preferred_language,omitempty"`
 	MemoryEnabled         bool                     `json:"memory_enabled"`
 	CrewMembers           []crewMemberResponse     `json:"crew_members"`
+	ConnectedCrews        []connectedCrewResponse  `json:"connected_crews,omitempty"`
 	AllCrews              []crewInfoResponse       `json:"all_crews,omitempty"`
 	ActiveMissions        []missionSummaryResponse `json:"active_missions,omitempty"`
 	NetworkMode           string                   `json:"network_mode"`
@@ -163,6 +164,21 @@ type crewMemberResponse struct {
 	Status       string                      `json:"status"`
 	ChatID       string                      `json:"chat_id,omitempty"`
 	Integrations []memberIntegrationResponse `json:"integrations,omitempty"`
+}
+
+// connectedCrewResponse mirrors the agent-config payload's connected_crews:
+// the crews this crew is linked to, so a LEAD's prompt can name them.
+type connectedCrewResponse struct {
+	Slug      string                   `json:"slug"`
+	Name      string                   `json:"name"`
+	Direction string                   `json:"direction"`
+	Agents    []connectedAgentResponse `json:"agents,omitempty"`
+}
+
+type connectedAgentResponse struct {
+	Slug      string `json:"slug"`
+	RoleTitle string `json:"role_title,omitempty"`
+	IsLead    bool   `json:"is_lead,omitempty"`
 }
 
 type credentialResponse struct {
@@ -483,6 +499,17 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		crewMembers = append(crewMembers, cm)
 	}
 
+	var connectedCrews []orchestrator.ConnectedCrew
+	for _, c := range data.ConnectedCrews {
+		cc := orchestrator.ConnectedCrew{Name: c.Name, Slug: c.Slug, Direction: c.Direction}
+		for _, a := range c.Agents {
+			cc.Agents = append(cc.Agents, orchestrator.ConnectedAgent{
+				Slug: a.Slug, RoleTitle: a.RoleTitle, IsLead: a.IsLead,
+			})
+		}
+		connectedCrews = append(connectedCrews, cc)
+	}
+
 	networkMode := data.NetworkMode
 	if networkMode == "" {
 		networkMode = "free"
@@ -610,6 +637,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		PreferredLanguage:     data.PreferredLanguage,
 		MemoryEnabled:         data.MemoryEnabled,
 		CrewMembers:           crewMembers,
+		ConnectedCrews:        connectedCrews,
 		NetworkMode:           networkMode,
 		AllowedDomains:        allowedDomains,
 		AllowPrivateEndpoints: data.AllowPrivateEndpoints,
