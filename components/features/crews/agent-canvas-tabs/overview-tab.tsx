@@ -198,23 +198,6 @@ export function OverviewTab({
         footerLabel: "Manage channels", footerHref: "/integrations?tab=notifications",
       },
     },
-    {
-      id: "sessions", icon: MessageSquare, label: "Sessions", tone: "notice", group: "History", value: String(chats?.length ?? 0),
-      cell: {
-        title: "Sessions",
-        count: chats?.length ?? 0,
-        filters: [{ id: "all", label: "All" }],
-        items: (chats ?? []).map((c): DetailCellItem => ({
-          id: c.id, icon: MessageSquare, tone: "notice",
-          title: c.title ?? "Untitled",
-          subtitle: `${c.message_count} messages`,
-          meta: new Date(c.started_at).toLocaleDateString(),
-          tag: "all",
-          href: `/chat?agent=${encodeURIComponent(agent.slug)}`,
-        })),
-        footerLabel: "Open chat", footerHref: `/chat?agent=${encodeURIComponent(agent.slug)}`,
-      },
-    },
   ]
 
   return (
@@ -316,10 +299,39 @@ export function OverviewTab({
           footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
         />
 
+        {/* Beside Runs, and deliberately so: Runs is what this agent did on its
+            own, Sessions is what it did with a person. The same question —
+            "what has it been up to" — answered from both sides, and on a wide
+            pane they sit on one line instead of leaving half the row empty.
+            Promoted out of the chip row rather than added: it was already
+            there as a bubble, and one concept in two places is the thing this
+            screen keeps getting punished for. Both cells read data the canvas
+            already fetched, so the pair costs no extra request. */}
+        <DetailCell
+          className="@xl:col-span-2 @8xl:col-span-1"
+          order={5}
+          title="Sessions"
+          count={chats?.length ?? 0}
+          filters={[{ id: "all", label: "All" }]}
+          items={(chats ?? []).map((c): DetailCellItem => ({
+            id: c.id,
+            icon: MessageSquare,
+            tone: "notice",
+            title: c.title ?? "Untitled",
+            subtitle: `${c.message_count} message${c.message_count === 1 ? "" : "s"}`,
+            meta: new Date(c.started_at).toLocaleDateString(),
+            tag: "all",
+            href: `/chat/${encodeURIComponent(agent.slug)}`,
+          }))}
+          tall
+          footerLabel="Open chat"
+          footerHref={`/chat/${encodeURIComponent(agent.slug)}`}
+        />
+
         {peerMessages.length > 0 && (
           <DetailCell
             className="@xl:col-span-2 @8xl:col-span-1"
-            order={5}
+            order={6}
             title="From peers"
             count={peerMessages.length}
             filters={[{ id: "all", label: "All" }]}

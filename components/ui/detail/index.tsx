@@ -149,7 +149,7 @@ export function Pill({ tone = "default", children, className }: PillProps) {
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-medium",
-        "text-[0.6875rem] leading-4",
+        "type-meta",
         TONE_FILL[tone],
         className,
       )}
@@ -287,7 +287,7 @@ export function StepRow({ index, icon: Icon, title, badge, body, tone = "default
       <span
         className={cn(
           "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md font-medium",
-          "text-[0.625rem] leading-none",
+          "type-meta leading-none",
           TONE_ICON[tone],
         )}
       >
@@ -325,7 +325,7 @@ export function EntityChip({ icon: Icon, label, note, tone = "default", onClick,
   )
   const className = cn(
     "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-0.5 font-medium",
-    "text-[0.6875rem] leading-4 transition-colors",
+    "type-meta transition-colors",
     TONE_FILL[tone],
     "border-transparent",
     (onClick || href) && "cursor-pointer hover:brightness-125",
