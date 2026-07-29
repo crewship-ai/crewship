@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils"
 // points at `/issues?assignee=…` for the rest — one place per concept.
 // =============================================================================
 
-export type DetailCellTone = "primary" | "success" | "warn" | "danger" | "purple" | "notice" | "muted"
+export type DetailCellTone = "primary" | "success" | "warn" | "danger" | "purple" | "notice" | "gold" | "muted"
 
 const TONE_BG: Record<DetailCellTone, string> = {
   primary: "bg-primary",
@@ -33,6 +33,7 @@ const TONE_BG: Record<DetailCellTone, string> = {
   danger: "bg-destructive",
   purple: "bg-purple",
   notice: "bg-notice",
+  gold: "bg-gold",
   muted: "bg-surface-raised",
 }
 

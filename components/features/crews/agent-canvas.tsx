@@ -490,6 +490,7 @@ export function AgentCanvas({
       {/* Tab content */}
       {tab === "overview" && (
         <OverviewTab
+          workspaceId={workspaceId}
           agent={agent}
           crews={crews}
           inbox={inbox}
@@ -497,6 +498,7 @@ export function AgentCanvas({
           runs={runs}
           peerMessages={peerMessages}
           patch={patch}
+          onStop={handleStop}
         />
       )}
 
