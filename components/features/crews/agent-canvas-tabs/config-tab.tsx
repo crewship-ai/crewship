@@ -1,6 +1,9 @@
 "use client"
 
-import { Bot, CalendarClock, Settings2, Shield, Webhook, Wrench } from "lucide-react"
+import { Bot, CalendarClock, Settings2, Shield, Sparkles, Webhook, Wrench } from "lucide-react"
+
+import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
+import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
 
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
@@ -82,6 +85,7 @@ export interface ConfigTabProps {
 export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps) {
   const isLead = agent.agent_role === "LEAD"
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
+  const tools = agent.cli_tools ?? []
 
   return (
     // `columns: 3 24rem` is the whole rule: at most three columns, each at
@@ -176,6 +180,26 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             options={TOOL_PROFILES.map((t) => ({ value: t.value, title: t.title, description: t.description }))}
             onSave={(v) => patch({ tool_profile: v })}
           />
+          {tools.length > 0 && (
+            <div className="border-t border-hairline px-3 py-2.5">
+              <div className="type-meta mb-1.5 uppercase tracking-wide text-muted-foreground-soft">
+                Tools currently enabled
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {tools.slice(0, 8).map((t) => (
+                  <span
+                    key={t}
+                    className="type-meta rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-foreground/80"
+                  >
+                    {t}
+                  </span>
+                ))}
+                {tools.length > 8 && (
+                  <span className="type-meta text-muted-foreground-soft">+ {tools.length - 8} more</span>
+                )}
+              </div>
+            </div>
+          )}
         </DetailCard>
       </Appear>
 
@@ -203,8 +227,12 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
 
       <Appear order={4}>
         <DetailCard
-          bare icon={Webhook} title="Webhook"
-          footer="The secret is shown once on rotation — it can never be read back."
+          bare icon={Webhook} title="Webhook and hooks"
+          footer={<>
+            The secret is shown once on rotation — it can never be read back. Rotate it with{" "}
+            <code className="font-mono text-foreground/80">crewship agent webhook {agent.slug}</code>; hooks are
+            listed and toggled with <code className="font-mono text-foreground/80">crewship hooks</code>.
+          </>}
         >
           <ConfigReadOnly
             label="Signing key"
@@ -235,6 +263,29 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             </div>
         )}
         </DetailCard>
+      </Appear>
+
+      {/* The system prompt is the longest thing on this screen and the one
+          people actually read, so it takes a column of its own instead of
+          being squeezed beside a switch. It stays inside the same bounded
+          block — 800 characters of mono set 2000px wide is unreadable. */}
+      <Appear order={6}>
+        <SystemPromptEditor
+          value={agent.system_prompt}
+          onSave={(v) => patch({ system_prompt: v })}
+          updatedHint={`updated ${new Date(agent.updated_at).toLocaleDateString()}`}
+        />
+      </Appear>
+
+      <Appear order={7}>
+        <div data-testid="learning-card">
+          <DetailCard
+            bare icon={Sparkles} title="Learning posture"
+            footer="Per agent, and separate from the crew's autonomy level. Every flip is recorded with its reason."
+          >
+            <AgentLearningToggle bare agentId={agent.id} workspaceId={agent.workspace_id} />
+          </DetailCard>
+        </div>
       </Appear>
     </div>
   )

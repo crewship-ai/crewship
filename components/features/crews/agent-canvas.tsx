@@ -36,7 +36,6 @@ import {
 import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { ConfigTab } from "./agent-canvas-tabs/config-tab"
-import { SettingsTab } from "./agent-canvas-tabs/settings-tab"
 import { SkillsTab } from "./agent-canvas-tabs/skills-tab"
 import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
 import { WorkspaceTab } from "./agent-canvas-tabs/workspace-tab"
@@ -133,12 +132,10 @@ export function AgentCanvas({
   })
 
   const [tab, setTab] = useState<AgentTab>("overview")
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
   // Reset to Overview when switching agents.
-  const resetAdvanced = useCallback(() => setShowAdvanced(false), [])
-  useResetTabOnSlugChange<AgentTab>(agentSlug, setTab, "overview", resetAdvanced)
+  useResetTabOnSlugChange<AgentTab>(agentSlug, setTab, "overview")
 
   useRealtimeEvent("agent.status", useCallback((event) => {
     if (agent && event.payload?.agent_id === agent.id) {
@@ -547,20 +544,12 @@ export function AgentCanvas({
         />
       )}
 
+      {/* The old settings panel is gone. Everything it carried is a card in
+          ConfigTab now, and the three controls it duplicated — timeout, tool
+          profile, memory — are back to one each. Deletion stays in the ··· menu
+          beside Chat, which is where a destructive action belongs. */}
       {tab === "config" && (
-        <div className="space-y-4">
-          <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
-          {/* Schedule, ephemeral lifecycle and deletion still live in the old
-              settings panel. Folding them into the sections above is the next
-              slice — dropping working controls to hit a layout would be worse
-              than one extra panel. */}
-          <SettingsTab
-            agent={agent}
-            patch={patch}
-            showAdvanced={showAdvanced}
-            setShowAdvanced={setShowAdvanced}
-          />
-        </div>
+        <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
       )}
 
     </CanvasShell>

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
 
 // PR-G F4.1 UX — per-agent self-learning toggle.
 //
@@ -37,9 +38,16 @@ export interface AgentLearningToggleProps {
   agentId: string
   workspaceId: string
   canEdit?: boolean
+  /**
+   * Drop the card chrome — the caller already supplies one. Without this the
+   * component nests a bordered card inside a bordered card, which reads as a
+   * mistake rather than a hierarchy.
+   */
+  bare?: boolean
 }
 
-export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLearningToggleProps) {
+export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = false }: AgentLearningToggleProps) {
+  const SHELL = bare ? "p-4" : "rounded-xl border border-white/8 bg-card p-4"
   // Mirrors the CrewPolicyControls pattern: if caller passes canEdit
   // explicitly we honor it (lets admin overlays override), otherwise
   // derive from CASL abilities. Self-learning is ADMIN+ on the server
@@ -142,17 +150,21 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
+      <div className={cn(SHELL, "flex items-center gap-2 text-sm text-muted-foreground")}>
         <Spinner className="h-3.5 w-3.5" /> Loading…
       </div>
     )
   }
   if (err) {
-    return <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{err}</div>
+    return (
+      <div className={cn(bare ? "p-4" : "rounded-xl border border-destructive/30 bg-destructive/5 p-4", "text-sm text-destructive")}>
+        {err}
+      </div>
+    )
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-card p-4 space-y-3">
+    <div className={cn(SHELL, "space-y-3")}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2.5">
           <Sparkles className={target ? "h-4 w-4 text-success mt-0.5" : "h-4 w-4 text-muted-foreground mt-0.5"} />
