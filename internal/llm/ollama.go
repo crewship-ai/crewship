@@ -10,15 +10,45 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/llm/endpoint"
 )
 
 // Ollama implements Provider for the Ollama /api/chat endpoint.
 // Supports tool calling (Ollama 0.5+) and NDJSON streaming.
 type Ollama struct {
 	baseURL string // e.g. "http://localhost:11434"
-	model   string
-	client  *http.Client // bounded by Client.Timeout — used for Complete()
-	stream  *http.Client // no total deadline — used for Stream()
+	// ep is baseURL reduced to its mount root, so the API path is appended
+	// exactly once no matter which shape the operator stored. Zero when baseURL
+	// could not be parsed — see chatURL for the fallback.
+	ep     endpoint.Endpoint
+	model  string
+	client *http.Client // bounded by Client.Timeout — used for Complete()
+	stream *http.Client // no total deadline — used for Stream()
+}
+
+// chatURL is the completion endpoint. Going through endpoint.Endpoint is what
+// makes a stored ".../v1" value work: concatenating onto the raw string produced
+// ".../v1/api/chat", a 404, and — Keeper being fail-closed — a DENY on every
+// credential request, with the credential's own Test button still green.
+//
+// An unparseable baseURL falls back to the historical concatenation. This
+// package repairs shapes; it must not turn a working oddball deployment into a
+// construction-time failure.
+func (o *Ollama) chatURL() string {
+	if o.ep.Root == nil {
+		return o.baseURL + "/api/chat"
+	}
+	return o.ep.ChatURL()
+}
+
+// tagsURL is Ollama's model list, used by discovery and by set-time model
+// validation. Same normalization, same reason.
+func (o *Ollama) tagsURL() string {
+	if o.ep.Root == nil {
+		return o.baseURL + "/api/tags"
+	}
+	return o.ep.TagsURL()
 }
 
 // NewOllama creates a provider that calls a local or remote Ollama instance.
@@ -34,8 +64,13 @@ func NewOllama(baseURL, model string) *Ollama {
 	streamTransport := http.DefaultTransport.(*http.Transport).Clone()
 	streamTransport.ResponseHeaderTimeout = 60 * time.Second
 	streamTransport.IdleConnTimeout = 90 * time.Second
+	// A parse failure is deliberately non-fatal: ep stays zero and the URL
+	// builders fall back to raw concatenation, preserving pre-normalization
+	// behaviour for a value we cannot interpret.
+	ep, _ := endpoint.Normalize(baseURL)
 	return &Ollama{
 		baseURL: strings.TrimRight(baseURL, "/"),
+		ep:      ep.WithWire(endpoint.WireOllama),
 		model:   model,
 		client:  &http.Client{Timeout: 300 * time.Second},
 		stream:  &http.Client{Transport: streamTransport},
@@ -76,7 +111,7 @@ func checkOllamaStatus(resp *http.Response) error {
 // has pulled), so a failure here is terminal for the caller — they get the
 // error, not a static list.
 func (o *Ollama) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, o.baseURL+"/api/tags", nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, o.tagsURL(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -115,7 +150,7 @@ func (o *Ollama) Complete(ctx context.Context, req Request) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/chat", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.chatURL(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -144,7 +179,7 @@ func (o *Ollama) Stream(ctx context.Context, req Request, handler func(StreamEve
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/api/chat", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.chatURL(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -210,8 +245,16 @@ func (o *Ollama) buildRequestBody(req Request, stream bool) ([]byte, error) {
 // --- Ollama wire types ---
 
 type ollamaMessage struct {
-	Role      string           `json:"role"`
-	Content   string           `json:"content"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	// Thinking is a reasoning model's chain of thought, which Ollama returns
+	// SEPARATELY from content. Dropping it was actively dangerous: a reasoning
+	// model (qwen3, deepseek-r1, gpt-oss…) that spends its whole token budget
+	// thinking returns content:"" with thinking populated, so a caller reading
+	// only content saw a successful, empty completion. For the Keeper judge —
+	// which is fail-closed — that is a DENY on every credential request, with no
+	// error logged anywhere to explain it.
+	Thinking  string           `json:"thinking,omitempty"`
 	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -225,6 +268,10 @@ type ollamaToolCall struct {
 type ollamaChatResponse struct {
 	Message ollamaMessage `json:"message"`
 	Done    bool          `json:"done"`
+	// DoneReason distinguishes a finished answer ("stop") from one cut off by
+	// the token budget ("length"). Ollama always reported StopEndTurn before, so
+	// a truncated verdict was indistinguishable from a complete one.
+	DoneReason string `json:"done_reason,omitempty"`
 	// Token counts (may be 0 on partial stream chunks)
 	PromptEvalCount int `json:"prompt_eval_count"`
 	EvalCount       int `json:"eval_count"`
@@ -233,15 +280,21 @@ type ollamaChatResponse struct {
 func (r *ollamaChatResponse) toResponse() *Response {
 	resp := &Response{
 		Content:    r.Message.Content,
+		Thinking:   r.Message.Thinking,
 		InputToks:  r.PromptEvalCount,
 		OutputToks: r.EvalCount,
 	}
-	if len(r.Message.ToolCalls) > 0 {
+	switch {
+	case len(r.Message.ToolCalls) > 0:
 		resp.StopReason = StopToolUse
 		// Complete has no error channel for a single bad tool call, so the
 		// per-call "{}" fallback inside toToolCalls is the whole story here.
 		resp.ToolCalls, _ = toToolCalls(r.Message.ToolCalls)
-	} else {
+	case r.DoneReason == "length":
+		// Surfaced so a caller can say "the model ran out of budget" instead of
+		// treating an empty or half-written answer as a considered one.
+		resp.StopReason = StopMaxToks
+	default:
 		resp.StopReason = StopEndTurn
 	}
 	return resp

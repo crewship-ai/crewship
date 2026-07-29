@@ -34,6 +34,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   line surfaces the trust downgrade in ops the moment such a crew is
   provisioned.
 
+### Fixed
+
+- **A local-model endpoint now works whatever shape it was stored in.** One
+  `ENDPOINT_URL` credential was consumed by three code paths that each expected a
+  *different* shape of the same string: a bare root for `llm.Ollama` (which
+  appended `/api/chat`), `.../v1` for the OpenCode provider block, and the full
+  `.../v1/chat/completions` for `llm.OpenAI` (which used the value verbatim as the
+  POST target). Our own documentation tells operators to store the `.../v1` form —
+  point the Keeper governance model at that credential and the judge POSTed to
+  `.../v1/api/chat`, got a 404, and, Keeper being fail-closed, **denied every
+  credential request**. The credential's own Test button stayed green throughout,
+  because the reachability probe strips `/v1` before falling back to `/api/tags`.
+  A new `internal/llm/endpoint` package normalizes any pasted shape — bare
+  `host:port`, trailing slash, `/v1`, `/v1/chat/completions`, `/api/chat` — to a
+  mount root, and each provider appends the path for the wire it speaks, so the
+  mismatch is now unreachable by construction. A reverse-proxy mount prefix
+  (`https://gw/ollama`) and an Azure-style unversioned deployment are both
+  preserved, as is an `?api-version=` query.
+
+- **A reasoning model no longer silently denies everything as the Keeper judge.**
+  Ollama returns a reasoning model's chain of thought in `message.thinking`,
+  separately from `message.content`. A model that spends its token budget
+  thinking (verified against Ollama 0.32.5 with `qwen3:4b`) answers with empty
+  content, `done_reason: "length"`, and HTTP 200 — which the provider reported as
+  a successful, empty, `end_turn` completion, so the fail-closed judge parsed
+  nothing and denied, with no error to explain it. `Response` now carries
+  `Thinking`, and a budget-truncated answer reports `max_tokens` instead of
+  `end_turn`, so callers can tell "the model said nothing" from "the model
+  reasoned and never reached an answer".
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security

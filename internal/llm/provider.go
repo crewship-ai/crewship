@@ -62,7 +62,13 @@ const (
 // cache info leave both fields zero — dashboards can still compute
 // "cached / input" without branching per provider.
 type Response struct {
-	Content           string     `json:"content,omitempty"`
+	Content string `json:"content,omitempty"`
+	// Thinking is a reasoning model's chain of thought when the provider returns
+	// it separately from Content (Ollama does). It is never the answer — but it
+	// is the difference between "the model said nothing" and "the model reasoned
+	// and never got to an answer", which is the diagnosis a caller needs when a
+	// completion comes back empty.
+	Thinking          string     `json:"thinking,omitempty"`
 	ToolCalls         []ToolCall `json:"tool_calls,omitempty"`
 	StopReason        StopReason `json:"stop_reason"`
 	InputToks         int        `json:"input_tokens,omitempty"`

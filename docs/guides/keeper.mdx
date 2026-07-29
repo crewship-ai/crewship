@@ -423,6 +423,26 @@ Keeper runs entirely on your own hardware.
 | **Model** | The provider's model id, e.g. `qwen2.5:3b-instruct` (local) or `claude-haiku-4-5`. Keeper's evaluators are **classifiers, not coders** — prefer small instruct models. |
 | **Credential** | *(optional)* a vault `ENDPOINT_URL` or `API_KEY` credential the provider sources its endpoint/key from, so no secret lives in env or config. |
 
+<Warning>
+  **Pick a model that answers, not one that thinks.** Keeper's parser is
+  fail-closed: a response it cannot read is a `DENY`. A *reasoning* model
+  (`qwen3`, `deepseek-r1`, `gpt-oss`, anything whose `ollama show` capabilities
+  include `thinking`) returns its chain of thought separately from its answer, and
+  if the token budget runs out mid-thought the answer is **empty** — so every
+  credential request is denied, with an HTTP 200 and nothing in the logs. Prefer a
+  small non-reasoning instruct model (`qwen2.5:7b`, `mistral:7b`, `granite3.3:8b`
+  are all fine judges). Keeper's evaluators are classifiers, not coders.
+</Warning>
+
+<Note>
+  The endpoint URL may be stored in **any** shape — `http://host:11434`,
+  `.../v1`, `.../v1/chat/completions`, `.../api/chat`. They are all normalized to
+  the same mount root and each provider appends the path for the protocol it
+  speaks. One caveat that normalization cannot fix: the judge dials from the
+  **daemon**, so `host.docker.internal` (correct for an agent inside a crew
+  container) does not resolve for it — use `localhost` or the host's LAN address.
+</Note>
+
 ```bash
 # Show the current workspace governance model
 crewship keeper model get
