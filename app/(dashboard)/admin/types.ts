@@ -133,7 +133,6 @@ export type TabKey =
   | "overview"
   | "workspaces"
   | "users"
-  | "gdpr"
   | "providers"
   | "security"
   | "reviews"

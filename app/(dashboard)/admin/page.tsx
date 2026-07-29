@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
+  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo,
   AlertTriangle, Bell, Gauge,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -27,7 +27,6 @@ import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
-import { GdprActionsPanel } from "@/components/features/admin/gdpr-actions-panel"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
 
@@ -58,7 +57,6 @@ const sections: NavSection[] = [
     items: [
       { key: "workspaces", label: "Workspaces", icon: Building },
       { key: "users", label: "Users", icon: Users },
-      { key: "gdpr", label: "GDPR actions", icon: FileLock },
     ],
   },
   {
@@ -334,9 +332,6 @@ export default function AdminPage() {
       return <KeeperQueuePanel workspaceId={workspaceId} />
     }
 
-    if (tab === "gdpr") {
-      return <GdprActionsPanel users={users} workspaceId={workspaceId} />
-    }
 
     if (tab === "security") {
       return (
