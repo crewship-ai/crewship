@@ -2,26 +2,26 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { AlertTriangle, ArrowUpRight, X } from "lucide-react"
+import { AlertTriangle, Radar, X } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
+import { DetailCard, EntityChip, Pill, TickRow } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 
 import { DetailCell, type DetailCellProps } from "./detail-cell"
 
 // =============================================================================
-// The three blocks that sit above the cells on a detail screen, in the order
-// the screen answers questions:
+// The blocks above the cells, in the order the screen answers questions:
 //
 //   BlockingNotice — what this thing wants FROM YOU. Nothing outranks it.
 //   NowRunning     — what it is doing right now.
-//   ReachStrip     — what it can touch, collapsed to one row of chips.
+//   ReachStrip     — what it can touch.
 //
-// ReachStrip exists because the overview grew to eleven cells and stopped
-// being readable. Relations that are rarely acted on (skills, tools, memory,
-// notification channels) collapse into a single row; clicking one slides out
-// the same DetailCell the grid would have shown. Nothing is lost, but the
-// grid keeps four cells instead of eleven.
+// All three are the routine screen's vocabulary: a card with an UPPERCASE
+// header, ticks on the ragged right edge, entity chips for anything the
+// surface points at. ReachStrip is the direct analogue of that screen's
+// "WHAT IT TOUCHES · blast radius", down to the chips — the difference is
+// that clicking one here slides out the full list instead of navigating.
 // =============================================================================
 
 export interface BlockingNoticeAction {
@@ -48,88 +48,102 @@ export function BlockingNotice({
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-      className={cn(
-        "flex flex-wrap items-center gap-3 rounded-[10px] border px-4 py-3",
-        tone === "warn"
-          ? "border-warn/30 bg-warn/[.07]"
-          : "border-border bg-card",
-      )}
     >
-      <span className={cn("inline-flex shrink-0", tone === "warn" ? "text-warn" : "text-notice")}>
-        <Icon className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1 basis-60 text-body leading-snug">
-        <b className="font-semibold">{title}</b> {body}
-        {detail && <span className="mt-0.5 block text-label text-muted-foreground">{detail}</span>}
-      </div>
-      {actions.length > 0 && (
-        <div className="flex shrink-0 gap-2">
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              type="button"
-              onClick={a.onClick}
-              className={cn(
-                "rounded-lg border px-3 py-1.5 text-label font-medium transition-colors",
-                a.primary
-                  ? "border-transparent bg-primary text-primary-foreground hover:bg-primary-hover"
-                  : "border-border bg-surface-raised text-foreground hover:bg-white/[.09]",
-              )}
-            >
-              {a.label}
-            </button>
-          ))}
+      <DetailCard tone={tone === "warn" ? "warn" : "default"} className={tone === "warn" ? "bg-warn/[.06]" : undefined}>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={cn("inline-flex shrink-0", tone === "warn" ? "text-warn" : "text-notice")}>
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="type-row min-w-0 flex-1 basis-60 leading-snug">
+            <b className="font-semibold">{title}</b> {body}
+            {detail && <span className="type-meta mt-0.5 block text-muted-foreground">{detail}</span>}
+          </div>
+          {actions.length > 0 && (
+            <div className="flex shrink-0 gap-2">
+              {actions.map((a) => (
+                <button
+                  key={a.label}
+                  type="button"
+                  onClick={a.onClick}
+                  className={cn(
+                    "type-row rounded-lg border px-3 py-1.5 font-medium transition-colors",
+                    a.primary
+                      ? "border-transparent bg-primary text-primary-foreground hover:bg-primary-hover"
+                      : "border-border bg-surface-raised text-foreground hover:bg-white/[.09]",
+                  )}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </DetailCard>
     </motion.div>
   )
 }
 
+export interface NowRunningStep {
+  label: string
+  detail?: string
+  status: "ok" | "failed" | "running" | "pending"
+  meta?: string
+}
+
 export interface NowRunningProps {
   label: string
-  /** e.g. "krok 3 / 5" — omitted when the backend reports no step count. */
   step?: string
-  /** 0–100. Omitted renders an indeterminate shimmer instead of a fill. */
   percent?: number
   meta?: string
   icon?: LucideIcon
   onStop?: () => void
+  /** Rendered as "JAK BĚŽÍ" ticks under the header, like the routine screen. */
+  steps?: NowRunningStep[]
 }
 
-export function NowRunning({ label, step, percent, meta, icon: Icon, onStop }: NowRunningProps) {
+export function NowRunning({ label, step, percent, meta, icon: Icon, onStop, steps }: NowRunningProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-wrap items-center gap-3 rounded-[10px] border border-primary/30 bg-gradient-to-b from-primary/[.08] to-transparent px-4 py-3"
     >
-      <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-success" />
-      <span className="inline-flex items-center gap-2 text-body font-semibold">
-        {Icon && <Icon className="h-3.5 w-3.5" />}
-        {label}
-      </span>
-      {step && (
-        <span className="rounded-md bg-surface-raised px-2 py-0.5 text-micro text-muted-foreground">{step}</span>
-      )}
-      <span className="h-1.5 min-w-[110px] flex-1 basis-44 overflow-hidden rounded-full bg-surface-raised">
-        <motion.span
-          className="block h-full rounded-full bg-primary"
-          initial={{ width: 0 }}
-          animate={{ width: percent === undefined ? "40%" : `${percent}%` }}
-          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-        />
-      </span>
-      {meta && <span className="font-mono text-micro text-muted-foreground-soft">{meta}</span>}
-      {onStop && (
-        <button
-          type="button"
-          onClick={onStop}
-          className="rounded-lg border border-border bg-surface-raised px-2.5 py-1 text-label transition-colors hover:bg-white/[.09]"
-        >
-          Zastavit
-        </button>
-      )}
+      <DetailCard tone="success" bare>
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-success" />
+          <span className="type-row inline-flex items-center gap-2 font-semibold">
+            {Icon && <Icon className="h-3.5 w-3.5" />}
+            {label}
+          </span>
+          {step && <Pill tone="blue">{step}</Pill>}
+          <span className="h-1.5 min-w-[110px] flex-1 basis-44 overflow-hidden rounded-full bg-surface-raised">
+            <motion.span
+              className="block h-full rounded-full bg-primary"
+              initial={{ width: 0 }}
+              animate={{ width: percent === undefined ? "40%" : `${percent}%` }}
+              transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+            />
+          </span>
+          {meta && <span className="type-meta font-mono text-muted-foreground-soft">{meta}</span>}
+          {onStop && (
+            <button
+              type="button"
+              onClick={onStop}
+              className="type-row rounded-lg border border-border bg-surface-raised px-2.5 py-1 transition-colors hover:bg-white/[.09]"
+            >
+              Zastavit
+            </button>
+          )}
+        </div>
+        {steps && steps.length > 0 && (
+          <div className="border-t border-hairline px-4 py-2">
+            <div className="type-section mb-1 text-muted-foreground-soft">Jak běží</div>
+            {steps.map((s) => (
+              <TickRow key={s.label} label={s.label} detail={s.detail} status={s.status} meta={s.meta} />
+            ))}
+          </div>
+        )}
+      </DetailCard>
     </motion.div>
   )
 }
@@ -143,61 +157,52 @@ export interface ReachItem {
   tone: "primary" | "success" | "warn" | "purple" | "notice" | "gold"
   /** Draws attention to the chip — something in that list needs a decision. */
   alert?: boolean
-  /** Rendered in the slide-out when the chip is clicked. */
   cell?: Omit<DetailCellProps, "className">
-  /**
-   * Escape hatch for relations that already have a full component (memory,
-   * workspace). Rendered instead of `cell`, in a wider panel — pushing a
-   * 700-line manager into a 420px rail would be worse than the tab it
-   * replaced.
-   */
+  /** Escape hatch for relations that already have a full component. */
   render?: () => React.ReactNode
   wide?: boolean
+  /** Groups chips into labelled rows, as "WHAT IT TOUCHES" does. */
+  group?: string
 }
 
-const REACH_BG: Record<ReachItem["tone"], string> = {
-  primary: "bg-primary",
-  success: "bg-success",
-  warn: "bg-warn",
-  purple: "bg-purple",
-  notice: "bg-notice",
-  gold: "bg-gold",
+const CHIP_TONE: Record<ReachItem["tone"], "blue" | "success" | "warn" | "purple" | "default"> = {
+  primary: "blue",
+  success: "success",
+  warn: "warn",
+  purple: "purple",
+  notice: "default",
+  gold: "warn",
 }
 
 export function ReachStrip({ items }: { items: ReachItem[] }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const open = items.find((i) => i.id === openId) ?? null
 
+  const groups = items.reduce<Record<string, ReachItem[]>>((acc, item) => {
+    const key = item.group ?? "Dosah"
+    ;(acc[key] ??= []).push(item)
+    return acc
+  }, {})
+
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-0.5 text-micro font-bold uppercase tracking-[.09em] text-muted-foreground-soft max-sm:hidden">
-          Dosah
-        </span>
-        {items.map((item) => {
-          const Icon = item.icon
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setOpenId(item.id)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border bg-card py-1 pl-1 pr-3 text-label transition-[border-color,transform,background-color]",
-                "hover:-translate-y-px hover:border-primary/50 hover:bg-white/[.03]",
-                item.alert ? "border-warn/45" : "border-border",
-              )}
-            >
-              <span className={cn("grid h-[22px] w-[22px] place-items-center rounded-full text-white", REACH_BG[item.tone])}>
-                <Icon className="h-3.5 w-3.5" />
-              </span>
-              {item.label}
-              <span className={cn("font-mono text-micro", item.alert ? "text-warn" : "text-muted-foreground-soft")}>
-                {item.value}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      <DetailCard title="Kam dosáhne" subtitle="blast radius" icon={Radar} bare>
+        {Object.entries(groups).map(([group, groupItems]) => (
+          <div key={group} className="flex flex-wrap items-center gap-2 border-b border-hairline px-4 py-2.5 last:border-b-0">
+            <span className="type-meta w-24 shrink-0 uppercase tracking-wide text-muted-foreground-soft">{group}</span>
+            {groupItems.map((item) => (
+              <EntityChip
+                key={item.id}
+                icon={item.icon}
+                label={item.label}
+                note={item.value}
+                tone={item.alert ? "warn" : CHIP_TONE[item.tone]}
+                onClick={() => setOpenId(item.id)}
+              />
+            ))}
+          </div>
+        ))}
+      </DetailCard>
 
       <AnimatePresence>
         {open && (
@@ -208,11 +213,7 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-[3px]"
-              onClick={() => setOpenId(null)}
-              aria-hidden
-            />
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px]" onClick={() => setOpenId(null)} aria-hidden />
             <motion.aside
               role="dialog"
               aria-label={open.label}
@@ -225,8 +226,8 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
                 open.wide ? "w-[min(760px,96vw)]" : "w-[min(420px,92vw)]",
               )}
             >
-              <header className="flex items-center gap-2 border-b border-border px-4 py-3">
-                <span className="text-default font-semibold">{open.label}</span>
+              <header className="flex items-center gap-2 border-b border-hairline px-4 py-3">
+                <span className="type-section text-foreground/70">{open.label}</span>
                 <button
                   type="button"
                   onClick={() => setOpenId(null)}
@@ -244,15 +245,5 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
         )}
       </AnimatePresence>
     </>
-  )
-}
-
-/** Small link used in section headers — "Vše ↗". */
-export function SectionLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a href={href} className="ml-auto inline-flex items-center gap-1 text-label font-medium text-primary hover:underline">
-      {children}
-      <ArrowUpRight className="h-3 w-3" />
-    </a>
   )
 }

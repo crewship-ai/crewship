@@ -4,6 +4,8 @@ import { Bot, CalendarClock, Settings2, Shield, Webhook, Wrench } from "lucide-r
 
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
+import { DetailCard } from "@/components/ui/detail"
+
 import {
   ConfigCards, ConfigPresets, ConfigReadOnly, ConfigSelect, ConfigSwitch, ConfigText,
 } from "../canvas/config-field"
@@ -69,30 +71,6 @@ function providerMark(provider: string | null | undefined) {
   return <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 }
 
-function Section({ icon: Icon, title, note, children, footer }: {
-  icon: typeof Bot
-  title: string
-  note?: string
-  children: React.ReactNode
-  footer?: React.ReactNode
-}) {
-  return (
-    <section className="overflow-hidden rounded-[11px] border border-border bg-card">
-      <header className="flex items-center gap-2 border-b border-border bg-surface-subtle px-3 py-2.5 text-label font-semibold">
-        <Icon className="h-3.5 w-3.5" />
-        {title}
-        {note && <span className="ml-auto text-micro font-normal text-muted-foreground-soft">{note}</span>}
-      </header>
-      <div>{children}</div>
-      {footer && (
-        <p className="border-t border-border bg-surface-subtle/60 px-3 py-2 text-micro leading-relaxed text-muted-foreground-soft">
-          {footer}
-        </p>
-      )}
-    </section>
-  )
-}
-
 export interface ConfigTabProps {
   agent: AgentRecord
   crews: { id: string; name: string; slug: string }[]
@@ -107,7 +85,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
   return (
     <div className="grid items-start gap-4 lg:grid-cols-2">
       <div className="grid gap-4">
-        <Section icon={Bot} title="Identita">
+        <DetailCard bare icon={Bot} title="Identita">
           <ConfigText label="Jméno" value={agent.name} onSave={(v) => patch({ name: v })} />
           <ConfigText
             label="Slug" mono hint="Používá se v CLI a při delegaci mezi agenty."
@@ -147,9 +125,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             placeholder="Čím se tenhle agent zabývá…"
             onSave={(v) => patch({ description: v })}
           />
-        </Section>
+        </DetailCard>
 
-        <Section icon={Settings2} title="Model a běh">
+        <DetailCard bare icon={Settings2} title="Model a běh">
           <ConfigSelect
             label="Provider" value={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
             adornment={providerMark(agent.llm_provider)}
@@ -173,10 +151,10 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             checked={agent.memory_enabled}
             onSave={(v) => patch({ memory_enabled: v })}
           />
-        </Section>
+        </DetailCard>
 
-        <Section
-          icon={Wrench} title="Co smí dělat" note="tool_profile"
+        <DetailCard
+          bare icon={Wrench} title="Co smí dělat" subtitle="tool_profile"
           footer={<>Kam se agent dostane <b className="font-medium text-foreground">ven</b>, tohle neřeší — to je síťová politika crew.</>}
         >
           <ConfigCards
@@ -184,11 +162,11 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             options={TOOL_PROFILES.map((t) => ({ value: t.value, title: t.title, description: t.description }))}
             onSave={(v) => patch({ tool_profile: v })}
           />
-        </Section>
+        </DetailCard>
       </div>
 
       <div className="grid gap-4">
-        <Section icon={CalendarClock} title="Plán">
+        <DetailCard bare icon={CalendarClock} title="Plán">
           <ConfigSwitch
             label="Spouštět podle plánu" checked={agent.schedule_enabled ?? false}
             onSave={(v) => patch({ schedule_enabled: v })}
@@ -206,10 +184,10 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             label="Příští běh"
             value={agent.schedule_next_run ? new Date(agent.schedule_next_run).toLocaleString() : "—"}
           />
-        </Section>
+        </DetailCard>
 
-        <Section
-          icon={Webhook} title="Webhook"
+        <DetailCard
+          bare icon={Webhook} title="Webhook"
           footer="Tajemství se ukáže jen jednou při rotaci — zpětně se přečíst nedá."
         >
           <ConfigReadOnly
@@ -217,11 +195,11 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             value={webhookSet ? "nastaven" : "nenastaven"}
             note={webhookSet ? "rotovat v Nastavení" : undefined}
           />
-        </Section>
+        </DetailCard>
 
-        <Section
-          icon={Shield} title="Prostředí"
-          note={agent.crew ? `patří crew ${agent.crew.name}` : "bez crew"}
+        <DetailCard
+          bare icon={Shield} title="Prostředí"
+          subtitle={agent.crew ? `patří crew ${agent.crew.name}` : "bez crew"}
           footer={agent.crew
             ? <>Kontejner, paměť a síť nastavuje crew — změna by se dotkla všech jejích agentů.</>
             : <>Agent bez crew běží v izolovaném kontejneru workspace.</>}
@@ -242,7 +220,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
               </button>
             </div>
           )}
-        </Section>
+        </DetailCard>
       </div>
     </div>
   )

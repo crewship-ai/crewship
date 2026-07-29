@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { Pill } from "@/components/ui/detail"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
@@ -76,6 +77,16 @@ export interface AgentCanvasProps {
   onSelectCrew: (slug: string | null) => void
   /** Open the bottom panel pre-targeted to the Files tab. Wired by CrewsLayout. */
   onOpenFiles?: () => void
+}
+
+/** Status → the kit's pill tone, so agent state reads like routine state. */
+const STATUS_PILL_TONE: Record<string, "default" | "success" | "destructive" | "warn" | "blue" | "purple"> = {
+  RUNNING: "success",
+  IDLE: "default",
+  ERROR: "destructive",
+  STOPPED: "warn",
+  PENDING_REVIEW: "warn",
+  EXPIRED: "default",
 }
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
@@ -304,170 +315,181 @@ export function AgentCanvas({
 
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
-      {/* Header */}
+      {/* Header — the routine detail's shape: state pills, then the name,
+          then the identity line, then actions on their own row. Cramming the
+          buttons beside the title is what forced the old header to three rows
+          and made the name compete with them for the eye. */}
       <motion.header
         layout
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.16, ease: "easeOut" }}
-        className="flex items-start gap-3.5 border-b border-border pb-4"
+        className="border-b border-border pb-4"
       >
-        <button
-          type="button"
-          onClick={() => setAvatarPickerOpen(true)}
-          className="relative shrink-0 group"
-          title="Customize avatar"
-        >
-          <AgentAvatar
-            seed={agent.avatar_seed || agent.name}
-            style={agent.avatar_style || agent.crew?.avatar_style}
-            agentId={agent.id}
-            avatarUrl={agent.avatar_url}
-            className={cn(
-              "h-11 w-11 rounded-[10px] transition-transform group-hover:scale-[1.04]",
-              isRunning && "ring-2 ring-success/40",
-            )}
-          />
-          <span className="absolute inset-0 rounded-2xl ring-2 ring-primary/0 group-hover:ring-primary/40 transition-all pointer-events-none" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-title font-semibold tracking-tight">{agent.name}</h1>
-            <span className={cn("flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-micro", status.className)}>
-              <span className={cn("h-1.5 w-1.5 rounded-full", isRunning ? "animate-pulse bg-success" : "bg-current")} />
-              {status.label}
-            </span>
-            {agent.agent_role === "LEAD" && (
-              <span className="shrink-0 rounded-full bg-surface-raised px-2 py-0.5 text-micro text-muted-foreground">Lead</span>
-            )}
-          </div>
-          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-label text-muted-foreground">
-            <code className="font-mono text-micro text-foreground/80">{agent.slug}</code>
-            {agent.role_title && (
-              <>
-                <span className="text-muted-foreground-soft">·</span>
-                <span>{agent.role_title}</span>
-              </>
-            )}
-            {agent.crew && (
-              <>
-                <span className="text-muted-foreground-soft">·</span>
-                <button
-                  type="button"
-                  onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="text-primary hover:underline"
-                >
-                  {agent.crew.name}
-                </button>
-              </>
-            )}
-            {agent.llm_model && (
-              <>
-                <span className="text-muted-foreground-soft">·</span>
-                <span className="inline-flex items-center gap-1.5 font-mono text-micro">
-                  {providerMark(agent.llm_provider)}
-                  {agent.llm_model}
-                </span>
-              </>
-            )}
-          </div>
-          {/* Ephemeral hire context — what's being approved, TTL, reason */}
-          {agent.ephemeral && (
-            <div className="mb-3 text-xs">
-              {isPendingHire ? (
-                <div className="inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
-                  <Clock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  <span>
-                    Requesting to join <span className="font-medium">{agent.crew?.name ?? "this crew"}</span> — approve to add it.
-                    {ttl && <> · TTL {ttl}</>}
-                    {hireReason && <> · {hireReason}</>}
+        <div className="flex items-start gap-3.5">
+          <button
+            type="button"
+            onClick={() => setAvatarPickerOpen(true)}
+            className="group relative shrink-0"
+            title="Upravit avatar"
+          >
+            <AgentAvatar
+              seed={agent.avatar_seed || agent.name}
+              style={agent.avatar_style || agent.crew?.avatar_style}
+              agentId={agent.id}
+              avatarUrl={agent.avatar_url}
+              className={cn(
+                "h-11 w-11 rounded-[10px] transition-transform group-hover:scale-[1.04]",
+                isRunning && "ring-2 ring-success/40",
+              )}
+            />
+          </button>
+
+          <div className="min-w-0 flex-1">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <Pill tone={STATUS_PILL_TONE[statusKey] ?? "default"}>
+                <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
+                {status.label}
+              </Pill>
+              {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
+              {agent.ephemeral && !ghost && (
+                <Pill tone="warn">
+                  <Clock className="h-3 w-3" />
+                  dočasný{ttl && ` · ${ttl}`}
+                </Pill>
+              )}
+              {agent.memory_enabled && <Pill>paměť</Pill>}
+            </div>
+
+            <h1 className="type-title text-foreground">{agent.name}</h1>
+
+            <div className="type-meta mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-muted-foreground">
+              <span>{agent.slug}</span>
+              {agent.role_title && <><span className="opacity-40">·</span><span>{agent.role_title}</span></>}
+              {agent.crew && (
+                <>
+                  <span className="opacity-40">·</span>
+                  <button
+                    type="button"
+                    onClick={() => onSelectCrew(agent.crew!.slug)}
+                    className="text-primary hover:underline"
+                  >
+                    {agent.crew.name}
+                  </button>
+                </>
+              )}
+              {agent.llm_model && (
+                <>
+                  <span className="opacity-40">·</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    {providerMark(agent.llm_provider)}
+                    {agent.llm_model}
                   </span>
-                </div>
-              ) : ghost ? (
-                <span className="text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-notice/80">
-                  <Clock className="h-3 w-3" /> Ephemeral hire{ttl && <span className="text-muted-foreground"> · TTL {ttl}</span>}
-                </span>
+                </>
               )}
             </div>
-          )}
 
+            {agent.description && (
+              <p className="type-row mt-1.5 max-w-prose text-muted-foreground">{agent.description}</p>
+            )}
+
+            {isPendingHire && (
+              <p className="type-row mt-2 inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
+                <Clock className="mt-px h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Žádá o zařazení do <b className="font-medium">{agent.crew?.name ?? "crew"}</b> — schválením se přidá.
+                  {hireReason && <> · {hireReason}</>}
+                </span>
+              </p>
+            )}
+            {ghost && (
+              <p className="type-row mt-2 text-muted-foreground">Vypršelý dočasný agent — najmout znovu.</p>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+
+        {/* Actions on their own row, primary first, like Run / Dry run. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Link
+            href={`/chat/${encodeURIComponent(agent.slug)}`}
+            className="type-row inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Chat
+          </Link>
+          {isRunning && (
+            <button
+              type="button"
+              onClick={handleStop}
+              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/15 px-3 py-1.5 font-medium text-destructive transition-colors hover:bg-destructive/25"
+            >
+              <Square className="h-3 w-3 fill-current" />
+              Zastavit
+            </button>
+          )}
           {isPendingHire && (
             <button
               type="button"
               onClick={handleApproveHire}
-              className="px-3.5 py-2 rounded-lg bg-success/20 hover:bg-success/30 text-success border border-success/30 text-sm font-medium flex items-center gap-1.5"
-              title="Approve this ephemeral hire — the agent joins the crew and any waiting work resumes"
+              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/20 px-3 py-1.5 font-medium text-success transition-colors hover:bg-success/30"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
-              Approve hire
+              Schválit najmutí
             </button>
           )}
           {ghost && (
             <button
               type="button"
               onClick={handleRehire}
-              className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-foreground/80 border border-white/10 text-sm font-medium flex items-center gap-1.5"
-              title="Re-hire this expired agent with a fresh TTL"
+              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
             >
               <RotateCcw className="h-3 w-3" />
-              Re-hire
+              Najmout znovu
             </button>
           )}
-          {isRunning && (
+          {onOpenFiles && (
             <button
               type="button"
-              onClick={handleStop}
-              className="px-3 py-2 rounded-lg bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/30 text-sm font-medium flex items-center gap-1.5"
-              title="Stop running agent"
+              onClick={onOpenFiles}
+              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
             >
-              <Square className="h-3 w-3 fill-current" />
-              Stop
+              <FolderTree className="h-3.5 w-3.5" />
+              Soubory
             </button>
           )}
-          <Link
-            href={`/chat/${encodeURIComponent(agent.slug)}`}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-label font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            Chat
-          </Link>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="p-2 rounded-lg border border-white/10 hover:bg-white/5 text-muted-foreground"
-                title="More actions"
-                aria-label="Agent actions"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[220px]">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                {agent.name}
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => toast.info("Container restart will land in a follow-up")}
-                className="flex items-center gap-2"
-              >
-                <RotateCcw className="h-4 w-4" />
-                <span>Restart container</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleDelete}
-                className="flex items-center gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>Delete agent</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="ml-auto">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-white/[.05]"
+                  title="Další akce"
+                  aria-label="Agent actions"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[220px]">
+                <DropdownMenuLabel className="type-meta text-muted-foreground">{agent.name}</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => toast.info("Container restart will land in a follow-up")}
+                  className="flex items-center gap-2"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  <span>Restartovat kontejner</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleDelete}
+                  className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>Smazat agenta</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </motion.header>
 
@@ -507,7 +529,7 @@ export function AgentCanvas({
           onOpenConfig={() => setTab("config")}
           extraReach={[
             {
-              id: "memory", icon: Brain, label: "Paměť", tone: "gold", wide: true,
+              id: "memory", icon: Brain, label: "Paměť", tone: "gold", wide: true, group: "Umí",
               value: agent.memory_enabled ? "zapnutá" : "vypnutá",
               render: () => (
                 <MemoryTab
@@ -519,7 +541,7 @@ export function AgentCanvas({
               ),
             },
             {
-              id: "skillsmgr", icon: Sparkles, label: "Spravovat skilly", tone: "purple", wide: true,
+              id: "skillsmgr", icon: Sparkles, label: "Spravovat skilly", tone: "purple", wide: true, group: "Umí",
               value: String(agent._count?.skills ?? 0),
               render: () => (
                 <SkillsTab
@@ -533,14 +555,14 @@ export function AgentCanvas({
               ),
             },
             {
-              id: "workspace", icon: FolderTree, label: "Workspace", tone: "notice", wide: true,
+              id: "workspace", icon: FolderTree, label: "Workspace", tone: "notice", wide: true, group: "Historie",
               value: "soubory",
               render: () => (
                 <WorkspaceTab agentId={agent.id} agentSlug={agent.slug} onOpenFiles={onOpenFiles} />
               ),
             },
             {
-              id: "activity", icon: History, label: "Aktivita", tone: "notice", wide: true,
+              id: "activity", icon: History, label: "Aktivita", tone: "notice", wide: true, group: "Historie",
               value: "vše",
               render: () => <ActivityTab workspaceId={workspaceId} agentId={agent.id} />,
             },

@@ -143,7 +143,7 @@ export function OverviewTab({
 
   const reach: ReachItem[] = [
     {
-      id: "skills", icon: Sparkles, label: "Skilly", tone: "purple",
+      id: "skills", icon: Sparkles, label: "Skilly", tone: "purple", group: "Umí",
       value: `${skills.filter((s) => s.enabled).length} / ${skills.length}`,
       cell: {
         title: "Skilly",
@@ -160,7 +160,7 @@ export function OverviewTab({
       },
     },
     {
-      id: "tools", icon: Wrench, label: "Nástroje", tone: "notice", value: String(toolkits.length),
+      id: "tools", icon: Wrench, label: "Nástroje", tone: "notice", group: "Umí", value: String(toolkits.length),
       cell: {
         title: "Nástroje a konektory",
         count: toolkits.length,
@@ -175,7 +175,7 @@ export function OverviewTab({
       },
     },
     {
-      id: "channels", icon: Bell, label: "Kam hlásí", tone: "purple",
+      id: "channels", icon: Bell, label: "Kam hlásí", tone: "purple", group: "Hlásí",
       value: String(channels.filter((c) => c.enabled).length),
       cell: {
         title: "Kam hlásí",
@@ -191,7 +191,7 @@ export function OverviewTab({
       },
     },
     {
-      id: "sessions", icon: MessageSquare, label: "Sezení", tone: "notice", value: String(chats?.length ?? 0),
+      id: "sessions", icon: MessageSquare, label: "Sezení", tone: "notice", group: "Historie", value: String(chats?.length ?? 0),
       cell: {
         title: "Sezení",
         count: chats?.length ?? 0,

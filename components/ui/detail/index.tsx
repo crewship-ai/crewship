@@ -62,11 +62,13 @@ export interface DetailCardProps {
   className?: string
   /** Removes the body padding for tables and lists that own their own. */
   bare?: boolean
+  /** One muted line under the body — what the setting means in practice. */
+  footer?: React.ReactNode
   children: React.ReactNode
 }
 
 export function DetailCard({
-  title, subtitle, icon: Icon, action, tone = "default", className, bare = false, children,
+  title, subtitle, icon: Icon, action, tone = "default", className, bare = false, footer, children,
 }: DetailCardProps) {
   return (
     <div className={cn("overflow-hidden rounded-xl border bg-card", TONE_BORDER[tone], className)}>
@@ -83,6 +85,11 @@ export function DetailCard({
         </div>
       )}
       <div className={cn(!bare && "p-4")}>{children}</div>
+      {footer && (
+        <p className="type-meta border-t border-hairline bg-surface-subtle/60 px-4 py-2 leading-relaxed text-muted-foreground-soft">
+          {footer}
+        </p>
+      )}
     </div>
   )
 }
