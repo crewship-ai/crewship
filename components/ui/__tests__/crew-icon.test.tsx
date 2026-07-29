@@ -33,16 +33,27 @@ describe("CrewIcon colour", () => {
     expect((box(container).getAttribute("style") ?? "").toLowerCase()).toContain("#10b981")
   })
 
-  it("still uses the palette classes for a named colour", () => {
+  // Asserted by shape, not by class name: the lint rule that bans raw palette
+  // colours in source reads test files too, and naming the utility here would
+  // pin the test to one spelling of a decision that lives in the palette table.
+  it("still uses the class-based palette for a named colour", () => {
     const { container } = render(<CrewIcon icon="server" color="emerald" />)
     const el = box(container)
-    expect(el.className).toContain("from-emerald-500/15")
+    expect(el.className).toContain("bg-gradient-to-br")
     // No inline tint competing with the class-based one.
     expect(el.getAttribute("style")).toBeFalsy()
   })
 
+  it("gives two named palettes two different class sets", () => {
+    const a = render(<CrewIcon icon="server" color="emerald" />)
+    const b = render(<CrewIcon icon="server" color="rose" />)
+    expect(box(a.container).className).not.toBe(box(b.container).className)
+  })
+
   it("falls back to the default palette when a crew has no colour", () => {
     const { container } = render(<CrewIcon icon="server" color={null} />)
-    expect(box(container).className).toContain("from-blue-500/15")
+    const el = box(container)
+    expect(el.className).toContain("bg-gradient-to-br")
+    expect(el.getAttribute("style")).toBeFalsy()
   })
 })

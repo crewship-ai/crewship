@@ -39,10 +39,12 @@ function openSelect(trigger: HTMLElement) {
   fireEvent.click(trigger)
 }
 
+// The colours a seeded workspace actually stores — raw hexes, not palette
+// ids. That distinction is the whole reason crews used to render identically.
 const CREWS = [
-  { id: "c-eng", name: "Engineering", slug: "engineering", color: "blue", icon: "code" },
-  { id: "c-ops", name: "Ops", slug: "ops", color: "green", icon: "shield" },
-  { id: "c-qa", name: "Quality", slug: "quality", color: "purple", icon: "bug" },
+  { id: "c-eng", name: "Engineering", slug: "engineering", color: "#3B82F6", icon: "code" },
+  { id: "c-ops", name: "Ops", slug: "ops", color: "#EF4444", icon: "shield" },
+  { id: "c-qa", name: "Quality", slug: "quality", color: "#10B981", icon: "bug" },
 ]
 
 function conn(id: string, from: string, to: string, direction = "bidirectional") {
@@ -202,5 +204,87 @@ describe("Crew links — per-crew view", () => {
     // NOT enable until the sidecar learned to name a target crew.
     const panel = screen.getByRole("region", { name: /crew links/i })
     expect(within(panel).getByText(/hand work to/i)).toBeInTheDocument()
+  })
+})
+
+// The state used to live only in the wording of a dropdown. A link is a
+// direction between two things, and direction is something you should be able
+// to see without reading — so the row draws it, in the two crews' own colours,
+// and the control is a tinted pill rather than a grey select.
+describe("Crew links — the link is drawn, not just worded", () => {
+  beforeEach(() => {
+    cleanup()
+    role = "MANAGER"
+    apiFetch.mockReset()
+    mockApi([conn("cc-eng-ops", "c-eng", "c-ops")])
+  })
+
+  it("marks each pair row with the state it is drawing", async () => {
+    const { container } = render(<ConnectionsSection workspaceId="ws1" />)
+    await screen.findByRole("button", { name: "Engineering" })
+
+    expect(container.querySelector('[data-link-state="both"]')).toBeTruthy()
+    expect(container.querySelector('[data-link-state="none"]')).toBeTruthy()
+  })
+
+  it("carries each crew's own colour into the drawing", async () => {
+    const { container } = render(<ConnectionsSection workspaceId="ws1" />)
+    await screen.findByRole("button", { name: "Engineering" })
+
+    const drawn = container.querySelector('[data-link-state="both"]') as HTMLElement
+    const style = (drawn.getAttribute("style") ?? "").toLowerCase()
+    // Engineering's blue on one end, Ops' red on the other.
+    expect(style).toContain("#3b82f6")
+    expect(style).toContain("#ef4444")
+  })
+})
+
+// Both views answer different questions: the editor answers "what can THIS
+// crew reach", the matrix answers "show me every pair at once" — which is the
+// audit question, and the one a flat list of edges answered worst.
+describe("Crew links — matrix overview", () => {
+  beforeEach(() => {
+    cleanup()
+    role = "MANAGER"
+    apiFetch.mockReset()
+    mockApi([conn("cc-eng-ops", "c-eng", "c-ops"), conn("cc-ops-qa", "c-ops", "c-qa", "unidirectional")])
+  })
+
+  async function openMatrix() {
+    render(<ConnectionsSection workspaceId="ws1" />)
+    await screen.findByRole("button", { name: "Engineering" })
+    fireEvent.click(screen.getByRole("button", { name: /matrix/i }))
+  }
+
+  it("shows one cell per ordered pair, and none for a crew against itself", async () => {
+    await openMatrix()
+    const grid = screen.getByRole("table", { name: /crew links/i })
+    // 3 crews → 3 rows; each row has 3 cells + the row header.
+    expect(within(grid).getAllByRole("row")).toHaveLength(4) // + header row
+    expect(within(grid).getAllByText("—")).toHaveLength(3) // the diagonal
+  })
+
+  it("reads a one-way link in one direction only", async () => {
+    await openMatrix()
+    // ops → quality is one-way, so the ops row is on and the quality row is not.
+    expect(screen.getByLabelText("Ops can hand work to Quality")).toBeInTheDocument()
+    expect(screen.getByLabelText("Quality cannot hand work to Ops")).toBeInTheDocument()
+  })
+
+  it("clicking a crew in the matrix opens that crew's pairs for editing", async () => {
+    await openMatrix()
+    fireEvent.click(screen.getByRole("button", { name: /edit Quality/i }))
+
+    // Back on the editor, on Quality: the pair control for Ops exists, and
+    // there is no self-pair.
+    expect(
+      screen.getByRole("combobox", { name: /between Quality and Ops/i }),
+    ).toBeInTheDocument()
+  })
+
+  it("is read-only — the one place a link changes is the editor", async () => {
+    await openMatrix()
+    expect(screen.queryByRole("combobox")).toBeNull()
+    expect(mutations()).toHaveLength(0)
   })
 })
