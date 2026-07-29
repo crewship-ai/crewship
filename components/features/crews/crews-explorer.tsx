@@ -210,17 +210,35 @@ export function CrewsExplorer({
                     <span className="type-meta text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
                     </span>
-                    {/* Mini status dots */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {Array.from({ length: dots.running }).map((_, i) => (
-                        <span key={`r${i}`} className="h-1.5 w-1.5 rounded-full bg-success" />
-                      ))}
-                      {Array.from({ length: dots.error }).map((_, i) => (
-                        <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-destructive" />
-                      ))}
-                      {Array.from({ length: Math.min(dots.idle, 3) }).map((_, i) => (
-                        <span key={`i${i}`} className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-                      ))}
+                    {/* One dot per STATE, not one per agent.
+                        It used to draw a dot for every agent — a crew of 35
+                        drew 35 dots, and idle was capped at 3 while running and
+                        error were not, so the row grew with the roster and the
+                        count beside it became unreadable.
+                        The count already says how many. What it cannot say is
+                        that something is running or broken, which is the only
+                        reason to glance at a collapsed crew at all — so that
+                        keeps a mark, once, and idle gets none: idle is the
+                        normal state and needs no ink. */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {dots.error > 0 && (
+                        <span
+                          className="type-meta inline-flex items-center gap-1 text-destructive"
+                          title={`${dots.error} in error`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+                          {dots.error > 1 && <span className="tabular-nums">{dots.error}</span>}
+                        </span>
+                      )}
+                      {dots.running > 0 && (
+                        <span
+                          className="type-meta inline-flex items-center gap-1 text-success"
+                          title={`${dots.running} running`}
+                        >
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
+                          {dots.running > 1 && <span className="tabular-nums">{dots.running}</span>}
+                        </span>
+                      )}
                     </div>
                   </SidebarRow>
 
