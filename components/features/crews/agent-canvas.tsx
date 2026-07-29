@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { Button } from "@/components/ui/button"
 import { Pill } from "@/components/ui/detail"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
@@ -347,63 +348,51 @@ export function AgentCanvas({
           <span className="type-meta font-mono text-muted-foreground">{agent.slug}</span>
 
           <div className="ml-auto flex items-center gap-2">
-            <Link
-              href={`/chat/${encodeURIComponent(agent.slug)}`}
-              className="type-row inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
-            >
-              <MessageSquare className="h-3.5 w-3.5" />
-              Chat
-            </Link>
+            <Button asChild variant="soft" size="sm">
+              <Link href={`/chat/${encodeURIComponent(agent.slug)}`}>
+                <MessageSquare />
+                Chat
+              </Link>
+            </Button>
             {isRunning && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleStop}
-                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/15 px-3 py-1.5 font-medium text-destructive transition-colors hover:bg-destructive/25"
+                className="border-destructive/30 bg-destructive/15 text-destructive hover:bg-destructive/25 hover:text-destructive"
               >
-                <Square className="h-3 w-3 fill-current" />
+                <Square className="fill-current" />
                 Stop
-              </button>
+              </Button>
             )}
             {isPendingHire && (
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={handleApproveHire}
-                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/20 px-3 py-1.5 font-medium text-success transition-colors hover:bg-success/30"
+                className="border-success/30 bg-success/20 text-success hover:bg-success/30 hover:text-success"
               >
-                <CheckCircle2 className="h-3.5 w-3.5" />
+                <CheckCircle2 />
                 Approve hire
-              </button>
+              </Button>
             )}
             {ghost && (
-              <button
-                type="button"
-                onClick={handleRehire}
-                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
-              >
-                <RotateCcw className="h-3 w-3" />
+              <Button variant="outline" size="sm" onClick={handleRehire}>
+                <RotateCcw />
                 Re-hire
-              </button>
+              </Button>
             )}
             {onOpenFiles && (
-              <button
-                type="button"
-                onClick={onOpenFiles}
-                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
-              >
-                <FolderTree className="h-3.5 w-3.5" />
+              <Button variant="outline" size="sm" onClick={onOpenFiles}>
+                <FolderTree />
                 Files
-              </button>
+              </Button>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-white/[.05]"
-                  title="More actions"
-                  aria-label="Agent actions"
-                >
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </button>
+                <Button variant="outline" size="icon-sm" title="More actions" aria-label="Agent actions">
+                  <MoreHorizontal />
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[220px]">
                 <DropdownMenuLabel className="type-meta text-muted-foreground">{agent.name}</DropdownMenuLabel>

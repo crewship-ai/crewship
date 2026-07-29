@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "motion/react"
 import { AlertTriangle, Radar, X } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { DetailCard, EntityChip, Pill, TickRow } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 
@@ -61,19 +62,9 @@ export function BlockingNotice({
           {actions.length > 0 && (
             <div className="flex shrink-0 gap-2">
               {actions.map((a) => (
-                <button
-                  key={a.label}
-                  type="button"
-                  onClick={a.onClick}
-                  className={cn(
-                    "type-row rounded-lg border px-3 py-1.5 font-medium transition-colors",
-                    a.primary
-                      ? "border-transparent bg-primary text-primary-foreground hover:bg-primary-hover"
-                      : "border-border bg-surface-raised text-foreground hover:bg-white/[.09]",
-                  )}
-                >
+                <Button key={a.label} variant={a.primary ? "soft" : "outline"} size="sm" onClick={a.onClick}>
                   {a.label}
-                </button>
+                </Button>
               ))}
             </div>
           )}
@@ -126,13 +117,7 @@ export function NowRunning({ label, step, percent, meta, icon: Icon, onStop, ste
           </span>
           {meta && <span className="type-meta font-mono text-muted-foreground-soft">{meta}</span>}
           {onStop && (
-            <button
-              type="button"
-              onClick={onStop}
-              className="type-row rounded-lg border border-border bg-surface-raised px-2.5 py-1 transition-colors hover:bg-white/[.09]"
-            >
-              Stop
-            </button>
+            <Button variant="outline" size="xs" onClick={onStop}>Stop</Button>
           )}
         </div>
         {steps && steps.length > 0 && (

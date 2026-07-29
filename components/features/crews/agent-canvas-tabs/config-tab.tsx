@@ -4,6 +4,7 @@ import { Bot, CalendarClock, Settings2, Shield, Webhook, Wrench } from "lucide-r
 
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
+import { Button } from "@/components/ui/button"
 import { DetailCard } from "@/components/ui/detail"
 
 import {
@@ -211,13 +212,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           />
           {agent.crew && (
             <div className="px-3 pb-3">
-              <button
-                type="button"
-                onClick={() => onSelectCrew(agent.crew!.slug)}
-                className="rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-label transition-colors hover:bg-white/[.09]"
-              >
+              <Button variant="outline" size="sm" onClick={() => onSelectCrew(agent.crew!.slug)}>
                 Open crew settings
-              </button>
+              </Button>
             </div>
           )}
         </DetailCard>
