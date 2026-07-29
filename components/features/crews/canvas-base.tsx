@@ -119,7 +119,8 @@ export interface UsePatchEntityOptions<T> {
   /** Builds the full PATCH URL for the matched entity (no query string). */
   patchUrl: (entity: T) => string
   setEntity: (next: T) => void
-  onChanged: () => void
+  /** Receives the saved record — a rename has to be able to follow the slug. */
+  onChanged: (updated: T) => void
 }
 
 export function usePatchEntity<T>({
@@ -144,7 +145,7 @@ export function usePatchEntity<T>({
     }
     const updated: T = await res.json()
     setEntity(updated)
-    onChanged()
+    onChanged(updated)
   }, [entity, workspaceId, patchUrl, setEntity, onChanged])
 }
 

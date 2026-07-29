@@ -73,7 +73,7 @@ export interface AgentCanvasProps {
   agentSlug: string
   /** Crews list passed for the Crew dropdown in Profile section. */
   crews: { id: string; name: string; slug: string }[]
-  onAgentChanged: () => void
+  onAgentChanged: (nextSlug?: string) => void
   onSelectCrew: (slug: string | null) => void
   /** Open the bottom panel pre-targeted to the Files tab. Wired by CrewsLayout. */
   onOpenFiles?: () => void
@@ -207,7 +207,11 @@ export function AgentCanvas({
     entity: agent,
     patchUrl: (a) => `/api/v1/agents/${a.id}`,
     setEntity: setAgent,
-    onChanged: onAgentChanged,
+    // Hand the new slug up. Editing the Slug field used to orphan the page:
+    // the URL still said ?agent=<old>, the refetched list no longer had it,
+    // and the stale-slug watcher toasted "not found" and dropped the user on
+    // the empty roster — for a rename that had just succeeded.
+    onChanged: (updated) => onAgentChanged(updated.slug),
   })
 
 

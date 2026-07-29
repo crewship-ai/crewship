@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Check } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -50,25 +49,8 @@ export function ConfigRow({ label, hint, htmlFor, children, full = false }: Conf
   )
 }
 
-/** Green tick that fades out after a successful commit. */
-function SavedTick({ show }: { show: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 text-micro text-success transition-opacity",
-        show ? "opacity-100" : "opacity-0",
-      )}
-    >
-      <Check className="h-3 w-3" />
-    </span>
-  )
-}
-
-function useOptimistic<T>(value: T, onSave: (next: T) => Promise<void> | void) {
+function useOptimistic<T>(value: T, label: string, onSave: (next: T) => Promise<void> | void) {
   const [local, setLocal] = useState<T>(value)
-  const [saved, setSaved] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Last value the server confirmed. A text field mutates `local` on every
   // keystroke, so rolling back to "whatever local was a moment ago" would
   // restore the rejected draft. The prop is the only trustworthy baseline.
@@ -79,23 +61,23 @@ function useOptimistic<T>(value: T, onSave: (next: T) => Promise<void> | void) {
     server.current = value
     setLocal(value)
   }, [value])
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
 
   async function commit(next: T) {
     setLocal(next)
     try {
       await onSave(next)
       server.current = next
-      setSaved(true)
-      if (timer.current) clearTimeout(timer.current)
-      timer.current = setTimeout(() => setSaved(false), 1500)
+      // Named, because there is no Save button to have clicked: the toast is
+      // the only evidence, and "saved" alone leaves you wondering which field
+      // it meant when you have just tabbed through three of them.
+      toast.success(`${label} saved`)
     } catch (err) {
       setLocal(server.current)
       toast.error(err instanceof Error ? err.message : "Could not save")
     }
   }
 
-  return { local, setLocal, saved, commit }
+  return { local, setLocal, commit }
 }
 
 // One control shape. The height is explicit because a <select> and an <input>
@@ -121,7 +103,7 @@ export interface ConfigTextProps {
 
 export function ConfigText({ label, hint, value, mono, multiline, placeholder, onSave }: ConfigTextProps) {
   const id = useId()
-  const { local, setLocal, saved, commit } = useOptimistic(value, onSave)
+  const { local, setLocal, commit } = useOptimistic(value, label, onSave)
 
   function handleBlur() {
     if (local === value) return
@@ -156,7 +138,6 @@ export function ConfigText({ label, hint, value, mono, multiline, placeholder, o
       ) : (
         <input type="text" {...shared} />
       )}
-      <SavedTick show={saved} />
     </ConfigRow>
   )
 }
@@ -175,7 +156,7 @@ export function ConfigSelect<T extends string>({
   label, hint, value, options, adornment, onSave,
 }: ConfigSelectProps<T>) {
   const id = useId()
-  const { local, saved, commit } = useOptimistic(value, onSave)
+  const { local, commit } = useOptimistic(value, label, onSave)
 
   return (
     <ConfigRow label={label} hint={hint} htmlFor={id}>
@@ -197,7 +178,6 @@ export function ConfigSelect<T extends string>({
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}
       </select>
-      <SavedTick show={saved} />
     </ConfigRow>
   )
 }
@@ -212,7 +192,7 @@ export interface ConfigSwitchProps {
 }
 
 export function ConfigSwitch({ label, hint, checked, locked = false, onSave }: ConfigSwitchProps) {
-  const { local, saved, commit } = useOptimistic(checked, onSave)
+  const { local, commit } = useOptimistic(checked, label, onSave)
 
   return (
     <ConfigRow label={label} hint={hint}>
@@ -237,7 +217,6 @@ export function ConfigSwitch({ label, hint, checked, locked = false, onSave }: C
           style={{ transitionTimingFunction: "cubic-bezier(.34,1.56,.64,1)" }}
         />
       </button>
-      <SavedTick show={saved} />
     </ConfigRow>
   )
 }
@@ -253,7 +232,7 @@ export interface ConfigPresetsProps<T extends string | number> {
 export function ConfigPresets<T extends string | number>({
   label, hint, value, presets, onSave,
 }: ConfigPresetsProps<T>) {
-  const { local, saved, commit } = useOptimistic(value, onSave)
+  const { local, commit } = useOptimistic(value, label, onSave)
   const isCustom = !presets.some((p) => p.value === local)
 
   return (
@@ -285,7 +264,6 @@ export function ConfigPresets<T extends string | number>({
           </button>
         )}
       </div>
-      <SavedTick show={saved} />
     </ConfigRow>
   )
 }
@@ -310,7 +288,7 @@ export interface ConfigCardsProps<T extends string> {
  * tells a reader nothing about what it costs them.
  */
 export function ConfigCards<T extends string>({ value, options, onSave }: ConfigCardsProps<T>) {
-  const { local, commit } = useOptimistic(value, onSave)
+  const { local, commit } = useOptimistic(value, "Tool profile", onSave)
 
   return (
     <div className="grid gap-1.5 p-3" role="radiogroup">
