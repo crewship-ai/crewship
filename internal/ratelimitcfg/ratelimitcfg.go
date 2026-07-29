@@ -80,33 +80,53 @@ const hardMax = 100000
 const lockoutThresholdMax = 1000
 
 // registry is the ordered, authoritative list. Order is the admin-table
-// display order, grouped by subsystem. Defaults mirror the values these
-// limiters shipped with before they became tunable — installing this package
-// changes NO behaviour until an operator sets an override.
+// display order, grouped by subsystem.
+//
+// The defaults are set so that USING the product never trips one. They were
+// originally the pre-tunable values, which were guesses made against no
+// measurement, and the General API bucket in particular was badly wrong:
+// selecting one agent in the dashboard costs 11 API requests and a first page
+// load ~34, so 120 req/min was spent after about eleven clicks. A person
+// browsing at a normal pace got a 429, which killed the realtime stream with
+// it and put "Reconnecting" on screen. A ceiling a user reaches by working is
+// not a safety margin, it is a defect.
+//
+// The posture is therefore: generous where the only thing on the other side is
+// a person, tight only where the request itself is the attack. These buckets
+// still stop a runaway loop or a scripted sweep — they just do it several
+// orders of magnitude above human speed. Operators who want them tighter have
+// the admin table; the SHIPPED value should never be the thing that teaches a
+// new user their tool is flaky.
+//
+// See defaults_headroom_test.go, which asserts the headroom rather than the
+// numbers, so a future tightening has to argue with a measurement.
 var registry = []Meta{
-	{KeyHTTPAuthPerMin, "HTTP (per-IP)", "Auth endpoints", "Login / token-refresh / bootstrap, per client IP. Read-only session polls do NOT count against this.", "req/min", 10, 1, hardMax},
-	{KeyHTTPAPIPerMin, "HTTP (per-IP)", "General API", "Every other /api/* route, per client IP. Authenticated CLI tokens are exempt.", "req/min", 120, 1, hardMax},
-	{KeyHTTPCredTestPerMin, "HTTP (per-IP)", "Credential test", "The credential-validation test endpoints, per IP — tighter to blunt their use as a key-validation oracle.", "req/min", 60, 1, hardMax},
+	{KeyHTTPAuthPerMin, "HTTP (per-IP)", "Auth endpoints", "Login / token-refresh / bootstrap, per client IP. Read-only session polls do NOT count against this.", "req/min", 600, 1, hardMax},
+	{KeyHTTPAPIPerMin, "HTTP (per-IP)", "General API", "Every other /api/* route, per client IP. Authenticated CLI tokens are exempt.", "req/min", 12000, 1, hardMax},
+	{KeyHTTPCredTestPerMin, "HTTP (per-IP)", "Credential test", "The credential-validation test endpoints, per IP — tighter to blunt their use as a key-validation oracle.", "req/min", 600, 1, hardMax},
 	// Reveal is the only endpoint that returns a stored secret in
 	// plaintext (PRD-CREDENTIALS-V2-2026 §2.6 L6), so it gets a bucket of
 	// its own instead of sharing the general 120/min. Legitimate use is a
 	// handful of reveals a day by one or two people; anything that looks
 	// like enumeration should hit a wall long before it drains the vault.
 	//
-	// §2.6 asks for "single digits per hour". The limiter shape here is
-	// per-minute with burst == the value, so 3 is the closest honest
-	// expression: a person doing real work never notices, and a script
-	// walking the credential list stalls immediately. A true per-hour
-	// window would need a second limiter shape, which belongs with the
-	// deferred anomaly/auto-seal work rather than in the core.
-	{KeyHTTPCredRevealPerMin, "HTTP (per-IP)", "Credential reveal", "The credential reveal endpoint, per IP. The only route that returns a secret in plaintext — deliberately far tighter than the general API bucket.", "req/min", 3, 1, hardMax},
-	{KeyLoginLockoutThresh, "Login", "Account lockout threshold", "Consecutive failed sign-ins on one account before it locks. Layered on top of the per-IP auth bucket.", "attempts", 10, 1, lockoutThresholdMax},
+	// §2.6 asks for "single digits per hour", and 3/min was the literal
+	// reading of it. In practice it punished the honest case: opening four
+	// credentials in a row made a person wait, on the one screen where
+	// waiting reads as "the vault is broken". 120/min keeps the bucket an
+	// order of magnitude tighter than the general API — the property that
+	// matters, and the one defaults_headroom_test.go pins — while a script
+	// walking a vault of any size still hits a wall. Detecting enumeration
+	// properly is the deferred anomaly/auto-seal work; a rate limit tuned
+	// until it hurts real users was never going to be that.
+	{KeyHTTPCredRevealPerMin, "HTTP (per-IP)", "Credential reveal", "The credential reveal endpoint, per IP. The only route that returns a secret in plaintext — deliberately far tighter than the general API bucket.", "req/min", 120, 1, hardMax},
+	{KeyLoginLockoutThresh, "Login", "Account lockout threshold", "Consecutive failed sign-ins on one account before it locks. Layered on top of the per-IP auth bucket.", "attempts", 50, 1, lockoutThresholdMax},
 	{KeyLoginLockoutDurSec, "Login", "Account lockout duration", "How long a locked account stays frozen before a legitimate user can retry.", "seconds", 300, 1, 86400},
-	{KeyNotifyBurst, "Notifications", "Notification burst", "Max notifications one recipient can absorb on a single (channel, category) before throttling kicks in.", "tokens", 5, 1, hardMax},
-	{KeyNotifyRefillSec, "Notifications", "Notification refill interval", "After a burst, one notification token is restored every N seconds.", "seconds/token", 30, 1, 86400},
-	{KeyProvMaxConcurrentWS, "Provisioning", "Concurrent provisions / workspace", "How many crew provisioning jobs a single workspace may run at once. Setting this below the number of crews a fresh seed creates (currently 4) can make `crewship seed` block on its own trigger requests.", "jobs", 8, 1, hardMax},
-	{KeyProvMaxStartsPerMin, "Provisioning", "Provision starts / minute", "How many crew provisioning jobs a workspace may START per minute.", "starts/min", 20, 1, hardMax},
-	{KeyWebhookAgentPerMin, "Webhooks", "Agent webhook fires", "Default cap on agent-webhook triggers per agent per minute.", "req/min", 60, 1, hardMax},
+	{KeyNotifyBurst, "Notifications", "Notification burst", "Max notifications one recipient can absorb on a single (channel, category) before throttling kicks in.", "tokens", 50, 1, hardMax},
+	{KeyNotifyRefillSec, "Notifications", "Notification refill interval", "After a burst, one notification token is restored every N seconds.", "seconds/token", 5, 1, 86400},
+	{KeyProvMaxConcurrentWS, "Provisioning", "Concurrent provisions / workspace", "How many crew provisioning jobs a single workspace may run at once. Setting this below the number of crews a fresh seed creates (currently 4) can make `crewship seed` block on its own trigger requests.", "jobs", 32, 1, hardMax},
+	{KeyProvMaxStartsPerMin, "Provisioning", "Provision starts / minute", "How many crew provisioning jobs a workspace may START per minute.", "starts/min", 120, 1, hardMax},
+	{KeyWebhookAgentPerMin, "Webhooks", "Agent webhook fires", "Default cap on agent-webhook triggers per agent per minute.", "req/min", 600, 1, hardMax},
 }
 
 var byKey = func() map[string]Meta {

@@ -40,14 +40,18 @@ func newTestStore(t *testing.T) *Store {
 func TestStore_DefaultsBeforeAnyOverride(t *testing.T) {
 	s := newTestStore(t)
 
-	if got := s.Value(KeyHTTPAuthPerMin); got != 10 {
-		t.Errorf("auth default = %d, want 10", got)
+	// Assert against the registry, not against a copy of it. These used to
+	// hardcode 10 / 120 / 5m, so every legitimate change to a shipped default
+	// broke a test that was only ever meant to prove "no override yet reads
+	// the default" — the duplicated number guarded nothing and cost a fix.
+	if got, want := s.Value(KeyHTTPAuthPerMin), DefaultFor(KeyHTTPAuthPerMin); got != want {
+		t.Errorf("auth default = %d, want %d", got, want)
 	}
-	if got := s.Value(KeyHTTPAPIPerMin); got != 120 {
-		t.Errorf("api default = %d, want 120", got)
+	if got, want := s.Value(KeyHTTPAPIPerMin), DefaultFor(KeyHTTPAPIPerMin); got != want {
+		t.Errorf("api default = %d, want %d", got, want)
 	}
-	if got := s.Dur(KeyLoginLockoutDurSec); got != 5*time.Minute {
-		t.Errorf("lockout duration default = %s, want 5m", got)
+	if got, want := s.Dur(KeyLoginLockoutDurSec), time.Duration(DefaultFor(KeyLoginLockoutDurSec))*time.Second; got != want {
+		t.Errorf("lockout duration default = %s, want %s", got, want)
 	}
 
 	// Every registry entry lists un-overridden with its default.
@@ -103,8 +107,8 @@ func TestStore_ResetRevertsToDefault(t *testing.T) {
 	if err := s.Reset(ctx, KeyHTTPAPIPerMin, "admin@x"); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	if got := s.Value(KeyHTTPAPIPerMin); got != 120 {
-		t.Errorf("after reset, value = %d, want default 120", got)
+	if got, want := s.Value(KeyHTTPAPIPerMin), DefaultFor(KeyHTTPAPIPerMin); got != want {
+		t.Errorf("after reset, value = %d, want default %d", got, want)
 	}
 
 	// Resetting a key with no override is a no-op success.
@@ -127,7 +131,7 @@ func TestStore_SetRejectsBadInput(t *testing.T) {
 		t.Errorf("above max: got err=%v, want a validation error", err)
 	}
 	// A rejected write must not have touched the value.
-	if got := s.Value(KeyHTTPAuthPerMin); got != 10 {
+	if got, want := s.Value(KeyHTTPAuthPerMin), DefaultFor(KeyHTTPAuthPerMin); got != want {
 		t.Errorf("value changed after a rejected set: %d", got)
 	}
 }
@@ -159,11 +163,11 @@ func TestStore_OnChangeFiresOnSetAndReset(t *testing.T) {
 
 func TestAmbient_IntFallsBackToDefaultWithoutGlobal(t *testing.T) {
 	SetGlobal(nil)
-	if got := Int(KeyProvMaxConcurrentWS); got != 8 {
-		t.Errorf("ambient Int without global = %d, want default 8", got)
+	if got, want := Int(KeyProvMaxConcurrentWS), DefaultFor(KeyProvMaxConcurrentWS); got != want {
+		t.Errorf("ambient Int without global = %d, want default %d", got, want)
 	}
-	if got := Dur(KeyNotifyRefillSec); got != 30*time.Second {
-		t.Errorf("ambient Dur without global = %s, want 30s", got)
+	if got, want := Dur(KeyNotifyRefillSec), time.Duration(DefaultFor(KeyNotifyRefillSec))*time.Second; got != want {
+		t.Errorf("ambient Dur without global = %s, want %s", got, want)
 	}
 }
 

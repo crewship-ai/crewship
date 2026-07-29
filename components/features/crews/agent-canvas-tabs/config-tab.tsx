@@ -9,6 +9,7 @@ import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provid
 
 import { Button } from "@/components/ui/button"
 import { Appear, DetailCard } from "@/components/ui/detail"
+import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 
 import {
   ConfigCards, ConfigPresets, ConfigReadOnly, ConfigSelect, ConfigSwitch, ConfigText,
@@ -246,24 +247,26 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
         </Appear>
       )}
 
-      <Appear order={4}>
-        <DetailCard
-          bare icon={Webhook} title="Webhook and hooks"
-          footer={<>
-            An agent has one signing secret, not a list of webhooks — the multi-webhook surface belongs to
-            routines. The secret is shown once on rotation and can never be read back. Rotate it with{" "}
-            <code className="font-mono text-foreground/80">crewship agent rotate-webhook-secret {agent.slug}</code>;
-            hooks are listed and toggled with{" "}
-            <code className="font-mono text-foreground/80">crewship hooks list / enable / disable</code>.
-          </>}
-        >
-          <ConfigReadOnly
-            label="Signing key"
-            value={webhookSet ? "set" : "not set"}
-            note={webhookSet ? "rotate in Settings" : undefined}
-          />
-        </DetailCard>
-      </Appear>
+      {AGENT_EXTERNAL_TRIGGERS && (
+        <Appear order={4}>
+          <DetailCard
+            bare icon={Webhook} title="Webhook and hooks"
+            footer={<>
+              An agent has one signing secret, not a list of webhooks — the multi-webhook surface belongs to
+              routines. The secret is shown once on rotation and can never be read back. Rotate it with{" "}
+              <code className="font-mono text-foreground/80">crewship agent rotate-webhook-secret {agent.slug}</code>;
+              hooks are listed and toggled with{" "}
+              <code className="font-mono text-foreground/80">crewship hooks list / enable / disable</code>.
+            </>}
+          >
+            <ConfigReadOnly
+              label="Signing key"
+              value={webhookSet ? "set" : "not set"}
+              note={webhookSet ? "rotate in Settings" : undefined}
+            />
+          </DetailCard>
+        </Appear>
+      )}
 
       <Appear order={5}>
         <DetailCard

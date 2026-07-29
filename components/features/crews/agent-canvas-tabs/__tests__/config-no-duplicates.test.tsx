@@ -81,11 +81,18 @@ describe("agent configuration", () => {
     expect(screen.queryByText(/^Advanced \(/)).not.toBeInTheDocument()
   })
 
-  it("still shows what the retired panel uniquely carried", () => {
+  it("still shows the tool list the retired panel uniquely carried", () => {
     renderTab()
-    // the read-only tool list, and the CLI-only surfaces
     expect(screen.getByText(/bash/)).toBeInTheDocument()
-    expect(screen.getByText(/crewship hooks/)).toBeInTheDocument()
+  })
+
+  // Waking an agent from outside is gated off (lib/feature-gates.ts): issues
+  // and routines are the two finished ways to give an agent work, and a
+  // third-party trigger with no delivery log or docs is not a third one.
+  it("does not advertise external triggers while the gate is off", () => {
+    renderTab()
+    expect(screen.queryByText(/Webhook and hooks/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/rotate-webhook-secret/)).not.toBeInTheDocument()
   })
 
   it("carries the system prompt and learning posture as cards, not a trailing panel", () => {

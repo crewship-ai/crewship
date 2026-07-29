@@ -1,5 +1,6 @@
 "use client"
 
+import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { readThrough } from "@/lib/stale-cache"
@@ -149,7 +150,7 @@ export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): Ag
   // The secret itself is show-once and never readable back; the record only
   // reports whether one is configured, which is exactly what this row needs.
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set
-  if (webhookSet) {
+  if (AGENT_EXTERNAL_TRIGGERS && webhookSet) {
     triggers.push({
       kind: "webhook",
       title: "Webhook",
