@@ -185,6 +185,7 @@ export function CrewsExplorer({
                     as="div"
                     selected={isSelected}
                     aria-label={crew.name}
+                    className="group/crew"
                     onSelect={() => {
                       onCrewSelect(crew.id)
                       if (!expanded) toggleCrew(crew.id)
@@ -198,14 +199,21 @@ export function CrewsExplorer({
                       onClick={(e) => { e.stopPropagation(); toggleCrew(crew.id) }}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleCrew(crew.id) } }}
                     >
+                      {/* Visible on hover, on focus, and while collapsed.
+                          It is nearly redundant — clicking the row selects and
+                          expands — but it is the ONLY way to collapse with a
+                          mouse, so it cannot simply go. Quiet at rest, there
+                          when reached for. */}
                       <ChevronRight
                         className={cn(
-                          "h-3 w-3 text-muted-foreground-soft transition-transform",
-                          expanded && "rotate-90",
+                          "h-3 w-3 text-muted-foreground-soft transition-all",
+                          expanded
+                            ? "rotate-90 opacity-0 group-hover/crew:opacity-100 group-focus-within/crew:opacity-100"
+                            : "opacity-100",
                         )}
                       />
                     </span>
-                    <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="md" />
+                    <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
                     <span className="type-row font-semibold truncate flex-1">{crew.name}</span>
                     <span className="type-meta text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
@@ -274,11 +282,21 @@ export function CrewsExplorer({
                           avatarUrl={agent.avatar_url}
                           className="h-8 w-8 rounded-lg shrink-0"
                         />
+                        {/* The role line only on the row you are on.
+                            Measured: the two text lines were 38px against a
+                            29px portrait, so the TEXT set the row height and
+                            the face — the thing you actually scan by — was the
+                            smaller half. Dropping the second line for every
+                            other row lets the portrait grow and the row shrink
+                            at the same time, and the role is still there the
+                            moment you need it to confirm. */}
                         <div className="flex-1 min-w-0">
-                          <span className="type-row font-medium truncate block">{agent.name}</span>
-                          <span className="type-meta text-muted-foreground truncate block">
-                            {agent.role_title || agent.agent_role}
-                          </span>
+                          <span className="type-row font-medium truncate block leading-tight">{agent.name}</span>
+                          {isAgentSelected && (
+                            <span className="type-meta text-muted-foreground truncate block">
+                              {agent.role_title || agent.agent_role}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {agent.ephemeral && !ghost && (
@@ -330,7 +348,7 @@ export function CrewsExplorer({
                         className="h-8 w-8 rounded-lg shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <span className="type-row font-medium truncate block">{agent.name}</span>
+                        <span className="type-row font-medium truncate block leading-tight">{agent.name}</span>
                         <span className="type-meta text-muted-foreground truncate block">
                           {agent.role_title || agent.agent_role}
                         </span>
