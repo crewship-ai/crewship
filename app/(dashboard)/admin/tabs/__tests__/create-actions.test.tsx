@@ -108,3 +108,35 @@ describe("Admin → Users can add one", () => {
     expect(screen.queryByRole("button", { name: /add member|invite/i })).toBeNull()
   })
 })
+
+// Both actions sit in the same slot, in the same kind of card, one tab apart.
+// Shipping one as a filled primary button and the other as an outline made the
+// console look like two products — and the primary was the odd one out:
+// every other card action in Settings and Admin (Refresh, Export CSV, Check
+// again, Save) is the small outline button.
+describe("the two actions look like one product", () => {
+  beforeEach(() => { cleanup(); h.apiFetch.mockReset() })
+
+  function trigger(name: RegExp) {
+    return screen.getByRole("button", { name })
+  }
+
+  it("uses the card-action button in both places", () => {
+    const { unmount } = render(<WorkspacesTab orgs={ORGS} onRefresh={vi.fn()} />)
+    const create = trigger(/create workspace/i).className
+    unmount()
+
+    render(<UsersTab users={USERS} workspaceId="ws-1" onRefresh={vi.fn()} />)
+    const invite = trigger(/add member/i).className
+
+    // Same height and the same outline treatment — not one filled and one not.
+    for (const cls of ["h-7", "border"]) {
+      expect(create, `create workspace should carry ${cls}`).toContain(cls)
+      expect(invite, `add member should carry ${cls}`).toContain(cls)
+    }
+    // Neither is the filled primary: that weight belongs to a page's single
+    // main CTA, not to a row of equal-weight card actions.
+    expect(create).not.toContain("bg-primary")
+    expect(invite).not.toContain("bg-primary")
+  })
+})
