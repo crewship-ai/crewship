@@ -13,6 +13,7 @@ import { Appear, DetailCard } from "@/components/ui/detail"
 import {
   ConfigCards, ConfigPresets, ConfigReadOnly, ConfigSelect, ConfigSwitch, ConfigText,
 } from "../canvas/config-field"
+import { ConfigModel } from "../canvas/config-model"
 import type { AgentRecord } from "./types"
 
 // =============================================================================
@@ -150,7 +151,13 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
             onSave={(v) => patch({ llm_provider: v })}
           />
-          <ConfigText label="Model" mono value={agent.llm_model ?? ""} onSave={(v) => patch({ llm_model: v })} />
+          <ConfigModel
+            label="Model" hint="Only what this provider can actually serve."
+            workspaceId={agent.workspace_id}
+            provider={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
+            value={agent.llm_model ?? ""}
+            onSave={(v) => patch({ llm_model: v })}
+          />
           <ConfigSelect
             label="CLI adapter" hint="What launches the agent inside the container."
             value={agent.cli_adapter}
@@ -203,35 +210,51 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
         </DetailCard>
       </Appear>
 
-      <Appear order={3}>
-        <DetailCard bare icon={CalendarClock} title="Schedule">
-          <ConfigSwitch
-            label="Run on a schedule" checked={agent.schedule_enabled ?? false}
-            onSave={(v) => patch({ schedule_enabled: v })}
-          />
-          <ConfigText
-            label="Cron" mono value={agent.schedule_cron ?? ""} placeholder="0 3 * * *"
-            onSave={(v) => patch({ schedule_cron: v || null })}
-          />
-          <ConfigText
-            label="Prompt for the scheduled run" multiline value={agent.schedule_prompt ?? ""}
-            placeholder="What the agent should do in that run…"
-            onSave={(v) => patch({ schedule_prompt: v || null })}
-          />
-          <ConfigReadOnly
-            label="Next run"
-            value={agent.schedule_next_run ? new Date(agent.schedule_next_run).toLocaleString() : "—"}
-          />
-        </DetailCard>
-      </Appear>
+      {/* Scheduling an agent directly is a second cron alongside routines —
+          internal/scheduler/scheduler.go registers one entry per agent with
+          schedule_enabled=1 and fires it straight through the orchestrator,
+          while routine schedules dedupe at the executor chokepoint. One
+          concept, two mechanisms, two idempotency stories. So this screen no
+          longer offers it: a recurring job is a routine.
+
+          It is NOT simply deleted, because the cron is real and still running.
+          Removing the card outright would leave agents firing on a schedule
+          with nothing in the product that admits it exists. The card appears
+          only when a schedule is actually set, read-only, and its one action
+          is to stop it. */}
+      {(agent.schedule_enabled || agent.schedule_cron) && (
+        <Appear order={3}>
+          <DetailCard
+            bare icon={CalendarClock} title="Scheduled run" tone="warn"
+            subtitle="legacy"
+            footer="Recurring work belongs in Routines, where a run is visible, versioned and replayable. This per-agent schedule predates that and is being retired — move it to a routine and switch it off here."
+          >
+            <ConfigReadOnly label="Cron" value={agent.schedule_cron || "—"} />
+            <ConfigReadOnly
+              label="Next run"
+              value={agent.schedule_next_run ? new Date(agent.schedule_next_run).toLocaleString() : "—"}
+            />
+            {agent.schedule_prompt && (
+              <ConfigReadOnly label="Prompt" value={agent.schedule_prompt} />
+            )}
+            <ConfigSwitch
+              label="Still firing" hint="Turn this off once the work lives in a routine."
+              checked={agent.schedule_enabled ?? false}
+              onSave={(v) => patch({ schedule_enabled: v })}
+            />
+          </DetailCard>
+        </Appear>
+      )}
 
       <Appear order={4}>
         <DetailCard
           bare icon={Webhook} title="Webhook and hooks"
           footer={<>
-            The secret is shown once on rotation — it can never be read back. Rotate it with{" "}
-            <code className="font-mono text-foreground/80">crewship agent webhook {agent.slug}</code>; hooks are
-            listed and toggled with <code className="font-mono text-foreground/80">crewship hooks</code>.
+            An agent has one signing secret, not a list of webhooks — the multi-webhook surface belongs to
+            routines. The secret is shown once on rotation and can never be read back. Rotate it with{" "}
+            <code className="font-mono text-foreground/80">crewship agent rotate-webhook-secret {agent.slug}</code>;
+            hooks are listed and toggled with{" "}
+            <code className="font-mono text-foreground/80">crewship hooks list / enable / disable</code>.
           </>}
         >
           <ConfigReadOnly

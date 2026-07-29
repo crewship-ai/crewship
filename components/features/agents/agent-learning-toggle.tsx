@@ -169,13 +169,24 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = fal
         <div className="flex items-start gap-2.5">
           <Sparkles className={target ? "h-4 w-4 text-success mt-0.5" : "h-4 w-4 text-muted-foreground mt-0.5"} />
           <div>
-            <div className="text-sm font-medium">Self-improving mode</div>
-            <div className="text-xs text-muted-foreground mt-0.5 max-w-xl">
-              When ON, keeper evaluator ALLOW decisions auto-apply (recommended skills flip
-              to active, captured lessons land in <code className="text-[10px]">lessons.md</code>).
-              When OFF, every proposal queues a blocking inbox item for operator approval.
-              DENY + ESCALATE always gate through inbox regardless. Still subordinate to
-              this crew&rsquo;s autonomy level.
+            <div className="type-row font-medium">Self-improving mode</div>
+            <div className="type-meta mt-1 max-w-xl leading-relaxed text-muted-foreground">
+              {/* Says what the flag actually gates. Its only two readers are
+                  keeper_phase2.go (the lesson) and agent_persona.go (the
+                  persona). The previous wording also promised that skills
+                  "flip to active", which no code path does. */}
+              This does not decide whether the agent learns — it decides <b className="font-medium text-foreground">who
+              signs off</b> when it wants to edit its own notes: a lesson captured from a run
+              (<code className="font-mono">lessons.md</code>) or a change to how it describes itself
+              (<code className="font-mono">PERSONA.md</code>).
+              <span className="mt-1 block">
+                <b className="font-medium text-foreground">On</b> — the change is written straight away.{" "}
+                <b className="font-medium text-foreground">Off</b> — it waits for you as a blocking inbox item.
+              </span>
+              <span className="mt-1 block">
+                Anything the evaluator denies or escalates comes to you either way, and this can only
+                tighten the crew&rsquo;s autonomy level, never loosen it.
+              </span>
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
 } from "lucide-react"
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
+import { withReturnTo } from "@/lib/return-to"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
 import { BlockingNotice, NowRunning, ReachStrip, type ReachItem } from "../canvas/detail-blocks"
@@ -95,7 +96,14 @@ export function OverviewTab({
     title: `${i.identifier ? `${i.identifier} ` : ""}${i.title}`,
     subtitle: [i.status?.toLowerCase(), i.priority?.toLowerCase()].filter(Boolean).join(" · "),
     tag: issueBucket(i.status),
-    href: `/orchestration/issues/${encodeURIComponent(i.identifier ?? i.id)}`,
+    // Canonical route (/orchestration/issues/* is a compat redirect), and it
+    // carries where we came from so the issue's back arrow returns to this
+    // agent instead of dumping the reader on the board.
+    href: withReturnTo(
+      `/issues/${encodeURIComponent(i.identifier ?? i.id)}`,
+      `/crews?agent=${encodeURIComponent(agent.slug)}`,
+      agent.name,
+    ),
   }))
 
   const routineItems: DetailCellItem[] = agentPipelines.map((p): DetailCellItem => ({
