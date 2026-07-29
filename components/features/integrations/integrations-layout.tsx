@@ -190,15 +190,13 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   // their destinations redacted and their actions off.
   const [includeEveryone, setIncludeEveryone] = React.useState(false)
 
-  // Read once, on mount: which tab and section the URL asked for. Held in
-  // state rather than re-read per render so the sync effect below (which
-  // rewrites that same URL) cannot feed itself.
-  const [initialRoute] = React.useState(() =>
-    initialIntegrationsRoute(typeof window === "undefined" ? "" : window.location.search),
-  )
-
-  const [tab, setTab] = React.useState<IntegrationsTab>(initialRoute.tab)
-  const [notifySection, setNotifySection] = React.useState<NotifySection>(initialRoute.notifySection)
+  // This page is statically prerendered, so the first render must not read
+  // the URL: the served HTML was built without one, and a client that renders
+  // a different tab from it is a hydration mismatch. The URL is applied in a
+  // layout effect instead — before paint, so a deep link still opens on the
+  // section it named rather than flashing the default.
+  const [tab, setTab] = React.useState<IntegrationsTab>("notifications")
+  const [notifySection, setNotifySection] = React.useState<NotifySection>("connections")
   // Which item the left panel has open — a connection, or a tool account.
   // Selecting one takes over the main column, exactly as picking a routine
   // does on /routines.
@@ -213,7 +211,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   // Tools tab: which of Composio's six views is showing, and the facets that
   // narrow it. Held here because the left panel renders them and the main
   // column obeys them — the same split every other tab already uses.
-  const [mcpSection, setMcpSection] = React.useState<TabKey>(initialRoute.mcpSection)
+  const [mcpSection, setMcpSection] = React.useState<TabKey>("accounts")
   const [mcpFilters, setMcpFilters] = React.useState<McpFilters>(EMPTY_MCP_FILTERS)
   const [apiKeyOpen, setApiKeyOpen] = React.useState(false)
   const [composioStatus, setComposioStatus] = React.useState<ComposioStatus>({
@@ -228,11 +226,27 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     bindings: {},
   })
 
+  // Apply the incoming ?tab=&section= once, before paint.
+  React.useLayoutEffect(() => {
+    const r = initialIntegrationsRoute(window.location.search)
+    setTab(r.tab)
+    setNotifySection(r.notifySection)
+    setMcpSection(r.mcpSection)
+  }, [])
+
   // Keep the URL naming what is on screen, so any view here can be linked to —
   // by /settings' retired tabs, by the docs, by a colleague pasting "look at
   // Deliveries". replaceState, not a route push: this is the same page.
+  //
+  // Skips its first run: that one fires with the pre-URL defaults still in
+  // state and would overwrite the very link the layout effect just read.
+  const urlSynced = React.useRef(false)
   React.useEffect(() => {
     if (typeof window === "undefined") return
+    if (!urlSynced.current) {
+      urlSynced.current = true
+      return
+    }
     const url = new URL(window.location.href)
     url.searchParams.set("tab", tab)
     url.searchParams.set("section", tab === "notifications" ? notifySection : mcpSection)
