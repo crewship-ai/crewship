@@ -174,12 +174,13 @@ export default function AdminPage() {
     }
   }, [wsLoading, role, router])
 
-  useEffect(() => {
+  // Lifted out of the effect so an action on a tab (creating a workspace,
+  // adding a member) can ask for the same refresh the page does on mount —
+  // a list that does not catch up after a create reads as a failed create.
+  const fetchData = useCallback(async () => {
     if (!workspaceId || !isAdmin) return
-
-    let cancelled = false
-
-    async function fetchData() {
+    const cancelled = false
+    {
       setLoading(true)
       try {
         const [
@@ -231,10 +232,11 @@ export default function AdminPage() {
         if (!cancelled) setLoading(false)
       }
     }
+  }, [workspaceId, isAdmin])
 
-    fetchData()
-    return () => { cancelled = true }
-  }, [workspaceId, role])
+  useEffect(() => {
+    void fetchData()
+  }, [fetchData])
 
   const fetchKeeperData = useCallback(async () => {
     setKeeperLoading(true)
@@ -296,11 +298,11 @@ export default function AdminPage() {
     }
 
     if (tab === "workspaces") {
-      return <WorkspacesTab orgs={orgs} />
+      return <WorkspacesTab orgs={orgs} onRefresh={fetchData} />
     }
 
     if (tab === "users") {
-      return <UsersTab users={users} />
+      return <UsersTab users={users} workspaceId={workspaceId} onRefresh={fetchData} />
     }
 
     if (tab === "providers") {

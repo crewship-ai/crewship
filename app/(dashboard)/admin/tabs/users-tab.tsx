@@ -1,13 +1,19 @@
 import React from "react"
 import { Badge } from "@/components/ui/badge"
 import { SettingsCard } from "@/components/features/settings/shared"
+import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import type { AdminUser } from "../types"
 
 interface UsersTabProps {
   users: AdminUser[]
+  /** The workspace a new member would be added to. Null while it is still
+   *  resolving — there is nothing to invite INTO yet, and a button that can
+   *  only fail is worse than no button. */
+  workspaceId: string | null
+  onRefresh: () => void
 }
 
-export const UsersTab = React.memo(function UsersTab({ users }: UsersTabProps) {
+export const UsersTab = React.memo(function UsersTab({ users, workspaceId, onRefresh }: UsersTabProps) {
   return (
     <SettingsCard
       title="All users"
@@ -15,6 +21,14 @@ export const UsersTab = React.memo(function UsersTab({ users }: UsersTabProps) {
         users.length === 0
           ? "No users"
           : `${users.length} user${users.length === 1 ? "" : "s"} across all workspaces`
+      }
+      actions={
+        // The same dialog Settings → Members opens, provisioning included:
+        // a second "add a person" form would have to re-derive the invite
+        // link and the role rules, and would drift from the first one.
+        workspaceId ? (
+          <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} />
+        ) : undefined
       }
     >
       {users.length === 0 ? (
