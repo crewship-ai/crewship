@@ -346,7 +346,7 @@ export function AgentCanvas({
             />
           </button>
           <h1 className="type-title leading-none">{agent.name}</h1>
-          <span className="type-meta font-mono text-muted-foreground">{agent.slug}</span>
+          <span className="type-row font-mono text-muted-foreground">{agent.slug}</span>
 
           <div className="ml-auto flex items-center gap-2">
             <Button asChild variant="soft" size="sm">
@@ -430,7 +430,11 @@ export function AgentCanvas({
               ephemeral{ttl && ` · ${ttl}`}
             </Pill>
           )}
-          <span className="type-meta flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-muted-foreground">
+          {/* Role · crew · model is the first thing read after the name, so it
+              takes the row role rather than the caption one. type-meta is for
+              a timestamp in the corner of a card, not for the line that says
+              what this agent IS. */}
+          <span className="type-row flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-muted-foreground">
             {agent.role_title && <span>{agent.role_title}</span>}
             {agent.crew && (
               <>

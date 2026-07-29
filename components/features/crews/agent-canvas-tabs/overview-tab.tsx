@@ -225,14 +225,15 @@ export function OverviewTab({
         />
       )}
 
-      {/* Column counts that DIVIDE the six cells: 1 → 2 → 3 → 6.
-          auto-fit was more elegant and produced five tracks at a 1479px pane,
-          which left Sessions stranded alone on a second row while four cells
-          shared the first. Fitting as many as possible is the wrong goal when
-          the count is known and small; landing on an even split is the right
-          one, so a row is never one card and a gap.
+      {/* Two rows by MEANING, not by whatever the arithmetic allows.
+          Row one is what the agent is holding — issues, routines, triggers,
+          credentials. Row two is what it has been up to — runs on its own,
+          sessions with a person. Letting all six flow into one line at wide
+          widths made the grid look tidier and read worse: two unrelated
+          questions in one stripe. Runs and Sessions stay a pair at every size,
+          and get half the pane each, which lists deserve more than a sixth.
           Thresholds are container sizes — this pane, not the window. */}
-      <div className="grid gap-3.5 @xl:grid-cols-2 @4xl:grid-cols-3 @9xl:grid-cols-6">
+      <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-4">
         <DetailCell
           order={0}
           title="Issues"
@@ -283,7 +284,14 @@ export function OverviewTab({
           footerLabel="Open vault"
           footerHref="/credentials"
         />
+      </div>
 
+      {/* Sessions was PROMOTED out of the chip row, not added: it was already
+          there as a bubble with a drawer, and one concept in two places is the
+          thing this screen keeps getting punished for. Both cells read runs
+          and chats the canvas already fetched, so the pair costs no extra
+          request — which matters on a screen already spending 11 per click. */}
+      <div className="grid gap-3.5 @xl:grid-cols-2">
         <DetailCell
           order={4}
           title="Runs"
@@ -298,14 +306,6 @@ export function OverviewTab({
           footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
         />
 
-        {/* Beside Runs, and deliberately so: Runs is what this agent did on its
-            own, Sessions is what it did with a person. The same question —
-            "what has it been up to" — answered from both sides, and on a wide
-            pane they sit on one line instead of leaving half the row empty.
-            Promoted out of the chip row rather than added: it was already
-            there as a bubble, and one concept in two places is the thing this
-            screen keeps getting punished for. Both cells read data the canvas
-            already fetched, so the pair costs no extra request. */}
         <DetailCell
           order={5}
           title="Sessions"
@@ -327,7 +327,7 @@ export function OverviewTab({
 
         {peerMessages.length > 0 && (
           <DetailCell
-              order={6}
+            order={6}
             title="From peers"
             count={peerMessages.length}
             filters={[{ id: "all", label: "All" }]}
