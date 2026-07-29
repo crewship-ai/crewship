@@ -5,8 +5,8 @@ import Link from "next/link"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ArrowUpRight, Bot, Brain, CheckCircle2, Clock, FolderTree, History, MessageSquare,
-  MoreHorizontal, RotateCcw, Sparkles, Square, Trash2,
+  ArrowUpRight, Bot, CheckCircle2, Clock, FolderTree, MessageSquare,
+  MoreHorizontal, RotateCcw, Square, Trash2,
 } from "lucide-react"
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
@@ -22,6 +22,7 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import { Pill } from "@/components/ui/detail"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
@@ -511,7 +512,7 @@ export function AgentCanvas({
           onOpenConfig={() => setTab("config")}
           extraReach={[
             {
-              id: "memory", icon: Brain, label: "Memory", tone: "gold", wide: true, group: "Can do",
+              id: "memory", icon: CONCEPT_ICON.memory, label: "Memory", tone: "gold", wide: true, group: "Can do",
               value: agent.memory_enabled ? "on" : "off",
               render: () => (
                 <MemoryTab
@@ -523,7 +524,7 @@ export function AgentCanvas({
               ),
             },
             {
-              id: "skillsmgr", icon: Sparkles, label: "Manage skills", tone: "purple", wide: true, group: "Can do",
+              id: "skillsmgr", icon: CONCEPT_ICON.skills, label: "Manage skills", tone: "purple", wide: true, group: "Can do",
               value: String(agent._count?.skills ?? 0),
               render: () => (
                 <SkillsTab
@@ -537,14 +538,14 @@ export function AgentCanvas({
               ),
             },
             {
-              id: "workspace", icon: FolderTree, label: "Workspace", tone: "notice", wide: true, group: "History",
+              id: "workspace", icon: CONCEPT_ICON.workspace, label: "Workspace", tone: "notice", wide: true, group: "History",
               value: "files",
               render: () => (
                 <WorkspaceTab agentId={agent.id} agentSlug={agent.slug} onOpenFiles={onOpenFiles} />
               ),
             },
             {
-              id: "activity", icon: History, label: "Activity", tone: "notice", wide: true, group: "History",
+              id: "activity", icon: CONCEPT_ICON.activity, label: "Activity", tone: "notice", wide: true, group: "History",
               value: "all",
               render: () => <ActivityTab workspaceId={workspaceId} agentId={agent.id} />,
             },

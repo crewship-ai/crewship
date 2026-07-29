@@ -2,24 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  LayoutDashboard,
-  Key,
-  Plug,
-  Zap,
-  Settings,
-  Activity,
-  Store,
-  ShieldCheck,
-  PanelLeftClose,
-  Pin,
-  MousePointer2,
-  Users,
-  BookOpen,
-  ScrollText,
-  CircleDot,
-  Inbox,
-} from "lucide-react"
+import { PanelLeftClose, Pin, MousePointer2 } from "lucide-react"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -40,38 +24,46 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 
+/**
+ * The rail's icons ARE the product's icons — every other surface used to pick
+ * again from memory, so the same concept wore a different face per screen.
+ * They now come from lib/concept-icons, and NAV_ICONS is re-exported so that
+ * map can assert the two never drift (lib/__tests__/concept-icons.test.ts).
+ */
+export const NAV_ICONS = CONCEPT_ICON
+
 const navSections = [
   {
     label: "Plan",
     items: [
-      { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Inbox", href: "/inbox", icon: Inbox },
-      { title: "Issues", href: "/issues", icon: CircleDot },
-      { title: "Routines", href: "/routines", icon: ScrollText },
+      { title: "Dashboard", href: "/", icon: CONCEPT_ICON.dashboard },
+      { title: "Inbox", href: "/inbox", icon: CONCEPT_ICON.inbox },
+      { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
+      { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
     ],
   },
   {
     label: "Run",
     items: [
-      { title: "Activity", href: "/activity", icon: Activity },
-      { title: "Journal", href: "/journal", icon: BookOpen },
+      { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
+      { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal },
     ],
   },
   {
     label: "Build",
     items: [
-      { title: "Crews", href: "/crews", icon: Users },
-      { title: "Skills", href: "/skills", icon: Zap },
-      { title: "Credentials", href: "/credentials", icon: Key },
-      { title: "Integrations", href: "/integrations", icon: Plug },
+      { title: "Crews", href: "/crews", icon: CONCEPT_ICON.crews },
+      { title: "Skills", href: "/skills", icon: CONCEPT_ICON.skills },
+      { title: "Credentials", href: "/credentials", icon: CONCEPT_ICON.credentials },
+      { title: "Integrations", href: "/integrations", icon: CONCEPT_ICON.integrations },
     ],
   },
   {
     label: "System",
     items: [
-      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
-      { title: "Settings", href: "/settings", icon: Settings },
-      { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "ADMIN" as const },
+      { title: "Marketplace", href: "/marketplace", icon: CONCEPT_ICON.marketplace, badge: "FUTURE" as const },
+      { title: "Settings", href: "/settings", icon: CONCEPT_ICON.settings },
+      { title: "Admin", href: "/admin", icon: CONCEPT_ICON.admin, badge: "ADMIN" as const },
     ],
   },
 ]

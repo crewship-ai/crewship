@@ -58,6 +58,8 @@ export interface DetailCellFilter {
 
 export interface DetailCellProps {
   title: string
+  /** The concept's icon — take it from lib/concept-icons, never pick one. */
+  icon?: LucideIcon
   count?: number | string
   /** Renders the count in the warn tone — something in here needs attention. */
   warn?: boolean
@@ -77,7 +79,7 @@ export interface DetailCellProps {
 const ALL = (filters: DetailCellFilter[]) => filters[0]?.id ?? "all"
 
 export function DetailCell({
-  title, count, warn = false, filters, items, tall = false,
+  title, icon, count, warn = false, filters, items, tall = false,
   footerLabel, footerHref, footerOnClick, className, order = 0,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
@@ -108,6 +110,7 @@ export function DetailCell({
     <Appear order={order} reflow className={cn("flex min-w-0", className)}>
     <DetailCard
       title={title}
+      icon={icon}
       subtitle={String(count ?? items.length)}
       bare
       tone={warn ? "warn" : "default"}

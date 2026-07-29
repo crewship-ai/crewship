@@ -2,11 +2,11 @@
 
 import { useMemo } from "react"
 import {
-  AtSign, Bell, Bot, CalendarClock, Check, CircleDot, KeyRound, MessageSquare,
-  Play, Share2, Sparkles, Webhook, Workflow, Wrench, XCircle,
+  AtSign, Bot, CalendarClock, Check, MessageSquare, Play, Share2, Webhook, Workflow, XCircle,
 } from "lucide-react"
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { withReturnTo } from "@/lib/return-to"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
@@ -91,7 +91,7 @@ export function OverviewTab({
 
   const issueItems: DetailCellItem[] = issues.map((i): DetailCellItem => ({
     id: i.id,
-    icon: issueBucket(i.status) === "done" ? Check : CircleDot,
+    icon: issueBucket(i.status) === "done" ? Check : CONCEPT_ICON.issues,
     tone: ISSUE_TONE[(i.status ?? "").toUpperCase()] ?? "muted",
     title: `${i.identifier ? `${i.identifier} ` : ""}${i.title}`,
     subtitle: [i.status?.toLowerCase(), i.priority?.toLowerCase()].filter(Boolean).join(" · "),
@@ -108,7 +108,7 @@ export function OverviewTab({
 
   const routineItems: DetailCellItem[] = agentPipelines.map((p): DetailCellItem => ({
     id: p.id,
-    icon: Workflow,
+    icon: CONCEPT_ICON.routines,
     tone: "purple",
     title: p.name ?? p.slug,
     subtitle: p.slug,
@@ -130,7 +130,7 @@ export function OverviewTab({
 
   const credItems: DetailCellItem[] = credentials.map((c): DetailCellItem => ({
     id: c.id,
-    icon: KeyRound,
+    icon: CONCEPT_ICON.credentials,
     tone: c.credential_status === "ACTIVE" ? "gold" : "warn",
     title: c.credential_name,
     subtitle: `${c.credential_provider?.toLowerCase() ?? "custom"} · ${c.env_var_name}`,
@@ -151,14 +151,15 @@ export function OverviewTab({
 
   const reach: ReachItem[] = [
     {
-      id: "skills", icon: Sparkles, label: "Skills", tone: "purple", group: "Can do",
+      id: "skills", icon: CONCEPT_ICON.skills, label: "Skills", tone: "purple", group: "Can do",
       value: `${skills.filter((s) => s.enabled).length} / ${skills.length}`,
       cell: {
         title: "Skills",
+        icon: CONCEPT_ICON.skills,
         count: skills.length,
         filters: [{ id: "all", label: "All" }, { id: "on", label: "Enabled" }, { id: "off", label: "Disabled" }],
         items: skills.map((s): DetailCellItem => ({
-          id: s.id, icon: Sparkles, tone: s.enabled ? "purple" : "muted",
+          id: s.id, icon: CONCEPT_ICON.skills, tone: s.enabled ? "purple" : "muted",
           title: s.skill.display_name ?? s.skill.name,
           subtitle: s.skill.description ?? s.skill.slug,
           meta: s.enabled ? "enabled" : "disabled",
@@ -168,13 +169,14 @@ export function OverviewTab({
       },
     },
     {
-      id: "tools", icon: Wrench, label: "Tools", tone: "notice", group: "Can do", value: String(toolkits.length),
+      id: "tools", icon: CONCEPT_ICON.tools, label: "Tools", tone: "notice", group: "Can do", value: String(toolkits.length),
       cell: {
         title: "Tools and connectors",
+        icon: CONCEPT_ICON.tools,
         count: toolkits.length,
         filters: [{ id: "all", label: "All" }],
         items: toolkits.map((t, idx): DetailCellItem => ({
-          id: `${t.toolkit || idx}`, icon: Wrench, tone: "notice",
+          id: `${t.toolkit || idx}`, icon: CONCEPT_ICON.tools, tone: "notice",
           title: t.toolkit || "connector",
           subtitle: t.tools?.length ? `Composio · ${t.tools.length} tools` : `Composio · ${t.mode}`,
           tag: "all",
@@ -183,14 +185,15 @@ export function OverviewTab({
       },
     },
     {
-      id: "channels", icon: Bell, label: "Channels", tone: "purple", group: "Reports to",
+      id: "channels", icon: CONCEPT_ICON.channels, label: "Channels", tone: "purple", group: "Reports to",
       value: String(channels.filter((c) => c.enabled).length),
       cell: {
         title: "Channels",
+        icon: CONCEPT_ICON.channels,
         count: channels.length,
         filters: [{ id: "all", label: "All" }, { id: "on", label: "Active" }],
         items: channels.map((c): DetailCellItem => ({
-          id: c.id, icon: Bell, tone: c.enabled ? "purple" : "muted",
+          id: c.id, icon: CONCEPT_ICON.channels, tone: c.enabled ? "purple" : "muted",
           title: c.provider ?? c.type, subtitle: c.type,
           meta: c.enabled ? "active" : "off",
           tag: c.enabled ? "on" : "all", dimmed: !c.enabled,
@@ -237,6 +240,7 @@ export function OverviewTab({
         <DetailCell
           order={0}
           title="Issues"
+          icon={CONCEPT_ICON.issues}
           count={issues.length}
           filters={[
             { id: "all", label: "All" },
@@ -251,6 +255,7 @@ export function OverviewTab({
         <DetailCell
           order={1}
           title="Routines"
+          icon={CONCEPT_ICON.routines}
           count={agentPipelines.length}
           filters={[{ id: "all", label: "All" }]}
           items={routineItems}
@@ -260,6 +265,7 @@ export function OverviewTab({
         <DetailCell
           order={2}
           title="Triggers"
+          icon={CONCEPT_ICON.triggers}
           count={triggers.length}
           filters={[
             { id: "all", label: "All" },
@@ -273,6 +279,7 @@ export function OverviewTab({
         <DetailCell
           order={3}
           title="Credentials"
+          icon={CONCEPT_ICON.credentials}
           count={credentials.length}
           warn={credentials.some((c) => c.credential_status !== "ACTIVE")}
           filters={[
@@ -295,6 +302,7 @@ export function OverviewTab({
         <DetailCell
           order={4}
           title="Runs"
+          icon={CONCEPT_ICON.runs}
           count={runs?.length ?? 0}
           filters={[
             { id: "all", label: "All" },
@@ -309,6 +317,7 @@ export function OverviewTab({
         <DetailCell
           order={5}
           title="Sessions"
+          icon={CONCEPT_ICON.sessions}
           count={chats?.length ?? 0}
           filters={[{ id: "all", label: "All" }]}
           items={(chats ?? []).map((c): DetailCellItem => ({
@@ -329,6 +338,7 @@ export function OverviewTab({
           <DetailCell
             order={6}
             title="From peers"
+            icon={CONCEPT_ICON.peers}
             count={peerMessages.length}
             filters={[{ id: "all", label: "All" }]}
             items={peerMessages.map((m, idx): DetailCellItem => ({

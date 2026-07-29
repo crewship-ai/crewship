@@ -7,7 +7,6 @@ import { SystemPromptEditor } from "@/components/features/crews/system-prompt-ed
 
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
-import { Button } from "@/components/ui/button"
 import { Appear, DetailCard } from "@/components/ui/detail"
 import { AGENT_EXTERNAL_TRIGGERS, AGENT_SELF_LEARNING } from "@/lib/feature-gates"
 
