@@ -1,6 +1,7 @@
 import {
-  Activity, AtSign, BookOpen, Brain, CircleDot, FolderTree, Inbox, Key, LayoutDashboard,
-  MessageSquare, Play, Plug, ScrollText, Settings, ShieldCheck, Store, Users, Zap,
+  Activity, AtSign, Bell, BookOpen, Brain, CircleDot, FolderTree, Inbox, Key,
+  LayoutDashboard, MessageSquare, Play, Plug, ScrollText, Settings, ShieldCheck,
+  Store, Users, Zap,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -46,8 +47,11 @@ export const CONCEPT_ICON = {
   sessions: MessageSquare,
   /** Messages from other agents. Opens the inbox. */
   peers: AtSign,
-  /** Where notifications go out. */
-  channels: Inbox,
+  /** Where notifications go OUT. Bell, not Inbox: the app already uses Bell
+   *  for notifications (notification-bell.tsx), and Inbox is the opposite
+   *  direction — what arrives for you. One icon for both directions would be
+   *  worse than the inconsistency this file exists to fix. */
+  channels: Bell,
   /** What the agent remembers between sessions. */
   memory: Brain,
   /** The agent's files. */
