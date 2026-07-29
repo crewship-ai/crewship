@@ -1,233 +1,234 @@
 "use client"
 
 import { useState } from "react"
-import { Search } from "lucide-react"
+import {
+  AlertTriangle, Check, CircleDot, Clock, Gauge, ListTodo, Shield,
+  ShieldCheck, UserCog, X,
+} from "lucide-react"
 
-import { DetailCard } from "@/components/ui/detail"
-import { CONCEPT_ICON } from "@/lib/concept-icons"
+import { DetailCard, Pill } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 
 // =============================================================================
 // /design — a live wireframe bench, not a product screen.
 //
-// It exists because layout arguments cannot be settled in prose. Every variant
-// renders with the real kit (components/ui/detail), the real type roles and the
-// real icon map, so whatever gets picked here is already implementable — there
-// is no translation step between the mock and the screen.
+// Renders with the real kit and the real type roles, so whatever is picked here
+// is already implementable. Unlinked from the sidebar; delete before merge.
 //
-// Deliberately unlinked from the sidebar: reachable by typing /design, invisible
-// to anyone not looking for it. Delete before this branch merges.
+// ── the question on the bench: the Keeper admin screens ─────────────────────
 //
-// ── the question on the bench right now ──────────────────────────────────────
+// Measured on dev3 (2026-07-29), not guessed:
 //
-// The overview has 6 cards AND a row of 7 chips, each chip opening a drawer from
-// the right. The drawers are not one thing: three hold a list (literally the
-// same DetailCell the grid uses, 420px) and four hold an entire tab component
-// (760px). That is the width inconsistency — a symptom, not a styling slip.
+//   crewship keeper status
+//     Status:       enabled
+//     Ollama URL:   http://127.0.0.1:11434
+//     Model:        qwen2.5:7b
+//     Ollama:       offline          ← the judge has no brain
+//     Gov model:    — (server default)
+//     Watchdog:     disabled
+//   crewship keeper requests → (no results)   ← nothing ever evaluated
 //
-// Of the seven chips:
-//   Skills / Tools / Channels   lists. They belong in the grid.
-//   Manage skills               the same concept as Skills.
-//   Workspace                   the header already has a Files button.
-//   Activity                    the header already has a Journal link.
-//   Memory                      persona + crew settings — that is Configuration.
+// The capability is all there and the CLI drives it fine: provider is
+// ollama | anthropic | openai_compat, the endpoint (IP:port) and the API key
+// both come from vault credentials, and with no judge the gatekeeper denies at
+// risk 10 rather than failing open. Setting it to anthropic/claude-haiku-4-5
+// worked first try.
 //
-// So six of the seven carry nothing of their own.
+// What is wrong is the screen. Today:
+//
+//   Admin → Keeper          status rows + 4 KPI cards + the whole 752-line
+//                           governance form + recent requests + live activity
+//   Admin → Keeper reviews  the pending-review queue, on its own
+//
+// Two nav entries for one subject, and on the first one the single most
+// important fact — "the judge is offline, so everything denies" — is a grey
+// status row between an Ollama URL you cannot edit there and a counter.
 // =============================================================================
 
-type CellSpec = {
-  key: keyof typeof CONCEPT_ICON
-  title: string
-  count: string
-  filters: string[]
-  rows: [string, string][]
-  footer: string
-  empty?: string
+const JUDGE_OFFLINE = {
+  provider: "ollama",
+  model: "qwen2.5:7b",
+  endpoint: "http://127.0.0.1:11434",
+  reachable: false,
 }
 
-const HOLDS: CellSpec[] = [
-  {
-    key: "issues", title: "Issues", count: "2", filters: ["All", "Running", "Todo", "Done"],
-    rows: [["ENG-2 Rewrite the Harborlight README", "backlog · medium"],
-           ["ENG-3 Create a directory tree", "backlog · high"]],
-    footer: "Open filtered by casey",
-  },
-  {
-    key: "routines", title: "Routines", count: "0", filters: ["All"], rows: [],
-    footer: "Open routines", empty: "Nothing matches this filter.",
-  },
-  {
-    key: "triggers", title: "Triggers", count: "1", filters: ["All", "Automatic", "Manual"],
-    rows: [["Manually from chat or CLI", "crewship agent run casey"]],
-    footer: "Configure triggers",
-  },
-  {
-    key: "credentials", title: "Credentials", count: "3", filters: ["All", "Active", "Pending"],
-    rows: [["CLAUDE_CODE_OAUTH_TOKEN", "anthropic"], ["GH_TOKEN", "github"], ["github-acme", "github"]],
-    footer: "Open vault",
-  },
-]
+const JUDGE_ONLINE = {
+  provider: "anthropic",
+  model: "claude-haiku-4-5",
+  endpoint: "vault: ANTHROPIC_API_KEY",
+  reachable: true,
+}
 
-const CAN_DO: CellSpec[] = [
-  {
-    key: "skills", title: "Skills", count: "3 / 3", filters: ["All", "Enabled", "Disabled"],
-    rows: [["incident-triage", "enabled"], ["pr-review", "enabled"], ["script-runner", "enabled"]],
-    footer: "Manage skills",
-  },
-  {
-    key: "tools", title: "Tools", count: "0", filters: ["All"], rows: [],
-    footer: "Manage connectors", empty: "No connector bound.",
-  },
-  {
-    key: "channels", title: "Channels", count: "0", filters: ["All", "Active"], rows: [],
-    footer: "Manage channels", empty: "Nothing to report to.",
-  },
-]
-
-const DID: CellSpec[] = [
-  {
-    key: "runs", title: "Runs", count: "1", filters: ["All", "Errors only", "Running"],
-    rows: [["USER run", "completed"]],
-    footer: "Open in Journal",
-  },
-  {
-    key: "sessions", title: "Sessions", count: "7", filters: ["All"],
-    rows: [["Pipeline pln_cms3qu7ij · step extract", "2 messages"],
-           ["Pipeline pln_cms3qu7ij · step extract", "0 messages"]],
-    footer: "Open chat",
-  },
-]
-
-function Cell({ spec }: { spec: CellSpec }) {
-  const Icon = CONCEPT_ICON[spec.key]
+function Row({
+  label, hint, children, tone,
+}: { label: string; hint?: string; children: React.ReactNode; tone?: "warn" }) {
   return (
-    <DetailCard
-      bare
-      icon={Icon}
-      title={spec.title}
-      subtitle={spec.count}
-      className="flex w-full flex-col"
-      action={
-        <span className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground-soft">
-          <Search className="h-3.5 w-3.5" />
-        </span>
-      }
-    >
-      <div className="flex gap-1 border-b border-hairline px-4 py-2">
-        {spec.filters.map((f, i) => (
-          <span
-            key={f}
-            className={cn(
-              "type-meta shrink-0 rounded-full px-2.5 py-1 font-medium",
-              i === 0 ? "bg-primary/20 text-primary" : "text-muted-foreground",
-            )}
-          >
-            {f}
-          </span>
-        ))}
+    <div className="grid min-h-[38px] grid-cols-1 items-center gap-3.5 border-b border-border px-3 py-1.5 last:border-b-0 md:grid-cols-[minmax(0,1fr)_248px]">
+      <div className="min-w-0">
+        <span className={cn("type-row block font-medium", tone === "warn" && "text-warn")}>{label}</span>
+        {hint && <span className="type-meta mt-0.5 block leading-snug text-muted-foreground-soft">{hint}</span>}
       </div>
-      <div className="min-h-[92px] divide-y divide-border/40">
-        {spec.rows.length === 0 ? (
-          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">{spec.empty}</p>
-        ) : (
-          spec.rows.map(([title, sub], i) => (
-            <div key={i} className="flex items-start gap-2.5 px-4 py-2">
-              <span className="mt-px grid h-5 w-5 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-                <Icon className="h-3 w-3" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="type-row block truncate text-foreground">{title}</span>
-                <span className="type-meta block truncate font-mono text-muted-foreground">{sub}</span>
+      <div className="flex min-w-0 items-center gap-2">{children}</div>
+    </div>
+  )
+}
+
+const Val = ({ children, mono }: { children: React.ReactNode; mono?: boolean }) => (
+  <span className={cn("type-row truncate", mono && "font-mono")}>{children}</span>
+)
+
+/* ── band 1: can it judge at all ──────────────────────────────────────────── */
+function CanItJudge({ judge }: { judge: typeof JUDGE_OFFLINE }) {
+  return (
+    <div className="space-y-3.5">
+      {!judge.reachable && (
+        <DetailCard tone="warn" className="bg-warn/[.06]">
+          <div className="flex flex-wrap items-center gap-3">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-warn" />
+            <div className="type-row min-w-0 flex-1 basis-72 leading-snug">
+              <b className="font-semibold">The judge is unreachable, so the Keeper is denying everything.</b>{" "}
+              {judge.model} at {judge.endpoint} did not answer. Access requests fall through to
+              DENY at risk 10 — safe, but nothing is being evaluated.
+              <span className="type-meta mt-0.5 block text-muted-foreground">
+                This is the state dev3 has been in. It was a grey status row.
               </span>
             </div>
-          ))
-        )}
-      </div>
-      <div className="type-meta mt-auto flex items-center gap-2 border-t border-hairline px-4 py-2 text-muted-foreground-soft">
-        <span>{spec.rows.length} items</span>
-        <span className="ml-auto text-primary">{spec.footer} ↗</span>
-      </div>
-    </DetailCard>
-  )
-}
+          </div>
+        </DetailCard>
+      )}
 
-function RowLabel({ children, note }: { children: string; note: string }) {
-  return (
-    <div className="mb-2 flex items-baseline gap-2">
-      <span className="type-section text-foreground/70">{children}</span>
-      <span className="type-meta text-muted-foreground-soft">{note}</span>
+      <div className="grid gap-3.5 @xl:grid-cols-2">
+        <DetailCard bare icon={Shield} title="Watchdog" subtitle="this workspace">
+          <Row label="Enabled" hint="Off by default — opt in per workspace.">
+            <Pill tone="default">off</Pill>
+          </Row>
+          <Row label="Security contact" hint="Must be an OWNER or ADMIN of this workspace.">
+            <Val>— (MANAGER fanout)</Val>
+          </Row>
+          <Row label="Second approver" hint="A human must co-sign an ALLOW.">
+            <Pill tone="default">off</Pill>
+          </Row>
+        </DetailCard>
+
+        <DetailCard
+          bare
+          icon={judge.reachable ? ShieldCheck : AlertTriangle}
+          title="The judge"
+          subtitle={judge.reachable ? "reachable" : "unreachable"}
+          tone={judge.reachable ? "success" : "warn"}
+          footer="Endpoint and API key both come from vault credentials, so the IP:port of a local Ollama is a credential, not a config file."
+        >
+          <Row label="Provider">
+            <Val>{judge.provider}</Val>
+          </Row>
+          <Row label="Model">
+            <Val mono>{judge.model}</Val>
+          </Row>
+          <Row label="Endpoint" hint="ENDPOINT_URL credential, or the server default.">
+            <Val mono>{judge.endpoint}</Val>
+          </Row>
+          <Row label="Answering" tone={judge.reachable ? undefined : "warn"}>
+            {judge.reachable
+              ? <Pill tone="success"><Check className="h-3 w-3" />yes</Pill>
+              : <Pill tone="warn"><X className="h-3 w-3" />no</Pill>}
+          </Row>
+        </DetailCard>
+      </div>
     </div>
   )
 }
 
-/* ── Variant A — three rows, no chips, no drawer ─────────────────────────── */
-function VariantA({ labelled }: { labelled: boolean }) {
+/* ── band 2: what it decides ──────────────────────────────────────────────── */
+function WhatItDecides() {
   return (
-    <div className="space-y-5">
-      <div>
-        {labelled && <RowLabel note="the work it is carrying">What it holds</RowLabel>}
-        <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-4">
-          {HOLDS.map((c) => <Cell key={c.key} spec={c} />)}
-        </div>
-      </div>
-      <div>
-        {labelled && <RowLabel note="its abilities and where it reports">What it can do</RowLabel>}
-        <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-3">
-          {CAN_DO.map((c) => <Cell key={c.key} spec={c} />)}
-        </div>
-      </div>
-      <div>
-        {labelled && <RowLabel note="on its own, and with you">What it has been up to</RowLabel>}
-        <div className="grid gap-3.5 @xl:grid-cols-2">
-          {DID.map((c) => <Cell key={c.key} spec={c} />)}
-        </div>
-      </div>
+    <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-3">
+      <DetailCard bare icon={Gauge} title="Thresholds">
+        <Row label="Notify on DENY at risk ≥" hint="1–10.">
+          <Val>7</Val>
+        </Row>
+        <Row label="Auto-issue leases" hint="Grants expire instead of standing forever.">
+          <Pill tone="default">off</Pill>
+        </Row>
+        <Row label="Lease TTL">
+          <Val>—</Val>
+        </Row>
+      </DetailCard>
+
+      <DetailCard bare icon={ListTodo} title="Watch rules" subtitle="presets + custom">
+        <Row label="Presets"><Val>3 of 7 on</Val></Row>
+        <Row label="Custom rules"><Val>2</Val></Row>
+        <Row label="Applies to"><Val>every agent in the workspace</Val></Row>
+      </DetailCard>
+
+      <DetailCard
+        bare icon={UserCog} title="Who hears about it"
+        footer="Verified in internal/api/keeper_governance.go: the contact must hold OWNER or ADMIN, and the MANAGER fanout stays as a fallback so a missing contact never means nobody."
+      >
+        <Row label="Security contact"><Val>— not set</Val></Row>
+        <Row label="Falls back to"><Val>MANAGER fanout</Val></Row>
+        <Row label="Delivered as"><Val>blocking inbox item</Val></Row>
+      </DetailCard>
     </div>
   )
 }
 
-/* ── Variant B — one flat grid ───────────────────────────────────────────── */
-function VariantB() {
+/* ── band 3: what it has decided ─────────────────────────────────────────── */
+function WhatItDecided({ merged }: { merged: boolean }) {
   return (
-    <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-3 @9xl:grid-cols-4">
-      {[...HOLDS, ...CAN_DO, ...DID].map((c) => <Cell key={c.key} spec={c} />)}
+    <div className="space-y-3.5">
+      {merged && (
+        <DetailCard
+          bare icon={ListTodo} title="Waiting for a human" subtitle="0"
+          footer="This is the whole of the old 'Keeper reviews' page. It is the only part of the subject that is ever actionable, so it belongs at the top of the evidence, not behind a second nav entry."
+        >
+          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">
+            Nothing is waiting.
+          </p>
+        </DetailCard>
+      )}
+
+      <div className="grid gap-3.5 @xl:grid-cols-4">
+        {[
+          ["Requests", "0", "lifetime"],
+          ["Allowed", "0", "decisions"],
+          ["Denied", "0", "decisions"],
+          ["Escalated", "0", "to a human"],
+        ].map(([label, value, note]) => (
+          <div key={label} className="rounded-xl border border-border/60 bg-card px-4 py-3">
+            <div className="type-meta uppercase tracking-wide text-muted-foreground-soft">{label}</div>
+            <div className="type-title mt-0.5 tabular-nums">{value}</div>
+            <div className="type-meta text-muted-foreground-soft">{note}</div>
+          </div>
+        ))}
+      </div>
+
+      <DetailCard
+        bare icon={CircleDot} title="Decision history" subtitle="0"
+        footer="Append-only. Every row keeps the prompt and the raw model response, which is what makes a denial arguable after the fact."
+      >
+        <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">
+          Nothing has been evaluated on this instance yet.
+        </p>
+      </DetailCard>
     </div>
   )
 }
 
-const VARIANTS = [
-  {
-    id: "A1",
-    title: "A · three rows, labelled",
-    blurb:
-      "Every card visible, grouped by the question it answers, and the group says so out loud. " +
-      "No chip row and no drawer: Manage skills becomes the Skills card's footer link, Workspace " +
-      "is the Files button already in the header, Activity is the Journal link already in the " +
-      "header, and Memory moves to Configuration, where the memory switch already lives.",
-    render: () => <VariantA labelled />,
-  },
-  {
-    id: "A2",
-    title: "A · three rows, unlabelled",
-    blurb:
-      "The same structure with the group headings removed — the grouping carried by the row breaks " +
-      "alone. Quieter; costs you the one line that explains why those three sit together.",
-    render: () => <VariantA labelled={false} />,
-  },
-  {
-    id: "B",
-    title: "B · one flat grid",
-    blurb:
-      "All nine cards in a single flowing grid. Simplest rule, and the honest downside: Credentials " +
-      "ends up beside Runs for no reason but the arithmetic. This is close to what the screen does " +
-      "today, with the hidden cards made visible.",
-    render: () => <VariantB />,
-  },
-]
+function Band({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-2 flex items-baseline gap-2">
+        <h2 className="type-section text-foreground/70">{title}</h2>
+        <span className="type-meta text-muted-foreground-soft">{note}</span>
+      </div>
+      {children}
+    </section>
+  )
+}
 
 export default function DesignBench() {
-  const [variant, setVariant] = useState(VARIANTS[0].id)
-  const active = VARIANTS.find((v) => v.id === variant) ?? VARIANTS[0]
+  const [online, setOnline] = useState(false)
+  const judge = online ? JUDGE_ONLINE : JUDGE_OFFLINE
 
   return (
     <div className="@container min-h-screen space-y-6 px-6 py-6 md:px-8 lg:px-12">
@@ -235,51 +236,59 @@ export default function DesignBench() {
         <p className="type-row text-warn">
           Wireframe bench — not a product screen. Delete this route before the branch merges.
         </p>
-        <p className="type-meta mt-1 text-muted-foreground">
-          Renders with the real kit, type roles and icon map, so whatever is chosen here is already
-          implementable.
-        </p>
       </div>
 
       <div>
-        <h1 className="type-title">Agent overview — where the chips should go</h1>
+        <h1 className="type-title">Keeper — one screen instead of two</h1>
         <p className="type-row mt-2 max-w-3xl text-muted-foreground">
-          The chip row opens a drawer from the right, and the drawers are two different things
-          wearing the same clothes: three hold a list — the same card the grid already uses, 420px —
-          and four hold an entire tab component, 760px. That is the width inconsistency. It is a
-          symptom, not a styling slip.
+          Measured on dev3 rather than guessed. The capability is all there and the CLI drives it
+          fine: provider is <b className="font-medium text-foreground">ollama | anthropic |
+          openai_compat</b>, the endpoint (an IP:port) and the API key both come from vault
+          credentials, and with no judge the gatekeeper denies at risk 10 rather than failing open.
+          Pointing it at <code className="font-mono">anthropic / claude-haiku-4-5</code> worked
+          first try.
         </p>
         <p className="type-row mt-2 max-w-3xl text-muted-foreground">
-          Six of the seven chips carry nothing of their own: three are lists that belong in the
-          grid, <b className="font-medium text-foreground">Manage skills</b> is the same concept as
-          Skills, <b className="font-medium text-foreground">Workspace</b> is the header&rsquo;s
-          Files button, <b className="font-medium text-foreground">Activity</b> is the header&rsquo;s
-          Journal link, and <b className="font-medium text-foreground">Memory</b> opens persona and
-          crew settings — which is Configuration, not overview.
+          What is wrong is the screen. <b className="font-medium text-foreground">Admin → Keeper</b> carries
+          status rows, four counters, the entire 752-line governance form, recent requests and a
+          live feed; <b className="font-medium text-foreground">Admin → Keeper reviews</b> carries the
+          queue on its own. Two nav entries for one subject — and on the first one, the single most
+          important fact, <i>the judge is offline so everything denies</i>, is a grey row between an
+          Ollama URL you cannot edit there and a counter.
+        </p>
+        <p className="type-row mt-2 max-w-3xl text-muted-foreground">
+          Three bands, same shape as the agent screen: can it judge · what it decides · what it has
+          decided. The queue is the only actionable part, so it opens the evidence band instead of
+          living behind a second nav entry.
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {VARIANTS.map((v) => (
-          <button
-            key={v.id}
-            type="button"
-            onClick={() => setVariant(v.id)}
-            className={cn(
-              "type-row rounded-lg border px-3 py-1.5 transition-colors",
-              v.id === variant
-                ? "border-primary bg-primary/15 text-primary-hover"
-                : "border-border text-muted-foreground hover:border-foreground/25 hover:text-foreground",
-            )}
-          >
-            {v.title}
-          </button>
-        ))}
+      <button
+        type="button"
+        onClick={() => setOnline((v) => !v)}
+        className="type-row rounded-lg border border-border px-3 py-1.5 text-muted-foreground transition-colors hover:border-foreground/25 hover:text-foreground"
+      >
+        {online ? "Show it as dev3 actually is (judge offline)" : "Show it with a reachable judge"}
+      </button>
+
+      <div className="space-y-5 rounded-xl border border-border/60 bg-background p-4">
+        <Band title="Can it judge" note="is it on, and does the model answer">
+          <CanItJudge judge={judge} />
+        </Band>
+        <Band title="What it decides" note="the rules it applies, and who hears about them">
+          <WhatItDecides />
+        </Band>
+        <Band title="What it has decided" note="the queue, the counters, the audit trail">
+          <WhatItDecided merged />
+        </Band>
       </div>
 
-      <p className="type-row max-w-3xl text-muted-foreground">{active.blurb}</p>
-
-      <div className="rounded-xl border border-border/60 bg-background p-4">{active.render()}</div>
+      <div className="flex items-center gap-2">
+        <Clock className="h-3.5 w-3.5 text-muted-foreground-soft" />
+        <span className="type-meta text-muted-foreground-soft">
+          Not implemented yet — this is the proposal. Nothing in the product has changed.
+        </span>
+      </div>
     </div>
   )
 }
