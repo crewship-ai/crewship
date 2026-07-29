@@ -88,15 +88,15 @@ type ChatInfo struct {
 	// → orchestrator applies the deprecated env fallback.
 	LocalModelBaseURL string
 	// LocalModelAPIKey / LocalModelHeaders carry optional endpoint auth (#961).
-	LocalModelAPIKey      string
-	LocalModelHeaders     map[string]string
-	SystemPrompt          string
-	ToolProfile           string
-	Credentials           []orchestrator.Credential
-	TimeoutSecs           int
-	WorkspaceID           string
-	MemoryEnabled         bool
-	CrewMembers           []orchestrator.CrewMember
+	LocalModelAPIKey  string
+	LocalModelHeaders map[string]string
+	SystemPrompt      string
+	ToolProfile       string
+	Credentials       []orchestrator.Credential
+	TimeoutSecs       int
+	WorkspaceID       string
+	MemoryEnabled     bool
+	CrewMembers       []orchestrator.CrewMember
 	// ConnectedCrews is what a LEAD may dispatch across. Empty for every
 	// other role: only a lead orchestrates.
 	ConnectedCrews        []orchestrator.ConnectedCrew

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
 )
 
@@ -126,6 +127,15 @@ func (h *NotifyProvidersHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"provider": provider, "enabled": body.Enabled})
 }
 
+// newProviderGate adapts providerEnabled to the dispatcher's gate signature,
+// so the instance-wide toggle is read by the SAME query on the way out as at
+// channel-create time. Two readers of one switch is how they drift.
+func newProviderGate(db *sql.DB) func(ctx context.Context, provider string) (bool, error) {
+	return func(ctx context.Context, provider string) (bool, error) {
+		return providerEnabled(ctx, db, provider)
+	}
+}
+
 // providerEnabled reads the app_settings toggle for provider p, defaulting
 // to true (enabled) when no row exists — a freshly-upgraded instance
 // doesn't need an admin to opt every provider back in. Shared with
@@ -140,4 +150,16 @@ func providerEnabled(ctx context.Context, db *sql.DB, p string) (bool, error) {
 		return false, err
 	}
 	return value == "true", nil
+}
+
+// newGatedDispatcher builds a dispatcher that honours the instance-wide
+// provider toggle on delivery, not only when a channel is created.
+//
+// Without the gate, switching Discord off stopped nobody: every channel made
+// before the switch kept delivering, which is the opposite of what an
+// operator reaches for that switch to do.
+func newGatedDispatcher(store notify.ChannelLister, mail mailer.Mailer, logger *slog.Logger, db *sql.DB) *notify.Dispatcher {
+	d := notify.NewDispatcher(store, mail, logger, db)
+	d.SetProviderGate(newProviderGate(db))
+	return d
 }

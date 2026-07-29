@@ -48,9 +48,9 @@ type AgentRunRequest struct {
 	// re-sending context every turn. 0 means "use DefaultMaxTurns". Routine /
 	// scheduled runs set RoutineMaxTurns — lower, because an unattended job
 	// with no human watching is exactly where a stuck loop goes unnoticed.
-	MaxTurns              int
-	MemoryEnabled         bool
-	CrewMembers           []CrewMember      // Populated by bridge for LEAD agents
+	MaxTurns      int
+	MemoryEnabled bool
+	CrewMembers   []CrewMember // Populated by bridge for LEAD agents
 	// ConnectedCrews lists the crews this crew is linked to, for LEAD agents.
 	// Without it a link is invisible to the model: it cannot learn another
 	// crew is reachable, so it refuses the work or guesses a crew-local

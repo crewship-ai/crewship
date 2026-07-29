@@ -182,6 +182,39 @@ type Dispatcher struct {
 	// delivered relative, which is honest about not knowing rather than
 	// guessing a host and emitting links that 404.
 	publicURL string
+
+	// providerGate answers "is this shoutrrr provider enabled on this
+	// instance". It is the SAME toggle the channel-create path checks, read
+	// on the way out as well — a switch labelled enable/disable has to mean
+	// "nothing leaves through this provider", or it lies at exactly the
+	// moment someone reaches for it to stop a leak. Enforcing it only at
+	// create time left every channel made before the switch delivering.
+	//
+	// nil = no gate (embedded use, tests): previous behaviour, everything
+	// delivers.
+	providerGate func(ctx context.Context, provider string) (bool, error)
+}
+
+// SetProviderGate wires the instance-wide provider toggle into delivery.
+func (d *Dispatcher) SetProviderGate(fn func(ctx context.Context, provider string) (bool, error)) {
+	d.providerGate = fn
+}
+
+// checkProviderEnabled fails CLOSED. The gate exists to stop data leaving; if
+// its state cannot be read, holding the message is the safe direction and the
+// caller gets an error it can retry or surface, rather than a silent send.
+func (d *Dispatcher) checkProviderEnabled(ctx context.Context, provider string) error {
+	if d.providerGate == nil {
+		return nil
+	}
+	enabled, err := d.providerGate(ctx, provider)
+	if err != nil {
+		return fmt.Errorf("notify: cannot determine whether provider %q is enabled: %w", provider, err)
+	}
+	if !enabled {
+		return fmt.Errorf("notify: provider %q is disabled on this instance", provider)
+	}
+	return nil
 }
 
 // publicURLEnv names the browser-reachable base URL of this instance, e.g.
@@ -330,6 +363,9 @@ func (d *Dispatcher) deliver(ctx context.Context, ch Channel, ev NotificationEve
 // same secret_enc column the webhook signing secret uses; see
 // ChannelStore.Create).
 func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev NotificationEvent) error {
+	if err := d.checkProviderEnabled(ctx, ch.Provider); err != nil {
+		return err
+	}
 	if ch.Secret == "" {
 		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
 	}
