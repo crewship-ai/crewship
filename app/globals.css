@@ -391,6 +391,33 @@ body {
     font-size: 0.75rem;
     line-height: 1.1rem;
   }
+  /* ── The navigation register ──
+     A second, quieter pair of sizes for the rails — the crews explorer, and
+     any nav list that follows it. Not an exception to the roles above: a
+     NAMED role, for a genuinely different reading task.
+
+     A detail card is read; a rail is scanned. In a card the text is the
+     content, so it carries the content sizes. In a rail the text is a label
+     on a target you are aiming at — you already know which agent you want,
+     and the portrait finds it faster than the name does. Sized down so the
+     row belongs to the face rather than competing with it.
+
+       .type-nav      13px  crew and agent names in a rail
+       .type-nav-sub  11px  the role line, counts, status words
+
+     Written here rather than typed into crews-explorer.tsx on purpose. The
+     moment a surface spells out text-[0.8125rem] for itself, it has left the
+     system, and the next surface copies the number instead of the reason —
+     which is how 12 different ways to write "small text" happened. */
+  .type-nav {
+    font-size: 0.8125rem;
+    line-height: 1.15rem;
+  }
+  .type-nav-sub {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+  }
+
   /* Hairline: 211 uses of border-white/10 and 53 of border-white/8 existed
      because the divider inside a card had no name — only the card's own
      border did. Now it has one. */

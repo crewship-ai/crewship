@@ -214,8 +214,8 @@ export function CrewsExplorer({
                       />
                     </span>
                     <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
-                    <span className="type-row font-semibold truncate flex-1">{crew.name}</span>
-                    <span className="type-meta text-muted-foreground-soft tabular-nums shrink-0">
+                    <span className="type-nav font-semibold truncate flex-1">{crew.name}</span>
+                    <span className="type-nav-sub text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
                     </span>
                     {/* One dot per STATE, not one per agent.
@@ -291,9 +291,9 @@ export function CrewsExplorer({
                             at the same time, and the role is still there the
                             moment you need it to confirm. */}
                         <div className="flex-1 min-w-0">
-                          <span className="type-row font-medium truncate block leading-tight">{agent.name}</span>
+                          <span className="type-nav font-medium truncate block">{agent.name}</span>
                           {isAgentSelected && (
-                            <span className="type-meta text-muted-foreground truncate block">
+                            <span className="type-nav-sub text-muted-foreground truncate block">
                               {agent.role_title || agent.agent_role}
                             </span>
                           )}
@@ -308,7 +308,7 @@ export function CrewsExplorer({
                               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
                             </span>
                           )}
-                          <span className={cn("type-meta", badge.className)}>{badge.label}</span>
+                          <span className={cn("type-nav-sub", badge.className)}>{badge.label}</span>
                         </div>
                       </SidebarRow>
                     )
@@ -322,7 +322,7 @@ export function CrewsExplorer({
             {/* Unassigned */}
             {unassigned.length > 0 && (
               <div className="mt-2 pt-2 border-t border-border">
-                <div className="type-section px-2 py-1 text-muted-foreground-soft">
+                <div className="type-nav-sub px-2 py-1 font-semibold uppercase tracking-wider text-muted-foreground-soft">
                   Unassigned
                 </div>
                 {unassigned.map((agent) => {
@@ -348,8 +348,8 @@ export function CrewsExplorer({
                         className="h-8 w-8 rounded-lg shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <span className="type-row font-medium truncate block leading-tight">{agent.name}</span>
-                        <span className="type-meta text-muted-foreground truncate block">
+                        <span className="type-nav font-medium truncate block">{agent.name}</span>
+                        <span className="type-nav-sub text-muted-foreground truncate block">
                           {agent.role_title || agent.agent_role}
                         </span>
                       </div>
@@ -357,7 +357,7 @@ export function CrewsExplorer({
                         {agent.ephemeral && !ghost && (
                           <Clock className="h-2.5 w-2.5 text-notice/80" aria-label="Ephemeral hire" />
                         )}
-                        <span className={cn("type-meta", badge.className)}>{badge.label}</span>
+                        <span className={cn("type-nav-sub", badge.className)}>{badge.label}</span>
                       </div>
                     </SidebarRow>
                   )

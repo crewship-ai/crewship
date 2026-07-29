@@ -320,7 +320,10 @@ export function SidebarRow({
       selected={selected}
       onSelect={onSelect}
       className={cn(
-        "mx-1.5 gap-2 rounded-md px-2 py-1.5 text-xs",
+        // py-1 rather than py-1.5: with the role line gone from every
+        // unselected row, the portrait is what sets the height, and the extra
+        // padding was only ever there to keep two lines of text from touching.
+        "mx-1.5 gap-2 rounded-md px-2 py-1 type-nav",
         indent && "ml-6",
         className,
       )}
