@@ -5,7 +5,7 @@ import Link from "next/link"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ArrowUpRight, Bot, CheckCircle2, Clock, FolderTree, MessageSquare,
+  ArrowUpRight, Bot, Brain, CheckCircle2, Clock, FolderTree, MessageSquare,
   MoreHorizontal, RotateCcw, Square, Trash2,
 } from "lucide-react"
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
@@ -18,6 +18,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import { Pill } from "@/components/ui/detail"
@@ -37,6 +40,7 @@ import {
 import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { ConfigTab } from "./agent-canvas-tabs/config-tab"
+import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
 import { WorkspaceTab } from "./agent-canvas-tabs/workspace-tab"
 import type {
   AgentRecord,
@@ -132,6 +136,7 @@ export function AgentCanvas({
 
   const [tab, setTab] = useState<AgentTab>("overview")
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
+  const [memoryOpen, setMemoryOpen] = useState(false)
 
   // Reset to Overview when switching agents.
   useResetTabOnSlugChange<AgentTab>(agentSlug, setTab, "overview")
@@ -397,6 +402,19 @@ export function AgentCanvas({
               <DropdownMenuContent align="end" className="min-w-[220px]">
                 <DropdownMenuLabel className="type-meta text-muted-foreground">{agent.name}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {/* Memory lives here rather than on a tab. It is four markdown
+                    files — AGENT.md, CREW.md, PERSONA.md, peer cards — that
+                    almost nobody edits, and it spent a spell bolted to the
+                    bottom of Configuration where it dwarfed every actual
+                    setting. Reachable, not resident. */}
+                <DropdownMenuItem onClick={() => setMemoryOpen(true)} className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  <span>Memory</span>
+                  <span className="type-meta ml-auto text-muted-foreground-soft">
+                    {agent.memory_enabled ? "on" : "off"}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => toast.info("Container restart will land in a follow-up")}
                   className="flex items-center gap-2"
@@ -517,14 +535,26 @@ export function AgentCanvas({
           profile, memory — are back to one each. Deletion stays in the ··· menu
           beside Chat, which is where a destructive action belongs. */}
       {tab === "config" && (
-        <ConfigTab
-          agent={agent}
-          crews={crews}
-          patch={patch}
-          onSelectCrew={onSelectCrew}
-          workspaceId={workspaceId}
-        />
+        <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
       )}
+
+      <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[820px]">
+          <DialogHeader>
+            <DialogTitle>Memory</DialogTitle>
+            <DialogDescription>
+              What {agent.name} carries between sessions. The switch that turns it on is in
+              Configuration, under Model and run.
+            </DialogDescription>
+          </DialogHeader>
+          <MemoryTab
+            agentId={agent.id}
+            agentSlug={agent.slug}
+            crewId={agent.crew_id ?? undefined}
+            workspaceId={workspaceId}
+          />
+        </DialogContent>
+      </Dialog>
 
     </CanvasShell>
   )

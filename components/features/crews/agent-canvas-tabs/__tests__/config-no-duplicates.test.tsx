@@ -103,6 +103,17 @@ describe("agent configuration", () => {
   // Self-improving mode is gated off (lib/feature-gates.ts). The switch and
   // the gate are both proven, but nothing demonstrates that a live agent run
   // reaches the handler they gate, so it is not offered yet.
+  // Memory is four markdown files almost nobody edits. It briefly sat at the
+  // bottom of this screen, where it was taller than every real setting above
+  // it combined. It lives in the ··· menu now — reachable, not resident.
+  it("does not park the memory editor under the settings", () => {
+    renderTab()
+    expect(screen.queryByText("AGENT.md")).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Memory$/)).not.toBeInTheDocument()
+    // The switch that actually configures it stays.
+    expect(screen.getByRole("switch", { name: "Memory between sessions" })).toBeInTheDocument()
+  })
+
   it("does not offer self-improving mode while the gate is off", () => {
     renderTab()
     expect(screen.queryByTestId("learning-card")).not.toBeInTheDocument()
