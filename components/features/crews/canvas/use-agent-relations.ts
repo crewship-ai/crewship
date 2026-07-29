@@ -114,7 +114,7 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
 }
 
 // =============================================================================
-// "Čím se spouští" is derived, not fetched. Every trigger the backend supports
+// "Triggers" is derived, not fetched. Every trigger the backend supports
 // is already on the agent record or in its inbox, and deriving it here keeps
 // the four ways an agent can start work in one list instead of scattered
 // across three tabs.
@@ -137,11 +137,11 @@ export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): Ag
   if (agent.schedule_cron) {
     triggers.push({
       kind: "schedule",
-      title: `Plán · ${agent.schedule_cron}`,
+      title: `Schedule · ${agent.schedule_cron}`,
       subtitle: agent.schedule_next_run
-        ? `příští běh ${new Date(agent.schedule_next_run).toLocaleString()}`
-        : "příští běh se spočítá po uložení",
-      meta: agent.schedule_enabled === false ? "vypnuto" : "aktivní",
+        ? `next run ${new Date(agent.schedule_next_run).toLocaleString()}`
+        : "next run is computed on save",
+      meta: agent.schedule_enabled === false ? "off" : "on",
       automatic: true,
     })
   }
@@ -154,7 +154,7 @@ export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): Ag
       kind: "webhook",
       title: "Webhook",
       subtitle: `POST /api/v1/agents/${agent.slug}/trigger`,
-      meta: "aktivní",
+      meta: "on",
       automatic: true,
     })
   }
@@ -162,16 +162,16 @@ export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): Ag
   if (agent.agent_role === "LEAD" || peerMessageCount > 0) {
     triggers.push({
       kind: "delegation",
-      title: "Delegace od kolegy",
-      subtitle: peerMessageCount > 0 ? `${peerMessageCount} čekajících zpráv` : "žádná čekající zpráva",
-      meta: "povoleno",
+      title: "Delegated by a peer",
+      subtitle: peerMessageCount > 0 ? `${peerMessageCount} waiting messages` : "no waiting message",
+      meta: "allowed",
       automatic: true,
     })
   }
 
   triggers.push({
     kind: "manual",
-    title: "Ručně z chatu nebo CLI",
+    title: "Manually from chat or CLI",
     subtitle: `crewship agent run ${agent.slug}`,
     meta: "—",
     automatic: false,

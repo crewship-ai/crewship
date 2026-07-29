@@ -114,7 +114,7 @@ export function DetailCell({
           type="button"
           onClick={toggleSearch}
           aria-pressed={searchOpen}
-          aria-label={`Hledat v ${title.toLowerCase()}`}
+          aria-label={`Search ${title.toLowerCase()}`}
           className={cn(
             "grid h-6 w-6 place-items-center rounded-md text-muted-foreground-soft transition-colors",
             "hover:bg-white/[.06] hover:text-foreground",
@@ -134,7 +134,7 @@ export function DetailCell({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Hledat v ${title.toLowerCase()}…`}
+            placeholder={`Search ${title.toLowerCase()}…`}
             className={cn(
               "type-row w-full rounded-md border border-primary bg-background px-2.5 py-1 text-foreground outline-none",
               "shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_18%,transparent)]",
@@ -170,13 +170,13 @@ export function DetailCell({
           <CellRow key={item.id} item={item} index={index} />
         ))}
         {visible.length === 0 && (
-          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">Nic neodpovídá filtru.</p>
+          <p className="type-row px-4 py-6 text-center text-muted-foreground-soft">Nothing matches this filter.</p>
         )}
       </div>
 
       <div className="type-meta mt-auto flex items-center gap-2 border-t border-hairline px-4 py-2 text-muted-foreground-soft">
         <span data-testid="cell-count">
-          {narrowed ? `${visible.length} z ${items.length}` : `${items.length} položek`}
+          {narrowed ? `${visible.length} of ${items.length}` : `${items.length} items`}
         </span>
         {footerLabel && footerHref && (
           <Link href={footerHref} className="ml-auto inline-flex items-center gap-1 text-primary hover:underline">

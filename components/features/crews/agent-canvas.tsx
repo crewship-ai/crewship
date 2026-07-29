@@ -55,8 +55,8 @@ export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } fro
 type AgentTab = "overview" | "config"
 
 const TABS: Array<{ id: AgentTab; label: string }> = [
-  { id: "overview", label: "Přehled" },
-  { id: "config", label: "Konfigurace" },
+  { id: "overview", label: "Overview" },
+  { id: "config", label: "Configuration" },
 ]
 
 /** Brand mark for the model in the identity line. */
@@ -331,7 +331,7 @@ export function AgentCanvas({
             type="button"
             onClick={() => setAvatarPickerOpen(true)}
             className="group relative shrink-0"
-            title="Upravit avatar"
+            title="Change avatar"
           >
             <AgentAvatar
               seed={agent.avatar_seed || agent.name}
@@ -355,10 +355,10 @@ export function AgentCanvas({
               {agent.ephemeral && !ghost && (
                 <Pill tone="warn">
                   <Clock className="h-3 w-3" />
-                  dočasný{ttl && ` · ${ttl}`}
+                  ephemeral{ttl && ` · ${ttl}`}
                 </Pill>
               )}
-              {agent.memory_enabled && <Pill>paměť</Pill>}
+              {agent.memory_enabled && <Pill>memory</Pill>}
             </div>
 
             <h1 className="type-title text-foreground">{agent.name}</h1>
@@ -397,13 +397,13 @@ export function AgentCanvas({
               <p className="type-row mt-2 inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
                 <Clock className="mt-px h-3.5 w-3.5 shrink-0" />
                 <span>
-                  Žádá o zařazení do <b className="font-medium">{agent.crew?.name ?? "crew"}</b> — schválením se přidá.
+                  Requesting to join <b className="font-medium">{agent.crew?.name ?? "crew"}</b> — approve to add it.
                   {hireReason && <> · {hireReason}</>}
                 </span>
               </p>
             )}
             {ghost && (
-              <p className="type-row mt-2 text-muted-foreground">Vypršelý dočasný agent — najmout znovu.</p>
+              <p className="type-row mt-2 text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</p>
             )}
           </div>
         </div>
@@ -424,7 +424,7 @@ export function AgentCanvas({
               className="type-row inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/15 px-3 py-1.5 font-medium text-destructive transition-colors hover:bg-destructive/25"
             >
               <Square className="h-3 w-3 fill-current" />
-              Zastavit
+              Stop
             </button>
           )}
           {isPendingHire && (
@@ -434,7 +434,7 @@ export function AgentCanvas({
               className="type-row inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/20 px-3 py-1.5 font-medium text-success transition-colors hover:bg-success/30"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
-              Schválit najmutí
+              Approve hire
             </button>
           )}
           {ghost && (
@@ -444,7 +444,7 @@ export function AgentCanvas({
               className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
             >
               <RotateCcw className="h-3 w-3" />
-              Najmout znovu
+              Re-hire
             </button>
           )}
           {onOpenFiles && (
@@ -463,7 +463,7 @@ export function AgentCanvas({
                 <button
                   type="button"
                   className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-white/[.05]"
-                  title="Další akce"
+                  title="More actions"
                   aria-label="Agent actions"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
@@ -477,7 +477,7 @@ export function AgentCanvas({
                   className="flex items-center gap-2"
                 >
                   <RotateCcw className="h-4 w-4" />
-                  <span>Restartovat kontejner</span>
+                  <span>Restart container</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -485,7 +485,7 @@ export function AgentCanvas({
                   className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
-                  <span>Smazat agenta</span>
+                  <span>Delete agent</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -529,8 +529,8 @@ export function AgentCanvas({
           onOpenConfig={() => setTab("config")}
           extraReach={[
             {
-              id: "memory", icon: Brain, label: "Paměť", tone: "gold", wide: true, group: "Umí",
-              value: agent.memory_enabled ? "zapnutá" : "vypnutá",
+              id: "memory", icon: Brain, label: "Memory", tone: "gold", wide: true, group: "Can do",
+              value: agent.memory_enabled ? "on" : "off",
               render: () => (
                 <MemoryTab
                   agentId={agent.id}
@@ -541,7 +541,7 @@ export function AgentCanvas({
               ),
             },
             {
-              id: "skillsmgr", icon: Sparkles, label: "Spravovat skilly", tone: "purple", wide: true, group: "Umí",
+              id: "skillsmgr", icon: Sparkles, label: "Manage skills", tone: "purple", wide: true, group: "Can do",
               value: String(agent._count?.skills ?? 0),
               render: () => (
                 <SkillsTab
@@ -555,15 +555,15 @@ export function AgentCanvas({
               ),
             },
             {
-              id: "workspace", icon: FolderTree, label: "Workspace", tone: "notice", wide: true, group: "Historie",
-              value: "soubory",
+              id: "workspace", icon: FolderTree, label: "Workspace", tone: "notice", wide: true, group: "History",
+              value: "files",
               render: () => (
                 <WorkspaceTab agentId={agent.id} agentSlug={agent.slug} onOpenFiles={onOpenFiles} />
               ),
             },
             {
-              id: "activity", icon: History, label: "Aktivita", tone: "notice", wide: true, group: "Historie",
-              value: "vše",
+              id: "activity", icon: History, label: "Activity", tone: "notice", wide: true, group: "History",
+              value: "all",
               render: () => <ActivityTab workspaceId={workspaceId} agentId={agent.id} />,
             },
           ]}

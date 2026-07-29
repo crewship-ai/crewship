@@ -91,7 +91,7 @@ function useOptimistic<T>(value: T, onSave: (next: T) => Promise<void> | void) {
       timer.current = setTimeout(() => setSaved(false), 1500)
     } catch (err) {
       setLocal(server.current)
-      toast.error(err instanceof Error ? err.message : "Uložení se nepovedlo")
+      toast.error(err instanceof Error ? err.message : "Could not save")
     }
   }
 
@@ -271,7 +271,7 @@ export function ConfigPresets<T extends string | number>({
             aria-pressed
             className="rounded-lg border border-transparent bg-primary px-2.5 py-1 text-label font-medium text-primary-foreground"
           >
-            vlastní · {String(local)}
+            custom · {String(local)}
           </button>
         )}
       </div>

@@ -42,17 +42,17 @@ const TOOL_PROFILES = [
   {
     value: "MINIMAL",
     title: "MINIMAL",
-    description: "Jen čte a plánuje. Codex jede read-only, Gemini v plan módu, Claude s omezeným seznamem nástrojů.",
+    description: "Reads and plans only. Codex runs read-only, Gemini in plan mode, Claude with a restricted tool list.",
   },
   {
     value: "CODING",
     title: "CODING",
-    description: "Běžná práce — zápis do workspace a spouštění příkazů uvnitř kontejneru crew.",
+    description: "Everyday work — writes to the workspace and runs commands inside the crew container.",
   },
   {
     value: "FULL",
     title: "FULL",
-    description: "Nejvyšší autonomie. U Factory Droid zvedá i úroveň samostatnosti.",
+    description: "Highest autonomy. On Factory Droid it also raises the autonomy level.",
   },
 ] as const
 
@@ -85,10 +85,10 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
   return (
     <div className="grid items-start gap-4 lg:grid-cols-2">
       <div className="grid gap-4">
-        <DetailCard bare icon={Bot} title="Identita">
-          <ConfigText label="Jméno" value={agent.name} onSave={(v) => patch({ name: v })} />
+        <DetailCard bare icon={Bot} title="Identity">
+          <ConfigText label="Name" value={agent.name} onSave={(v) => patch({ name: v })} />
           <ConfigText
-            label="Slug" mono hint="Používá se v CLI a při delegaci mezi agenty."
+            label="Slug" mono hint="Used in the CLI and when delegating between agents."
             value={agent.slug} onSave={(v) => patch({ slug: v })}
           />
           <ConfigText label="Role title" value={agent.role_title ?? ""} onSave={(v) => patch({ role_title: v })} />
@@ -98,36 +98,36 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
               detached the agent from its crew — silently. */}
           {crews.length > 0 ? (
             <ConfigSelect
-              label="Crew" hint="Určuje kontejner, síť a sdílenou paměť."
+              label="Crew" hint="Decides the container, the network and the shared memory."
               value={agent.crew_id ?? ""}
               options={[{ value: "", label: "(bez crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
               onSave={(v) => patch({ crew_id: v || null })}
             />
           ) : (
-            <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="načítá se" />
+            <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="loading" />
           )}
           <ConfigSelect
-            label="Role v crew" hint="Lead smí zadávat práci ostatním a čekat na výsledek."
+            label="Role in crew" hint="A lead may assign work to the others and wait for the result."
             value={agent.agent_role}
             options={[{ value: "AGENT", label: "Agent" }, { value: "LEAD", label: "Lead" }]}
             onSave={(v) => patch({ agent_role: v })}
           />
           {isLead && (
             <ConfigSelect
-              label="Režim leada" hint="Pasivní lead jen odpovídá, sám nikoho neřídí."
+              label="Lead mode" hint="A passive lead only answers; it never drives anyone."
               value={agent.lead_mode || "active"}
-              options={[{ value: "active", label: "Aktivní" }, { value: "passive", label: "Pasivní" }]}
+              options={[{ value: "active", label: "Active" }, { value: "passive", label: "Passive" }]}
               onSave={(v) => patch({ lead_mode: v })}
             />
           )}
           <ConfigText
-            label="Popis" multiline value={agent.description ?? ""}
-            placeholder="Čím se tenhle agent zabývá…"
+            label="Description" multiline value={agent.description ?? ""}
+            placeholder="What this agent does…"
             onSave={(v) => patch({ description: v })}
           />
         </DetailCard>
 
-        <DetailCard bare icon={Settings2} title="Model a běh">
+        <DetailCard bare icon={Settings2} title="Model and run">
           <ConfigSelect
             label="Provider" value={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
             adornment={providerMark(agent.llm_provider)}
@@ -136,26 +136,26 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           />
           <ConfigText label="Model" mono value={agent.llm_model ?? ""} onSave={(v) => patch({ llm_model: v })} />
           <ConfigSelect
-            label="CLI adapter" hint="Čím se agent pouští uvnitř kontejneru."
+            label="CLI adapter" hint="What launches the agent inside the container."
             value={agent.cli_adapter}
             options={ADAPTERS.map((a) => ({ value: a.value, label: a.label }))}
             onSave={(v) => patch({ cli_adapter: v })}
           />
           <ConfigPresets
-            label="Nejdelší běh" hint="Po vypršení se běh ukončí jako timeout."
+            label="Longest run" hint="When it expires the run ends as a timeout."
             value={agent.timeout_seconds} presets={TIMEOUTS}
             onSave={(v) => patch({ timeout_seconds: v })}
           />
           <ConfigSwitch
-            label="Paměť mezi sezeními" hint="Bez ní začíná každé sezení od nuly."
+            label="Memory between sessions" hint="Without it every session starts from nothing."
             checked={agent.memory_enabled}
             onSave={(v) => patch({ memory_enabled: v })}
           />
         </DetailCard>
 
         <DetailCard
-          bare icon={Wrench} title="Co smí dělat" subtitle="tool_profile"
-          footer={<>Kam se agent dostane <b className="font-medium text-foreground">ven</b>, tohle neřeší — to je síťová politika crew.</>}
+          bare icon={Wrench} title="What it may do" subtitle="tool_profile"
+          footer={<>Where the agent reaches <b className="font-medium text-foreground">outward</b> is not decided here — that is the crew network policy.</>}
         >
           <ConfigCards
             value={agent.tool_profile}
@@ -166,9 +166,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
       </div>
 
       <div className="grid gap-4">
-        <DetailCard bare icon={CalendarClock} title="Plán">
+        <DetailCard bare icon={CalendarClock} title="Schedule">
           <ConfigSwitch
-            label="Spouštět podle plánu" checked={agent.schedule_enabled ?? false}
+            label="Run on a schedule" checked={agent.schedule_enabled ?? false}
             onSave={(v) => patch({ schedule_enabled: v })}
           />
           <ConfigText
@@ -176,38 +176,38 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             onSave={(v) => patch({ schedule_cron: v || null })}
           />
           <ConfigText
-            label="Zadání pro plánovaný běh" multiline value={agent.schedule_prompt ?? ""}
-            placeholder="Co má agent v tom běhu udělat…"
+            label="Prompt for the scheduled run" multiline value={agent.schedule_prompt ?? ""}
+            placeholder="What the agent should do in that run…"
             onSave={(v) => patch({ schedule_prompt: v || null })}
           />
           <ConfigReadOnly
-            label="Příští běh"
+            label="Next run"
             value={agent.schedule_next_run ? new Date(agent.schedule_next_run).toLocaleString() : "—"}
           />
         </DetailCard>
 
         <DetailCard
           bare icon={Webhook} title="Webhook"
-          footer="Tajemství se ukáže jen jednou při rotaci — zpětně se přečíst nedá."
+          footer="The secret is shown once on rotation — it can never be read back."
         >
           <ConfigReadOnly
-            label="Podpisový klíč"
+            label="Signing key"
             value={webhookSet ? "nastaven" : "nenastaven"}
-            note={webhookSet ? "rotovat v Nastavení" : undefined}
+            note={webhookSet ? "rotate in Settings" : undefined}
           />
         </DetailCard>
 
         <DetailCard
-          bare icon={Shield} title="Prostředí"
-          subtitle={agent.crew ? `patří crew ${agent.crew.name}` : "bez crew"}
+          bare icon={Shield} title="Environment"
+          subtitle={agent.crew ? `owned by crew ${agent.crew.name}` : "no crew"}
           footer={agent.crew
-            ? <>Kontejner, paměť a síť nastavuje crew — změna by se dotkla všech jejích agentů.</>
-            : <>Agent bez crew běží v izolovaném kontejneru workspace.</>}
+            ? <>The container, memory and network belong to the crew — a change would hit all of its agents.</>
+            : <>An agent with no crew runs in an isolated workspace container.</>}
         >
           <ConfigReadOnly
             label="Crew"
             value={agent.crew?.name ?? "—"}
-            note={agent.crew ? "otevřít" : undefined}
+            note={agent.crew ? "open" : undefined}
           />
           {agent.crew && (
             <div className="px-3 pb-3">
@@ -216,7 +216,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
                 onClick={() => onSelectCrew(agent.crew!.slug)}
                 className="rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-label transition-colors hover:bg-white/[.09]"
               >
-                Otevřít nastavení crew
+                Open crew settings
               </button>
             </div>
           )}

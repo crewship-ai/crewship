@@ -12,27 +12,27 @@ import {
 
 describe("<DetailCard>", () => {
   it("renders the header as a section role and keeps the body", () => {
-    render(<DetailCard title="What it does" subtitle="step by step" icon={Workflow}>obsah</DetailCard>)
+    render(<DetailCard title="What it does" subtitle="step by step" icon={Workflow}>body</DetailCard>)
     const header = screen.getByText("What it does")
     expect(header).toHaveClass("type-section")
     expect(screen.getByText("step by step")).toHaveClass("type-meta")
-    expect(screen.getByText("obsah")).toBeInTheDocument()
+    expect(screen.getByText("body")).toBeInTheDocument()
   })
 
   it("renders headerless when no title or action is given", () => {
-    const { container } = render(<DetailCard>jen tělo</DetailCard>)
+    const { container } = render(<DetailCard>body only</DetailCard>)
     expect(container.querySelectorAll(".type-section")).toHaveLength(0)
   })
 
   it("drops body padding when bare", () => {
-    const { container } = render(<DetailCard bare>tabulka</DetailCard>)
+    const { container } = render(<DetailCard bare>table</DetailCard>)
     const body = container.querySelector("div > div:last-child") as HTMLElement
     expect(body.className).not.toContain("p-4")
   })
 
   it("places the action on the right of the header", () => {
-    render(<DetailCard title="Runs" action={<button>Vše</button>}>x</DetailCard>)
-    expect(screen.getByRole("button", { name: "Vše" })).toBeInTheDocument()
+    render(<DetailCard title="Runs" action={<button>All</button>}>x</DetailCard>)
+    expect(screen.getByRole("button", { name: "All" })).toBeInTheDocument()
   })
 })
 
@@ -129,21 +129,21 @@ describe("<EntityChip>", () => {
 
 describe("shared roles", () => {
   it("FieldLabel is a section role", () => {
-    render(<FieldLabel>Jméno</FieldLabel>)
-    expect(screen.getByText("Jméno")).toHaveClass("type-section")
+    render(<FieldLabel>Name</FieldLabel>)
+    expect(screen.getByText("Name")).toHaveClass("type-section")
   })
 
   it("Pill carries its tone", () => {
-    render(<Pill tone="warn">čeká</Pill>)
-    expect(screen.getByText("čeká")).toHaveClass("text-warn")
+    render(<Pill tone="warn">pending</Pill>)
+    expect(screen.getByText("pending")).toHaveClass("text-warn")
   })
 
   it("EmptyState renders title, description and action", () => {
     render(
-      <EmptyState icon={Workflow} title="Zatím nic" description="Popis" action={<button>Přidat</button>} />,
+      <EmptyState icon={Workflow} title="Nothing yet" description="Description" action={<button>Add</button>} />,
     )
-    expect(screen.getByText("Zatím nic")).toBeInTheDocument()
-    expect(screen.getByText("Popis")).toHaveClass("type-row")
-    expect(screen.getByRole("button", { name: "Přidat" })).toBeInTheDocument()
+    expect(screen.getByText("Nothing yet")).toBeInTheDocument()
+    expect(screen.getByText("Description")).toHaveClass("type-row")
+    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument()
   })
 })

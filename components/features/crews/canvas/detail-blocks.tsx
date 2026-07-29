@@ -97,7 +97,7 @@ export interface NowRunningProps {
   meta?: string
   icon?: LucideIcon
   onStop?: () => void
-  /** Rendered as "JAK BĚŽÍ" ticks under the header, like the routine screen. */
+  /** Rendered as "how it runs" ticks under the header, like the routine screen. */
   steps?: NowRunningStep[]
 }
 
@@ -131,13 +131,13 @@ export function NowRunning({ label, step, percent, meta, icon: Icon, onStop, ste
               onClick={onStop}
               className="type-row rounded-lg border border-border bg-surface-raised px-2.5 py-1 transition-colors hover:bg-white/[.09]"
             >
-              Zastavit
+              Stop
             </button>
           )}
         </div>
         {steps && steps.length > 0 && (
           <div className="border-t border-hairline px-4 py-2">
-            <div className="type-section mb-1 text-muted-foreground-soft">Jak běží</div>
+            <div className="type-section mb-1 text-muted-foreground-soft">How it runs</div>
             {steps.map((s) => (
               <TickRow key={s.label} label={s.label} detail={s.detail} status={s.status} meta={s.meta} />
             ))}
@@ -179,14 +179,14 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
   const open = items.find((i) => i.id === openId) ?? null
 
   const groups = items.reduce<Record<string, ReachItem[]>>((acc, item) => {
-    const key = item.group ?? "Dosah"
+    const key = item.group ?? "Reach"
     ;(acc[key] ??= []).push(item)
     return acc
   }, {})
 
   return (
     <>
-      <DetailCard title="Kam dosáhne" subtitle="blast radius" icon={Radar} bare>
+      <DetailCard title="What it touches" subtitle="blast radius" icon={Radar} bare>
         {Object.entries(groups).map(([group, groupItems]) => (
           <div key={group} className="flex flex-wrap items-center gap-2 border-b border-hairline px-4 py-2.5 last:border-b-0">
             <span className="type-meta w-24 shrink-0 uppercase tracking-wide text-muted-foreground-soft">{group}</span>
@@ -231,7 +231,7 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
                 <button
                   type="button"
                   onClick={() => setOpenId(null)}
-                  aria-label="Zavřít"
+                  aria-label="Close"
                   className="ml-auto inline-flex rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/[.07] hover:text-foreground"
                 >
                   <X className="h-4 w-4" />

@@ -18,9 +18,9 @@ beforeEach(() => {
 describe("<ConfigText>", () => {
   it("saves on blur when the value changed", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
-    render(<ConfigText label="Jméno" value="Morgan" onSave={onSave} />)
+    render(<ConfigText label="Name" value="Morgan" onSave={onSave} />)
 
-    const input = screen.getByLabelText("Jméno")
+    const input = screen.getByLabelText("Name")
     fireEvent.change(input, { target: { value: "Morgan Q" } })
     fireEvent.blur(input)
 
@@ -30,9 +30,9 @@ describe("<ConfigText>", () => {
 
   it("does not save when the value is unchanged", () => {
     const onSave = vi.fn()
-    render(<ConfigText label="Jméno" value="Morgan" onSave={onSave} />)
+    render(<ConfigText label="Name" value="Morgan" onSave={onSave} />)
 
-    const input = screen.getByLabelText("Jméno")
+    const input = screen.getByLabelText("Name")
     fireEvent.focus(input)
     fireEvent.blur(input)
 
@@ -41,10 +41,10 @@ describe("<ConfigText>", () => {
 
   it("reverts on Escape without saving", () => {
     const onSave = vi.fn()
-    render(<ConfigText label="Jméno" value="Morgan" onSave={onSave} />)
+    render(<ConfigText label="Name" value="Morgan" onSave={onSave} />)
 
-    const input = screen.getByLabelText("Jméno") as HTMLInputElement
-    fireEvent.change(input, { target: { value: "smazáno" } })
+    const input = screen.getByLabelText("Name") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "wiped" } })
     fireEvent.keyDown(input, { key: "Escape" })
 
     expect(input.value).toBe("Morgan")
@@ -64,14 +64,14 @@ describe("<ConfigText>", () => {
   })
 
   it("follows the record when the value prop changes from outside", () => {
-    const { rerender } = render(<ConfigText label="Jméno" value="Morgan" onSave={vi.fn()} />)
-    rerender(<ConfigText label="Jméno" value="Quinn" onSave={vi.fn()} />)
-    expect((screen.getByLabelText("Jméno") as HTMLInputElement).value).toBe("Quinn")
+    const { rerender } = render(<ConfigText label="Name" value="Morgan" onSave={vi.fn()} />)
+    rerender(<ConfigText label="Name" value="Quinn" onSave={vi.fn()} />)
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Quinn")
   })
 
   it("renders the hint next to the label", () => {
-    render(<ConfigText label="Slug" hint="Používá se v CLI." value="morgan" onSave={vi.fn()} />)
-    expect(screen.getByText("Používá se v CLI.")).toBeInTheDocument()
+    render(<ConfigText label="Slug" hint="Used in the CLI." value="morgan" onSave={vi.fn()} />)
+    expect(screen.getByText("Used in the CLI.")).toBeInTheDocument()
   })
 })
 
@@ -104,26 +104,26 @@ describe("<ConfigSelect>", () => {
 describe("<ConfigSwitch>", () => {
   it("saves the flipped value", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
-    render(<ConfigSwitch label="Paměť" checked={false} onSave={onSave} />)
+    render(<ConfigSwitch label="Memory" checked={false} onSave={onSave} />)
 
-    fireEvent.click(screen.getByRole("switch", { name: "Paměť" }))
+    fireEvent.click(screen.getByRole("switch", { name: "Memory" }))
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(true))
   })
 
   it("flips back when the save fails", async () => {
     const onSave = vi.fn().mockRejectedValue(new Error("nope"))
-    render(<ConfigSwitch label="Paměť" checked={false} onSave={onSave} />)
+    render(<ConfigSwitch label="Memory" checked={false} onSave={onSave} />)
 
-    const sw = screen.getByRole("switch", { name: "Paměť" })
+    const sw = screen.getByRole("switch", { name: "Memory" })
     fireEvent.click(sw)
     await waitFor(() => expect(sw).toHaveAttribute("aria-checked", "false"))
   })
 
   it("does not save while locked and marks itself disabled", () => {
     const onSave = vi.fn()
-    render(<ConfigSwitch label="Privátní endpointy" checked={false} locked onSave={onSave} />)
+    render(<ConfigSwitch label="Private endpoints" checked={false} locked onSave={onSave} />)
 
-    const sw = screen.getByRole("switch", { name: "Privátní endpointy" })
+    const sw = screen.getByRole("switch", { name: "Private endpoints" })
     fireEvent.click(sw)
     expect(onSave).not.toHaveBeenCalled()
     expect(sw).toBeDisabled()
@@ -138,21 +138,21 @@ describe("<ConfigPresets>", () => {
   ]
 
   it("marks the option matching the current value", () => {
-    render(<ConfigPresets label="Nejdelší běh" value={1800} presets={presets} onSave={vi.fn()} />)
+    render(<ConfigPresets label="Longest run" value={1800} presets={presets} onSave={vi.fn()} />)
     expect(screen.getByRole("button", { name: "30 m" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: "5 m" })).toHaveAttribute("aria-pressed", "false")
   })
 
   it("saves the picked preset value, not its label", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
-    render(<ConfigPresets label="Nejdelší běh" value={1800} presets={presets} onSave={onSave} />)
+    render(<ConfigPresets label="Longest run" value={1800} presets={presets} onSave={onSave} />)
 
     fireEvent.click(screen.getByRole("button", { name: "1 h" }))
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(3600))
   })
 
   it("keeps a value that matches no preset visible as a custom chip", () => {
-    render(<ConfigPresets label="Nejdelší běh" value={900} presets={presets} onSave={vi.fn()} />)
-    expect(screen.getByRole("button", { name: /vlastní/i })).toHaveAttribute("aria-pressed", "true")
+    render(<ConfigPresets label="Longest run" value={900} presets={presets} onSave={vi.fn()} />)
+    expect(screen.getByRole("button", { name: /custom/i })).toHaveAttribute("aria-pressed", "true")
   })
 })

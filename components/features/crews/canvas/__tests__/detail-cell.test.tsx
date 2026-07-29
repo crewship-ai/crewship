@@ -12,8 +12,8 @@ const items: DetailCellItem[] = [
 ]
 
 const filters = [
-  { id: "all", label: "Vše" },
-  { id: "run", label: "Běží" },
+  { id: "all", label: "All" },
+  { id: "run", label: "Running" },
   { id: "todo", label: "Todo" },
 ]
 
@@ -28,7 +28,7 @@ describe("<DetailCell>", () => {
     renderCell()
     expect(screen.getByText("OPS-6 Map container ceiling")).toBeInTheDocument()
     expect(screen.getByText("OPS-9 Audit base image")).toBeInTheDocument()
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("4 položek")
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("4 items")
   })
 
   it("narrows to the selected filter and reports the narrowed count", () => {
@@ -37,19 +37,19 @@ describe("<DetailCell>", () => {
 
     expect(screen.queryByText("OPS-6 Map container ceiling")).not.toBeInTheDocument()
     expect(screen.getByText("OPS-2 Harborlight brief")).toBeInTheDocument()
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("2 z 4")
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("2 of 4")
   })
 
   it("returns to the full list when the all-filter is picked again", () => {
     renderCell()
     fireEvent.click(screen.getByRole("button", { name: "Todo" }))
-    fireEvent.click(screen.getByRole("button", { name: "Vše" }))
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("4 položek")
+    fireEvent.click(screen.getByRole("button", { name: "All" }))
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("4 items")
   })
 
   it("filters by free text across title and subtitle, case-insensitively", () => {
     renderCell()
-    fireEvent.click(screen.getByRole("button", { name: /hledat/i }))
+    fireEvent.click(screen.getByRole("button", { name: /search/i }))
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "RUNBOOK" } })
 
     expect(screen.getByText("OPS-1 Draft a runbook")).toBeInTheDocument()
@@ -62,32 +62,32 @@ describe("<DetailCell>", () => {
   it("combines the chip filter with the search term", () => {
     renderCell()
     fireEvent.click(screen.getByRole("button", { name: "Todo" }))
-    fireEvent.click(screen.getByRole("button", { name: /hledat/i }))
+    fireEvent.click(screen.getByRole("button", { name: /search/i }))
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "harborlight" } })
 
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("1 z 4")
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("1 of 4")
   })
 
   it("shows the empty state when nothing matches and hides it again after clearing", () => {
     renderCell()
-    fireEvent.click(screen.getByRole("button", { name: /hledat/i }))
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz-nic" } })
-    expect(screen.getByText(/nic neodpovídá/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /search/i }))
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz-none" } })
+    expect(screen.getByText(/nothing matches/i)).toBeInTheDocument()
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } })
-    expect(screen.queryByText(/nic neodpovídá/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nothing matches/i)).not.toBeInTheDocument()
   })
 
   it("clears the search term when the search box is toggled shut", () => {
     renderCell()
-    const toggle = screen.getByRole("button", { name: /hledat/i })
+    const toggle = screen.getByRole("button", { name: /search/i })
     fireEvent.click(toggle)
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "runbook" } })
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("1 z 4")
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("1 of 4")
 
     fireEvent.click(toggle)
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument()
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("4 položek")
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("4 items")
   })
 
   it("invokes onSelect for the clicked row", () => {
@@ -98,15 +98,15 @@ describe("<DetailCell>", () => {
   })
 
   it("renders the footer link with the destination label", () => {
-    renderCell({ footerLabel: "Otevřít s filtrem agent:morgan", footerHref: "/issues?assignee=morgan" })
-    const footer = screen.getByRole("link", { name: /otevřít s filtrem/i })
+    renderCell({ footerLabel: "Open filtered by agent:morgan", footerHref: "/issues?assignee=morgan" })
+    const footer = screen.getByRole("link", { name: /open filtered/i })
     expect(footer).toHaveAttribute("href", "/issues?assignee=morgan")
   })
 
   it("renders an empty list without crashing and reports zero", () => {
     renderCell({ items: [], count: 0 })
-    expect(screen.getByTestId("cell-count")).toHaveTextContent("0 položek")
-    expect(screen.getByText(/nic neodpovídá/i)).toBeInTheDocument()
+    expect(screen.getByTestId("cell-count")).toHaveTextContent("0 items")
+    expect(screen.getByText(/nothing matches/i)).toBeInTheDocument()
   })
 
   it("marks the cell header count as needing attention when warn is set", () => {
