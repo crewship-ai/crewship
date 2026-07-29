@@ -183,19 +183,45 @@ export interface CanvasShellProps {
   children: React.ReactNode
 }
 
-export function CanvasShell({ loading, error, notLoadedLabel, children }: CanvasShellProps) {
-  if (loading) {
-    return (
-      <div className="px-6 md:px-8 lg:px-12 py-6 detail-width">
-        <Skeleton className="h-[600px] w-full rounded-xl" />
+const SHELL = "@container px-6 md:px-8 lg:px-12 detail-width"
+
+/**
+ * Loading state shaped like the screen it precedes: a title line, a chip row,
+ * then the same auto-fit card grid. The dashboard does this — its skeleton
+ * repeats its real row grids verbatim — and the reason shows the moment you
+ * compare. One full-width grey slab, which is what this used to be, resolves
+ * by being replaced, so the page visibly jumps. A skeleton in the right shape
+ * resolves by being filled in, and the cards land where the grey already was.
+ */
+function CanvasSkeleton() {
+  return (
+    <div className={`${SHELL} space-y-6 py-6`} aria-hidden>
+      <div className="space-y-2.5">
+        <Skeleton className="h-7 w-56 rounded-lg" />
+        <Skeleton className="h-4 w-80 rounded-md" />
       </div>
-    )
-  }
+      <div className="flex flex-wrap gap-1.5">
+        {[64, 52, 72, 58, 48, 66].map((w, i) => (
+          <Skeleton key={i} className="h-5 rounded-md" style={{ width: w }} />
+        ))}
+      </div>
+      <div className="grid gap-3.5 grid-cols-[repeat(auto-fit,minmax(15.5rem,1fr))]">
+        {Array.from({ length: 5 }, (_, i) => (
+          <Skeleton key={i} className="h-[268px] rounded-xl" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function CanvasShell({ loading, error, notLoadedLabel, children }: CanvasShellProps) {
+  if (loading) return <CanvasSkeleton />
+
   if (error) {
     return (
-      <div className="px-6 md:px-8 lg:px-12 py-12 detail-width text-center">
-        <p className="text-sm text-destructive mb-2">{notLoadedLabel}</p>
-        <p className="text-xs text-muted-foreground">{error}</p>
+      <div className={`${SHELL} py-12 text-center`}>
+        <p className="type-row mb-2 text-destructive">{notLoadedLabel}</p>
+        <p className="type-meta text-muted-foreground">{error}</p>
       </div>
     )
   }
@@ -204,7 +230,7 @@ export function CanvasShell({ loading, error, notLoadedLabel, children }: Canvas
     // wide THIS pane is. The sidebar collapses, the list pane takes a slice,
     // a drawer can open — the window width never described the room the cards
     // actually had.
-    <div className="@container px-6 md:px-8 lg:px-12 py-6 space-y-6 detail-width">
+    <div className={`${SHELL} space-y-6 py-6`}>
       {children}
     </div>
   )

@@ -384,21 +384,23 @@ body {
      border did. Now it has one. */
   .border-hairline { border-color: color-mix(in oklch, var(--border) 40%, transparent); }
 
-  /* The detail column.
-     1180px was a fixed guess made at 1440px. On a 2560px monitor it parked
-     650px of dead gutter on either side of a grid whose own cards were
-     scrolling internally — we were rationing space we had. The cap now steps
-     with the viewport, and the grids inside add COLUMNS rather than stretching,
-     so a card stays card-sized and the extra width buys more content.
-     One class, so no screen has to re-decide this. */
+  /* The detail pane.
+     There is no width cap here, and that is the point. The dashboard — the
+     screen in this app that handles a wide monitor best — has never had one:
+     it fills the pane and lets each band of tiles decide its own column count
+     (grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 for the KPI row, lg:grid-cols-3
+     for the chart bands). Measured at a 2560 window it uses 2451px.
+
+     I had capped this at 1180 and then stepped the cap 1440/1780/2160, which
+     was just a slower way of leaving a gutter. A cap is the wrong tool: it
+     bounds the CONTAINER when the thing that actually needs bounding is a
+     column of text or a form row. So the pane fills, and the grids inside are
+     width-driven — a card can't get silly because the track has a max, not
+     because the page does. */
   .detail-width {
     width: 100%;
     margin-inline: auto;
-    max-width: 1180px;
   }
-  @media (min-width: 1536px) { .detail-width { max-width: 1440px; } }
-  @media (min-width: 1920px) { .detail-width { max-width: 1780px; } }
-  @media (min-width: 2400px) { .detail-width { max-width: 2160px; } }
 
   .scrollbar-none {
     -ms-overflow-style: none;

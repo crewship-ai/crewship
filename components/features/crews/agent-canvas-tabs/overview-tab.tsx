@@ -234,12 +234,13 @@ export function OverviewTab({
         />
       )}
 
-      {/* One grid, not three stacked blocks. Below 1920 it behaves exactly as
-          before — four cells, then Runs and peers full width underneath. Past
-          that the track count goes to six and the two wide cells fold up onto
-          the same row, so a wide monitor buys a denser screen instead of
-          wider cards over an empty half-page. */}
-      <div className="grid gap-3.5 @xl:grid-cols-2 @4xl:grid-cols-3 @6xl:grid-cols-4 @8xl:grid-cols-5 @10xl:grid-cols-6">
+      {/* One grid, not three stacked blocks, and no breakpoints: auto-fit with
+          a minimum track says "a cell is at least 248px wide, fit as many as
+          you can". The count then steps 1 → 2 → 4 → 6 on its own as the pane
+          grows, at every width in between, instead of at five places I picked.
+          auto-FIT rather than auto-fill so six cells never leave empty tracks
+          hanging on an ultrawide. */}
+      <div className="grid gap-3.5 grid-cols-[repeat(auto-fit,minmax(15.5rem,1fr))]">
         <DetailCell
           order={0}
           title="Issues"
@@ -292,7 +293,7 @@ export function OverviewTab({
         />
 
         <DetailCell
-          className="@xl:col-span-2 @4xl:col-span-3 @6xl:col-span-4 @8xl:col-span-5 @10xl:col-span-2"
+          className="@xl:col-span-2 @8xl:col-span-1"
           order={4}
           title="Runs"
           count={runs?.length ?? 0}
@@ -309,7 +310,7 @@ export function OverviewTab({
 
         {peerMessages.length > 0 && (
           <DetailCell
-            className="@xl:col-span-2 @4xl:col-span-3 @6xl:col-span-4 @8xl:col-span-5 @10xl:col-span-2"
+            className="@xl:col-span-2 @8xl:col-span-1"
             order={5}
             title="From peers"
             count={peerMessages.length}

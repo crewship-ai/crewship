@@ -84,11 +84,16 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
 
   return (
-    // Cards flow into as many columns as the PANE affords, instead of being
-    // dealt by hand into two fixed piles. Narrow, that is one column; at the
-    // usual width two, as before; on a wide monitor three, and the screen stops
-    // ending halfway down. break-inside-avoid keeps a card whole.
-    <div className="columns-1 gap-4 @3xl:columns-2 @8xl:columns-3 [&>*]:mb-4 [&>*]:break-inside-avoid">
+    // `columns: 3 24rem` is the whole rule: at most three columns, each at
+    // least 24rem. Narrow gives one, the usual width two, a wide pane three —
+    // no breakpoints, and a card can never be dealt into a column too thin to
+    // hold a label and its control.
+    //
+    // This block IS capped, unlike the pane around it, because it is a form.
+    // Data fills a monitor happily; a settings row does not — stretch it and
+    // the label drifts one way, the control the other, and the pair stops
+    // reading as one thing. That was the gap Pavel spotted in Identity.
+    <div className="[columns:3_24rem] gap-4 max-w-[105rem] [&>*]:mb-4 [&>*]:break-inside-avoid">
       <Appear order={0}>
         <DetailCard bare icon={Bot} title="Identity">
           <ConfigText label="Name" value={agent.name} onSave={(v) => patch({ name: v })} />
