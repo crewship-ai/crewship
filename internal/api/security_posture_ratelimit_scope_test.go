@@ -18,7 +18,7 @@ import (
 // security warning that overstates its scope is worse than a narrower one.
 
 func TestSecurityPosture_RateLimitWarningNamesOnlyWhatIsActuallyOff(t *testing.T) {
-	p := buildSecurityPosture(false, false, false, true)
+	p := buildSecurityPosture(false, false, false, true, postureState{BackupsRecorded: 1})
 
 	var msg string
 	for _, w := range p.Warnings {
