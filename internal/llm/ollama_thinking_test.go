@@ -113,3 +113,78 @@ func TestOllama_ToolCallsStillWinOverLengthStop(t *testing.T) {
 		t.Fatalf("tool calls = %d, want 1", len(resp.ToolCalls))
 	}
 }
+
+// TestOllama_StreamCarriesThinkingAndBudgetStop covers the streaming path, which
+// accumulated only content: a reasoning model's chain of thought was dropped and
+// a budget-truncated stream still reported end_turn. Raised by review on #1528 —
+// the non-streaming fix left the two paths disagreeing about the same response.
+func TestOllama_StreamCarriesThinkingAndBudgetStop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		// Thinking arrives as deltas, then a done chunk cut off by the budget.
+		for _, line := range []string{
+			`{"message":{"role":"assistant","thinking":"We are given "},"done":false}`,
+			`{"message":{"role":"assistant","thinking":"a specific instruction..."},"done":false}`,
+			`{"message":{"role":"assistant","content":""},"done":true,"done_reason":"length","prompt_eval_count":22,"eval_count":200}`,
+		} {
+			_, _ = w.Write([]byte(line + "\n"))
+		}
+	}))
+	defer srv.Close()
+
+	var streamed []string
+	resp, err := NewOllama(srv.URL, "qwen3:4b").Stream(context.Background(), probeRequest(),
+		func(e StreamEvent) error {
+			if e.Type == "text" {
+				streamed = append(streamed, e.Content)
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if resp.Thinking != "We are given a specific instruction..." {
+		t.Fatalf("thinking = %q, want the accumulated deltas", resp.Thinking)
+	}
+	if resp.StopReason != StopMaxToks {
+		t.Fatalf("stop reason = %q, want %q", resp.StopReason, StopMaxToks)
+	}
+	// Reasoning must not reach chat output as text.
+	if len(streamed) != 0 {
+		t.Fatalf("thinking leaked into text events: %q", streamed)
+	}
+}
+
+// TestOllama_StreamNormalTurnUnaffected pins that the ordinary streaming path
+// still reports end_turn and streams its content.
+func TestOllama_StreamNormalTurnUnaffected(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		for _, line := range []string{
+			`{"message":{"role":"assistant","content":"{\"decision\":"},"done":false}`,
+			`{"message":{"role":"assistant","content":"\"ALLOW\"}"},"done":true,"done_reason":"stop","eval_count":9}`,
+		} {
+			_, _ = w.Write([]byte(line + "\n"))
+		}
+	}))
+	defer srv.Close()
+
+	resp, err := NewOllama(srv.URL, "mistral:7b").Stream(context.Background(), probeRequest(),
+		func(StreamEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if resp.Content != `{"decision":"ALLOW"}` {
+		t.Fatalf("content = %q, want the joined deltas", resp.Content)
+	}
+	if resp.StopReason != StopEndTurn {
+		t.Fatalf("stop reason = %q, want %q", resp.StopReason, StopEndTurn)
+	}
+	if resp.Thinking != "" {
+		t.Fatalf("thinking = %q, want empty", resp.Thinking)
+	}
+}

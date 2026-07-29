@@ -349,6 +349,11 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 
 	final := &Response{StopReason: StopEndTurn}
 	var textParts []string
+	// Reasoning deltas are accumulated but deliberately NOT emitted as "text"
+	// events: they are not the answer, and streaming them would put a model's
+	// chain of thought into chat output. They are kept so the final response can
+	// explain an empty completion the same way the non-streaming path does.
+	var thinkingParts []string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -359,6 +364,10 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 		var chunk ollamaChatResponse
 		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
 			continue
+		}
+
+		if chunk.Message.Thinking != "" {
+			thinkingParts = append(thinkingParts, chunk.Message.Thinking)
 		}
 
 		if chunk.Message.Content != "" {
@@ -372,8 +381,10 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 			final.InputToks = chunk.PromptEvalCount
 			final.OutputToks = chunk.EvalCount
 			final.Content = strings.Join(textParts, "")
+			final.Thinking = strings.Join(thinkingParts, "")
 
-			if len(chunk.Message.ToolCalls) > 0 {
+			switch {
+			case len(chunk.Message.ToolCalls) > 0:
 				final.StopReason = StopToolUse
 				toolCalls, err := toToolCalls(chunk.Message.ToolCalls)
 				if err != nil {
@@ -385,6 +396,10 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 						return final, err
 					}
 				}
+			case chunk.DoneReason == "length":
+				// Same mapping as toResponse: a streaming caller must be able to
+				// tell a budget cut from a finished turn too.
+				final.StopReason = StopMaxToks
 			}
 			break
 		}
