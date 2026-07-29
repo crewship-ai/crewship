@@ -215,15 +215,14 @@ func findWorkspaceMemberUserIDByEmail(client *cli.Client, workspaceID, email str
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var members []struct {
-		UserID string `json:"user_id"`
-		Email  string `json:"email"`
-	}
+	// workspaceMemberRow reads the nested `user` the server actually sends,
+	// with the flat fields as a fallback — see its doc comment.
+	var members []workspaceMemberRow
 	if err := cli.ReadJSON(resp, &members); err != nil {
 		return "", err
 	}
 	for _, m := range members {
-		if strings.EqualFold(m.Email, email) {
+		if strings.EqualFold(m.email(), email) {
 			return m.UserID, nil
 		}
 	}

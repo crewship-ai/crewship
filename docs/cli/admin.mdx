@@ -37,6 +37,7 @@ crewship admin <subcommand> [flags]
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
 | `stats` | Workspace counts read against the licensed ceilings (crews, agents, members, runs in flight). **HTTP-backed — needs a running server + login.** |
+| `gdpr export/delete` | Answer a data-subject request: export everything held about one person, or erase it. **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
 | `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
@@ -375,6 +376,34 @@ Counts are read against the ceiling the licence imposes on each: a bare "8
 agents" is not something anyone acts on, "3 of 15 crews" is. Where the edition
 imposes no ceiling, the bare count is shown. If the licence cannot be read the
 counts still print — losing the ceilings must not cost you the numbers.
+
+---
+
+## `crewship admin gdpr`
+
+Answers the two requests a person can make about their own data.
+
+```bash
+# Right of access — everything this workspace holds about them
+crewship admin gdpr export someone@example.com
+crewship admin gdpr export someone@example.com --out subject-access.json
+
+# Right to erasure — irreversible
+crewship admin gdpr delete someone@example.com --reason "SAR #1234" --yes
+```
+
+Either a user id or an **email** is accepted; the email is resolved against the
+workspace roster, because an operator holding a request from a person has their
+address, not their cuid.
+
+`--reason` is not paperwork. It is the audit trail, and it is what answers "why
+was this person's data removed" a year later — so `delete` refuses without it,
+and refuses again without `--yes`. Both commands write an append-only row and
+return an **action id**: that id is the receipt for the request you were
+answering, so record it against the request.
+
+`export` writes to stdout by default (pipe it, redirect it); `--out` writes a
+file with `0600`, since the file is every row about a person.
 
 ---
 

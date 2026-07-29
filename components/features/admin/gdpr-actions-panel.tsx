@@ -43,6 +43,10 @@ import { apiFetch } from "@/lib/api-fetch"
 
 export interface GdprActionsPanelProps {
   users: AdminUser[]
+  /** The workspace these actions are scoped to. Null while it resolves — the
+   *  admin API refuses an unscoped request, so the actions stay hidden rather
+   *  than being offered in a state where they can only fail. */
+  workspaceId: string | null
 }
 
 // Server response shape for the DELETE endpoint. Documented in
@@ -57,6 +61,7 @@ interface DeleteResponse {
 
 export const GdprActionsPanel = React.memo(function GdprActionsPanel({
   users,
+  workspaceId,
 }: GdprActionsPanelProps) {
   const [query, setQuery] = useState("")
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
@@ -86,8 +91,12 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
     if (!selectedUser) return
     setBusy("export")
     try {
+      // The admin API is workspace-scoped by middleware: without this param
+      // the request is refused with 400 "workspace_id is required" before the
+      // handler runs, which is what made both buttons on this panel fail
+      // every time they were pressed.
       const r = await apiFetch(
-        `/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}/data`,
+        `/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}/data?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
         { headers: { Accept: "application/json" } },
       )
       if (!r.ok) {
@@ -111,7 +120,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
     } finally {
       setBusy(null)
     }
-  }, [selectedUser])
+  }, [selectedUser, workspaceId])
 
   const handleDelete = useCallback(async () => {
     if (!selectedUser) return
@@ -122,7 +131,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
     setBusy("delete")
     try {
       const r = await apiFetch(
-        `/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}/data`,
+        `/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}/data?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
         {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -158,12 +167,15 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
     <div className="space-y-5">
       <div>
         <h3 className="text-body font-medium text-foreground/80 leading-none">
-          GDPR data subject actions
+          Answer a data request
         </h3>
         <p className="text-[11px] text-muted-foreground mt-1 leading-snug max-w-2xl">
-          Export or cascade-delete a single user&apos;s data. Every action
-          writes an append-only audit row in <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">gdpr_actions</code>{" "}
-          (initiator, reason, scope, status). Delete is irreversible.
+          When someone asks for a copy of what you hold about them (right to
+          access) or asks to be erased (right to erasure), this is where you
+          answer. Pick the person, then export everything referencing them as
+          JSON, or remove it. Every action is written to an append-only trail —
+          who did it, why, what it touched — because the answer to &ldquo;prove
+          you handled that request&rdquo; is that record. Erasure cannot be undone.
         </p>
       </div>
 
@@ -228,7 +240,7 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
         </div>
       </SettingsCard>
 
-      {selectedUser && (
+      {selectedUser && workspaceId && (
         <>
           <SettingsCard
             title="Export user data"

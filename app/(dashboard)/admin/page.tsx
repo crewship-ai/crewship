@@ -335,7 +335,7 @@ export default function AdminPage() {
     }
 
     if (tab === "gdpr") {
-      return <GdprActionsPanel users={users} />
+      return <GdprActionsPanel users={users} workspaceId={workspaceId} />
     }
 
     if (tab === "security") {
