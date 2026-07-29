@@ -224,8 +224,17 @@ export function CrewsExplorer({
                     </div>
                   </SidebarRow>
 
-                  {/* Agent rows */}
-                  {expanded && crewAgents.map((agent) => {
+                  {/* Agent rows, hung off a guide line.
+                      They were already indented by 24px, and 24px of empty
+                      space says nothing — the eye read two rounded blocks
+                      side by side, not a parent and its children. The rule
+                      runs under the crew's own chevron, so the nesting is
+                      stated rather than implied, and a selected agent's
+                      highlight now starts to the RIGHT of it instead of
+                      competing with the crew's row for the same left edge. */}
+                  {expanded && (
+                  <div className="relative ml-[1.1rem] border-l border-border/70 pl-1">
+                  {crewAgents.map((agent) => {
                     const ghost = isGhost(agent)
                     const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                     const isAgentSelected = selectedAgentId === agent.id
@@ -233,7 +242,6 @@ export function CrewsExplorer({
                       <SidebarRow
                         key={agent.id}
                         as="div"
-                        indent
                         selected={isAgentSelected}
                         aria-label={agent.name}
                         onSelect={() => onAgentSelect(agent.id)}
@@ -269,6 +277,8 @@ export function CrewsExplorer({
                       </SidebarRow>
                     )
                   })}
+                  </div>
+                  )}
                 </div>
               )
             })}
