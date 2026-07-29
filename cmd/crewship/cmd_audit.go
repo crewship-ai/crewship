@@ -131,6 +131,10 @@ Examples:
 				Action     string  `json:"action" yaml:"action"`
 				EntityType string  `json:"entity_type" yaml:"entity_type"`
 				EntityID   *string `json:"entity_id" yaml:"entity_id"`
+				// EntityName is what the row touched, resolved server-side.
+				// Without it the table prints an id fragment, which does not
+				// distinguish deleting Riley from deleting Sam.
+				EntityName *string `json:"entity_name" yaml:"entity_name"`
 				UserEmail  *string `json:"user_email" yaml:"user_email"`
 				CreatedAt  string  `json:"created_at" yaml:"created_at"`
 			} `json:"data" yaml:"data"`
@@ -140,22 +144,26 @@ Examples:
 		}
 
 		f := newFormatter()
-		headers := []string{"TIME", "ACTION", "ENTITY", "ENTITY_ID", "USER"}
+		headers := []string{"TIME", "ACTION", "ENTITY", "NAME", "USER"}
 		var rows [][]string
 		for _, a := range result.Data {
 			ts := a.CreatedAt
 			if t, err := time.Parse(time.RFC3339Nano, a.CreatedAt); err == nil {
 				ts = t.Format("2006-01-02 15:04:05")
 			}
-			entityID := "-"
-			if a.EntityID != nil {
-				entityID = truncateEntityID(*a.EntityID, 32)
+			// Prefer the name; fall back to the id when the target has none
+			// (a backup path, a hard-deleted row).
+			entity := "-"
+			if a.EntityName != nil && strings.TrimSpace(*a.EntityName) != "" {
+				entity = *a.EntityName
+			} else if a.EntityID != nil {
+				entity = truncateEntityID(*a.EntityID, 32)
 			}
 			user := "-"
 			if a.UserEmail != nil {
 				user = *a.UserEmail
 			}
-			rows = append(rows, []string{ts, a.Action, a.EntityType, entityID, user})
+			rows = append(rows, []string{ts, a.Action, a.EntityType, entity, user})
 		}
 		return f.Auto(result.Data, headers, rows)
 	},
