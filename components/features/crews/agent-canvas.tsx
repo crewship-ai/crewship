@@ -315,22 +315,21 @@ export function AgentCanvas({
 
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
-      {/* Header — the routine detail's shape: state pills, then the name,
-          then the identity line, then actions on their own row. Cramming the
-          buttons beside the title is what forced the old header to three rows
-          and made the name compete with them for the eye. */}
+      {/* Header — variant C: name and actions share the top line, state and
+          identity drop to the second. The name stops competing with the
+          buttons, and the whole thing costs two lines instead of four. */}
       <motion.header
         layout
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.16, ease: "easeOut" }}
-        className="border-b border-border pb-4"
+        className="border-b border-border pb-3"
       >
-        <div className="flex items-start gap-3.5">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => setAvatarPickerOpen(true)}
-            className="group relative shrink-0"
+            className="group shrink-0"
             title="Change avatar"
           >
             <AgentAvatar
@@ -339,125 +338,62 @@ export function AgentCanvas({
               agentId={agent.id}
               avatarUrl={agent.avatar_url}
               className={cn(
-                "h-11 w-11 rounded-[10px] transition-transform group-hover:scale-[1.04]",
+                "h-8 w-8 rounded-lg transition-transform group-hover:scale-[1.06]",
                 isRunning && "ring-2 ring-success/40",
               )}
             />
           </button>
+          <h1 className="type-title leading-none">{agent.name}</h1>
+          <span className="type-meta font-mono text-muted-foreground">{agent.slug}</span>
 
-          <div className="min-w-0 flex-1">
-            <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <Pill tone={STATUS_PILL_TONE[statusKey] ?? "default"}>
-                <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
-                {status.label}
-              </Pill>
-              {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
-              {agent.ephemeral && !ghost && (
-                <Pill tone="warn">
-                  <Clock className="h-3 w-3" />
-                  ephemeral{ttl && ` · ${ttl}`}
-                </Pill>
-              )}
-              {agent.memory_enabled && <Pill>memory</Pill>}
-            </div>
-
-            <h1 className="type-title text-foreground">{agent.name}</h1>
-
-            <div className="type-meta mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-muted-foreground">
-              <span>{agent.slug}</span>
-              {agent.role_title && <><span className="opacity-40">·</span><span>{agent.role_title}</span></>}
-              {agent.crew && (
-                <>
-                  <span className="opacity-40">·</span>
-                  <button
-                    type="button"
-                    onClick={() => onSelectCrew(agent.crew!.slug)}
-                    className="text-primary hover:underline"
-                  >
-                    {agent.crew.name}
-                  </button>
-                </>
-              )}
-              {agent.llm_model && (
-                <>
-                  <span className="opacity-40">·</span>
-                  <span className="inline-flex items-center gap-1.5">
-                    {providerMark(agent.llm_provider)}
-                    {agent.llm_model}
-                  </span>
-                </>
-              )}
-            </div>
-
-            {agent.description && (
-              <p className="type-row mt-1.5 max-w-prose text-muted-foreground">{agent.description}</p>
+          <div className="ml-auto flex items-center gap-2">
+            <Link
+              href={`/chat/${encodeURIComponent(agent.slug)}`}
+              className="type-row inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              Chat
+            </Link>
+            {isRunning && (
+              <button
+                type="button"
+                onClick={handleStop}
+                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/15 px-3 py-1.5 font-medium text-destructive transition-colors hover:bg-destructive/25"
+              >
+                <Square className="h-3 w-3 fill-current" />
+                Stop
+              </button>
             )}
-
             {isPendingHire && (
-              <p className="type-row mt-2 inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
-                <Clock className="mt-px h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Requesting to join <b className="font-medium">{agent.crew?.name ?? "crew"}</b> — approve to add it.
-                  {hireReason && <> · {hireReason}</>}
-                </span>
-              </p>
+              <button
+                type="button"
+                onClick={handleApproveHire}
+                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/20 px-3 py-1.5 font-medium text-success transition-colors hover:bg-success/30"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Approve hire
+              </button>
             )}
             {ghost && (
-              <p className="type-row mt-2 text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</p>
+              <button
+                type="button"
+                onClick={handleRehire}
+                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Re-hire
+              </button>
             )}
-          </div>
-        </div>
-
-        {/* Actions on their own row, primary first, like Run / Dry run. */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Link
-            href={`/chat/${encodeURIComponent(agent.slug)}`}
-            className="type-row inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            Chat
-          </Link>
-          {isRunning && (
-            <button
-              type="button"
-              onClick={handleStop}
-              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/15 px-3 py-1.5 font-medium text-destructive transition-colors hover:bg-destructive/25"
-            >
-              <Square className="h-3 w-3 fill-current" />
-              Stop
-            </button>
-          )}
-          {isPendingHire && (
-            <button
-              type="button"
-              onClick={handleApproveHire}
-              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-success/30 bg-success/20 px-3 py-1.5 font-medium text-success transition-colors hover:bg-success/30"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Approve hire
-            </button>
-          )}
-          {ghost && (
-            <button
-              type="button"
-              onClick={handleRehire}
-              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
-            >
-              <RotateCcw className="h-3 w-3" />
-              Re-hire
-            </button>
-          )}
-          {onOpenFiles && (
-            <button
-              type="button"
-              onClick={onOpenFiles}
-              className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
-            >
-              <FolderTree className="h-3.5 w-3.5" />
-              Soubory
-            </button>
-          )}
-          <div className="ml-auto">
+            {onOpenFiles && (
+              <button
+                type="button"
+                onClick={onOpenFiles}
+                className="type-row inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-3 py-1.5 font-medium transition-colors hover:bg-white/[.09]"
+              >
+                <FolderTree className="h-3.5 w-3.5" />
+                Files
+              </button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -491,6 +427,58 @@ export function AgentCanvas({
             </DropdownMenu>
           </div>
         </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Pill tone={STATUS_PILL_TONE[statusKey] ?? "default"}>
+            <span className={cn("h-1.5 w-1.5 rounded-full bg-current", isRunning && "animate-pulse")} />
+            {status.label}
+          </Pill>
+          {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
+          {agent.ephemeral && !ghost && (
+            <Pill tone="warn">
+              <Clock className="h-3 w-3" />
+              ephemeral{ttl && ` · ${ttl}`}
+            </Pill>
+          )}
+          <span className="type-meta flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-muted-foreground">
+            {agent.role_title && <span>{agent.role_title}</span>}
+            {agent.crew && (
+              <>
+                {agent.role_title && <span className="opacity-40">·</span>}
+                <button
+                  type="button"
+                  onClick={() => onSelectCrew(agent.crew!.slug)}
+                  className="text-primary hover:underline"
+                >
+                  {agent.crew.name}
+                </button>
+              </>
+            )}
+            {agent.llm_model && (
+              <>
+                <span className="opacity-40">·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  {providerMark(agent.llm_provider)}
+                  {agent.llm_model}
+                </span>
+              </>
+            )}
+          </span>
+        </div>
+
+        {agent.description && (
+          <p className="type-row mt-2 max-w-prose text-muted-foreground">{agent.description}</p>
+        )}
+        {isPendingHire && (
+          <p className="type-row mt-2 inline-flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-warn/90">
+            <Clock className="mt-px h-3.5 w-3.5 shrink-0" />
+            <span>
+              Requesting to join <b className="font-medium">{agent.crew?.name ?? "crew"}</b> — approve to add it.
+              {hireReason && <> · {hireReason}</>}
+            </span>
+          </p>
+        )}
+        {ghost && <p className="type-row mt-2 text-muted-foreground">Expired ephemeral hire — re-hire to bring it back.</p>}
       </motion.header>
 
       <AvatarPickerDialog

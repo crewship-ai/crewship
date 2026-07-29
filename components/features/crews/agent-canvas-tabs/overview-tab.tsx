@@ -211,6 +211,11 @@ export function OverviewTab({
 
   return (
     <div className="space-y-4">
+      {/* Reach sits with the tabs, not under the content: it is chrome, read
+          once on arrival. Chips rather than links because the grid below is
+          chips-in-cards — the same shape says the two rows are one family. */}
+      <ReachStrip items={[...reach, ...extraReach]} />
+
       {inbox.count > 0 && (
         <BlockingNotice
           title="Waiting on your decision."
@@ -228,8 +233,6 @@ export function OverviewTab({
           onStop={onStop}
         />
       )}
-
-      <ReachStrip items={[...reach, ...extraReach]} />
 
       <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4">
         <DetailCell

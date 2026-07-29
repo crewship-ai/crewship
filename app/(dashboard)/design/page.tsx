@@ -280,8 +280,22 @@ function ReachCard() {
   )
 }
 
+function ReachBubbles() {
+  return (
+    <>
+      <TabBar />
+      <div className="flex flex-wrap items-center gap-1.5 py-2">
+        {REACH.map((r) => (
+          <EntityChip key={r.id} icon={r.icon} label={r.label} note={r.value} />
+        ))}
+      </div>
+    </>
+  )
+}
+
 const REACHES = [
   { id: "1", label: "1 · second row", note: "plain links under the tabs, counts inline", render: ReachSecondRow },
+  { id: "1b", label: "1b · bubbles", note: "same row, chips — same shape as the cells below (shipped)", render: ReachBubbles },
   { id: "2", label: "2 · one menu", note: "reach joins the tab bar after a divider", render: ReachInMainMenu },
   { id: "3", label: "3 · dropdown", note: "one Reach button, list on demand", render: ReachDropdown },
   { id: "4", label: "4 · card", note: "blast-radius card (today)", render: ReachCard },

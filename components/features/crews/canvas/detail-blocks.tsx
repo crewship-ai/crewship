@@ -174,7 +174,17 @@ const CHIP_TONE: Record<ReachItem["tone"], "blue" | "success" | "warn" | "purple
   gold: "warn",
 }
 
-export function ReachStrip({ items }: { items: ReachItem[] }) {
+export interface ReachStripProps {
+  items: ReachItem[]
+  /**
+   * `row` sits with the tabs as a line of chips — chrome, read once on
+   * arrival. `card` is the blast-radius card, for surfaces where reach is
+   * the subject rather than the navigation.
+   */
+  variant?: "row" | "card"
+}
+
+export function ReachStrip({ items, variant = "row" }: ReachStripProps) {
   const [openId, setOpenId] = useState<string | null>(null)
   const open = items.find((i) => i.id === openId) ?? null
 
@@ -183,6 +193,72 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
     ;(acc[key] ??= []).push(item)
     return acc
   }, {})
+
+  const drawer = (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px]" onClick={() => setOpenId(null)} aria-hidden />
+          <motion.aside
+            role="dialog"
+            aria-label={open.label}
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+            className={cn(
+              "absolute inset-y-0 right-0 flex flex-col border-l border-border bg-surface-subtle",
+              open.wide ? "w-[min(760px,96vw)]" : "w-[min(420px,92vw)]",
+            )}
+          >
+            <header className="flex items-center gap-2 border-b border-hairline px-4 py-3">
+              <span className="type-section text-foreground/70">{open.label}</span>
+              <button
+                type="button"
+                onClick={() => setOpenId(null)}
+                aria-label="Close"
+                className="ml-auto inline-flex rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/[.07] hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="flex-1 overflow-auto p-3">
+              {open.render ? open.render() : open.cell ? <DetailCell {...open.cell} tall /> : null}
+            </div>
+          </motion.aside>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+
+  // A line of chips under the tabs. Chips rather than plain links because the
+  // grid below is chips-in-cards: the same shape says these two rows are one
+  // family — what the agent has, and what it can reach.
+  if (variant === "row") {
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-1.5 py-0.5">
+          {items.map((item) => (
+            <EntityChip
+              key={item.id}
+              icon={item.icon}
+              label={item.label}
+              note={item.value}
+              tone={item.alert ? "warn" : CHIP_TONE[item.tone]}
+              onClick={() => setOpenId(item.id)}
+            />
+          ))}
+        </div>
+        {drawer}
+      </>
+    )
+  }
 
   return (
     <>
@@ -204,46 +280,7 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
         ))}
       </DetailCard>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            className="fixed inset-0 z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px]" onClick={() => setOpenId(null)} aria-hidden />
-            <motion.aside
-              role="dialog"
-              aria-label={open.label}
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-              className={cn(
-                "absolute inset-y-0 right-0 flex flex-col border-l border-border bg-surface-subtle",
-                open.wide ? "w-[min(760px,96vw)]" : "w-[min(420px,92vw)]",
-              )}
-            >
-              <header className="flex items-center gap-2 border-b border-hairline px-4 py-3">
-                <span className="type-section text-foreground/70">{open.label}</span>
-                <button
-                  type="button"
-                  onClick={() => setOpenId(null)}
-                  aria-label="Close"
-                  className="ml-auto inline-flex rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/[.07] hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
-              <div className="flex-1 overflow-auto p-3">
-                {open.render ? open.render() : open.cell ? <DetailCell {...open.cell} tall /> : null}
-              </div>
-            </motion.aside>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {drawer}
     </>
   )
 }
