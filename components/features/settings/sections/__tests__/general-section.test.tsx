@@ -14,7 +14,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 
 // The privileged-credentials override has its own test file and its own fetch;
 // here it only has to prove it landed on this section.
-vi.mock("../privileged-credentials-card", () => ({
+vi.mock("@/components/features/settings/sections/privileged-credentials-card", () => ({
   PrivilegedCredentialsCard: () => <div data-testid="privileged-credentials-card" />,
 }))
 

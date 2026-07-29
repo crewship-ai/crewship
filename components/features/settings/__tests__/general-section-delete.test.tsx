@@ -11,7 +11,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 // The privileged-credentials card GETs the same /api/v1/workspaces/{id} URL
 // this test matches on, and would eat the mockResolvedValueOnce below. It has
 // its own test file; here it is out of scope.
-vi.mock("../sections/privileged-credentials-card", () => ({
+vi.mock("@/components/features/settings/sections/privileged-credentials-card", () => ({
   PrivilegedCredentialsCard: () => <div data-testid="privileged-credentials-card" />,
 }))
 
