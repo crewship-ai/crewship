@@ -34,7 +34,7 @@ describe("<MemoryConfigCard> — #1379", () => {
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: true }))
     render(<MemoryConfigCard workspaceId="ws-1" />)
     expect(await screen.findByText(/built-in default/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/versions retention/i)).toHaveValue(30)
+    expect(screen.getByLabelText(/keep history for/i)).toHaveValue(30)
   })
 
   it("says when the value was set explicitly", async () => {
@@ -51,7 +51,7 @@ describe("<MemoryConfigCard> — #1379", () => {
       return jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false })
     })
     render(<MemoryConfigCard workspaceId="ws-1" />)
-    const input = await screen.findByLabelText(/versions retention/i)
+    const input = await screen.findByLabelText(/keep history for/i)
     fireEvent.change(input, { target: { value: "14" } })
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
 
@@ -63,7 +63,7 @@ describe("<MemoryConfigCard> — #1379", () => {
   it("blocks an out-of-range value client-side", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false }))
     render(<MemoryConfigCard workspaceId="ws-1" />)
-    const input = await screen.findByLabelText(/versions retention/i)
+    const input = await screen.findByLabelText(/keep history for/i)
     fireEvent.change(input, { target: { value: "0" } })
     expect(screen.getByText(/between 1 and 3650/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
@@ -78,7 +78,7 @@ describe("<MemoryConfigCard> — #1379", () => {
       return jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false })
     })
     render(<MemoryConfigCard workspaceId="ws-1" />)
-    const input = await screen.findByLabelText(/versions retention/i)
+    const input = await screen.findByLabelText(/keep history for/i)
     fireEvent.change(input, { target: { value: "100" } })
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
     await waitFor(() =>
@@ -90,7 +90,7 @@ describe("<MemoryConfigCard> — #1379", () => {
     role = "MEMBER"
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false }))
     render(<MemoryConfigCard workspaceId="ws-1" />)
-    expect(await screen.findByLabelText(/versions retention/i)).toBeDisabled()
+    expect(await screen.findByLabelText(/keep history for/i)).toBeDisabled()
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull()
     expect(screen.getByText(/requires an admin/i)).toBeInTheDocument()
   })
@@ -99,5 +99,41 @@ describe("<MemoryConfigCard> — #1379", () => {
     apiFetch.mockResolvedValue(jsonResponse({}, 403))
     render(<MemoryConfigCard workspaceId="ws-1" />)
     await waitFor(() => expect(screen.getByText(/requires an admin role/i)).toBeInTheDocument())
+  })
+})
+
+// The card was called "Memory configuration" with a retention window, which
+// reads as "how long agents remember". It is not that: an agent's memory is
+// its own files, kept for as long as the agent exists. What expires here is
+// the VERSION TRAIL of those files. Anyone who mistook one for the other
+// would either panic about data loss or set a window expecting an effect it
+// cannot have.
+describe("<MemoryConfigCard> — says what it actually governs", () => {
+  beforeEach(() => {
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue(jsonResponse({ versions_retention_days: 30, is_default: true }))
+  })
+
+  it("does not claim to govern what an agent remembers", async () => {
+    render(<MemoryConfigCard workspaceId="ws-1" />)
+    expect(await screen.findByText(/does not affect what an agent remembers/i)).toBeInTheDocument()
+  })
+
+  it("names what does expire — the history of past versions", async () => {
+    render(<MemoryConfigCard workspaceId="ws-1" />)
+    expect(await screen.findByText(/trail of past versions/i)).toBeInTheDocument()
+  })
+
+  it("says when the trim runs, including the boot pass", async () => {
+    render(<MemoryConfigCard workspaceId="ws-1" />)
+    // Only the daily tick used to run, and a restart-heavy instance therefore
+    // never swept at all — the boot pass is why the window means anything.
+    expect(await screen.findByText(/shortly after this instance starts/i)).toBeInTheDocument()
+    expect(screen.getByText(/03:00 UTC/)).toBeInTheDocument()
+  })
+
+  it("mentions the floor that survives any window", async () => {
+    render(<MemoryConfigCard workspaceId="ws-1" />)
+    expect(await screen.findByText(/three most recent versions/i)).toBeInTheDocument()
   })
 })

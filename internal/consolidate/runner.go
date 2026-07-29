@@ -70,6 +70,20 @@ type RunnerOptions struct {
 	// entirely; the orphan-blob sweep still runs.
 	MemoryVersionsRetention time.Duration
 
+	// RetentionCatchUpDelay is how long after boot the retention passes run
+	// once, before the daily tick takes over.
+	//
+	// Without it the sweep only ever ran from the daily compaction tick, and
+	// that tick waits for the NEXT 03:00 UTC with no catch-up — so any
+	// instance restarted more often than once a day never swept at all, and
+	// the retention window an operator set in the admin UI meant nothing. The
+	// sweep is one DELETE per workspace against a concrete cutoff:
+	// idempotent, cheap, and safe to repeat on every boot.
+	//
+	// 0 uses the default below; negative disables the catch-up entirely, for
+	// operators who want deletions confined to the maintenance window.
+	RetentionCatchUpDelay time.Duration
+
 	// MemoryVersionsKeepLatest is the per-(workspace_id, path) floor
 	// — the N most recent rows are never deleted, regardless of age.
 	// Matches Anthropic Managed Agents' "always keep last N" rule.
@@ -124,6 +138,22 @@ func StartBackground(
 		runCompactionLoop(ctx, db, compactor, opts)
 	}()
 
+	// Boot catch-up. The daily tick alone leaves restart-heavy instances
+	// unswept forever; this makes the configured window mean something on a
+	// box that never stays up until 03:00 UTC.
+	if opts.RetentionCatchUpDelay > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(opts.RetentionCatchUpDelay):
+			}
+			runRetentionPasses(ctx, db, compactor, opts)
+		}()
+	}
+
 	return func() {
 		cancel()
 		wg.Wait()
@@ -159,6 +189,11 @@ func applyDefaults(opts RunnerOptions) RunnerOptions {
 		// today the natural way to disable is BlobRoot="" which
 		// short-circuits the prune entirely.
 		opts.MemoryVersionsRetention = 30 * 24 * time.Hour
+	}
+	if opts.RetentionCatchUpDelay == 0 {
+		// Late enough not to compete with everything else a boot does,
+		// early enough that a short-lived instance still trims.
+		opts.RetentionCatchUpDelay = 60 * time.Second
 	}
 	if opts.MemoryVersionsKeepLatest < 0 {
 		opts.MemoryVersionsKeepLatest = 0
@@ -294,29 +329,44 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 		// unset (test harness, dev mode). The per-workspace pass
 		// runs regardless of BlobRoot — it doesn't touch blobs,
 		// only rows.
-		if opts.BlobRoot != "" && opts.MemoryVersionsRetention > 0 {
-			res, err := memory.PruneOldVersions(ctx, db, opts.BlobRoot, opts.MemoryVersionsRetention, opts.MemoryVersionsKeepLatest)
-			if err != nil {
-				opts.Logger.Warn("memory_versions retention sweep failed", "err", err)
-			} else {
-				opts.Logger.Info("memory_versions retention sweep",
-					"rows_deleted", res.RowsDeleted,
-					"blobs_deleted", res.BlobsDeleted,
-					"errors", len(res.Errors))
-				for _, e := range res.Errors {
-					opts.Logger.Warn("retention sweep partial failure", "err", e)
-				}
-			}
-		}
+		runRetentionPasses(ctx, db, comp, opts)
 		// Per-workspace tightening pass. comp.Journal is the same
 		// emitter the rest of the runner uses, so the
 		// memory.versions_swept events land alongside the
 		// compaction.completed events for the same tick. A nil
 		// emitter (test harness) is fine — SweepAllWorkspaces
 		// skips the emit when emitter==nil.
-		if err := memory.SweepAllWorkspaces(ctx, db, comp.Journal); err != nil {
-			opts.Logger.Warn("per-workspace memory retention sweep failed", "err", err)
+	}
+}
+
+// runRetentionPasses trims memory_versions: first the global pass (age cutoff
+// with the keep-latest-N floor, and the blob GC that depends on a BlobRoot),
+// then the per-workspace pass that can only tighten it further.
+//
+// Order matters: the global pass satisfies the keep-N floor, and the
+// per-workspace pass then trims purely by age, so a workspace configured
+// tighter than the instance default gets its window and never loses more of
+// its recent history than the floor allows.
+//
+// Both are single DELETE statements against concrete cutoffs, which is what
+// makes this safe to run from the boot catch-up as well as the daily tick.
+func runRetentionPasses(ctx context.Context, db *sql.DB, comp *Compactor, opts RunnerOptions) {
+	if opts.BlobRoot != "" && opts.MemoryVersionsRetention > 0 {
+		res, err := memory.PruneOldVersions(ctx, db, opts.BlobRoot, opts.MemoryVersionsRetention, opts.MemoryVersionsKeepLatest)
+		if err != nil {
+			opts.Logger.Warn("memory_versions retention sweep failed", "err", err)
+		} else {
+			opts.Logger.Info("memory_versions retention sweep",
+				"rows_deleted", res.RowsDeleted,
+				"blobs_deleted", res.BlobsDeleted,
+				"errors", len(res.Errors))
+			for _, e := range res.Errors {
+				opts.Logger.Warn("retention sweep partial failure", "err", e)
+			}
 		}
+	}
+	if err := memory.SweepAllWorkspaces(ctx, db, comp.Journal); err != nil {
+		opts.Logger.Warn("per-workspace memory retention sweep failed", "err", err)
 	}
 }
 

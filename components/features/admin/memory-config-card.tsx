@@ -116,8 +116,8 @@ export function MemoryConfigCard({ workspaceId }: {
 
   return (
     <SettingsCard
-      title="Memory configuration"
-      description="Retention window for memory_versions rows, used by the per-workspace retention sweep."
+      title="Memory version history"
+      description="How long this instance keeps the edit history of agent memory. It does not affect what an agent remembers."
       actions={
         <Button
           variant="outline"
@@ -141,7 +141,7 @@ export function MemoryConfigCard({ workspaceId }: {
           <div className="flex items-end gap-2 flex-wrap">
             <div className="space-y-1">
               <Label htmlFor="mem-retention-days" className="text-xs">
-                Versions retention (days)
+                Keep history for (days)
               </Label>
               <Input
                 id="mem-retention-days"
@@ -177,10 +177,22 @@ export function MemoryConfigCard({ workspaceId }: {
               : `Set explicitly for this workspace.`}
           </p>
 
-          <p className="text-[11px] text-muted-foreground">
-            Changes are journalled as <code className="font-mono">memory.config_updated</code>, so a
-            compliance audit can trace when retention policy changed and who changed it. Rows already
-            older than the new window become eligible for deletion on the sweep&apos;s next pass.
+          {/* The name "memory" made this read as "how long agents remember".
+              It is not: what an agent remembers lives in its own files and is
+              never touched here. This trims the VERSION TRAIL of those files —
+              the record of what each write changed, which is what makes a
+              memory edit recoverable and auditable. */}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            This is housekeeping for the instance, not a memory policy. An agent&apos;s memory lives in
+            its own files and is kept for as long as the agent exists; what expires here is the trail
+            of past versions of those files — what you would use to see what a write changed, or to
+            roll one back.
+          </p>
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            The trim runs shortly after this instance starts and then daily at 03:00 UTC. The three
+            most recent versions of every file always survive, whatever the window says. Changes to
+            this setting are journalled as <code className="font-mono">memory.config_updated</code>,
+            so an audit can trace when the policy changed and who changed it.
           </p>
 
           {!canEdit && (
