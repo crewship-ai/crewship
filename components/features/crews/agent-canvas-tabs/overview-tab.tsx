@@ -6,7 +6,6 @@ import {
   Play, Share2, Sparkles, Webhook, Workflow, Wrench, XCircle,
 } from "lucide-react"
 
-import { usePipelines } from "@/hooks/use-pipelines"
 import { useAgentReach } from "@/hooks/use-agent-reach"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
@@ -40,6 +39,8 @@ export interface OverviewTabProps {
   patch: (body: Record<string, unknown>) => Promise<void>
   onStop?: () => void
   onOpenInbox?: () => void
+  /** Switches this screen to its Konfigurace tab — used by the trigger cell. */
+  onOpenConfig?: () => void
   /**
    * Relations whose UI already exists as a full component (memory, workspace).
    * The canvas owns their props, so it builds the chips and passes them in.
@@ -70,10 +71,9 @@ function runTone(status?: string | null): DetailCellTone {
 }
 
 export function OverviewTab({
-  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, extraReach = [],
+  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, onOpenConfig, extraReach = [],
 }: OverviewTabProps) {
-  const { issues, credentials, skills } = useAgentRelations(workspaceId, agent.id)
-  const { pipelines } = usePipelines(workspaceId)
+  const { issues, credentials, skills, pipelines } = useAgentRelations(workspaceId, agent.id)
   const { toolkits, channels } = useAgentReach(workspaceId, agent.id)
 
   const agentPipelines = useMemo(
@@ -95,7 +95,7 @@ export function OverviewTab({
     title: `${i.identifier ? `${i.identifier} ` : ""}${i.title}`,
     subtitle: [i.status?.toLowerCase(), i.priority?.toLowerCase()].filter(Boolean).join(" · "),
     tag: issueBucket(i.status),
-    href: `/issues?issue=${encodeURIComponent(i.identifier ?? i.id)}`,
+    href: `/orchestration/issues/${encodeURIComponent(i.identifier ?? i.id)}`,
   }))
 
   const routineItems: DetailCellItem[] = agentPipelines.map((p): DetailCellItem => ({
@@ -105,7 +105,7 @@ export function OverviewTab({
     title: p.name ?? p.slug,
     subtitle: p.slug,
     tag: "all",
-    href: `/routines?routine=${encodeURIComponent(p.slug)}`,
+    href: "/routines",
   }))
 
   const triggerItems: DetailCellItem[] = triggers.map((t): DetailCellItem => ({
@@ -243,7 +243,7 @@ export function OverviewTab({
           ]}
           items={issueItems}
           footerLabel={`Otevřít s filtrem ${agent.slug}`}
-          footerHref={`/issues?assignee=${encodeURIComponent(agent.slug)}`}
+          footerHref="/orchestration/issues"
         />
         <DetailCell
           title="Rutiny"
@@ -263,7 +263,7 @@ export function OverviewTab({
           ]}
           items={triggerItems}
           footerLabel="Nastavit spouštění"
-          footerHref={`/crews?agent=${encodeURIComponent(agent.slug)}&tab=settings`}
+          footerOnClick={onOpenConfig}
         />
         <DetailCell
           title="Credentials"

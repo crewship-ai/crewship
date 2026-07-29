@@ -5,31 +5,20 @@ import { SystemPromptEditor } from "@/components/features/crews/system-prompt-ed
 import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
 
 import { AdvancedSection } from "./advanced-section"
-import { RuntimeSection } from "./runtime-section"
 import type { AgentRecord } from "./types"
 
 export interface SettingsTabProps {
   agent: AgentRecord
   patch: (body: Record<string, unknown>) => Promise<void>
-  safePatch: (body: Record<string, unknown>) => void
   showAdvanced: boolean
   setShowAdvanced: (next: boolean | ((prev: boolean) => boolean)) => void
-  customModelOpen: boolean
-  setCustomModelOpen: (open: boolean) => void
-  customModelDraft: string
-  setCustomModelDraft: (draft: string) => void
 }
 
 export function SettingsTab({
   agent,
   patch,
-  safePatch,
   showAdvanced,
   setShowAdvanced,
-  customModelOpen,
-  setCustomModelOpen,
-  customModelDraft,
-  setCustomModelDraft,
 }: SettingsTabProps) {
   return (
     <div className="space-y-7">
@@ -48,20 +37,11 @@ export function SettingsTab({
         <AgentLearningToggle agentId={agent.id} workspaceId={agent.workspace_id} />
       </section>
 
-      {/* Runtime — provider chips + rich model dropdown */}
+      {/* Runtime moved to the Konfigurace sections above — provider, model,
+          adapter and timeout are edited there now, and rendering both meant
+          two controls writing the same field. Only the collapsible Advanced
+          block stays, because nothing else hosts it yet. */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Runtime</h2>
-
-        <RuntimeSection
-          agent={agent}
-          safePatch={safePatch}
-          customModelOpen={customModelOpen}
-          setCustomModelOpen={setCustomModelOpen}
-          customModelDraft={customModelDraft}
-          setCustomModelDraft={setCustomModelDraft}
-        />
-
-        {/* Advanced — collapsible */}
         <AdvancedSection
           agent={agent}
           showAdvanced={showAdvanced}

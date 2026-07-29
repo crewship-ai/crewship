@@ -122,8 +122,6 @@ export function AgentCanvas({
 
   const [tab, setTab] = useState<AgentTab>("overview")
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [customModelOpen, setCustomModelOpen] = useState(false)
-  const [customModelDraft, setCustomModelDraft] = useState("")
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
   // Reset to Overview when switching agents.
@@ -203,14 +201,6 @@ export function AgentCanvas({
     onChanged: onAgentChanged,
   })
 
-  // Fire-and-forget wrapper for click/key handlers that can't await.
-  // Without this the rejected promise becomes an unhandled rejection
-  // and the UI shows nothing on save failure.
-  const safePatch = useCallback((body: Record<string, unknown>) => {
-    patch(body).catch((err) => {
-      toast.error(`Save failed: ${err instanceof Error ? err.message : err}`)
-    })
-  }, [patch])
 
   const handleStop = useCallback(async () => {
     if (!agent) return
@@ -514,6 +504,7 @@ export function AgentCanvas({
           peerMessages={peerMessages}
           patch={patch}
           onStop={isRunning ? handleStop : undefined}
+          onOpenConfig={() => setTab("config")}
           extraReach={[
             {
               id: "memory", icon: Brain, label: "Paměť", tone: "gold", wide: true,
@@ -567,13 +558,8 @@ export function AgentCanvas({
           <SettingsTab
             agent={agent}
             patch={patch}
-            safePatch={safePatch}
             showAdvanced={showAdvanced}
             setShowAdvanced={setShowAdvanced}
-            customModelOpen={customModelOpen}
-            setCustomModelOpen={setCustomModelOpen}
-            customModelDraft={customModelDraft}
-            setCustomModelDraft={setCustomModelDraft}
           />
         </div>
       )}

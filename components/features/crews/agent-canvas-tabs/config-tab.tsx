@@ -1,6 +1,6 @@
 "use client"
 
-import { Bot, CalendarClock, FileText, Settings2, Shield, Webhook, Wrench } from "lucide-react"
+import { Bot, CalendarClock, Settings2, Shield, Webhook, Wrench } from "lucide-react"
 
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
@@ -114,12 +114,20 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             value={agent.slug} onSave={(v) => patch({ slug: v })}
           />
           <ConfigText label="Role title" value={agent.role_title ?? ""} onSave={(v) => patch({ role_title: v })} />
-          <ConfigSelect
-            label="Crew" hint="Určuje kontejner, síť a sdílenou paměť."
-            value={agent.crew_id ?? ""}
-            options={[{ value: "", label: "(bez crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
-            onSave={(v) => patch({ crew_id: v || null })}
-          />
+          {/* Only offered once the crew list has arrived. Rendering it early
+              meant the agent's own crew was not among the options, so the
+              select fell back to "(bez crew)" and the first stray change
+              detached the agent from its crew — silently. */}
+          {crews.length > 0 ? (
+            <ConfigSelect
+              label="Crew" hint="Určuje kontejner, síť a sdílenou paměť."
+              value={agent.crew_id ?? ""}
+              options={[{ value: "", label: "(bez crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
+              onSave={(v) => patch({ crew_id: v || null })}
+            />
+          ) : (
+            <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="načítá se" />
+          )}
           <ConfigSelect
             label="Role v crew" hint="Lead smí zadávat práci ostatním a čekat na výsledek."
             value={agent.agent_role}
@@ -180,17 +188,6 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
       </div>
 
       <div className="grid gap-4">
-        <Section
-          icon={FileText} title="Systémový prompt"
-          footer="Uloží se po opuštění pole. Esc vrátí původní znění."
-        >
-          <ConfigText
-            label="Instrukce" multiline value={agent.system_prompt ?? ""}
-            placeholder="Bez promptu převezme agent výchozí chování crew."
-            onSave={(v) => patch({ system_prompt: v })}
-          />
-        </Section>
-
         <Section icon={CalendarClock} title="Plán">
           <ConfigSwitch
             label="Spouštět podle plánu" checked={agent.schedule_enabled ?? false}

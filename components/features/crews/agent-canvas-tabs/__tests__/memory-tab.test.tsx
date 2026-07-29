@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryTab } from "@/components/features/crews/agent-canvas-tabs/memory-tab"
 
 // PR-E F6 — Memory tab subtab navigation contract test.

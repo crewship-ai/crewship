@@ -71,6 +71,8 @@ export interface DetailCellProps {
   tall?: boolean
   footerLabel?: string
   footerHref?: string
+  /** Used instead of `footerHref` when the destination is in-page. */
+  footerOnClick?: () => void
   className?: string
 }
 
@@ -85,6 +87,7 @@ export function DetailCell({
   tall = false,
   footerLabel,
   footerHref,
+  footerOnClick,
   className,
 }: DetailCellProps) {
   const [activeFilter, setActiveFilter] = useState(() => ALL(filters))
@@ -211,6 +214,15 @@ export function DetailCell({
             {footerLabel}
             <ArrowUpRight className="h-3 w-3" />
           </Link>
+        )}
+        {footerLabel && !footerHref && footerOnClick && (
+          <button
+            type="button"
+            onClick={footerOnClick}
+            className="ml-auto inline-flex items-center gap-1 text-primary hover:underline"
+          >
+            {footerLabel}
+          </button>
         )}
       </div>
     </div>

@@ -92,6 +92,37 @@ function assertSameOrigin(input: RequestInfo | URL): string {
 }
 
 /** Centralised fetch with refresh-on-401-once + session-expired event. */
+
+/**
+ * Surfaces the two failure classes that are invisible from the UI: a 429 from
+ * the 120/min bucket and any 5xx. Both present identically to a user — the
+ * screen simply stops updating and the realtime stream reconnects — so a
+ * report of "it broke" carries no evidence unless the console says which call
+ * was rejected.
+ *
+ * Off unless `localStorage.crewshipDebug = "1"`, or always on in development.
+ * Rate limiting is the one status worth shouting about even in production
+ * builds, because it explains a whole session going quiet at once.
+ */
+function reportBadStatus(target: RequestInfo | URL, res: Response): void {
+  if (res.ok) return
+  const noisy = res.status === 429 || res.status >= 500
+  if (!noisy) return
+  let enabled = process.env.NODE_ENV !== "production"
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem("crewshipDebug") === "1") enabled = true
+  } catch {
+    // Private mode / disabled storage — fall back to the env default.
+  }
+  if (!enabled && res.status !== 429) return
+  const url = typeof target === "string" ? target : String((target as Request).url ?? target)
+  console.warn(
+    res.status === 429
+      ? `[crewship] 429 rate limited: ${url} — the 120/min bucket is full; the UI will look frozen until it drains.`
+      : `[crewship] ${res.status} from ${url}`,
+  )
+}
+
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   assertSameOrigin(input)
   // Remote-server mode (desktop shell): prefix relative /api/* string paths
@@ -114,6 +145,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   }
 
   const res = await fetch(target, initWithCreds)
+  reportBadStatus(target, res)
   // Bearer tokens are long-lived CLI-class credentials: there is no cookie
   // rotation to attempt, so a 401 is terminal for this request. Emit the
   // session-expired signal so the shell can re-pair.

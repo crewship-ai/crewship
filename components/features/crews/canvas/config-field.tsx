@@ -35,12 +35,12 @@ export function ConfigRow({ label, hint, htmlFor, children, full = false }: Conf
   return (
     <div
       className={cn(
-        "grid min-h-[44px] items-center gap-3.5 border-b border-border px-3 py-2 transition-colors last:border-b-0 hover:bg-white/[.025]",
+        "grid min-h-[38px] items-center gap-3.5 border-b border-border px-3 py-1.5 transition-colors last:border-b-0 hover:bg-white/[.025]",
         full ? "grid-cols-1 gap-1.5" : "grid-cols-1 md:grid-cols-[minmax(0,1fr)_248px]",
       )}
     >
       <div className="min-w-0">
-        <label htmlFor={htmlFor} className="block text-body font-medium text-foreground">
+        <label htmlFor={htmlFor} className="block text-label font-medium text-foreground">
           {label}
         </label>
         {hint && <span className="mt-0.5 block text-micro leading-snug text-muted-foreground-soft">{hint}</span>}
@@ -99,7 +99,7 @@ function useOptimistic<T>(value: T, onSave: (next: T) => Promise<void> | void) {
 }
 
 const inputBase =
-  "w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-body text-foreground outline-none " +
+  "w-full rounded-lg border border-border bg-background px-2.5 py-1 text-label text-foreground outline-none " +
   "transition-[border-color,box-shadow] hover:border-foreground/25 " +
   "focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_20%,transparent)]"
 
@@ -327,7 +327,7 @@ export function ConfigCards<T extends string>({ value, options, onSave }: Config
             {local === o.value && <span className="absolute inset-[3px] rounded-full bg-primary" />}
           </span>
           <span>
-            <span className="block text-body font-medium">{o.title}</span>
+            <span className="block text-label font-medium">{o.title}</span>
             <span className="mt-0.5 block text-micro leading-snug text-muted-foreground-soft">{o.description}</span>
           </span>
         </button>
