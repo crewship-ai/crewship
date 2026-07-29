@@ -15,7 +15,10 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
 
-import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth, LicenseInfo, TelemetryInfo } from "./types"
+import type {
+  TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth,
+  LicenseInfo, TelemetryInfo, VersionInfo, SecurityPosture, JournalIntegrity,
+} from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
@@ -108,6 +111,13 @@ export default function AdminPage() {
   const [health, setHealth] = useState<AdminHealth | null>(null)
   const [license, setLicense] = useState<LicenseInfo | null>(null)
   const [telemetry, setTelemetry] = useState<TelemetryInfo | null>(null)
+  // The instance already computes all three of these and the overview showed
+  // none of them: which build is running (and whether a newer one exists),
+  // what the instance thinks of its own security posture, and whether the
+  // tamper-evident journal still verifies.
+  const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [posture, setPosture] = useState<SecurityPosture | null>(null)
+  const [journal, setJournal] = useState<JournalIntegrity | null>(null)
   const [loading, setLoading] = useState(true)
   // A 403/500/network failure on the primary fetches must be visible, not a
   // silently empty table (#868). Populated by fetchData; cleared on success.
@@ -172,13 +182,19 @@ export default function AdminPage() {
     async function fetchData() {
       setLoading(true)
       try {
-        const [statsRes, orgsRes, usersRes, healthRes, licenseRes, telemetryRes] = await Promise.all([
+        const [
+          statsRes, orgsRes, usersRes, healthRes, licenseRes, telemetryRes,
+          versionRes, postureRes, journalRes,
+        ] = await Promise.all([
           apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/health?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/system/license?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/system/telemetry`),
+          apiFetch(`/api/v1/system/version`),
+          apiFetch(`/api/v1/admin/security-posture?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/admin/journal/verify?workspace_id=${workspaceId}`),
         ])
         if (cancelled) return
 
@@ -206,6 +222,9 @@ export default function AdminPage() {
         if (healthRes.ok) setHealth(await healthRes.json())
         if (licenseRes.ok) setLicense(await licenseRes.json())
         if (telemetryRes.ok) setTelemetry(await telemetryRes.json())
+        if (versionRes.ok) setVersion(await versionRes.json())
+        if (postureRes.ok) setPosture(await postureRes.json())
+        if (journalRes.ok) setJournal(await journalRes.json())
       } catch (e) {
         if (!cancelled) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
       } finally {
@@ -239,7 +258,10 @@ export default function AdminPage() {
   }, [role, checkRuntime])
 
   useEffect(() => {
-    if (isAdmin && tab === "security") fetchKeeperData()
+    // Overview shows a one-line keeper verdict, so it needs the same status
+    // the Keeper tab does — otherwise the line reads "unknown" until someone
+    // happens to visit that tab.
+    if (isAdmin && (tab === "security" || tab === "overview")) fetchKeeperData()
   }, [role, tab, fetchKeeperData])
 
   if (wsLoading || !isAdmin) {
@@ -265,6 +287,10 @@ export default function AdminPage() {
           health={health}
           license={license}
           telemetry={telemetry}
+          version={version}
+          posture={posture}
+          journal={journal}
+          keeper={keeperStatus}
         />
       )
     }

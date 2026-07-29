@@ -35,6 +35,8 @@ crewship admin <subcommand> [flags]
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. |
 | `prune-legacy` | Remove orphaned pre-C1 crew docker resources that block agents from starting. **HTTP-backed — needs a running server + login** (the one exception in this group). |
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
+| `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
+| `stats` | Workspace counts read against the licensed ceilings (crews, agents, members, runs in flight). **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
 | `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
@@ -319,6 +321,60 @@ provider is not docker.
 - [`crewship session`](/cli/session) — user-scoped self-service of the same `user_sessions` table.
 - [`crewship doctor`](/cli/doctor) — adjacent host-side diagnostics (data dir, schema version, container runtime).
 
+
+---
+
+## `crewship admin health`
+
+```bash
+crewship admin health
+crewship admin health --format json | jq '.disk.used_pct'
+```
+
+```
+CHECK           STATE
+Uptime          23m
+Database        connected
+Disk            70% used · 62.1 GB free of 206.9 GB (/home/ubuntu/.crewship)
+Log level       debug
+Encryption key  external — injected by the operator's environment
+```
+
+**Disk** is the data directory's volume — the one that fills in practice, since
+the database, agent outputs and logs all live under it. Where the platform
+cannot measure it, the row says so rather than printing a zero.
+
+**Encryption key** reports where `ENCRYPTION_KEY` came from. `generated` means
+Crewship auto-created it into `<dataDir>/secrets.env`, next to the database it
+protects — so a copied disk, a restored snapshot or a stray backup carries the
+ciphertext *and* what opens it. `external` means the operator injected it.
+
+**Log level** shows the live level, and says `(temporary)` when a timed
+override is in effect — a level that reverts on its own is a different fact
+from one someone set for good.
+
+---
+
+## `crewship admin stats`
+
+```bash
+crewship admin stats
+crewship admin stats --format json | jq '.crews'
+```
+
+```
+COUNT        VALUE
+Crews        3 of 15
+Agents       8
+Members      2 of 5
+Running now  0
+Edition      community
+```
+
+Counts are read against the ceiling the licence imposes on each: a bare "8
+agents" is not something anyone acts on, "3 of 15 crews" is. Where the edition
+imposes no ceiling, the bare count is shown. If the licence cannot be read the
+counts still print — losing the ceilings must not cost you the numbers.
 
 ---
 
