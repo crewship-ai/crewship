@@ -369,6 +369,22 @@ body {
      border did. Now it has one. */
   .border-hairline { border-color: color-mix(in oklch, var(--border) 40%, transparent); }
 
+  /* The detail column.
+     1180px was a fixed guess made at 1440px. On a 2560px monitor it parked
+     650px of dead gutter on either side of a grid whose own cards were
+     scrolling internally — we were rationing space we had. The cap now steps
+     with the viewport, and the grids inside add COLUMNS rather than stretching,
+     so a card stays card-sized and the extra width buys more content.
+     One class, so no screen has to re-decide this. */
+  .detail-width {
+    width: 100%;
+    margin-inline: auto;
+    max-width: 1180px;
+  }
+  @media (min-width: 1600px) { .detail-width { max-width: 1440px; } }
+  @media (min-width: 1920px) { .detail-width { max-width: 1780px; } }
+  @media (min-width: 2400px) { .detail-width { max-width: 2160px; } }
+
   .scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;

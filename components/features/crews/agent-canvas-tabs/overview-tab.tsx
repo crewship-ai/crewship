@@ -39,7 +39,7 @@ export interface OverviewTabProps {
   patch: (body: Record<string, unknown>) => Promise<void>
   onStop?: () => void
   onOpenInbox?: () => void
-  /** Switches this screen to its Konfigurace tab — used by the trigger cell. */
+  /** Switches this screen to its Configuration tab — used by the trigger cell. */
   onOpenConfig?: () => void
   /**
    * Relations whose UI already exists as a full component (memory, workspace).
@@ -167,11 +167,11 @@ export function OverviewTab({
         filters: [{ id: "all", label: "All" }],
         items: toolkits.map((t, idx): DetailCellItem => ({
           id: `${t.toolkit || idx}`, icon: Wrench, tone: "notice",
-          title: t.toolkit || "konektor",
+          title: t.toolkit || "connector",
           subtitle: t.tools?.length ? `Composio · ${t.tools.length} tools` : `Composio · ${t.mode}`,
           tag: "all",
         })),
-        footerLabel: "Spravovat konektory", footerHref: "/integrations",
+        footerLabel: "Manage connectors", footerHref: "/integrations",
       },
     },
     {
@@ -234,7 +234,12 @@ export function OverviewTab({
         />
       )}
 
-      <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4">
+      {/* One grid, not three stacked blocks. Below 1920 it behaves exactly as
+          before — four cells, then Runs and peers full width underneath. Past
+          that the track count goes to six and the two wide cells fold up onto
+          the same row, so a wide monitor buys a denser screen instead of
+          wider cards over an empty half-page. */}
+      <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4 min-[1920px]:grid-cols-6">
         <DetailCell
           title="Issues"
           count={issues.length}
@@ -281,43 +286,45 @@ export function OverviewTab({
           footerLabel="Open vault"
           footerHref="/credentials"
         />
+
+        <DetailCell
+          className="md:col-span-2 xl:col-span-4 min-[1920px]:col-span-2"
+          title="Runs"
+          count={runs?.length ?? 0}
+          filters={[
+            { id: "all", label: "All" },
+            { id: "err", label: "Errors only" },
+            { id: "run", label: "Running" },
+          ]}
+          items={runItems}
+          tall
+          footerLabel="Open in Journal"
+          footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
+        />
+
+        {peerMessages.length > 0 && (
+          <DetailCell
+            className="md:col-span-2 xl:col-span-4 min-[1920px]:col-span-2"
+            title="From peers"
+            count={peerMessages.length}
+            filters={[{ id: "all", label: "All" }]}
+            items={peerMessages.map((m, idx): DetailCellItem => ({
+              id: m.id ?? String(idx),
+              icon: AtSign,
+              tone: "purple",
+              title: m.from_agent_name ?? m.from_agent_slug ?? "peer",
+              subtitle: m.preview ?? "",
+              meta: m.created_at ? new Date(m.created_at).toLocaleDateString() : "",
+              tag: "all",
+            }))}
+            footerLabel="Open inbox"
+            footerHref={`/inbox?agent=${encodeURIComponent(agent.slug)}`}
+          />
+        )}
       </div>
 
-      <DetailCell
-        title="Runs"
-        count={runs?.length ?? 0}
-        filters={[
-          { id: "all", label: "All" },
-          { id: "err", label: "Errors only" },
-          { id: "run", label: "Running" },
-        ]}
-        items={runItems}
-        tall
-        footerLabel="Open in Journal"
-        footerHref={`/journal?agent=${encodeURIComponent(agent.slug)}`}
-      />
-
-      {peerMessages.length > 0 && (
-        <DetailCell
-          title="From peers"
-          count={peerMessages.length}
-          filters={[{ id: "all", label: "All" }]}
-          items={peerMessages.map((m, idx): DetailCellItem => ({
-            id: m.id ?? String(idx),
-            icon: AtSign,
-            tone: "purple",
-            title: m.from_agent_name ?? m.from_agent_slug ?? "peer",
-            subtitle: m.preview ?? "",
-            meta: m.created_at ? new Date(m.created_at).toLocaleDateString() : "",
-            tag: "all",
-          }))}
-          footerLabel="Open inbox"
-          footerHref={`/inbox?agent=${encodeURIComponent(agent.slug)}`}
-        />
-      )}
-
       {issues.length === 0 && agentPipelines.length === 0 && (runs?.length ?? 0) === 0 && (
-        <p className="flex items-center gap-2 px-1 text-label text-muted-foreground-soft">
+        <p className="type-row flex items-center gap-2 px-1 text-muted-foreground-soft">
           <Bot className="h-3.5 w-3.5" />
           This agent has done nothing yet. Assign it an issue or start it from chat.
         </p>

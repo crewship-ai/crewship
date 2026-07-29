@@ -40,10 +40,10 @@ export function ConfigRow({ label, hint, htmlFor, children, full = false }: Conf
       )}
     >
       <div className="min-w-0">
-        <label htmlFor={htmlFor} className="block text-label font-medium text-foreground">
+        <label htmlFor={htmlFor} className="type-row block font-medium text-foreground">
           {label}
         </label>
-        {hint && <span className="mt-0.5 block text-micro leading-snug text-muted-foreground-soft">{hint}</span>}
+        {hint && <span className="type-meta mt-0.5 block leading-snug text-muted-foreground-soft">{hint}</span>}
       </div>
       <div className={cn("flex min-w-0 items-center gap-2", full && "w-full")}>{children}</div>
     </div>
@@ -98,10 +98,16 @@ function useOptimistic<T>(value: T, onSave: (next: T) => Promise<void> | void) {
   return { local, setLocal, saved, commit }
 }
 
-const inputBase =
-  "w-full rounded-lg border border-border bg-background px-2.5 py-1 text-label text-foreground outline-none " +
+// One control shape. The height is explicit because a <select> and an <input>
+// with identical padding still disagree by 8px — the select reserves room for
+// the UA arrow it is no longer drawing — and a row of controls that each pick
+// their own height is what makes a form look assembled rather than designed.
+const controlBase =
+  "type-row w-full rounded-lg border border-border bg-background px-2.5 text-foreground outline-none " +
   "transition-[border-color,box-shadow] hover:border-foreground/25 " +
   "focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_20%,transparent)]"
+
+const inputBase = `${controlBase} h-7`
 
 export interface ConfigTextProps {
   label: string
@@ -136,13 +142,17 @@ export function ConfigText({ label, hint, value, mono, multiline, placeholder, o
       }
       if (e.key === "Enter" && !multiline) (e.target as HTMLElement).blur()
     },
-    className: cn(inputBase, mono && "font-mono text-label"),
+    className: cn(inputBase, mono && "font-mono"),
   }
 
   return (
     <ConfigRow label={label} hint={hint} htmlFor={id} full={multiline}>
       {multiline ? (
-        <textarea {...shared} rows={3} className={cn(shared.className, "min-h-[62px] resize-y leading-relaxed")} />
+        <textarea
+          {...shared}
+          rows={3}
+          className={cn(controlBase, mono && "font-mono", "min-h-[62px] resize-y py-1.5 leading-relaxed")}
+        />
       ) : (
         <input type="text" {...shared} />
       )}
@@ -256,7 +266,7 @@ export function ConfigPresets<T extends string | number>({
             aria-pressed={local === p.value}
             onClick={() => void commit(p.value)}
             className={cn(
-              "rounded-lg border px-2.5 py-1 text-label transition-colors",
+              "type-row h-7 rounded-lg border px-2.5 transition-colors",
               local === p.value
                 ? "border-transparent bg-primary font-medium text-primary-foreground"
                 : "border-border bg-background text-muted-foreground hover:border-foreground/25 hover:text-foreground",
@@ -269,7 +279,7 @@ export function ConfigPresets<T extends string | number>({
           <button
             type="button"
             aria-pressed
-            className="rounded-lg border border-transparent bg-primary px-2.5 py-1 text-label font-medium text-primary-foreground"
+            className="type-row h-7 rounded-lg border border-transparent bg-primary px-2.5 font-medium text-primary-foreground"
           >
             custom · {String(local)}
           </button>
@@ -327,8 +337,8 @@ export function ConfigCards<T extends string>({ value, options, onSave }: Config
             {local === o.value && <span className="absolute inset-[3px] rounded-full bg-primary" />}
           </span>
           <span>
-            <span className="block text-label font-medium">{o.title}</span>
-            <span className="mt-0.5 block text-micro leading-snug text-muted-foreground-soft">{o.description}</span>
+            <span className="type-row block font-medium">{o.title}</span>
+            <span className="type-meta mt-0.5 block leading-snug text-muted-foreground-soft">{o.description}</span>
           </span>
         </button>
       ))}
@@ -342,8 +352,8 @@ export function ConfigReadOnly({ label, hint, value, note }: {
 }) {
   return (
     <ConfigRow label={label} hint={hint}>
-      <span className="truncate font-mono text-label">{value}</span>
-      {note && <span className="shrink-0 text-micro text-muted-foreground-soft">{note}</span>}
+      <span className="type-row truncate font-mono">{value}</span>
+      {note && <span className="type-meta shrink-0 text-muted-foreground-soft">{note}</span>}
     </ConfigRow>
   )
 }

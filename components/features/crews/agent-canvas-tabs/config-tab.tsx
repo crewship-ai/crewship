@@ -84,141 +84,141 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
 
   return (
-    <div className="grid items-start gap-4 lg:grid-cols-2">
-      <div className="grid gap-4">
-        <DetailCard bare icon={Bot} title="Identity">
-          <ConfigText label="Name" value={agent.name} onSave={(v) => patch({ name: v })} />
-          <ConfigText
-            label="Slug" mono hint="Used in the CLI and when delegating between agents."
-            value={agent.slug} onSave={(v) => patch({ slug: v })}
-          />
-          <ConfigText label="Role title" value={agent.role_title ?? ""} onSave={(v) => patch({ role_title: v })} />
-          {/* Only offered once the crew list has arrived. Rendering it early
-              meant the agent's own crew was not among the options, so the
-              select fell back to "(bez crew)" and the first stray change
-              detached the agent from its crew — silently. */}
-          {crews.length > 0 ? (
-            <ConfigSelect
-              label="Crew" hint="Decides the container, the network and the shared memory."
-              value={agent.crew_id ?? ""}
-              options={[{ value: "", label: "(bez crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
-              onSave={(v) => patch({ crew_id: v || null })}
-            />
-          ) : (
-            <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="loading" />
-          )}
+    // Cards flow into as many columns as the viewport affords, instead of being
+    // dealt by hand into two fixed piles. At 1180px that is still two columns
+    // and reads exactly as before; on a wide monitor it becomes three and the
+    // screen stops ending halfway down. break-inside-avoid keeps a card whole.
+    <div className="columns-1 gap-4 lg:columns-2 min-[1920px]:columns-3 [&>*]:mb-4 [&>*]:break-inside-avoid">
+      <DetailCard bare icon={Bot} title="Identity">
+        <ConfigText label="Name" value={agent.name} onSave={(v) => patch({ name: v })} />
+        <ConfigText
+          label="Slug" mono hint="Used in the CLI and when delegating between agents."
+          value={agent.slug} onSave={(v) => patch({ slug: v })}
+        />
+        <ConfigText label="Role title" value={agent.role_title ?? ""} onSave={(v) => patch({ role_title: v })} />
+        {/* Only offered once the crew list has arrived. Rendering it early
+            meant the agent's own crew was not among the options, so the
+            select fell back to "(no crew)" and the first stray change
+            detached the agent from its crew — silently. */}
+        {crews.length > 0 ? (
           <ConfigSelect
-            label="Role in crew" hint="A lead may assign work to the others and wait for the result."
-            value={agent.agent_role}
-            options={[{ value: "AGENT", label: "Agent" }, { value: "LEAD", label: "Lead" }]}
-            onSave={(v) => patch({ agent_role: v })}
+            label="Crew" hint="Decides the container, the network and the shared memory."
+            value={agent.crew_id ?? ""}
+            options={[{ value: "", label: "(no crew)" }, ...crews.map((c) => ({ value: c.id, label: c.name }))]}
+            onSave={(v) => patch({ crew_id: v || null })}
           />
-          {isLead && (
-            <ConfigSelect
-              label="Lead mode" hint="A passive lead only answers; it never drives anyone."
-              value={agent.lead_mode || "active"}
-              options={[{ value: "active", label: "Active" }, { value: "passive", label: "Passive" }]}
-              onSave={(v) => patch({ lead_mode: v })}
-            />
-          )}
-          <ConfigText
-            label="Description" multiline value={agent.description ?? ""}
-            placeholder="What this agent does…"
-            onSave={(v) => patch({ description: v })}
-          />
-        </DetailCard>
-
-        <DetailCard bare icon={Settings2} title="Model and run">
+        ) : (
+          <ConfigReadOnly label="Crew" value={agent.crew?.name ?? "—"} note="loading" />
+        )}
+        <ConfigSelect
+          label="Role in crew" hint="A lead may assign work to the others and wait for the result."
+          value={agent.agent_role}
+          options={[{ value: "AGENT", label: "Agent" }, { value: "LEAD", label: "Lead" }]}
+          onSave={(v) => patch({ agent_role: v })}
+        />
+        {isLead && (
           <ConfigSelect
-            label="Provider" value={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
-            adornment={providerMark(agent.llm_provider)}
-            options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
-            onSave={(v) => patch({ llm_provider: v })}
+            label="Lead mode" hint="A passive lead only answers; it never drives anyone."
+            value={agent.lead_mode || "active"}
+            options={[{ value: "active", label: "Active" }, { value: "passive", label: "Passive" }]}
+            onSave={(v) => patch({ lead_mode: v })}
           />
-          <ConfigText label="Model" mono value={agent.llm_model ?? ""} onSave={(v) => patch({ llm_model: v })} />
-          <ConfigSelect
-            label="CLI adapter" hint="What launches the agent inside the container."
-            value={agent.cli_adapter}
-            options={ADAPTERS.map((a) => ({ value: a.value, label: a.label }))}
-            onSave={(v) => patch({ cli_adapter: v })}
-          />
-          <ConfigPresets
-            label="Longest run" hint="When it expires the run ends as a timeout."
-            value={agent.timeout_seconds} presets={TIMEOUTS}
-            onSave={(v) => patch({ timeout_seconds: v })}
-          />
-          <ConfigSwitch
-            label="Memory between sessions" hint="Without it every session starts from nothing."
-            checked={agent.memory_enabled}
-            onSave={(v) => patch({ memory_enabled: v })}
-          />
-        </DetailCard>
+        )}
+        <ConfigText
+          label="Description" multiline value={agent.description ?? ""}
+          placeholder="What this agent does…"
+          onSave={(v) => patch({ description: v })}
+        />
+      </DetailCard>
 
-        <DetailCard
-          bare icon={Wrench} title="What it may do" subtitle="tool_profile"
-          footer={<>Where the agent reaches <b className="font-medium text-foreground">outward</b> is not decided here — that is the crew network policy.</>}
-        >
-          <ConfigCards
-            value={agent.tool_profile}
-            options={TOOL_PROFILES.map((t) => ({ value: t.value, title: t.title, description: t.description }))}
-            onSave={(v) => patch({ tool_profile: v })}
-          />
-        </DetailCard>
-      </div>
+      <DetailCard bare icon={Settings2} title="Model and run">
+        <ConfigSelect
+          label="Provider" value={(agent.llm_provider ?? "ANTHROPIC").toUpperCase()}
+          adornment={providerMark(agent.llm_provider)}
+          options={PROVIDERS.map((p) => ({ value: p.value, label: p.label }))}
+          onSave={(v) => patch({ llm_provider: v })}
+        />
+        <ConfigText label="Model" mono value={agent.llm_model ?? ""} onSave={(v) => patch({ llm_model: v })} />
+        <ConfigSelect
+          label="CLI adapter" hint="What launches the agent inside the container."
+          value={agent.cli_adapter}
+          options={ADAPTERS.map((a) => ({ value: a.value, label: a.label }))}
+          onSave={(v) => patch({ cli_adapter: v })}
+        />
+        <ConfigPresets
+          label="Longest run" hint="When it expires the run ends as a timeout."
+          value={agent.timeout_seconds} presets={TIMEOUTS}
+          onSave={(v) => patch({ timeout_seconds: v })}
+        />
+        <ConfigSwitch
+          label="Memory between sessions" hint="Without it every session starts from nothing."
+          checked={agent.memory_enabled}
+          onSave={(v) => patch({ memory_enabled: v })}
+        />
+      </DetailCard>
 
-      <div className="grid gap-4">
-        <DetailCard bare icon={CalendarClock} title="Schedule">
-          <ConfigSwitch
-            label="Run on a schedule" checked={agent.schedule_enabled ?? false}
-            onSave={(v) => patch({ schedule_enabled: v })}
-          />
-          <ConfigText
-            label="Cron" mono value={agent.schedule_cron ?? ""} placeholder="0 3 * * *"
-            onSave={(v) => patch({ schedule_cron: v || null })}
-          />
-          <ConfigText
-            label="Prompt for the scheduled run" multiline value={agent.schedule_prompt ?? ""}
-            placeholder="What the agent should do in that run…"
-            onSave={(v) => patch({ schedule_prompt: v || null })}
-          />
-          <ConfigReadOnly
-            label="Next run"
-            value={agent.schedule_next_run ? new Date(agent.schedule_next_run).toLocaleString() : "—"}
-          />
-        </DetailCard>
+      <DetailCard
+        bare icon={Wrench} title="What it may do" subtitle="tool_profile"
+        footer={<>Where the agent reaches <b className="font-medium text-foreground">outward</b> is not decided here — that is the crew network policy.</>}
+      >
+        <ConfigCards
+          value={agent.tool_profile}
+          options={TOOL_PROFILES.map((t) => ({ value: t.value, title: t.title, description: t.description }))}
+          onSave={(v) => patch({ tool_profile: v })}
+        />
+      </DetailCard>
 
-        <DetailCard
-          bare icon={Webhook} title="Webhook"
-          footer="The secret is shown once on rotation — it can never be read back."
-        >
-          <ConfigReadOnly
-            label="Signing key"
-            value={webhookSet ? "nastaven" : "nenastaven"}
-            note={webhookSet ? "rotate in Settings" : undefined}
-          />
-        </DetailCard>
+      <DetailCard bare icon={CalendarClock} title="Schedule">
+        <ConfigSwitch
+          label="Run on a schedule" checked={agent.schedule_enabled ?? false}
+          onSave={(v) => patch({ schedule_enabled: v })}
+        />
+        <ConfigText
+          label="Cron" mono value={agent.schedule_cron ?? ""} placeholder="0 3 * * *"
+          onSave={(v) => patch({ schedule_cron: v || null })}
+        />
+        <ConfigText
+          label="Prompt for the scheduled run" multiline value={agent.schedule_prompt ?? ""}
+          placeholder="What the agent should do in that run…"
+          onSave={(v) => patch({ schedule_prompt: v || null })}
+        />
+        <ConfigReadOnly
+          label="Next run"
+          value={agent.schedule_next_run ? new Date(agent.schedule_next_run).toLocaleString() : "—"}
+        />
+      </DetailCard>
 
-        <DetailCard
-          bare icon={Shield} title="Environment"
-          subtitle={agent.crew ? `owned by crew ${agent.crew.name}` : "no crew"}
-          footer={agent.crew
-            ? <>The container, memory and network belong to the crew — a change would hit all of its agents.</>
-            : <>An agent with no crew runs in an isolated workspace container.</>}
-        >
-          <ConfigReadOnly
-            label="Crew"
-            value={agent.crew?.name ?? "—"}
-            note={agent.crew ? "open" : undefined}
-          />
-          {agent.crew && (
-            <div className="px-3 pb-3">
-              <Button variant="outline" size="sm" onClick={() => onSelectCrew(agent.crew!.slug)}>
-                Open crew settings
-              </Button>
-            </div>
-          )}
-        </DetailCard>
-      </div>
+      <DetailCard
+        bare icon={Webhook} title="Webhook"
+        footer="The secret is shown once on rotation — it can never be read back."
+      >
+        <ConfigReadOnly
+          label="Signing key"
+          value={webhookSet ? "set" : "not set"}
+          note={webhookSet ? "rotate in Settings" : undefined}
+        />
+      </DetailCard>
+
+      <DetailCard
+        bare icon={Shield} title="Environment"
+        subtitle={agent.crew ? `owned by crew ${agent.crew.name}` : "no crew"}
+        footer={agent.crew
+          ? <>The container, memory and network belong to the crew — a change would hit all of its agents.</>
+          : <>An agent with no crew runs in an isolated workspace container.</>}
+      >
+        <ConfigReadOnly
+          label="Crew"
+          value={agent.crew?.name ?? "—"}
+          note={agent.crew ? "open" : undefined}
+        />
+        {agent.crew && (
+          <div className="px-3 pb-3">
+            <Button variant="outline" size="sm" onClick={() => onSelectCrew(agent.crew!.slug)}>
+              Open crew settings
+            </Button>
+          </div>
+      )}
+      </DetailCard>
     </div>
   )
 }
