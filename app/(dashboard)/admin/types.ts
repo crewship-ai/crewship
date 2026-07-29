@@ -24,6 +24,10 @@ export interface AdminUser {
   id: string
   email: string
   full_name: string | null
+  /** Same-origin authed endpoint with a ?v= cache stamp. Returned by
+   *  /api/v1/admin/users since it was written; the type simply never
+   *  declared it, so no admin surface could draw a face. */
+  avatar_url?: string | null
   created_at: string
   workspace: { id: string; name: string } | null
   role: string | null

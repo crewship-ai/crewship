@@ -93,3 +93,18 @@ describe("GDPR actions — the panel explains itself", () => {
     expect(screen.getByText(/right to (access|erasure)|asks for a copy|asks to be erased/i)).toBeInTheDocument()
   })
 })
+
+// Picking the wrong row here erases the wrong person's data. The list should
+// carry every identifying signal the rest of the app already has.
+describe("GDPR actions — the person is recognisable", () => {
+  beforeEach(() => { cleanup(); h.apiFetch.mockReset() })
+
+  it("shows each candidate's avatar", () => {
+    render(<GdprActionsPanel users={USERS} workspaceId="ws-1" />)
+    // The initials branch, not the <img> one: jsdom does not fetch images and
+    // fires an error for the src, so UserAvatar legitimately falls back here.
+    // What this test is for is that the picker draws the shared component at
+    // all — the photo path has its own test in components/ui/__tests__.
+    expect(screen.getByText("FR")).toBeInTheDocument()
+  })
+})

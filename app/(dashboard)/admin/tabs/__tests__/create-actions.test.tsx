@@ -140,3 +140,45 @@ describe("the two actions look like one product", () => {
     expect(invite).not.toContain("bg-primary")
   })
 })
+
+// UserAvatar was extracted precisely because three surfaces drew a person
+// three different ways and only one of them knew about avatar_url — so the
+// same human could appear twice on one screen with two different faces. The
+// admin roster was a fourth surface that never got it: it printed a name and
+// an email and nothing else, while the top bar three centimetres above showed
+// that person's picture.
+describe("Admin → Users shows the person", () => {
+  beforeEach(() => { cleanup(); h.apiFetch.mockReset() })
+
+  it("renders an avatar for each row", () => {
+    const { container } = render(
+      <UsersTab
+        users={[{ ...USERS[0], avatar_url: "/api/v1/users/u-1/avatar?v=2" }]}
+        workspaceId="ws-1"
+        onRefresh={vi.fn()}
+      />,
+    )
+    const img = container.querySelector("img")
+    expect(img).toBeTruthy()
+    expect(img!.getAttribute("src")).toContain("/api/v1/users/u-1/avatar")
+  })
+
+  it("falls back to initials when there is no photo", () => {
+    render(<UsersTab users={USERS} workspaceId="ws-1" onRefresh={vi.fn()} />)
+    // "Demo" → DE, the same two letters the top bar derives.
+    expect(screen.getByText("DE")).toBeInTheDocument()
+  })
+
+  // A provisioned account has no full_name until the person picks one, and a
+  // row with a blank name still has to be identifiable.
+  it("derives initials from the email when the name is not set", () => {
+    render(
+      <UsersTab
+        users={[{ ...USERS[0], full_name: null, email: "zoe@example.com" }]}
+        workspaceId="ws-1"
+        onRefresh={vi.fn()}
+      />,
+    )
+    expect(screen.getByText("ZO")).toBeInTheDocument()
+  })
+})

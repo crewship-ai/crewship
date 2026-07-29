@@ -29,6 +29,7 @@ import { Download, Trash2, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -221,6 +222,17 @@ export const GdprActionsPanel = React.memo(function GdprActionsPanel({
                       (idx < filtered.length - 1 ? "border-b border-border/40" : "")
                     }
                   >
+                    {/* The same face as everywhere else. This list is how an
+                        operator confirms they picked the RIGHT person before
+                        erasing them, so it should not be the one place where
+                        a person looks different. */}
+                    <UserAvatar
+                      name={u.full_name}
+                      email={u.email}
+                      src={u.avatar_url}
+                      className="h-7 w-7 shrink-0"
+                      textClassName="text-[10px]"
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">
                         {u.full_name ?? "(no name)"}

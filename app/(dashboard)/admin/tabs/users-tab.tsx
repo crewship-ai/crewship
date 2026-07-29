@@ -2,6 +2,7 @@ import React from "react"
 import { Badge } from "@/components/ui/badge"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
+import { UserAvatar } from "@/components/ui/user-avatar"
 import type { AdminUser } from "../types"
 
 interface UsersTabProps {
@@ -57,9 +58,21 @@ export const UsersTab = React.memo(function UsersTab({ users, workspaceId, onRef
               }
               style={{ gridTemplateColumns: "minmax(0,1.6fr) minmax(0,1fr) 80px minmax(0,0.9fr)" }}
             >
-              <div className="min-w-0">
-                <div className="text-xs font-medium truncate">{u.full_name ?? "—"}</div>
-                <div className="text-[10px] text-muted-foreground truncate">{u.email}</div>
+              {/* The same face the top bar draws. UserAvatar exists because
+                  three surfaces used to render a person three ways and only
+                  one knew about avatar_url; this roster was a fourth. */}
+              <div className="flex min-w-0 items-center gap-2.5">
+                <UserAvatar
+                  name={u.full_name}
+                  email={u.email}
+                  src={u.avatar_url}
+                  className="h-7 w-7 shrink-0"
+                  textClassName="text-[10px]"
+                />
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-medium">{u.full_name ?? "—"}</div>
+                  <div className="truncate text-[10px] text-muted-foreground">{u.email}</div>
+                </div>
               </div>
               <div className="text-[11px] text-muted-foreground truncate">
                 {u.workspace?.name ?? "—"}
