@@ -279,3 +279,71 @@ export function ConfigPresets<T extends string | number>({
     </ConfigRow>
   )
 }
+
+export interface ConfigCardOption<T extends string> {
+  value: T
+  title: string
+  description: string
+}
+
+export interface ConfigCardsProps<T extends string> {
+  /** Rendered as the card group's heading inside the section, not a row. */
+  label?: string
+  value: T
+  options: ConfigCardOption<T>[]
+  onSave: (next: T) => Promise<void> | void
+}
+
+/**
+ * Radio cards. A three-way choice where each option needs a sentence of
+ * explanation does not fit a segmented control — the label alone ("MINIMAL")
+ * tells a reader nothing about what it costs them.
+ */
+export function ConfigCards<T extends string>({ value, options, onSave }: ConfigCardsProps<T>) {
+  const { local, commit } = useOptimistic(value, onSave)
+
+  return (
+    <div className="grid gap-1.5 p-3" role="radiogroup">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={local === o.value}
+          onClick={() => void commit(o.value)}
+          className={cn(
+            "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 rounded-[9px] border px-3 py-2.5 text-left transition-colors",
+            local === o.value
+              ? "border-primary bg-primary/10"
+              : "border-border bg-background hover:border-foreground/25",
+          )}
+        >
+          <span
+            className={cn(
+              "relative h-[15px] w-[15px] shrink-0 rounded-full border-[1.5px]",
+              local === o.value ? "border-primary" : "border-border",
+            )}
+          >
+            {local === o.value && <span className="absolute inset-[3px] rounded-full bg-primary" />}
+          </span>
+          <span>
+            <span className="block text-body font-medium">{o.title}</span>
+            <span className="mt-0.5 block text-micro leading-snug text-muted-foreground-soft">{o.description}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Read-only row for values this screen does not own (inherited from crew). */
+export function ConfigReadOnly({ label, hint, value, note }: {
+  label: string; hint?: string; value: React.ReactNode; note?: string
+}) {
+  return (
+    <ConfigRow label={label} hint={hint}>
+      <span className="truncate font-mono text-label">{value}</span>
+      {note && <span className="shrink-0 text-micro text-muted-foreground-soft">{note}</span>}
+    </ConfigRow>
+  )
+}

@@ -5,10 +5,10 @@ import Link from "next/link"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  MessageSquare, MoreHorizontal, Square,
-  Trash2, RotateCcw, CheckCircle2, Clock,
+  ArrowUpRight, Bot, Brain, CheckCircle2, Clock, FolderTree, History, MessageSquare,
+  MoreHorizontal, RotateCcw, Sparkles, Square, Trash2,
 } from "lucide-react"
-import { EditableField } from "@/components/shared/editable-field"
+import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import {
   DropdownMenu,
@@ -33,6 +33,7 @@ import {
 } from "./canvas-base"
 import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
+import { ConfigTab } from "./agent-canvas-tabs/config-tab"
 import { SettingsTab } from "./agent-canvas-tabs/settings-tab"
 import { SkillsTab } from "./agent-canvas-tabs/skills-tab"
 import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
@@ -47,16 +48,24 @@ import type {
 
 export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } from "./agent-canvas-tabs/types"
 
-type AgentTab = "overview" | "workspace" | "skills" | "memory" | "activity" | "settings"
+// Two entries, not six. Four of the old tabs were relations the agent merely
+// points at; they hang off the overview's reach strip now, so a reader picks
+// between "what is going on" and "how is it set up" instead of six nouns.
+type AgentTab = "overview" | "config"
 
 const TABS: Array<{ id: AgentTab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "workspace", label: "Workspace" },
-  { id: "skills", label: "Skills & Tools" },
-  { id: "memory", label: "Memory" },
-  { id: "activity", label: "Activity" },
-  { id: "settings", label: "Settings" },
+  { id: "overview", label: "Přehled" },
+  { id: "config", label: "Konfigurace" },
 ]
+
+/** Brand mark for the model in the identity line. */
+function providerMark(provider: string | null | undefined) {
+  const p = (provider ?? "").toUpperCase()
+  if (p === "OPENAI") return <OpenAIIcon className="h-3 w-3 shrink-0" />
+  if (p === "GOOGLE") return <GeminiIcon className="h-3 w-3 shrink-0 text-[#4285F4]" />
+  if (p === "ANTHROPIC") return <AnthropicIcon className="h-3 w-3 shrink-0 text-[#D97757]" />
+  return <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
+}
 
 export interface AgentCanvasProps {
   workspaceId: string
@@ -185,7 +194,6 @@ export function AgentCanvas({
       .catch(() => { /* tolerate */ })
     return () => { cancelled = true }
   }, [agentId, workspaceId])
-  const runsCount = runs?.length ?? null
 
   const patch = usePatchEntity<AgentRecord>({
     workspaceId,
@@ -312,7 +320,7 @@ export function AgentCanvas({
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.16, ease: "easeOut" }}
-        className="flex items-start gap-5 pb-5 border-b border-white/8"
+        className="flex items-start gap-3.5 border-b border-border pb-4"
       >
         <button
           type="button"
@@ -326,7 +334,7 @@ export function AgentCanvas({
             agentId={agent.id}
             avatarUrl={agent.avatar_url}
             className={cn(
-              "w-20 h-20 rounded-2xl transition-transform group-hover:scale-[1.03]",
+              "h-11 w-11 rounded-[10px] transition-transform group-hover:scale-[1.04]",
               isRunning && "ring-2 ring-success/40",
             )}
           />
@@ -334,18 +342,17 @@ export function AgentCanvas({
         </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-2xl font-semibold">
-              <EditableField value={agent.name} onSave={(v) => patch({ name: v })} ariaLabel="Agent name" placeholder="Name…" />
-            </h1>
-            <span className={cn("text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full border shrink-0", status.className)}>
-              <span className={cn("w-1.5 h-1.5 rounded-full", isRunning ? "bg-success animate-pulse" : "bg-current")} />
+            <h1 className="text-title font-semibold tracking-tight">{agent.name}</h1>
+            <span className={cn("flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-micro", status.className)}>
+              <span className={cn("h-1.5 w-1.5 rounded-full", isRunning ? "animate-pulse bg-success" : "bg-current")} />
               {status.label}
             </span>
+            {agent.agent_role === "LEAD" && (
+              <span className="shrink-0 rounded-full bg-surface-raised px-2 py-0.5 text-micro text-muted-foreground">Lead</span>
+            )}
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap mb-3">
-            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-muted border border-white/8">
-              {agent.slug}
-            </code>
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-label text-muted-foreground">
+            <code className="font-mono text-micro text-foreground/80">{agent.slug}</code>
             {agent.role_title && (
               <>
                 <span className="text-muted-foreground-soft">·</span>
@@ -358,10 +365,19 @@ export function AgentCanvas({
                 <button
                   type="button"
                   onClick={() => onSelectCrew(agent.crew!.slug)}
-                  className="text-purple hover:underline text-xs"
+                  className="text-primary hover:underline"
                 >
                   {agent.crew.name}
                 </button>
+              </>
+            )}
+            {agent.llm_model && (
+              <>
+                <span className="text-muted-foreground-soft">·</span>
+                <span className="inline-flex items-center gap-1.5 font-mono text-micro">
+                  {providerMark(agent.llm_provider)}
+                  {agent.llm_model}
+                </span>
               </>
             )}
           </div>
@@ -387,15 +403,6 @@ export function AgentCanvas({
             </div>
           )}
 
-          {/* 6-stat strip */}
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 max-w-[640px]">
-            <StatTile label="Sessions" value={agent._count?.chats ?? 0} />
-            <StatTile label="Runs" value={runsCount ?? "–"} />
-            <StatTile label="Cost · 30d" value={inbox.cost !== undefined ? formatCost(inbox.cost) : "–"} />
-            <StatTile label="Skills" value={agent._count?.skills ?? 0} />
-            <StatTile label="Creds" value={agent._count?.credentials ?? 0} />
-            <StatTile label="Last active" value={agent.last_active_at ? formatRelative(agent.last_active_at) : "—"} />
-          </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {isPendingHire && (
@@ -433,7 +440,7 @@ export function AgentCanvas({
           )}
           <Link
             href={`/chat/${encodeURIComponent(agent.slug)}`}
-            className="px-3.5 py-2 rounded-lg bg-primary hover:bg-primary text-white text-sm font-medium flex items-center gap-2"
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-label font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
           >
             <MessageSquare className="h-3.5 w-3.5" />
             Chat
@@ -484,10 +491,18 @@ export function AgentCanvas({
         onSave={handleAvatarSave}
       />
 
-      {/* Tabs */}
-      <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} />
+      {/* Menu — two entries plus the one link that leaves the screen */}
+      <div className="flex items-center gap-4 border-b border-border">
+        <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} />
+        <Link
+          href={`/journal?agent=${encodeURIComponent(agent.slug)}`}
+          className="ml-auto inline-flex shrink-0 items-center gap-1 pb-2 text-label text-muted-foreground transition-colors hover:text-primary"
+        >
+          Journal
+          <ArrowUpRight className="h-3 w-3" />
+        </Link>
+      </div>
 
-      {/* Tab content */}
       {tab === "overview" && (
         <OverviewTab
           workspaceId={workspaceId}
@@ -498,51 +513,71 @@ export function AgentCanvas({
           runs={runs}
           peerMessages={peerMessages}
           patch={patch}
-          onStop={handleStop}
+          onStop={isRunning ? handleStop : undefined}
+          extraReach={[
+            {
+              id: "memory", icon: Brain, label: "Paměť", tone: "gold", wide: true,
+              value: agent.memory_enabled ? "zapnutá" : "vypnutá",
+              render: () => (
+                <MemoryTab
+                  agentId={agent.id}
+                  agentSlug={agent.slug}
+                  crewId={agent.crew_id ?? undefined}
+                  workspaceId={workspaceId}
+                />
+              ),
+            },
+            {
+              id: "skillsmgr", icon: Sparkles, label: "Spravovat skilly", tone: "purple", wide: true,
+              value: String(agent._count?.skills ?? 0),
+              render: () => (
+                <SkillsTab
+                  agentId={agent.id}
+                  agentSlug={agent.slug}
+                  agentName={agent.name}
+                  agentCrew={agent.crew?.name ?? null}
+                  workspaceId={workspaceId}
+                  onAgentChanged={onAgentChanged}
+                />
+              ),
+            },
+            {
+              id: "workspace", icon: FolderTree, label: "Workspace", tone: "notice", wide: true,
+              value: "soubory",
+              render: () => (
+                <WorkspaceTab agentId={agent.id} agentSlug={agent.slug} onOpenFiles={onOpenFiles} />
+              ),
+            },
+            {
+              id: "activity", icon: History, label: "Aktivita", tone: "notice", wide: true,
+              value: "vše",
+              render: () => <ActivityTab workspaceId={workspaceId} agentId={agent.id} />,
+            },
+          ]}
         />
       )}
 
-      {tab === "workspace" && (
-        <WorkspaceTab agentId={agent.id} agentSlug={agent.slug} onOpenFiles={onOpenFiles} />
+      {tab === "config" && (
+        <div className="space-y-4">
+          <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
+          {/* Schedule, ephemeral lifecycle and deletion still live in the old
+              settings panel. Folding them into the sections above is the next
+              slice — dropping working controls to hit a layout would be worse
+              than one extra panel. */}
+          <SettingsTab
+            agent={agent}
+            patch={patch}
+            safePatch={safePatch}
+            showAdvanced={showAdvanced}
+            setShowAdvanced={setShowAdvanced}
+            customModelOpen={customModelOpen}
+            setCustomModelOpen={setCustomModelOpen}
+            customModelDraft={customModelDraft}
+            setCustomModelDraft={setCustomModelDraft}
+          />
+        </div>
       )}
 
-      {tab === "skills" && (
-        <SkillsTab
-          agentId={agent.id}
-          agentSlug={agent.slug}
-          agentName={agent.name}
-          agentCrew={agent.crew?.name ?? null}
-          workspaceId={workspaceId}
-          onAgentChanged={onAgentChanged}
-        />
-      )}
-
-      {tab === "memory" && (
-        <MemoryTab
-          agentId={agent.id}
-          agentSlug={agent.slug}
-          crewId={agent.crew_id ?? undefined}
-          workspaceId={workspaceId}
-        />
-      )}
-
-      {tab === "activity" && (
-        <ActivityTab workspaceId={workspaceId} agentId={agent.id} />
-      )}
-
-      {tab === "settings" && (
-        <SettingsTab
-          agent={agent}
-          patch={patch}
-          safePatch={safePatch}
-          showAdvanced={showAdvanced}
-          setShowAdvanced={setShowAdvanced}
-          customModelOpen={customModelOpen}
-          setCustomModelOpen={setCustomModelOpen}
-          customModelDraft={customModelDraft}
-          setCustomModelDraft={setCustomModelDraft}
-        />
-      )}
     </CanvasShell>
   )
 }
@@ -552,14 +587,6 @@ export function AgentCanvas({
 // =============================================================================
 
 
-function StatTile({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-lg border border-white/8 bg-card px-2.5 py-1.5">
-      <div className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</div>
-      <div className="text-sm text-foreground tabular-nums truncate">{value}</div>
-    </div>
-  )
-}
 
 // =============================================================================
 // Recent sessions + runs cards (overview tab)

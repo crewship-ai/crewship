@@ -144,7 +144,15 @@ export interface ReachItem {
   /** Draws attention to the chip — something in that list needs a decision. */
   alert?: boolean
   /** Rendered in the slide-out when the chip is clicked. */
-  cell: Omit<DetailCellProps, "className">
+  cell?: Omit<DetailCellProps, "className">
+  /**
+   * Escape hatch for relations that already have a full component (memory,
+   * workspace). Rendered instead of `cell`, in a wider panel — pushing a
+   * 700-line manager into a 420px rail would be worse than the tab it
+   * replaced.
+   */
+  render?: () => React.ReactNode
+  wide?: boolean
 }
 
 const REACH_BG: Record<ReachItem["tone"], string> = {
@@ -212,7 +220,10 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute inset-y-0 right-0 flex w-[min(420px,92vw)] flex-col border-l border-border bg-surface-subtle"
+              className={cn(
+                "absolute inset-y-0 right-0 flex flex-col border-l border-border bg-surface-subtle",
+                open.wide ? "w-[min(760px,96vw)]" : "w-[min(420px,92vw)]",
+              )}
             >
               <header className="flex items-center gap-2 border-b border-border px-4 py-3">
                 <span className="text-default font-semibold">{open.label}</span>
@@ -226,7 +237,7 @@ export function ReachStrip({ items }: { items: ReachItem[] }) {
                 </button>
               </header>
               <div className="flex-1 overflow-auto p-3">
-                <DetailCell {...open.cell} tall />
+                {open.render ? open.render() : open.cell ? <DetailCell {...open.cell} tall /> : null}
               </div>
             </motion.aside>
           </motion.div>

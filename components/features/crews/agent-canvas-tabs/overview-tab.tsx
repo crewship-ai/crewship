@@ -40,6 +40,11 @@ export interface OverviewTabProps {
   patch: (body: Record<string, unknown>) => Promise<void>
   onStop?: () => void
   onOpenInbox?: () => void
+  /**
+   * Relations whose UI already exists as a full component (memory, workspace).
+   * The canvas owns their props, so it builds the chips and passes them in.
+   */
+  extraReach?: ReachItem[]
 }
 
 const ISSUE_TONE: Record<string, DetailCellTone> = {
@@ -65,7 +70,7 @@ function runTone(status?: string | null): DetailCellTone {
 }
 
 export function OverviewTab({
-  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox,
+  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, extraReach = [],
 }: OverviewTabProps) {
   const { issues, credentials, skills } = useAgentRelations(workspaceId, agent.id)
   const { pipelines } = usePipelines(workspaceId)
@@ -224,7 +229,7 @@ export function OverviewTab({
         />
       )}
 
-      <ReachStrip items={reach} />
+      <ReachStrip items={[...reach, ...extraReach]} />
 
       <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-4">
         <DetailCell
