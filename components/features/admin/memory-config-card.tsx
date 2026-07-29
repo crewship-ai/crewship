@@ -33,7 +33,13 @@ interface MemoryConfig {
   raw_config?: string | null
 }
 
-export function MemoryConfigCard() {
+export function MemoryConfigCard({ workspaceId }: {
+  /** The workspace this card reads within. The admin API is workspace-scoped
+ *  by middleware: an unscoped request is refused with 400 before the handler
+ *  runs, which is what rendered these cards as "Could not load (HTTP 400)".
+ *  Null while it resolves — asking anyway just produces that error. */
+  workspaceId: string | null
+}) {
   const { role } = useAbilities()
   const canEdit = role === "OWNER" || role === "ADMIN"
 
@@ -44,10 +50,13 @@ export function MemoryConfigCard() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (!workspaceId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch("/api/v1/admin/memory/config")
+      const res = await apiFetch(
+        `/api/v1/admin/memory/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      )
       if (!res.ok) {
         setError(
           res.status === 403
@@ -64,7 +73,7 @@ export function MemoryConfigCard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => { void load() }, [load])
 
@@ -79,7 +88,8 @@ export function MemoryConfigCard() {
       // PATCH with only the one key: the server merges into the stored document
       // and preserves settings this UI doesn't model, so a newer knob can't be
       // clobbered by an older client saving a whole document back.
-      const res = await apiFetch("/api/v1/admin/memory/config", {
+      const res = await apiFetch(
+        `/api/v1/admin/memory/config?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ versions_retention_days: parsed }),

@@ -312,6 +312,7 @@ export default function AdminPage() {
           allRuntimes={allRuntimes}
           runtimeInstallLinks={runtimeInstallLinks}
           onCheckRuntime={checkRuntime}
+          workspaceId={workspaceId}
         />
       )
     }

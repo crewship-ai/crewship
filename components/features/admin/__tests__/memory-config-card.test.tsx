@@ -32,14 +32,14 @@ describe("<MemoryConfigCard> — #1379", () => {
     // Whether the value was chosen decides whether editing is routine or is
     // overriding somebody's deliberate policy.
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: true }))
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     expect(await screen.findByText(/built-in default/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/versions retention/i)).toHaveValue(30)
   })
 
   it("says when the value was set explicitly", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 7, is_default: false }))
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     expect(await screen.findByText(/set explicitly/i)).toBeInTheDocument()
   })
 
@@ -50,7 +50,7 @@ describe("<MemoryConfigCard> — #1379", () => {
       }
       return jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false })
     })
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     const input = await screen.findByLabelText(/versions retention/i)
     fireEvent.change(input, { target: { value: "14" } })
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
@@ -62,7 +62,7 @@ describe("<MemoryConfigCard> — #1379", () => {
 
   it("blocks an out-of-range value client-side", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false }))
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     const input = await screen.findByLabelText(/versions retention/i)
     fireEvent.change(input, { target: { value: "0" } })
     expect(screen.getByText(/between 1 and 3650/i)).toBeInTheDocument()
@@ -77,7 +77,7 @@ describe("<MemoryConfigCard> — #1379", () => {
       }
       return jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false })
     })
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     const input = await screen.findByLabelText(/versions retention/i)
     fireEvent.change(input, { target: { value: "100" } })
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
@@ -89,7 +89,7 @@ describe("<MemoryConfigCard> — #1379", () => {
   it("is read-only for a non-admin", async () => {
     role = "MEMBER"
     apiFetch.mockResolvedValue(jsonResponse({ workspace_id: "ws1", versions_retention_days: 30, is_default: false }))
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     expect(await screen.findByLabelText(/versions retention/i)).toBeDisabled()
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull()
     expect(screen.getByText(/requires an admin/i)).toBeInTheDocument()
@@ -97,7 +97,7 @@ describe("<MemoryConfigCard> — #1379", () => {
 
   it("explains a 403 instead of showing an empty card", async () => {
     apiFetch.mockResolvedValue(jsonResponse({}, 403))
-    render(<MemoryConfigCard />)
+    render(<MemoryConfigCard workspaceId="ws-1" />)
     await waitFor(() => expect(screen.getByText(/requires an admin role/i)).toBeInTheDocument())
   })
 })

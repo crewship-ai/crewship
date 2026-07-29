@@ -41,7 +41,12 @@ var systemInfoCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		client.WorkspaceID = ""
+		// Keep the workspace on the request. /system/runtime redacts host
+		// detail — the runtime name, its version, its socket — for anyone it
+		// cannot resolve as ADMIN+ (#865), and it resolves the role FROM the
+		// workspace. Clearing it here made the command print an empty Runtime
+		// and Version for everyone, which reads as "nothing detected" rather
+		// than "you did not ask as someone allowed to know".
 
 		// Runtime info
 		runtimeResp, err := client.Get("/api/v1/system/runtime")
@@ -82,6 +87,23 @@ var systemInfoCmd = &cobra.Command{
 			if runtime.Socket != "" {
 				fmt.Printf("  Socket:     %s\n", runtime.Socket)
 			}
+			// Everything else that answered a socket probe. The first entry
+			// is the one in use; the rest are what you could switch to.
+			if len(runtime.Runtimes) > 1 {
+				fmt.Printf("  Also found: ")
+				for i, rt := range runtime.Runtimes[1:] {
+					if i > 0 {
+						fmt.Printf(", ")
+					}
+					fmt.Printf("%s %s", rt.Runtime, rt.Version)
+				}
+				fmt.Println()
+			}
+			if !runtime.Available {
+				fmt.Printf("  %sNo container runtime answered. Crewship probes Docker, Colima,\n", cli.Dim)
+				fmt.Printf("  OrbStack, Rancher Desktop, Podman (rootless/root/machine),\n")
+				fmt.Printf("  containerd/nerdctl and Apple Containers.%s\n", cli.Reset)
+			}
 			if license != nil {
 				fmt.Printf("\n%sLicense%s\n", cli.Bold, cli.Reset)
 				fmt.Printf("  Edition:          %s\n", license.Edition)
@@ -105,6 +127,16 @@ type systemRuntimeInfo struct {
 	Runtime   string `json:"runtime"`
 	Version   string `json:"version"`
 	Socket    string `json:"socket,omitempty"`
+	// Runtimes is every runtime detected, not just the one in use. Docker
+	// Desktop and Podman on one laptop is the normal case for anyone testing
+	// both, and without this list switching between them is invisible.
+	Runtimes []systemRuntimeEntry `json:"runtimes,omitempty"`
+}
+
+type systemRuntimeEntry struct {
+	Runtime string `json:"runtime"`
+	Version string `json:"version"`
+	Socket  string `json:"socket,omitempty"`
 }
 
 type systemLicenseInfo struct {

@@ -76,16 +76,25 @@ const SEVERITY_STYLE: Record<string, { icon: typeof AlertTriangle; cls: string }
  * incident often doesn't have. Admin-gated server-side; a non-admin gets an
  * explanation rather than an empty card.
  */
-export function SecurityPostureCard() {
+export function SecurityPostureCard({ workspaceId }: {
+  /** The workspace this card reads within. The admin API is workspace-scoped
+ *  by middleware: an unscoped request is refused with 400 before the handler
+ *  runs, which is what rendered these cards as "Could not load (HTTP 400)".
+ *  Null while it resolves — asking anyway just produces that error. */
+  workspaceId: string | null
+}) {
   const [posture, setPosture] = useState<Posture | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (!workspaceId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch("/api/v1/admin/security-posture")
+      const res = await apiFetch(
+        `/api/v1/admin/security-posture?workspace_id=${encodeURIComponent(workspaceId)}`,
+      )
       if (!res.ok) {
         setError(
           res.status === 403
@@ -100,7 +109,7 @@ export function SecurityPostureCard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => { void load() }, [load])
 

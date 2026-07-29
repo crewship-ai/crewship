@@ -16,6 +16,8 @@ interface RuntimeTabProps {
   allRuntimes: { runtime: string; version: string; socket: string }[]
   runtimeInstallLinks: Record<string, string>
   onCheckRuntime: () => void
+  /** Scope for the two workspace-scoped cards below. */
+  workspaceId: string | null
 }
 
 export const RuntimeTab = React.memo(function RuntimeTab({
@@ -25,6 +27,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
   allRuntimes,
   runtimeInstallLinks,
   onCheckRuntime,
+  workspaceId,
 }: RuntimeTabProps) {
   return (
     <div className="space-y-4">
@@ -121,11 +124,11 @@ export const RuntimeTab = React.memo(function RuntimeTab({
 
     {/* #1379 — the env-driven instance flags an admin otherwise had to SSH in
         to read. Read-only: these are deploy decisions, not app settings. */}
-    <SecurityPostureCard />
+    <SecurityPostureCard workspaceId={workspaceId} />
 
     {/* #1379 — the memory retention window. The endpoint existed so this
         wouldn't need a SQLite edit; nothing rendered it until now. */}
-    <MemoryConfigCard />
+    <MemoryConfigCard workspaceId={workspaceId} />
     </div>
   )
 })
