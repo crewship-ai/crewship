@@ -14,6 +14,14 @@
 # whether the feature exists.
 #
 # Engineering crew: alex(lead) · sam · robin. Ops crew: morgan(lead) · riley.
+#
+# If section 3 fails while section 4 passes, suspect a STALE SIDECAR before
+# suspecting the code: the sidecar is bind-mounted into the crew container and
+# its process starts with the container, so a container that has been up since
+# before the deploy is still running the old binary no matter how many times
+# dev.sh rebuilt it. Drop it and re-run:
+#
+#   crewship crew restart-agents engineering
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
