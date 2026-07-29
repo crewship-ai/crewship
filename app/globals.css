@@ -325,6 +325,50 @@ body {
 }
 
 @layer utilities {
+  /* ── Type roles ──────────────────────────────────────────────────
+     Named by the JOB the text does, not by its size. Every detail
+     surface picks a role; nobody picks a pixel value. Changing the
+     product's density is then this block, not 395 files.
+
+     The values are lifted verbatim from the routine detail screen —
+     the one surface that was designed as a whole rather than grown —
+     so adopting a role is a visual no-op there and a correction
+     everywhere else.
+
+       .type-title    22px  page heading
+       .type-row      13px  list rows, field values, prose
+       .type-section  11px  UPPERCASE card + section headers, labels
+       .type-meta     10px  timestamps, ids, stat captions, badges
+
+     Weight, tracking and casing ride along, because "11px" was never
+     the rule — "11px semibold uppercase wide-tracked muted" was, and
+     leaving three of those four to memory is how the surfaces drifted. */
+  .type-title {
+    font-size: 1.375rem;
+    line-height: 1.75rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  .type-row {
+    font-size: 0.8125rem;
+    line-height: 1.15rem;
+  }
+  .type-section {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .type-meta {
+    font-size: 0.625rem;
+    line-height: 0.9rem;
+  }
+  /* Hairline: 211 uses of border-white/10 and 53 of border-white/8 existed
+     because the divider inside a card had no name — only the card's own
+     border did. Now it has one. */
+  .border-hairline { border-color: color-mix(in oklch, var(--border) 40%, transparent); }
+
   .scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;
