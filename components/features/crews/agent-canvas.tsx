@@ -37,8 +37,6 @@ import {
 import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { ConfigTab } from "./agent-canvas-tabs/config-tab"
-import { SkillsTab } from "./agent-canvas-tabs/skills-tab"
-import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
 import { WorkspaceTab } from "./agent-canvas-tabs/workspace-tab"
 import type {
   AgentRecord,
@@ -510,46 +508,7 @@ export function AgentCanvas({
           patch={patch}
           onStop={isRunning ? handleStop : undefined}
           onOpenConfig={() => setTab("config")}
-          extraReach={[
-            {
-              id: "memory", icon: CONCEPT_ICON.memory, label: "Memory", tone: "gold", wide: true, group: "Can do",
-              value: agent.memory_enabled ? "on" : "off",
-              render: () => (
-                <MemoryTab
-                  agentId={agent.id}
-                  agentSlug={agent.slug}
-                  crewId={agent.crew_id ?? undefined}
-                  workspaceId={workspaceId}
-                />
-              ),
-            },
-            {
-              id: "skillsmgr", icon: CONCEPT_ICON.skills, label: "Manage skills", tone: "purple", wide: true, group: "Can do",
-              value: String(agent._count?.skills ?? 0),
-              render: () => (
-                <SkillsTab
-                  agentId={agent.id}
-                  agentSlug={agent.slug}
-                  agentName={agent.name}
-                  agentCrew={agent.crew?.name ?? null}
-                  workspaceId={workspaceId}
-                  onAgentChanged={onAgentChanged}
-                />
-              ),
-            },
-            {
-              id: "workspace", icon: CONCEPT_ICON.workspace, label: "Workspace", tone: "notice", wide: true, group: "History",
-              value: "files",
-              render: () => (
-                <WorkspaceTab agentId={agent.id} agentSlug={agent.slug} onOpenFiles={onOpenFiles} />
-              ),
-            },
-            {
-              id: "activity", icon: CONCEPT_ICON.activity, label: "Activity", tone: "notice", wide: true, group: "History",
-              value: "all",
-              render: () => <ActivityTab workspaceId={workspaceId} agentId={agent.id} />,
-            },
-          ]}
+          onAgentChanged={onAgentChanged}
         />
       )}
 
@@ -558,7 +517,13 @@ export function AgentCanvas({
           profile, memory — are back to one each. Deletion stays in the ··· menu
           beside Chat, which is where a destructive action belongs. */}
       {tab === "config" && (
-        <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
+        <ConfigTab
+          agent={agent}
+          crews={crews}
+          patch={patch}
+          onSelectCrew={onSelectCrew}
+          workspaceId={workspaceId}
+        />
       )}
 
     </CanvasShell>

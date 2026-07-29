@@ -1,16 +1,22 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import {
   AtSign, Bot, CalendarClock, Check, MessageSquare, Play, Share2, Webhook, Workflow, XCircle,
 } from "lucide-react"
 
 import { useAgentReach } from "@/hooks/use-agent-reach"
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
+import { AgentConnectorsCard } from "@/components/features/integrations/composio/access-editor"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { withReturnTo } from "@/lib/return-to"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
-import { BlockingNotice, NowRunning, ReachStrip, type ReachItem } from "../canvas/detail-blocks"
+import { SkillsManager } from "../agent-canvas-managers"
+import { AgentChannelsCard } from "../agent-channels-card"
+import { BlockingNotice, NowRunning } from "../canvas/detail-blocks"
 import { deriveTriggers, useAgentRelations } from "../canvas/use-agent-relations"
 import type { AgentRecord, ChatRow, InboxSummary, PeerMessageRow, RunRow } from "./types"
 
@@ -42,11 +48,8 @@ export interface OverviewTabProps {
   onOpenInbox?: () => void
   /** Switches this screen to its Configuration tab — used by the trigger cell. */
   onOpenConfig?: () => void
-  /**
-   * Relations whose UI already exists as a full component (memory, workspace).
-   * The canvas owns their props, so it builds the chips and passes them in.
-   */
-  extraReach?: ReachItem[]
+  /** Refetch after a manager dialog changed skills / connectors / channels. */
+  onAgentChanged: () => void
 }
 
 const ISSUE_TONE: Record<string, DetailCellTone> = {
@@ -72,8 +75,12 @@ function runTone(status?: string | null): DetailCellTone {
 }
 
 export function OverviewTab({
-  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, onOpenConfig, extraReach = [],
+  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, onOpenConfig, onAgentChanged,
 }: OverviewTabProps) {
+  // Which manager dialog is open, if any. A centred dialog rather than the old
+  // right-hand drawer: the drawer had to be 420px for a list and 760px for an
+  // editor, which is how one pattern ended up with two widths.
+  const [manager, setManager] = useState<"skills" | "tools" | "channels" | null>(null)
   const { issues, credentials, skills, pipelines } = useAgentRelations(workspaceId, agent.id)
   const { toolkits, channels } = useAgentReach(workspaceId, agent.id)
 
@@ -149,67 +156,30 @@ export function OverviewTab({
       : ["FAILED", "ERROR"].includes((r.status ?? "").toUpperCase()) ? "err" : "ok",
   }))
 
-  const reach: ReachItem[] = [
-    {
-      id: "skills", icon: CONCEPT_ICON.skills, label: "Skills", tone: "purple", group: "Can do",
-      value: `${skills.filter((s) => s.enabled).length} / ${skills.length}`,
-      cell: {
-        title: "Skills",
-        icon: CONCEPT_ICON.skills,
-        count: skills.length,
-        filters: [{ id: "all", label: "All" }, { id: "on", label: "Enabled" }, { id: "off", label: "Disabled" }],
-        items: skills.map((s): DetailCellItem => ({
-          id: s.id, icon: CONCEPT_ICON.skills, tone: s.enabled ? "purple" : "muted",
-          title: s.skill.display_name ?? s.skill.name,
-          subtitle: s.skill.description ?? s.skill.slug,
-          meta: s.enabled ? "enabled" : "disabled",
-          tag: s.enabled ? "on" : "off", dimmed: !s.enabled,
-        })),
-        footerLabel: "Open catalog", footerHref: "/skills",
-      },
-    },
-    {
-      id: "tools", icon: CONCEPT_ICON.tools, label: "Tools", tone: "notice", group: "Can do", value: String(toolkits.length),
-      cell: {
-        title: "Tools and connectors",
-        icon: CONCEPT_ICON.tools,
-        count: toolkits.length,
-        filters: [{ id: "all", label: "All" }],
-        items: toolkits.map((t, idx): DetailCellItem => ({
-          id: `${t.toolkit || idx}`, icon: CONCEPT_ICON.tools, tone: "notice",
-          title: t.toolkit || "connector",
-          subtitle: t.tools?.length ? `Composio · ${t.tools.length} tools` : `Composio · ${t.mode}`,
-          tag: "all",
-        })),
-        footerLabel: "Manage connectors", footerHref: "/integrations",
-      },
-    },
-    {
-      id: "channels", icon: CONCEPT_ICON.channels, label: "Channels", tone: "purple", group: "Reports to",
-      value: String(channels.filter((c) => c.enabled).length),
-      cell: {
-        title: "Channels",
-        icon: CONCEPT_ICON.channels,
-        count: channels.length,
-        filters: [{ id: "all", label: "All" }, { id: "on", label: "Active" }],
-        items: channels.map((c): DetailCellItem => ({
-          id: c.id, icon: CONCEPT_ICON.channels, tone: c.enabled ? "purple" : "muted",
-          title: c.provider ?? c.type, subtitle: c.type,
-          meta: c.enabled ? "active" : "off",
-          tag: c.enabled ? "on" : "all", dimmed: !c.enabled,
-        })),
-        footerLabel: "Manage channels", footerHref: "/integrations?tab=notifications",
-      },
-    },
-  ]
+  const skillItems: DetailCellItem[] = skills.map((sk): DetailCellItem => ({
+    id: sk.id, icon: CONCEPT_ICON.skills, tone: sk.enabled ? "purple" : "muted",
+    title: sk.skill.display_name ?? sk.skill.name,
+    subtitle: sk.skill.description ?? sk.skill.slug,
+    meta: sk.enabled ? "enabled" : "disabled",
+    tag: sk.enabled ? "on" : "off", dimmed: !sk.enabled,
+  }))
+
+  const toolItems: DetailCellItem[] = toolkits.map((t, idx): DetailCellItem => ({
+    id: `${t.toolkit || idx}`, icon: CONCEPT_ICON.tools, tone: "notice",
+    title: t.toolkit || "connector",
+    subtitle: t.tools?.length ? `Composio · ${t.tools.length} tools` : `Composio · ${t.mode}`,
+    tag: "all",
+  }))
+
+  const channelItems: DetailCellItem[] = channels.map((c): DetailCellItem => ({
+    id: c.id, icon: CONCEPT_ICON.channels, tone: c.enabled ? "purple" : "muted",
+    title: c.provider ?? c.type, subtitle: c.type,
+    meta: c.enabled ? "active" : "off",
+    tag: c.enabled ? "on" : "all", dimmed: !c.enabled,
+  }))
 
   return (
-    <div className="space-y-4">
-      {/* Reach sits with the tabs, not under the content: it is chrome, read
-          once on arrival. Chips rather than links because the grid below is
-          chips-in-cards — the same shape says the two rows are one family. */}
-      <ReachStrip items={[...reach, ...extraReach]} />
-
+    <div className="space-y-5">
       {inbox.count > 0 && (
         <BlockingNotice
           title="Waiting on your decision."
@@ -228,14 +198,15 @@ export function OverviewTab({
         />
       )}
 
-      {/* Two rows by MEANING, not by whatever the arithmetic allows.
-          Row one is what the agent is holding — issues, routines, triggers,
-          credentials. Row two is what it has been up to — runs on its own,
-          sessions with a person. Letting all six flow into one line at wide
-          widths made the grid look tidier and read worse: two unrelated
-          questions in one stripe. Runs and Sessions stay a pair at every size,
-          and get half the pane each, which lists deserve more than a sixth.
-          Thresholds are container sizes — this pane, not the window. */}
+      {/* Three rows, each answering one question, and each saying so.
+          The chip row and its right-hand drawer are gone. Six of the seven
+          chips carried nothing of their own: Skills, Tools and Channels were
+          lists — the same card this grid uses, which is why the drawer needed
+          two widths — Manage skills was Skills again, Workspace is the header's
+          Files button, Activity the header's Journal link, and Memory opens
+          persona/crew settings, which is Configuration. So the lists moved
+          here and the rest went to where they already existed. */}
+      <RowGroup title="What it holds" note="the work it is carrying">
       <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-4">
         <DetailCell
           order={0}
@@ -292,15 +263,54 @@ export function OverviewTab({
           footerHref="/credentials"
         />
       </div>
+      </RowGroup>
 
-      {/* Sessions was PROMOTED out of the chip row, not added: it was already
-          there as a bubble with a drawer, and one concept in two places is the
-          thing this screen keeps getting punished for. Both cells read runs
-          and chats the canvas already fetched, so the pair costs no extra
-          request — which matters on a screen already spending 11 per click. */}
-      <div className="grid gap-3.5 @xl:grid-cols-2">
+      {/* What it can do. Each card's footer opens ONLY its own manager, in a
+          centred dialog. They used to be one "Manage skills" drawer containing
+          all four managers at once, which is why nothing in it was findable. */}
+      <RowGroup title="What it can do" note="its abilities and where it reports">
+      <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-3">
         <DetailCell
           order={4}
+          title="Skills"
+          icon={CONCEPT_ICON.skills}
+          count={`${skills.filter((sk) => sk.enabled).length} / ${skills.length}`}
+          filters={[
+            { id: "all", label: "All" },
+            { id: "on", label: "Enabled" },
+            { id: "off", label: "Disabled" },
+          ]}
+          items={skillItems}
+          footerLabel="Manage skills"
+          footerOnClick={() => setManager("skills")}
+        />
+        <DetailCell
+          order={5}
+          title="Tools"
+          icon={CONCEPT_ICON.tools}
+          count={toolkits.length}
+          filters={[{ id: "all", label: "All" }]}
+          items={toolItems}
+          footerLabel="Manage connectors"
+          footerOnClick={() => setManager("tools")}
+        />
+        <DetailCell
+          order={6}
+          title="Channels"
+          icon={CONCEPT_ICON.channels}
+          count={channels.length}
+          filters={[{ id: "all", label: "All" }, { id: "on", label: "Active" }]}
+          items={channelItems}
+          footerLabel="Manage channels"
+          footerOnClick={() => setManager("channels")}
+        />
+      </div>
+      </RowGroup>
+
+      <RowGroup title="What it has been up to" note="on its own, and with you">
+      <div className="grid gap-3.5 @xl:grid-cols-2">
+        <DetailCell
+          order={7}
           title="Runs"
           icon={CONCEPT_ICON.runs}
           count={runs?.length ?? 0}
@@ -315,7 +325,7 @@ export function OverviewTab({
         />
 
         <DetailCell
-          order={5}
+          order={8}
           title="Sessions"
           icon={CONCEPT_ICON.sessions}
           count={chats?.length ?? 0}
@@ -336,7 +346,7 @@ export function OverviewTab({
 
         {peerMessages.length > 0 && (
           <DetailCell
-            order={6}
+            order={9}
             title="From peers"
             icon={CONCEPT_ICON.peers}
             count={peerMessages.length}
@@ -355,6 +365,7 @@ export function OverviewTab({
           />
         )}
       </div>
+      </RowGroup>
 
       {issues.length === 0 && agentPipelines.length === 0 && (runs?.length ?? 0) === 0 && (
         <p className="type-row flex items-center gap-2 px-1 text-muted-foreground-soft">
@@ -362,6 +373,88 @@ export function OverviewTab({
           This agent has done nothing yet. Assign it an issue or start it from chat.
         </p>
       )}
+
+      <ManagerDialog
+        open={manager !== null}
+        onClose={() => setManager(null)}
+        title={
+          manager === "skills" ? "Skills"
+            : manager === "tools" ? "Tools and connectors"
+              : "Channels"
+        }
+        description={
+          manager === "skills" ? `What ${agent.name} is able to do.`
+            : manager === "tools" ? `Apps ${agent.name} may act through, and the tools it may call.`
+              : `Where ${agent.name} is allowed to post.`
+        }
+      >
+        {manager === "skills" && (
+          <SkillsManager
+            agentId={agent.id}
+            agentSlug={agent.slug}
+            workspaceId={workspaceId}
+            onChange={onAgentChanged}
+          />
+        )}
+        {manager === "tools" && (
+          <AgentConnectorsCard
+            agentId={agent.id}
+            agentName={agent.name}
+            agentCrew={agent.crew?.name ?? null}
+            workspaceId={workspaceId}
+          />
+        )}
+        {manager === "channels" && (
+          <AgentChannelsCard agentId={agent.id} agentName={agent.name} workspaceId={workspaceId} />
+        )}
+      </ManagerDialog>
     </div>
+  )
+}
+
+/**
+ * A labelled band of cards. The label is the only place this screen says out
+ * loud why these cards sit together — without it the grouping is just a gap,
+ * and a gap is indistinguishable from the grid running out of room.
+ */
+function RowGroup({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-2 flex items-baseline gap-2">
+        <h2 className="type-section text-foreground/70">{title}</h2>
+        <span className="type-meta text-muted-foreground-soft">{note}</span>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+/**
+ * Centred, one manager at a time.
+ *
+ * This replaces a drawer that slid in from the right and had to be 420px wide
+ * for a list and 760px for an editor — one pattern, two widths, because it was
+ * carrying two different kinds of thing. A dialog is honest about being a
+ * detour, and the same width suits every one of them.
+ */
+function ManagerDialog({
+  open, onClose, title, description, children,
+}: {
+  open: boolean
+  onClose: () => void
+  title: string
+  description: string
+  children: React.ReactNode
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
   )
 }

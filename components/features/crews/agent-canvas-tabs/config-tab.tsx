@@ -1,9 +1,10 @@
 "use client"
 
-import { Bot, CalendarClock, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
+import { Bot, Brain, CalendarClock, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
 
 import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
+import { MemoryTab } from "./memory-tab"
 
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
@@ -81,9 +82,10 @@ export interface ConfigTabProps {
   crews: { id: string; name: string; slug: string }[]
   patch: (body: Record<string, unknown>) => Promise<void>
   onSelectCrew: (slug: string | null) => void
+  workspaceId: string
 }
 
-export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps) {
+export function ConfigTab({ agent, crews, patch, onSelectCrew, workspaceId }: ConfigTabProps) {
   const isLead = agent.agent_role === "LEAD"
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
   const tools = agent.cli_tools ?? []
@@ -302,6 +304,27 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
         </Appear>
       )}
 
+      {/* Memory moved off the overview. It opens PERSONA.md, CREW.md and the
+          agent's own notes — wiring, not a status a reader glances at, and the
+          switch that turns it on is a few rows up in Model and run. It sits
+          outside the column flow because a file editor in a 24rem column is
+          not a file editor. */}
+      <div className="mt-4 [column-span:all]">
+        <DetailCard
+          bare icon={Brain} title="Memory"
+          subtitle={agent.memory_enabled ? "on" : "off"}
+          footer="Turn it on or off in Model and run, above. This is what it remembers."
+        >
+          <div className="p-3">
+            <MemoryTab
+              agentId={agent.id}
+              agentSlug={agent.slug}
+              crewId={agent.crew_id ?? undefined}
+              workspaceId={workspaceId}
+            />
+          </div>
+        </DetailCard>
+      </div>
     </div>
   )
 }
