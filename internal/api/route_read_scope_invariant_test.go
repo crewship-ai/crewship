@@ -33,19 +33,45 @@ import (
 //
 // So every read route must land in exactly one bucket:
 //
-//	wsCtx(...)     — workspace-scoped by the middleware chokepoint. Nothing to do.
-//	internalAuth() — sidecar trust boundary. Different fence, out of scope here
-//	                 (see route_authz_invariant_test.go's own exemption note).
-//	allowlisted    — no workspace dimension, with a stated reason below.
+//	wsCtx(...)      — workspace-scoped by the middleware chokepoint. Nothing to do.
+//	authedAdmin(...) — same chokepoint plus an ADMIN+ floor, so strictly stronger.
+//	internalAuth()  — sidecar trust boundary. Different fence, out of scope here
+//	                  (see route_authz_invariant_test.go's own exemption note).
+//	allowlisted     — no workspace dimension, with a stated reason below.
 //
 // Anything else fails. The point is not that the allowlist is short; it is that
 // adding to it is a deliberate act with a written reason, instead of the silent
 // default.
+//
+// A note on how the fourth bucket got here, because it is the same mistake this
+// file exists to catch. The first version scanned only `r.mux.Handle("GET …")`
+// and claimed "every read route lands in exactly one bucket". It did not: the 26
+// admin-console reads register as `r.authedAdmin("GET", pattern, h)`, where the
+// verb is an ARGUMENT rather than part of the pattern string, so the scan could
+// not see them at all — they were in no bucket and nothing failed. A completeness
+// claim that quietly excludes a whole surface is exactly the shape of defect this
+// test is supposed to prevent, so the scan now covers both registration forms.
+//
+// authedAdmin is scoped, not excused: rbac_routes.go builds it as
+// RequireAuth(RequireWorkspace(requireRoleScopeMW(roleManage, scopeSelf, h))),
+// and `wsCtx` is a local alias for that same r.authMw.RequireWorkspace. Same
+// chokepoint, plus a role floor.
+//
+// Verified for completeness rather than assumed: of the five registration forms
+// in router_*.go, `r.authedMut(` (246 uses) and `r.authedSelfMut(` (22) carry
+// only POST/PUT/PATCH/DELETE — zero reads — so they are genuinely irrelevant
+// here rather than a fifth gap. Re-check that if a read ever registers through
+// them.
 
 // readVerbLine matches a read-verb registration under /api/v1/. Multi-line
 // registrations put the verb and pattern on the first line, which is what this
 // keys on — same assumption (and same reason) as mutationVerbLine.
 var readVerbLine = regexp.MustCompile(`r\.mux\.(?:Handle|HandleFunc)\("(GET|HEAD) (/api/v1/[^"]*)"`)
+
+// adminReadLine matches the other registration form: the admin console's reads
+// go through r.authedAdmin("GET", "/api/v1/…", h), verb as an argument. Missing
+// this shape is what hid 26 routes from the first version of this test.
+var adminReadLine = regexp.MustCompile(`r\.authedAdmin\("(GET|HEAD)",\s*"(/api/v1/[^"]*)"`)
 
 // readRouteWrapperLookahead caps how many lines after a registration are joined
 // before looking for the wrapper. A registration whose handler argument wraps
@@ -136,6 +162,8 @@ func TestEveryReadRouteDeclaresItsWorkspaceScope(t *testing.T) {
 	var unclassified []string
 	for _, rt := range routes {
 		switch {
+		case rt.adminWrapped:
+			continue // RequireWorkspace + ADMIN+ floor, composed by the wrapper
 		case strings.Contains(rt.tail, "internalAuth("):
 			continue // sidecar boundary — different fence
 		case strings.Contains(rt.tail, "wsCtx("):
@@ -167,25 +195,43 @@ Do not add it to the map to make this test pass — the map is a review record.`
 func TestReadRouteScanFindsTheRealSurface(t *testing.T) {
 	routes := scanReadRoutes(t)
 
-	// 219 read routes on the tree this landed against. A floor well under that
-	// catches regex rot without tripping on ordinary growth or removal.
-	const minRoutes = 170
+	// 245 read routes on the tree this landed against: 219 through
+	// r.mux.Handle("GET …") and 26 through r.authedAdmin("GET", …). A floor well
+	// under that catches regex rot without tripping on ordinary growth.
+	//
+	// Both forms are counted separately below, because a single total would hide
+	// one regex rotting while the other still matched — which is how the admin
+	// surface went unnoticed in the first place.
+	const minRoutes = 200
 	if len(routes) < minRoutes {
-		t.Fatalf("scanned only %d read routes, expected at least %d — readVerbLine has likely stopped matching the registration shape, which would make TestEveryReadRouteDeclaresItsWorkspaceScope pass vacuously",
+		t.Fatalf("scanned only %d read routes, expected at least %d — a registration regex has likely stopped matching, which would make TestEveryReadRouteDeclaresItsWorkspaceScope pass vacuously",
 			len(routes), minRoutes)
+	}
+
+	admin := 0
+	for _, rt := range routes {
+		if rt.adminWrapped {
+			admin++
+		}
+	}
+	const minAdminRoutes = 15
+	if admin < minAdminRoutes {
+		t.Errorf("scanned only %d authedAdmin read routes, expected at least %d — adminReadLine has likely stopped matching, which silently drops the whole admin-console read surface from this invariant",
+			admin, minAdminRoutes)
 	}
 
 	// The overwhelming majority must be chokepoint-scoped. If this ratio ever
 	// inverts, the codebase has drifted to hand-rolled scoping and the
-	// allowlist has become the norm instead of the exception.
+	// allowlist has become the norm instead of the exception. authedAdmin counts
+	// as scoped — it composes the same RequireWorkspace, plus a role floor.
 	scoped := 0
 	for _, rt := range routes {
-		if strings.Contains(rt.tail, "wsCtx(") {
+		if rt.adminWrapped || strings.Contains(rt.tail, "wsCtx(") {
 			scoped++
 		}
 	}
 	if scoped*100/len(routes) < 60 {
-		t.Errorf("only %d/%d read routes (%d%%) go through wsCtx — workspace scoping is drifting off the chokepoint into handlers",
+		t.Errorf("only %d/%d read routes (%d%%) are scoped by the chokepoint — workspace scoping is drifting into handlers",
 			scoped, len(routes), scoped*100/len(routes))
 	}
 
@@ -216,6 +262,10 @@ type readRoute struct {
 	verb string
 	path string
 	tail string
+	// adminWrapped means it registered through r.authedAdmin, which composes
+	// RequireWorkspace + an ADMIN+ floor — scoped by the chokepoint, so it needs
+	// neither a wsCtx match nor an allowlist entry.
+	adminWrapped bool
 }
 
 func (r readRoute) key() string { return r.verb + " " + r.path }
@@ -244,6 +294,15 @@ func scanReadRoutes(t *testing.T) []readRoute {
 		}
 		lines := strings.Split(string(src), "\n")
 		for i, line := range lines {
+			// authedAdmin composes RequireWorkspace itself, so it needs no
+			// wrapper lookahead — the registration line is the whole story.
+			if m := adminReadLine.FindStringSubmatch(line); m != nil {
+				routes = append(routes, readRoute{
+					file: f, line: i + 1, verb: m[1], path: m[2],
+					tail: line, adminWrapped: true,
+				})
+				continue
+			}
 			m := readVerbLine.FindStringSubmatch(line)
 			if m == nil {
 				continue
