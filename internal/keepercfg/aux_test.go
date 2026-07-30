@@ -55,6 +55,36 @@ func newAuxStore(t *testing.T) *AuxStore {
 	return s
 }
 
+// newAuxStoreMultiConn is newAuxStore over a FILE database with the connection
+// pool left open. The :memory: helper has to pin the pool to one connection
+// (each pooled connection would otherwise get its own empty database), which
+// also serialises everything the store does — so it cannot exercise two
+// connections racing, the very case the transactional write path exists for.
+func newAuxStoreMultiConn(t *testing.T) *AuxStore {
+	t.Helper()
+	// The pragmas that matter here are the ones database.Open sets in production:
+	// WAL so a reader and a writer can hold the database at once, a busy timeout
+	// so a contended write waits instead of returning SQLITE_BUSY, and
+	// _txlock=immediate so BeginTx takes the write lock up front. Without the
+	// last one a read-modify-write transaction starts on a read snapshot and
+	// fails with "database is locked (517)" when it upgrades — a failure mode the
+	// real database does not have, which would make this test lie about it.
+	dsn := fmt.Sprintf("file:%s/aux.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_txlock=immediate", t.TempDir())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(auxTableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	s := NewAuxStore(db, llm.DefaultAuxiliaryModels())
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return s
+}
+
 func slotOf(t *testing.T, list []AuxEffective, slot string) AuxEffective {
 	t.Helper()
 	for _, e := range list {
@@ -524,5 +554,69 @@ func TestAux_ConcurrentAppliesDoNotLoseAField(t *testing.T) {
 	if reloaded := s.EffectiveSlot(slot); reloaded.Provider.Value != eff.Provider.Value ||
 		reloaded.Model.Value != eff.Model.Value || reloaded.TimeoutMS.Value != eff.TimeoutMS.Value {
 		t.Errorf("cache and database disagree: cached %+v, stored %+v", eff, reloaded)
+	}
+}
+
+// storedAuxRow reads one slot straight from the table, bypassing the cache — so a
+// test can assert the two agree rather than asking the cache about itself.
+func storedAuxRow(t *testing.T, db *sql.DB, slot string) (provider, model string, present bool) {
+	t.Helper()
+	err := db.QueryRow(`SELECT provider, model FROM keeper_aux_settings WHERE slot = ?`, slot).
+		Scan(&provider, &model)
+	if err == sql.ErrNoRows {
+		return "", "", false
+	}
+	if err != nil {
+		t.Fatalf("read stored row: %v", err)
+	}
+	return provider, model, true
+}
+
+// Reset used to delete the row and then reload the cache OUTSIDE the lock that
+// Apply holds. A concurrent Apply could commit its override and update the cache
+// in that window, and the reset's already-stale reload would then overwrite the
+// cache with the pre-apply state: the row survives in the database, but every
+// evaluator built in this process resolves the slot as inherited — a paid model
+// silently reverting to a different one — until something reloads.
+//
+// The invariant, whichever of the two lands last: the cache says what the table
+// says. Reported by CodeRabbit on #1530.
+func TestAux_ConcurrentResetAndApplyKeepCacheAgreeingWithTheDatabase(t *testing.T) {
+	s := newAuxStoreMultiConn(t)
+	ctx := context.Background()
+	slot := string(llm.SlotCurator)
+
+	for round := range 200 {
+		provider := "anthropic"
+		model := fmt.Sprintf("claude-opus-%d", round)
+
+		var wg sync.WaitGroup
+		wg.Add(4)
+		go func() {
+			defer wg.Done()
+			if err := s.Reset(ctx, slot); err != nil {
+				t.Errorf("reset: %v", err)
+			}
+		}()
+		for range 3 {
+			go func() {
+				defer wg.Done()
+				if _, err := s.Apply(ctx, slot, AuxPatch{Provider: &provider, Model: &model}, ""); err != nil {
+					t.Errorf("apply: %v", err)
+				}
+			}()
+		}
+		wg.Wait()
+
+		wantProvider, wantModel, present := storedAuxRow(t, s.db, slot)
+		eff := s.EffectiveSlot(slot)
+		if eff.Overridden != present {
+			t.Fatalf("round %d: cache says overridden=%v, table says row present=%v",
+				round, eff.Overridden, present)
+		}
+		if present && (eff.Provider.Value != wantProvider || eff.Model.Value != wantModel) {
+			t.Fatalf("round %d: cache has %s/%s, table has %s/%s",
+				round, eff.Provider.Value, eff.Model.Value, wantProvider, wantModel)
+		}
 	}
 }

@@ -214,12 +214,30 @@ func (s *AuxStore) Load(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT slot, provider, model, timeout_ms, updated_at, COALESCE(updated_by, '')
-		  FROM keeper_aux_settings`)
+	rows, err := s.db.QueryContext(ctx, auxSelectAll)
 	if err != nil {
 		return fmt.Errorf("keepercfg: load aux settings: %w", err)
 	}
+	next, err := scanAuxRows(rows)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.cur = next
+	s.mu.Unlock()
+	return nil
+}
+
+// auxSelectAll is shared by the boot-time load and the transactional refresh, so
+// the two can never drift into reading different columns.
+const auxSelectAll = `
+	SELECT slot, provider, model, timeout_ms, updated_at, COALESCE(updated_by, '')
+	  FROM keeper_aux_settings`
+
+// scanAuxRows builds the cache map from a query over auxSelectAll and closes
+// rows. Rows for slots the build no longer knows are dropped here.
+func scanAuxRows(rows *sql.Rows) (map[string]AuxOverride, error) {
 	defer rows.Close()
 
 	next := map[string]AuxOverride{}
@@ -227,7 +245,7 @@ func (s *AuxStore) Load(ctx context.Context) error {
 		var slot, provider, model, updatedAt, updatedBy string
 		var timeoutMS sql.NullInt64
 		if err := rows.Scan(&slot, &provider, &model, &timeoutMS, &updatedAt, &updatedBy); err != nil {
-			return fmt.Errorf("keepercfg: scan aux setting: %w", err)
+			return nil, fmt.Errorf("keepercfg: scan aux setting: %w", err)
 		}
 		if !KnownAuxSlot(slot) {
 			continue
@@ -240,13 +258,9 @@ func (s *AuxStore) Load(ctx context.Context) error {
 		next[slot] = o
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("keepercfg: iterate aux settings: %w", err)
+		return nil, fmt.Errorf("keepercfg: iterate aux settings: %w", err)
 	}
-
-	s.mu.Lock()
-	s.cur = next
-	s.mu.Unlock()
-	return nil
+	return next, nil
 }
 
 // Effective returns every slot resolved, in display order.
@@ -452,26 +466,63 @@ func readAuxSlotTx(ctx context.Context, tx *sql.Tx, slot string) (AuxOverride, e
 }
 
 // Reset drops the override for one slot, or every slot when slot is empty.
+//
+// It takes the same lock Apply does, for the same reason. Reset used to delete
+// and then reload outside it: a concurrent Apply could commit its override and
+// update the cache in the gap, and this reload — already stale by then — would
+// put the pre-apply state back. The row survived in the database while the
+// process resolved the slot as inherited, so a paid evaluator quietly ran on a
+// different model until the next reload.
 func (s *AuxStore) Reset(ctx context.Context, slot string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("keepercfg: no aux settings store configured")
 	}
-	var err error
+	if slot != "" && !KnownAuxSlot(slot) {
+		return newValidation(fmt.Sprintf("unknown evaluator slot %q", slot))
+	}
+
+	s.mu.Lock()
+	err := s.resetLocked(ctx, slot)
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	// Callbacks after the lock is dropped — same contract as Apply.
+	s.fireOnChange()
+	return nil
+}
+
+// resetLocked deletes and re-reads inside ONE transaction, so the cache is
+// refreshed from the same database state the delete left behind. Caller holds
+// s.mu.
+func (s *AuxStore) resetLocked(ctx context.Context, slot string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("keepercfg: begin aux reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	if slot == "" {
-		_, err = s.db.ExecContext(ctx, `DELETE FROM keeper_aux_settings`)
+		_, err = tx.ExecContext(ctx, `DELETE FROM keeper_aux_settings`)
 	} else {
-		if !KnownAuxSlot(slot) {
-			return newValidation(fmt.Sprintf("unknown evaluator slot %q", slot))
-		}
-		_, err = s.db.ExecContext(ctx, `DELETE FROM keeper_aux_settings WHERE slot = ?`, slot)
+		_, err = tx.ExecContext(ctx, `DELETE FROM keeper_aux_settings WHERE slot = ?`, slot)
 	}
 	if err != nil {
 		return fmt.Errorf("keepercfg: reset aux settings: %w", err)
 	}
-	if err := s.Load(ctx); err != nil {
+
+	rows, err := tx.QueryContext(ctx, auxSelectAll)
+	if err != nil {
+		return fmt.Errorf("keepercfg: reload aux settings: %w", err)
+	}
+	next, err := scanAuxRows(rows)
+	if err != nil {
 		return err
 	}
-	s.fireOnChange()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("keepercfg: commit aux reset: %w", err)
+	}
+	s.cur = next
 	return nil
 }
 

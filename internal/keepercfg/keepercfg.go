@@ -287,6 +287,26 @@ func (s *Store) Load(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	next, err := scanSettings(s.db.QueryRowContext(ctx, settingsSelect, singletonID))
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.cur = next
+	s.mu.Unlock()
+	return nil
+}
+
+// settingsSelect is shared by the boot-time load and the transactional
+// read-modify-write, so the two can never drift into reading different columns.
+const settingsSelect = `
+	SELECT enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
+	       judge_timeout_ms, updated_at, updated_by
+	  FROM keeper_runtime_settings WHERE id = ?`
+
+// scanSettings reads one singleton row. A missing row is the zero settings —
+// "inherits everything" — not an error.
+func scanSettings(row *sql.Row) (settings, error) {
 	var (
 		enabled                          sql.NullInt64
 		timeoutMS                        sql.NullInt64
@@ -294,19 +314,12 @@ func (s *Store) Load(ctx context.Context) error {
 		updatedAt                        string
 		updatedBy                        sql.NullString
 	)
-	err := s.db.QueryRowContext(ctx, `
-		SELECT enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
-		       judge_timeout_ms, updated_at, updated_by
-		  FROM keeper_runtime_settings WHERE id = ?`, singletonID).
-		Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &timeoutMS, &updatedAt, &updatedBy)
+	err := row.Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &timeoutMS, &updatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
-		s.mu.Lock()
-		s.cur = settings{}
-		s.mu.Unlock()
-		return nil
+		return settings{}, nil
 	}
 	if err != nil {
-		return fmt.Errorf("keepercfg: load settings: %w", err)
+		return settings{}, fmt.Errorf("keepercfg: load settings: %w", err)
 	}
 
 	next := settings{
@@ -325,10 +338,7 @@ func (s *Store) Load(ctx context.Context) error {
 		v := timeoutMS.Int64
 		next.timeoutMS = &v
 	}
-	s.mu.Lock()
-	s.cur = next
-	s.mu.Unlock()
-	return nil
+	return next, nil
 }
 
 // Defaults returns the inherited (env/YAML) layer.
@@ -356,9 +366,14 @@ func (s *Store) Effective() Effective {
 		}
 	}
 	s.mu.RLock()
-	cur := s.cur
-	s.mu.RUnlock()
-	return resolve(cur, s.dflt)
+	defer s.mu.RUnlock()
+	return s.effectiveLocked()
+}
+
+// effectiveLocked is Effective without taking the mutex, for the write path —
+// which already holds it, and would deadlock re-entering.
+func (s *Store) effectiveLocked() Effective {
+	return resolve(s.cur, s.dflt)
 }
 
 // resolve is the pure layering function — the part worth testing exhaustively,
@@ -420,7 +435,36 @@ func (s *Store) Apply(ctx context.Context, p Patch, actor string) (Effective, er
 	}
 
 	s.mu.Lock()
-	next := s.cur
+	eff, err := s.applyLocked(ctx, p, actor)
+	s.mu.Unlock()
+	if err != nil {
+		return Effective{}, err
+	}
+	// Callbacks after the lock is dropped: they read the store, and firing them
+	// under the write lock would deadlock the first one that did.
+	s.fireOnChange(eff)
+	return eff, nil
+}
+
+// applyLocked does the transactional read-modify-write. Caller holds s.mu.
+//
+// The base is the DATABASE row rather than the cache, and the refresh happens
+// inside the same transaction. The old shape read s.cur, wrote, and then
+// reloaded the cache AFTER releasing the lock: two Applies could interleave so
+// the later reload landed first, leaving the cache describing a configuration
+// the table no longer held — and this store decides whether the Keeper gate is
+// on and which model judges credential access.
+func (s *Store) applyLocked(ctx context.Context, p Patch, actor string) (Effective, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Effective{}, fmt.Errorf("keepercfg: begin settings update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	next, err := scanSettings(tx.QueryRowContext(ctx, settingsSelect, singletonID))
+	if err != nil {
+		return Effective{}, err
+	}
 	if p.Enabled != nil {
 		switch *p.Enabled {
 		case TriInherit:
@@ -432,7 +476,6 @@ func (s *Store) Apply(ctx context.Context, p Patch, actor string) (Effective, er
 			v := false
 			next.enabled = &v
 		default:
-			s.mu.Unlock()
 			return Effective{}, newValidation(fmt.Sprintf("enabled must be one of on, off, inherit (got %q)", *p.Enabled))
 		}
 	}
@@ -458,48 +501,60 @@ func (s *Store) Apply(ctx context.Context, p Patch, actor string) (Effective, er
 	}
 
 	if err := validate(next, s.dflt); err != nil {
-		s.mu.Unlock()
 		return Effective{}, err
 	}
 	// Persist before touching the cache: a failed write must not leave the
 	// process reporting a configuration the database never accepted.
-	if err := s.persist(ctx, next, actor); err != nil {
-		s.mu.Unlock()
+	if err := persistTx(ctx, tx, next, actor); err != nil {
 		return Effective{}, err
 	}
-	s.cur = next
-	s.mu.Unlock()
+	// Read back inside the same transaction, so updated_at/updated_by are the
+	// values the database wrote rather than a guess about its defaults.
+	saved, err := scanSettings(tx.QueryRowContext(ctx, settingsSelect, singletonID))
+	if err != nil {
+		return Effective{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Effective{}, fmt.Errorf("keepercfg: commit settings update: %w", err)
+	}
 
-	// Re-read so updated_at/updated_by come from the row the DB actually wrote.
-	if err := s.Load(ctx); err != nil {
-		return Effective{}, err
-	}
-	eff := s.Effective()
-	s.fireOnChange(eff)
-	return eff, nil
+	// Cached under the SAME lock as the write, so the next Apply cannot start
+	// from a value this one has already superseded.
+	s.cur = saved
+	return s.effectiveLocked(), nil
 }
 
 // Reset drops every instance override so the whole judge config returns to
 // cfg.Keeper. Resetting an already-clean instance is a no-op success.
+//
+// Delete and cache refresh under the same lock Apply holds: the delete used to
+// happen before the lock was taken, so a concurrent Apply could commit its row
+// and then have its cache entry wiped by this reset — leaving the table
+// configured and the process running on inherited values.
 func (s *Store) Reset(ctx context.Context, actor string) (Effective, error) {
 	if s == nil || s.db == nil {
 		return Effective{}, errors.New("keepercfg: no settings store configured")
 	}
+	s.mu.Lock()
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM keeper_runtime_settings WHERE id = ?`, singletonID); err != nil {
+		s.mu.Unlock()
 		return Effective{}, fmt.Errorf("keepercfg: reset settings: %w", err)
 	}
-	s.mu.Lock()
+	// No read-back: this table holds one row, so a successful delete leaves
+	// nothing to reload. The per-slot aux reset does need one, because the slots
+	// it did not touch keep their rows.
 	s.cur = settings{}
+	eff := s.effectiveLocked()
 	s.mu.Unlock()
 
-	eff := s.Effective()
 	s.fireOnChange(eff)
 	return eff, nil
 }
 
-// persist writes the singleton row. Timestamps are computed in SQL, never
-// formatted in Go, so this stays clear of the RFC3339-near-SQL lint.
-func (s *Store) persist(ctx context.Context, next settings, actor string) error {
+// persistTx writes the singleton row inside the caller's transaction.
+// Timestamps are computed in SQL, never formatted in Go, so this stays clear of
+// the RFC3339-near-SQL lint.
+func persistTx(ctx context.Context, tx *sql.Tx, next settings, actor string) error {
 	var enabled any
 	if next.enabled != nil {
 		if *next.enabled {
@@ -512,7 +567,7 @@ func (s *Store) persist(ctx context.Context, next settings, actor string) error 
 	if next.timeoutMS != nil {
 		timeout = *next.timeoutMS
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO keeper_runtime_settings
 			(id, enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
 			 judge_timeout_ms, updated_by, created_at, updated_at)

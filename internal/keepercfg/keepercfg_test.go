@@ -3,7 +3,9 @@ package keepercfg
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -631,5 +633,94 @@ func TestTimeout_Rejects(t *testing.T) {
 				t.Errorf("a rejected budget changed the effective value to %dms", got)
 			}
 		})
+	}
+}
+
+// --- concurrency ------------------------------------------------------------
+
+// newMultiConnStore is newTestStore over a FILE database with the connection
+// pool left open, mirroring the pragmas database.Open sets in production (WAL,
+// a busy timeout, and _txlock=immediate so BeginTx takes the write lock up
+// front). The :memory: helper has to pin the pool to one connection, which also
+// serialises every store operation — so it cannot exercise two connections
+// racing, which is exactly what the write path has to survive.
+func newMultiConnStore(t *testing.T, dflt Defaults) *Store {
+	t.Helper()
+	dsn := fmt.Sprintf("file:%s/keeper.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_txlock=immediate", t.TempDir())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(tableDDL); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	s := New(db, dflt)
+	if err := s.Load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return s
+}
+
+// storedJudgeModel reads the singleton row straight from the table, bypassing
+// the cache, so a test can assert the two agree.
+func storedJudgeModel(t *testing.T, db *sql.DB) (model string, present bool) {
+	t.Helper()
+	err := db.QueryRow(`SELECT judge_model FROM keeper_runtime_settings WHERE id = ?`, singletonID).Scan(&model)
+	if err == sql.ErrNoRows {
+		return "", false
+	}
+	if err != nil {
+		t.Fatalf("read stored row: %v", err)
+	}
+	return model, true
+}
+
+// The judge singleton had the same split-brain shape the aux store did: Apply
+// refreshed the cache with a Load AFTER releasing the lock, and Reset deleted
+// the row before taking it. Either one can interleave with a concurrent write so
+// that the cache ends up describing a state the table no longer holds — and this
+// store decides whether the Keeper gate is on and which model judges credential
+// access, so a stale cache is a security-relevant divergence, not a display bug.
+//
+// The invariant, whichever write lands last: the cache says what the table says.
+func TestStore_ConcurrentApplyAndResetKeepCacheAgreeingWithTheDatabase(t *testing.T) {
+	s := newMultiConnStore(t, envDefaults)
+	ctx := context.Background()
+
+	for round := range 200 {
+		var wg sync.WaitGroup
+		wg.Add(6)
+		for range 3 {
+			go func() {
+				defer wg.Done()
+				if _, err := s.Reset(ctx, ""); err != nil {
+					t.Errorf("reset: %v", err)
+				}
+			}()
+		}
+		// Distinct values per writer: identical ones would hide a cache refresh
+		// that lands out of order, because the wrong answer would equal the right
+		// one.
+		for i := range 3 {
+			go func(i int) {
+				defer wg.Done()
+				model := fmt.Sprintf("qwen2.5:%d-%db", round, i)
+				if _, err := s.Apply(ctx, Patch{Model: &model}, ""); err != nil {
+					t.Errorf("apply: %v", err)
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		wantModel, present := storedJudgeModel(t, s.db)
+		eff := s.Effective()
+		if present && (eff.Model.Value != wantModel || eff.Model.Source != SourceInstance) {
+			t.Fatalf("round %d: cache has model %q/%s, table has %q",
+				round, eff.Model.Value, eff.Model.Source, wantModel)
+		}
+		if !present && eff.Model.Source == SourceInstance {
+			t.Fatalf("round %d: cache claims an instance override, table has no row", round)
+		}
 	}
 }
