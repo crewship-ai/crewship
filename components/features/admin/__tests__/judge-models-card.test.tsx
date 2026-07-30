@@ -21,7 +21,7 @@ const BROKEN_JUDGE = {
   healthy: false, detail: "disabled by configuration (keeper.enabled = false)",
 }
 
-describe("JudgeModelsCard", () => {
+describe("BackgroundChecksCard", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   it("names the subsystem, not just the slot id", async () => {
@@ -29,31 +29,39 @@ describe("JudgeModelsCard", () => {
     render(<JudgeModelsCard workspaceId="ws1" />)
     // "curator" alone means nothing to an operator; the label says what it does.
     expect(await screen.findByText(/skill review/i)).toBeTruthy()
-    expect(screen.getByText(/claude-haiku-4-5/)).toBeTruthy()
   })
 
-  it("shows the reason a judge is not usable, not just a red dot", async () => {
-    apiFetch.mockResolvedValue(ok({ subsystems: [BROKEN_JUDGE] }))
-    render(<JudgeModelsCard workspaceId="ws1" />)
-    // The whole point of the rework: the old card said "explicit" here and
-    // left the operator to discover the judge was off by other means.
-    expect(await screen.findByText(/disabled by configuration/i)).toBeTruthy()
-  })
-
-  it("marks an unhealthy subsystem as a problem, visibly", async () => {
+  // The credential judge is NOT on this card any more. It has its own card
+  // directly above with its own Test, and the page's status strip already says
+  // whether it is answering — this was the third copy of one fact and the least
+  // actionable of the three, since it could be read and not changed. Asking one
+  // question in three places is what made an operator conclude none of them was
+  // the real setting.
+  it("does not repeat the credential judge, which has its own card", async () => {
     apiFetch.mockResolvedValue(ok({ subsystems: [HEALTHY, BROKEN_JUDGE] }))
     render(<JudgeModelsCard workspaceId="ws1" />)
-    await screen.findByText(/credential access judge/i)
-    const problems = screen.getAllByRole("status").filter((el) => /not running|unavailable|problem/i.test(el.textContent ?? ""))
-    expect(problems.length).toBeGreaterThan(0)
+    await screen.findByText(/skill review/i)
+    expect(screen.queryByText(/credential access judge/i)).toBeNull()
+    // And its problems are not counted here either — a disabled engine is not a
+    // broken background check.
+    expect(screen.queryByText(/cannot run/i)).toBeNull()
+  })
+
+  it("marks an unrunnable background check as a problem, in plain words", async () => {
+    const BROKEN_EVAL = {
+      id: "curator", label: "Skill review + memory consolidation",
+      provider: "anthropic", model: "claude-haiku-4-5", source: "explicit",
+      healthy: false, detail: "ANTHROPIC_API_KEY env not set",
+    }
+    apiFetch.mockResolvedValue(ok({ subsystems: [BROKEN_EVAL] }))
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    expect(await screen.findByText(/ANTHROPIC_API_KEY env not set/i)).toBeTruthy()
+    // "fail closed" is a state; what an operator can act on is the consequence.
+    expect(screen.getByText(/refused rather than allowed/i)).toBeTruthy()
   })
 
   it("does not fetch the workspace-scoped status before a workspace is known", () => {
     render(<JudgeModelsCard workspaceId={null} />)
-    // aux-status 400s without workspace_id; firing anyway just logs noise. The
-    // evaluator config is instance-scoped and takes no workspace, so that one
-    // may load — the card's edit half must not wait on a workspace it does not
-    // need.
     const targets = apiFetch.mock.calls.map((c) => String(c[0]))
     expect(targets.some((t) => t.includes("aux-status"))).toBe(false)
   })
@@ -72,59 +80,10 @@ describe("JudgeModelsCard", () => {
     expect(await screen.findByText(/couldn't load/i)).toBeTruthy()
   })
 
-  it("says so when the server reports no subsystems at all", async () => {
+  it("says so when the server reports nothing at all", async () => {
     apiFetch.mockResolvedValue(ok({ subsystems: [] }))
     render(<JudgeModelsCard workspaceId="ws1" />)
-    expect(await screen.findByText(/no judge/i)).toBeTruthy()
-  })
-})
-
-// "Configured" and "answering" are different questions and the card has to
-// keep them apart: a judge whose provider builds fine can still be pointing
-// at a model server that is not running — which is exactly what dev3 did.
-describe("JudgeModelsCard — reachability", () => {
-  beforeEach(() => { cleanup(); apiFetch.mockReset() })
-
-  const UNREACHABLE = {
-    id: "access_gatekeeper", label: "Credential access judge",
-    provider: "ollama", model: "qwen2.5:7b", source: "keeper_config",
-    healthy: true, reachable: false, reach_detail: "no response from http://127.0.0.1:11434",
-  }
-  const REACHABLE = { ...UNREACHABLE, reachable: true, reach_detail: "" }
-  const UNPROBED = {
-    id: "curator", label: "Skill review + memory consolidation",
-    provider: "anthropic", model: "claude-haiku-4-5", source: "explicit",
-    healthy: true, reach_detail: "not probed — Crewship does not call a paid API to render a status page",
-  }
-
-  it("flags a configured judge whose model server is not answering", async () => {
-    apiFetch.mockResolvedValue(ok({ subsystems: [UNREACHABLE] }))
-    render(<JudgeModelsCard workspaceId="ws1" />)
-    expect(await screen.findByText(/no response from/i)).toBeTruthy()
-  })
-
-  it("does not call an unreachable judge healthy just because it is configured", async () => {
-    apiFetch.mockResolvedValue(ok({ subsystems: [UNREACHABLE] }))
-    render(<JudgeModelsCard workspaceId="ws1" />)
-    await screen.findByText(/no response from/i)
-    // The summary line is what an admin scans; it must count this one.
-    expect(screen.getByText(/cannot run right now/i)).toBeTruthy()
-  })
-
-  it("stays quiet when the judge answers", async () => {
-    apiFetch.mockResolvedValue(ok({ subsystems: [REACHABLE] }))
-    render(<JudgeModelsCard workspaceId="ws1" />)
-    await screen.findByText(/credential access judge/i)
-    expect(screen.queryByText(/cannot run right now/i)).toBeNull()
-  })
-
-  it("says a paid provider was not probed rather than guessing", async () => {
-    apiFetch.mockResolvedValue(ok({ subsystems: [UNPROBED] }))
-    render(<JudgeModelsCard workspaceId="ws1" />)
-    await screen.findByText(/skill review/i)
-    // Neither green-with-confidence nor red-with-alarm: unknown, and why.
-    expect(screen.getByText(/not probed/i)).toBeTruthy()
-    expect(screen.queryByText(/cannot run right now/i)).toBeNull()
+    expect(await screen.findByText(/no background checks/i)).toBeTruthy()
   })
 })
 
@@ -372,12 +331,10 @@ describe("JudgeModelsCard — how much detail it shows by default", () => {
     })
   }
 
-  it("collapses identical evaluators into one line and keeps the judge visible", async () => {
+  it("collapses identical evaluators into one line", async () => {
     route(SAME)
     render(<JudgeModelsCard workspaceId="ws1" />)
 
-    // The row an operator opens this card for stays on screen.
-    expect(await screen.findByText(/credential access judge/i)).toBeTruthy()
     // Five identical models are summarised, not listed.
     expect(await screen.findByText(/all 5 on anthropic \/ claude-haiku-4-5/i)).toBeTruthy()
     expect(screen.queryAllByTestId(/keeper-aux-probe-/)).toHaveLength(0)

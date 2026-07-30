@@ -279,9 +279,14 @@ export const KeeperTab = React.memo(function KeeperTab({
       )}
 
       {/* ── Configuration ──
-          Below the monitoring, behind a divider, in dependency order: what
-          decides → can every judge run → what else is watched → where findings
-          go → how long access lasts → this workspace's own override. */}
+          One subject per card, and the cards for ONE subject adjacent. What
+          decides about credentials used to be asked in three places at opposite
+          ends of the page — the instance judge here, an overview in the middle,
+          and the workspace override (the only place an Anthropic key could be
+          chosen) at the very bottom under a name nobody connected to it. An
+          operator reasonably concluded there was no way to pick a model or a
+          key. Now: the judge, then its per-workspace override, then the
+          background checks that are a different subject, then policy. */}
       <div className="flex items-center gap-3 pt-2">
         <h3 className="text-body font-medium text-foreground/80 leading-none shrink-0">Configuration</h3>
         <div className="h-px flex-1 bg-border/60" />
@@ -289,16 +294,23 @@ export const KeeperTab = React.memo(function KeeperTab({
 
       <KeeperJudgeCard workspaceId={workspaceId} />
 
-      {/* Which model each judge actually uses, and whether it can run.
-          Deliberately OUTSIDE the `keeperStatus &&` guard above: a null status
-          means the keeper status endpoint failed, which is exactly when an
-          operator needs to know whether the judges can run — hiding it then
-          removes the diagnosis along with the symptom. */}
+      {/* The same question at the narrower scope, directly beneath the answer it
+          overrides — including the hosted-provider + vault-key choice. */}
+      <KeeperGovernancePanel
+        workspaceId={workspaceId}
+        serverEnabled={keeperStatus?.enabled ?? false}
+        section="judge"
+      />
+
+      {/* The scheduled evaluators. Deliberately OUTSIDE the `keeperStatus &&`
+          guard below: a null status means the keeper status endpoint failed,
+          which is exactly when an operator needs to know whether these can run —
+          hiding it then removes the diagnosis along with the symptom. */}
       <JudgeModelsCard workspaceId={workspaceId} />
 
       {!keeperLoading && keeperStatus && (
         <>
-          {/* ── Watchdog / findings / leases / workspace model (#1001 M0) ── */}
+          {/* ── Watchdog / findings / leases (#1001 M0) ── */}
           <KeeperGovernancePanel
             workspaceId={workspaceId}
             serverEnabled={keeperStatus.enabled}

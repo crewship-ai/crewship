@@ -472,6 +472,27 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
 
   const failClosed = form.draft.enabled && (form.draft.endpoint.trim() === "" || form.draft.model.trim() === "")
 
+  /**
+   * A budget the last test says would actually hold, or null when the current one
+   * is already comfortable.
+   *
+   * Doubling the measurement rather than adding a margin: the check is one warm
+   * call and the first request after an idle period pays for a cold model load,
+   * which is not a small difference on a 7B model. Rounded up to 5s so the number
+   * in the box reads like a decision rather than a reading.
+   */
+  const measuredMS = testResult?.stages.find((st) => st.name === "verdict")?.latency_ms ?? 0
+  const currentBudgetSec = Number(form.draft.timeoutSec) || 0
+  const suggestedBudgetSec = (() => {
+    if (measuredMS <= 0) return null
+    const want = Math.min(120, Math.max(10, Math.ceil((measuredMS * 2) / 5000) * 5))
+    // Only offer it when it would change something AND the current budget is
+    // genuinely tight — a suggestion that lowers a deliberately generous budget
+    // would be worse than none.
+    if (want <= currentBudgetSec) return null
+    return want
+  })()
+
   return (
     <SettingsCard
       title="Credential access judge"
@@ -742,6 +763,21 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           {testResult.stages.map((st) => (
             <StageRow key={st.name} stage={st} />
           ))}
+          {/* The check just measured the exact number this setting wants. Making
+              the operator read a latency out of a sentence and type a bigger one
+              into a box above is a setting we can simply not have: the budget is
+              a consequence of the model they picked, and we know what that model
+              does on this hardware. */}
+          {suggestedBudgetSec !== null && (
+            <button
+              type="button"
+              onClick={() => form.set("timeoutSec", String(suggestedBudgetSec))}
+              className="text-[11px] underline decoration-dotted text-foreground/80 hover:text-foreground"
+              data-testid="keeper-judge-apply-budget"
+            >
+              Set the budget to {suggestedBudgetSec}s and save
+            </button>
+          )}
         </div>
       )}
 

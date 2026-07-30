@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { KeeperJudgeCard } from "../keeper-judge-card"
 
 // The card exists because this page could previously only DIAGNOSE a dead
@@ -412,5 +412,67 @@ describe("KeeperJudgeCard", () => {
     const { container } = render(<KeeperJudgeCard workspaceId={null} />)
     expect(container).toBeEmptyDOMElement()
     expect(apiFetch).not.toHaveBeenCalled()
+  })
+})
+
+// The budget, from what the check measured.
+//
+// Keeper is fail-closed, so a judge slower than the budget denies every request.
+// The check already measures the exact number the setting wants; making the
+// operator read a latency out of a sentence and type a bigger one into a box is a
+// decision we can take off them entirely.
+describe("KeeperJudgeCard — the time budget follows the measurement", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  function testResult(latencyMS: number, passed = true) {
+    return {
+      ok: passed,
+      endpoint: "http://localhost:11434",
+      model: "qwen2.5:7b",
+      decision: "ALLOW",
+      stages: [
+        { name: "reach", label: "Reach the endpoint", ok: true, detail: "answering" },
+        { name: "model", label: "Model is available", ok: true, detail: "ready" },
+        { name: "verdict", label: "Returns a verdict", ok: true, detail: "verdict: ALLOW", latency_ms: latencyMS },
+      ],
+    }
+  }
+
+  function routeWithTest(result: unknown) {
+    mockRoutes(
+      config({
+        enabled: [true, "instance"],
+        endpoint: ["http://localhost:11434", "instance"],
+        model: ["qwen2.5:7b", "instance"],
+      }),
+      { models: ["qwen2.5:7b"], test: result },
+    )
+  }
+
+  it("offers a budget the measurement says would hold", async () => {
+    // 19.8s measured against the 20s default: it fits today and will not survive
+    // a cold model load, which is the case that produces a mystery DENY later.
+    routeWithTest(testResult(19805))
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.click(await screen.findByTestId("keeper-judge-test"))
+    const apply = await screen.findByTestId("keeper-judge-apply-budget")
+    // Doubled and rounded, not "measured + a bit": the first request after an
+    // idle period pays for a cold load, which on a 7B model is not a small delta.
+    expect(apply.textContent).toMatch(/40s/)
+
+    fireEvent.click(apply)
+    expect(screen.getByTestId("keeper-judge-timeout")).toHaveValue(40)
+  })
+
+  it("stays quiet when the current budget is already comfortable", async () => {
+    // 1.2s against a 20s budget needs no advice, and a suggestion that LOWERED a
+    // deliberately generous budget would be worse than none.
+    routeWithTest(testResult(1200))
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.click(await screen.findByTestId("keeper-judge-test"))
+    await screen.findByTestId("keeper-judge-test-result")
+    expect(screen.queryByTestId("keeper-judge-apply-budget")).toBeNull()
   })
 })

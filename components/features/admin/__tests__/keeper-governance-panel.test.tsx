@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { KeeperGovernancePanel } from "../keeper-governance-panel"
 
 // The panel is four cards over ONE partial-update endpoint (#1001 M0), so the
@@ -152,8 +152,14 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     // Opt-in, default OFF: an unconfigured workspace shows the switch off even
     // though the server engine is on (the engine is shown only as context).
     expect(sw).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByText(/off by default \(opt-in\)/i)).toBeInTheDocument()
-    expect(screen.getByText(/server engine is on/i)).toBeInTheDocument()
+    // The wording says what the state IS and what turning it on does, rather
+    // than naming the pattern ("opt-in") the state is an instance of.
+    expect(screen.getByText(/off by default/i)).toBeInTheDocument()
+    // With the engine ON the copy no longer restates it — a line that says
+    // "server engine is on" on a page whose own status strip already says so is
+    // one more sentence to read for nothing. It appears only when the engine is
+    // OFF, where it is the reason this switch will not do anything yet.
+    expect(screen.queryByText(/engine above is off/i)).toBeNull()
     expect(screen.getByTestId("keeper-governance-risk")).toHaveValue(7)
     // Nothing edited → no card offers a Save.
     for (const id of ["keeper-watchdog-save", "keeper-findings-save", "keeper-leases-save", "keeper-gov-model-save"]) {
@@ -374,9 +380,13 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
 
   // ── Workspace governance model card ──────────────────────────────────────
 
+  // section="judge" renders ONLY the workspace judge override. It moved next to
+  // the instance judge it overrides — the two are one question asked at two
+  // scopes, and having them at opposite ends of the page is what made an operator
+  // conclude there was no way to choose a model or an API key at all.
   it("renders the four governance-model provider options (#1001 gov-model)", async () => {
     mockRoutes(BASE)
-    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
     const trigger = await screen.findByTestId("keeper-gov-provider")
     // Defaults to "use the instance judge", and no model input until a concrete
@@ -399,7 +409,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
 
   it("blocks save when a provider is set but the model id is empty (#1001 gov-model)", async () => {
     mockRoutes(BASE)
-    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
     const trigger = await screen.findByTestId("keeper-gov-provider")
     openSelect(trigger)
@@ -419,7 +429,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
 
   it("saves the governance-model fields via PUT, alone (#1001 gov-model)", async () => {
     mockRoutes(BASE)
-    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
     const trigger = await screen.findByTestId("keeper-gov-provider")
     openSelect(trigger)
@@ -456,7 +466,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       gov_model_id: "qwen2.5:3b-instruct",
       gov_model_credential_id: "cred-url",
     })
-    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
     expect(await screen.findByTestId("keeper-gov-model-id")).toHaveValue("qwen2.5:3b-instruct")
     expect(screen.getByTestId("keeper-gov-provider")).toHaveTextContent(/a different local model/i)
@@ -470,7 +480,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
       gov_model_id: "claude-haiku-4-5",
       gov_model_credential_id: "cred-api",
     })
-    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
 
     const trigger = await screen.findByTestId("keeper-gov-provider")
     openSelect(trigger)
@@ -600,5 +610,45 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     // And the untouched cards stay clean — no phantom "unsaved changes".
     expect(screen.queryByTestId("keeper-leases-save")).not.toBeInTheDocument()
     expect(screen.queryByTestId("keeper-findings-save")).not.toBeInTheDocument()
+  })
+})
+
+// Not asking for configuration of a thing that is not running.
+//
+// The watchdog card showed the preset checkboxes and the free-text rule box
+// whether or not the watchdog was on — and it is off by default. So the first
+// thing an operator saw was a rules editor for a monitor that does not exist yet,
+// which is most of what made this page feel like work rather than a switch.
+describe("WatchdogCard — how much it asks for before it is on", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  it("asks only the on/off question while it is off", async () => {
+    mockRoutes({ ...BASE, configured: false, enabled: false })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    await screen.findByTestId("keeper-governance-switch")
+    expect(screen.queryByTestId("keeper-watch-spec")).toBeNull()
+    expect(screen.queryByTestId("keeper-watch-preset-credentials")).toBeNull()
+  })
+
+  it("reveals what to flag once it is turned on", async () => {
+    mockRoutes({ ...BASE, configured: false, enabled: false })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.click(await screen.findByTestId("keeper-governance-switch"))
+    // Immediately, on the draft — not after a save. Choosing the rules is part of
+    // turning it on, and a round-trip in the middle of one decision is a place to
+    // give up.
+    expect(await screen.findByTestId("keeper-watch-preset-credentials")).toBeTruthy()
+    expect(screen.getByTestId("keeper-watch-spec")).toBeTruthy()
+  })
+
+  it("says why the switch will not do anything while the engine is off", async () => {
+    mockRoutes({ ...BASE, configured: false, enabled: false })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={false} />)
+
+    // Two switches, one of which silently gates the other, is exactly the shape
+    // that produces "I turned it on and nothing happened".
+    expect(await screen.findByText(/engine above is off/i)).toBeTruthy()
   })
 })

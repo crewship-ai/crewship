@@ -299,6 +299,30 @@ The `containsDangerousShellChars` function in `internal/sidecar/keeper_bridge.go
 
 Content inside **single quotes** is allowed -- the shell does not interpret special characters within single quotes.
 
+## The admin page, in the order it asks
+
+Four cards, each answering one question, top to bottom:
+
+| Card | The question |
+|------|--------------|
+| **Credential access judge** | What decides, on this whole instance — model server, model, time budget, and the on/off switch. |
+| **Judge for this workspace** | …unless this workspace needs its own. This is where a **hosted** judge lives: Anthropic or an OpenAI-compatible endpoint, on an API key picked **by name** from your stored credentials. |
+| **Background checks** | The five scheduled evaluators. Collapsed to one line when they all run the same model, because on a stock instance they do. |
+| **Watch what agents do** | The behaviour monitor: off by default, and it asks nothing else until you turn it on. |
+
+The split between the first two is real and not cosmetic: the first is the
+instance default, the second overrides it for one workspace. On a single-workspace
+instance you will only ever touch the first — unless you want a hosted judge, which
+is workspace-scoped because the API key lives in that workspace's vault.
+
+<Note>
+  Several Anthropic keys is the normal case on an orchestration platform: each
+  carries its own subscription limit. Store them as separate credentials with
+  meaningful names, then pick one by name — and press **Test**, which tells you
+  whether that particular key still answers. A 401 is the wrong key and a 429 is a
+  spent subscription; both used to be invisible until a credential request denied.
+</Note>
+
 ## Configuration
 
 Enable Keeper in your config:

@@ -261,7 +261,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // the difference is the point).
   const [showEach, setShowEach] = useState(false)
 
-  const unusable = (rows ?? []).filter((r) => !isUsable(r)).length
+  const unusable = (rows ?? []).filter((r) => r.id !== "access_gatekeeper" && !isUsable(r)).length
   const auxBySlot = new Map((aux?.slots ?? []).map((s) => [s.slot, s]))
   // Slots the status endpoint does not report (today: `fallback`) still belong
   // in the list — an evaluator that is configurable but invisible is a knob an
@@ -271,7 +271,10 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // The credential judge is the row an operator opens this card for: it is the
   // one in the path of every credential request. Everything else runs on a
   // schedule and can be a summary until asked about.
-  const judgeRow = (rows ?? []).find((r) => r.id === "access_gatekeeper")
+  // The credential judge is NOT listed here. It has its own card directly above,
+  // with its own Test, and the page's status strip already reports whether it is
+  // answering — three copies of one fact, of which this was the least actionable
+  // (it could be looked at and not changed).
   const evaluatorRows = (rows ?? []).filter((r) => r.id !== "access_gatekeeper")
   const allSlots = aux?.slots ?? []
   const uniformModel =
@@ -283,14 +286,12 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // actually deciding about.
   const evaluatorsAreFree = allSlots.length > 0 && allSlots.every((sl) => sl.provider.value === "ollama")
   const expanded = showEach || uniformModel === null
-  const orderedRows = judgeRow
-    ? (expanded ? [judgeRow, ...evaluatorRows] : [judgeRow])
-    : (expanded ? evaluatorRows : [])
+  const orderedRows = expanded ? evaluatorRows : []
 
   return (
     <SettingsCard
-      title="Which model decides"
-      description="The judge that answers credential requests, and the models behind the background checks. Applies to the whole instance — a workspace can override it under Judge for this workspace."
+      title="Background checks"
+      description="The scheduled reviews: skills, the tool-call watchdog, memory audits, failure lessons and run summaries. They run on a timer, not in the credential path — nothing waits on them, and the credential judge above is unaffected by anything here."
       actions={
         <>
           {aux && aux.judge_model && (
@@ -329,8 +330,8 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
           <Skeleton className="h-7 w-full" />
           <Skeleton className="h-7 w-full" />
         </div>
-      ) : rows.length === 0 && extraSlots.length === 0 ? (
-        <SettingsEmpty>No judge models are wired into this build.</SettingsEmpty>
+      ) : evaluatorRows.length === 0 && extraSlots.length === 0 ? (
+        <SettingsEmpty>No background checks are wired into this build.</SettingsEmpty>
       ) : (
         <>
           {/* "fail closed" is jargon that reads as a state rather than a

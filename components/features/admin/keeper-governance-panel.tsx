@@ -243,6 +243,21 @@ export interface KeeperGovernancePanelProps {
   /** Server-level keeper engine flag (GET /system/keeper) — shown as context
    *  only; the per-workspace watchdog toggle is independent (opt-in). */
   serverEnabled: boolean
+  /**
+   * Which half of the panel to render.
+   *
+   * The workspace judge override belongs next to the instance judge it
+   * overrides — the two are one question ("what decides about credentials")
+   * asked at two scopes, and putting them at opposite ends of the page is what
+   * made an operator conclude there was no way to choose a model or a key. The
+   * rest of the panel (watchdog, findings routing, leases) is a different
+   * subject and stays below.
+   *
+   * Splitting by prop rather than by component keeps ONE fetch, one `put`, and
+   * one error path for a single governance row — two components would each load
+   * it and could disagree about what it says.
+   */
+  section?: "judge" | "policy"
 }
 
 /** Shape shared by every card: commit a partial governance update. */
@@ -251,6 +266,7 @@ type PutGovernance = (body: Record<string, unknown>) => Promise<GovernanceRespon
 export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   workspaceId,
   serverEnabled,
+  section = "policy",
 }: KeeperGovernancePanelProps) {
   // Mirrors AgentLearningToggle: derive edit rights from CASL. The PUT is
   // roleManage (OWNER/ADMIN) server-side; only those roles get "manage" on
@@ -384,12 +400,15 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     )
   }
 
+  if (section === "judge") {
+    return <GovernanceModelCard gov={gov} credentials={govCredentials} canEdit={canEdit} put={put} workspaceId={workspaceId} />
+  }
+
   return (
     <>
       <WatchdogCard gov={gov} serverEnabled={serverEnabled} canEdit={canEdit} put={put} />
       <FindingsRoutingCard gov={gov} admins={admins} canEdit={canEdit} put={put} workspaceId={workspaceId} />
       <CredentialLeasesCard gov={gov} canEdit={canEdit} put={put} />
-      <GovernanceModelCard gov={gov} credentials={govCredentials} canEdit={canEdit} put={put} workspaceId={workspaceId} />
     </>
   )
 })
@@ -424,15 +443,15 @@ function WatchdogCard({
 
   return (
     <SettingsCard
-      title="Watchdog"
-      description="Behavioral monitoring for this workspace: whether it runs, and what it flags. Credential-access enforcement is the judge above, not this."
+      title="Watch what agents do"
+      description="Separate from credential access. This samples the tool calls agents make — files read, commands run, hosts contacted — and raises a finding when something looks wrong. It never blocks a credential; the judge above does that."
     >
       <SettingsRow
-        label="Watchdog enabled"
+        label="Turn it on"
         description={
-          gov.configured
-            ? `Samples agent tool calls and flags anti-patterns. Server engine is ${serverEnabled ? "on" : "off"}.`
-            : `Off by default (opt-in) — enable to start behavioral monitoring for this workspace. Server engine is ${serverEnabled ? "on" : "off"}.`
+          serverEnabled
+            ? "Off by default. When on, a share of tool calls is reviewed and anything suspicious lands in the inbox."
+            : "Off by default. The Keeper engine above is off too, so nothing is reviewed until both are on."
         }
       >
         <Switch
@@ -444,13 +463,18 @@ function WatchdogCard({
         />
       </SettingsRow>
 
-      {/* Watch presets — curated rules the operator toggles on. A full-width
-          block rather than a SettingsRow: a five-way multi-select does not
-          belong in a right-aligned control slot. */}
+      {/* Everything below is what it looks for — shown only once it is ON.
+          Asking an operator to choose rules for a monitor that is not running is
+          a configuration screen for a thing that does not exist yet, and it is
+          most of what made this page feel like work. */}
+      {form.draft.enabled && (
+      <>
+      {/* A full-width block rather than a SettingsRow: a five-way multi-select
+          does not belong in a right-aligned control slot. */}
       <div className="px-4 py-2.5 border-b border-border/40">
-        <div className="text-xs text-foreground">Watch presets</div>
+        <div className="text-xs text-foreground">What to flag</div>
         <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
-          Curated rules the watchdog flags against, added to its built-in checks.
+          Pick the ones that matter here. These are added to the checks it always does.
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           {WATCH_PRESETS.map((p) => {
@@ -492,9 +516,9 @@ function WatchdogCard({
 
       {/* Free-form rules — natural language, injected as authoritative policy. */}
       <div className="px-4 py-2.5">
-        <div className="text-xs text-foreground">Custom watch rules</div>
+        <div className="text-xs text-foreground">Anything else to flag</div>
         <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
-          One rule per line, in plain language. Injected into the evaluator prompts.
+          One rule per line, in your own words. Optional — leave it empty and the checks above still apply.
         </div>
         <Textarea
           value={form.draft.spec}
@@ -510,6 +534,8 @@ function WatchdogCard({
           data-testid="keeper-watch-spec"
         />
       </div>
+      </>
+      )}
 
       {canEdit && (
         <SaveFooter
