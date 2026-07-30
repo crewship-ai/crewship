@@ -11,6 +11,112 @@ and credential **self-service vs. escalation**.
 > clone's dev target — never a DB shell or hand-rolled `curl`. Dogfooding the
 > CLI is the QA budget.
 
+## Which of these run in CI
+
+Until `.github/workflows/nightly-harness.yml` landed, **none of them did**.
+`ci.yml` runs `scripts/test-harness-lib-test.sh` — a unit test of *this
+directory's library* (`lib.sh` assertion helpers and exit codes). It never
+starts a server and never asserts a product behaviour, so every suite below
+was gated by nothing.
+
+`nightly-harness.yml` (nightly 03:10 UTC + `workflow_dispatch`) now boots an
+ephemeral instance per matrix square — `crewship start` → `crewship seed
+--skip-issues` → one suite — and files/refreshes a single deduplicated
+`nightly-harness-alert` issue when a square goes red (same containment pattern
+as `security.yml`'s `scheduled-report`: bot author + label + marker, and a
+green night closes the bot's own issue).
+
+**Hard gate today — control-plane suites, no provider credential required:**
+
+| Suite | Verified |
+|---|---|
+| `test-keeper.sh` | 18 assertions, 0 fail |
+| `test-keeper-ingress-fence.sh` | 53 assertions, 0 fail (5 non-fatal findings) |
+| `test-keeper-toctou.sh` | 15 assertions, 0 fail |
+| `test-orphan-token-reap.sh` | 1 assertion + 1 self-SKIP (no docker provider) |
+| `test-attack-surface.sh` | 4 assertions (Tier A), Tier B SKIPs by design |
+
+All five were driven end-to-end against a clean-DB bootstrap of exactly that
+sequence before the workflow was written.
+
+**Not gated yet — the runtime suites.** `test-memory.sh`,
+`test-delegation.sh`, `test-crew-links.sh`, `test-notifications.sh`,
+`test-orchestration.sh`, `test-determinism.sh`, `test-credentials.sh`,
+`test-keeper-audit-integrity.sh` and `test-keeper-load.sh` all reach their
+assertions only *after* a real agent reply or a real routine run. Without a
+provider credential the server answers
+
+```
+LLMRunner: provider: no active Anthropic credential in workspace
+```
+
+and everything downstream fails. There is **no Anthropic secret in this
+repository's Actions secrets**, so the `harness-runtime` job is skipped and
+the alert issue says so in as many words. Configure
+`SEED_ANTHROPIC_API_KEY` as a repository secret and that job becomes a hard
+gate with no workflow edit. Do not read a green nightly as "memory and
+delegation still work" until then.
+
+**Never run in CI, on purpose:** `test-realworld-github.sh`,
+`test-secretless-github.sh`, `test-notifications-shoutrrr.sh`,
+`test-ollama-local.sh`, `test-datastore-redis-auth.sh` and
+`test-redteam-insider.sh` — each needs a secret, an external service, a
+provisioned crew, or a shared dev slot it is allowed to mutate. The reasons are
+spelled out per suite in the workflow header.
+
+### Adding a suite: the tiers are enforced, not documented
+
+Deliberately no total is quoted here or in the workflow. The first draft of that
+header said "19 suites" and was wrong within days — `test-crew-links.sh` and
+`test-secretless-github.sh` landed in merged PRs while it was being written. A
+number in prose cannot be enforced, so the invariant is stated as set membership
+instead:
+
+> every `scripts/test-harness/test-*.sh` on disk must be claimed by exactly one
+> of the two matrices in `nightly-harness.yml` or by its `EXCLUDED_SUITES` list
+
+and the `suite-coverage-guard` job **fails the workflow** on any suite in no
+tier, any tier naming a suite that no longer exists, and any suite claimed
+twice. It reads the two run lists out of the matrices themselves — there is no
+second copy of them to drift — so adding a suite to a matrix is all the
+bookkeeping there is. A new `test-*.sh` that nobody wired up turns the nightly
+red instead of silently getting zero coverage.
+
+So: add the file, then put it in a matrix (with a per-suite timeout) or in
+`EXCLUDED_SUITES` with the reason in the header block. There is no third option
+the guard will accept.
+
+### A green run states what it did not verify
+
+`nightly-harness.yml` has a `coverage-summary` job that writes a tier table to
+the run's summary page — on the **success** path too, not only on failure, and
+on manual dispatches as well as the schedule. Until a provider credential
+exists, that table carries a warning banner saying in as many words that the
+green tick covers the control-plane tier only and that the run does **not**
+show memory, delegation, notifications, orchestration, determinism or credential
+escalation still working. The banner disappears by itself the moment
+`SEED_ANTHROPIC_API_KEY` is configured and the runtime tier starts executing.
+The point is that the run page never claims more coverage than the run had.
+
+`run-all.sh` is not used by CI: it is a flat sequential loop with no per-suite
+timeout, so one wedged `ask` consumes the whole job budget and the summary
+cannot say which subsystem broke. The workflow gives every suite its own
+runner, its own timeout, and its own red square.
+
+Two CI-specific notes worth keeping:
+
+- **`crewship seed` needs retrying from cold.** Crew creation validates each
+  runtime image against `mcr.microsoft.com`, and the first call reproducibly
+  exceeds the CLI's client timeout (`invalid runtime_image: … context deadline
+  exceeded`). The workflow retries up to 3×; locally it took 3 attempts from
+  cold and then succeeded.
+- **`test-attack-surface.sh` must be handed its token.** It resolves a bearer
+  token by matching `$SERVER` against a `cli-config` profile, which cannot
+  resolve a loopback address — so without `CREWSHIP_ATTACK_TOKEN` +
+  `CREWSHIP_ATTACK_WS` it SKIPs its entire Tier A block and reports green
+  having proved nothing. The workflow mints both via `crewship token create`
+  and `crewship whoami --format json`.
+
 ## Prereqs
 
 1. A `crewship` binary the harness can find. It looks, in order, at `$CREWSHIP`,
