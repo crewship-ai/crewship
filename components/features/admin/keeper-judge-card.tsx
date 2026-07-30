@@ -83,6 +83,23 @@ function ProvenanceChip({ source }: { source: ConfigSource }) {
   )
 }
 
+/**
+ * StepLabel numbers the three things that have to happen in order. The card used
+ * to lead with the engine switch, which invited turning Keeper on before there
+ * was a judge for it to use — and Keeper is fail-closed, so that is the one
+ * ordering that produces an outage.
+ */
+function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="grid place-items-center h-4 w-4 rounded-full bg-muted/60 border border-border/60 text-[9px] font-semibold text-muted-foreground shrink-0">
+        {n}
+      </span>
+      <span>{children}</span>
+    </span>
+  )
+}
+
 /** Row description with the provenance chip on its own line underneath. */
 function WithProvenance({ source, children }: { source: ConfigSource; children: React.ReactNode }) {
   return (
@@ -162,6 +179,8 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<JudgeTestResult | null>(null)
+  const [connecting, setConnecting] = useState(false)
+  const [connectResult, setConnectResult] = useState<{ ok: boolean; detail: string } | null>(null)
 
   // Engine, endpoint and model share ONE draft on purpose, even though a switch
   // would normally commit on the spot. Keeper is fail-closed: enabling it
@@ -274,6 +293,54 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     }
   }, [workspaceId, draftEndpoint])
 
+  // Connect is the cheap half of the check, asked for explicitly: one
+  // GET /api/tags, no model load, no verdict. It answers "is anything there"
+  // and hands back what that server has — which is the question you have before
+  // you can sensibly choose a model. The debounced discovery above still runs,
+  // but a background effect is not an answer: pressing a button and being told
+  // yes or no is.
+  async function handleConnect() {
+    if (!workspaceId || connecting) return
+    const endpoint = form.draft.endpoint.trim()
+    if (endpoint === "") return
+    setConnecting(true)
+    setConnectResult(null)
+    try {
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/judge/models?workspace_id=${encodeURIComponent(workspaceId)}&endpoint=${encodeURIComponent(endpoint)}`,
+      )
+      if (!res.ok) {
+        setConnectResult({ ok: false, detail: await errorFrom(res, `The check could not run (HTTP ${res.status})`) })
+        return
+      }
+      const body = (await res.json()) as { models?: string[]; error?: string }
+      if (body.error) {
+        setModels([])
+        setModelsError(body.error)
+        setConnectResult({ ok: false, detail: body.error })
+        return
+      }
+      const found = body.models ?? []
+      setModels(found)
+      setModelsError(null)
+      setConnectResult({
+        ok: true,
+        detail: found.length === 0
+          ? "Connected — but that server has no models pulled yet. Run `ollama pull qwen2.5:7b` there."
+          : `Connected · ${found.length} model${found.length === 1 ? "" : "s"} available`,
+      })
+      // Nothing chosen yet and exactly one candidate: choosing it for them is
+      // the difference between a setup and a form.
+      if (found.length === 1 && form.draft.model.trim() === "") {
+        form.set("model", found[0])
+      }
+    } catch (e) {
+      setConnectResult({ ok: false, detail: e instanceof Error ? e.message : "Could not reach that address" })
+    } finally {
+      setConnecting(false)
+    }
+  }
+
   // Test the DRAFT, not the saved row: finding a working combination before
   // committing it is the whole point of a test button.
   async function handleTest() {
@@ -328,10 +395,18 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       }
       const next = (await res.json()) as KeeperConfigResponse
       setCfg(next)
+      setConnectResult(null)
+      setTestResult(null)
       // The draft is rebased by the baseline effect once cfg lands, but only
       // while the form is clean — reset is a discard, so drop the draft too.
       form.reset()
-      toast.success("Judge configuration reset — the server's own settings are back in force.")
+      // Name the consequence: the override commonly IS what turned Keeper on, so
+      // "reset" and "switch Keeper off" are frequently the same action.
+      toast.success(
+        next.enabled.value
+          ? "Judge configuration reset — the server's own settings are back in force."
+          : "Judge configuration reset — the server config has Keeper OFF, so the engine is now off.",
+      )
     } finally {
       setResetting(false)
     }
@@ -361,80 +436,85 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   return (
     <SettingsCard
       title="Credential access judge"
-      description="Which model decides credential access, and whether Keeper runs at all. Instance-wide; a workspace governance model overrides it per request. Changes apply to the next credential request — no restart."
+      description="Three steps, in order: point it at a model server, pick a model it actually has, then turn it on. Instance-wide; a workspace governance model overrides it per request. Changes apply to the next credential request — no restart."
       actions={
-        canEdit ? (
-          <>
-            <Button
-              variant="soft"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              onClick={() => { void handleTest() }}
-              disabled={testing}
-              data-testid="keeper-judge-test"
-            >
-              {testing ? "Testing…" : "Test"}
-            </Button>
-            {cfg.overridden && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2.5 text-xs"
-                onClick={() => { void handleReset() }}
-                disabled={resetting}
-                data-testid="keeper-judge-reset"
-              >
-                {resetting ? "Resetting…" : "Reset to inherited"}
-              </Button>
-            )}
-          </>
+        canEdit && cfg.overridden ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => { void handleReset() }}
+            disabled={resetting}
+            data-testid="keeper-judge-reset"
+          >
+            {resetting ? "Resetting…" : "Reset to inherited"}
+          </Button>
         ) : undefined
       }
     >
+      {/* Step 1. The endpoint and its own Connect button, because "is anything
+          there" is a question you ask BEFORE choosing a model — and it is the
+          cheap half of the check (one GET /api/tags, no model load). */}
       <SettingsRow
-        label="Keeper engine"
-        description={
-          <WithProvenance source={cfg.enabled.source}>
-            With Keeper on, SECRET credentials are withheld from agents and must be requested.
-            Applies to runs started after the change.
-          </WithProvenance>
-        }
-      >
-        <Switch
-          checked={form.draft.enabled}
-          onCheckedChange={(checked) => form.set("enabled", checked)}
-          disabled={!canEdit}
-          aria-label="Toggle the Keeper engine"
-          data-testid="keeper-judge-enabled"
-        />
-      </SettingsRow>
-
-      <SettingsRow
-        label="Judge endpoint"
+        label={<StepLabel n={1}>Model server</StepLabel>}
         description={
           <WithProvenance source={cfg.judge_endpoint_url.source}>
-            Where the judge asks. Repoints the judge only — the episodic embedder and the chat
-            summarizer keep the server&apos;s own URL. Clear the field to inherit it again.
+            Where the judge asks. Run Ollama on this machine and it is
+            <code className="mx-1 px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">http://localhost:11434</code>;
+            on another machine, that machine&apos;s address. Repoints the judge only — the episodic
+            embedder and the chat summarizer keep the server&apos;s own URL.
           </WithProvenance>
         }
       >
-        <Input
-          type="text"
-          value={form.draft.endpoint}
-          onChange={(e) => form.set("endpoint", e.target.value)}
-          disabled={!canEdit}
-          placeholder="http://localhost:11434"
-          className="h-8 w-[240px] text-xs font-mono"
-          aria-label="Judge endpoint URL"
-          data-testid="keeper-judge-endpoint"
-        />
+        <span className="flex flex-col items-end gap-1.5">
+          <span className="flex items-center gap-1.5">
+            <Input
+              type="text"
+              value={form.draft.endpoint}
+              onChange={(e) => form.set("endpoint", e.target.value)}
+              disabled={!canEdit}
+              placeholder="http://localhost:11434"
+              className="h-8 w-[240px] text-xs font-mono"
+              aria-label="Judge endpoint URL"
+              data-testid="keeper-judge-endpoint"
+            />
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 px-2.5 text-xs shrink-0"
+                onClick={() => { void handleConnect() }}
+                disabled={connecting || form.draft.endpoint.trim() === ""}
+                data-testid="keeper-judge-connect"
+              >
+                {connecting ? "Connecting…" : "Connect"}
+              </Button>
+            )}
+          </span>
+          {connectResult && (
+            <span
+              className={cn(
+                "text-[10px] max-w-[21rem] text-right leading-snug",
+                connectResult.ok ? "text-success" : "text-destructive",
+              )}
+              data-testid="keeper-judge-connect-result"
+            >
+              {connectResult.detail}
+            </span>
+          )}
+        </span>
       </SettingsRow>
 
+      {/* Step 2. The models that endpoint reported. A picker, not a text field:
+          a typo here is a fail-closed DENY on every credential request, and
+          nobody should be typing a model tag from memory. */}
       <SettingsRow
-        label="Judge model"
+        label={<StepLabel n={2}>Model</StepLabel>}
         description={
           <WithProvenance source={cfg.judge_model.source}>
-            The model that returns the verdict. Clear the field to inherit the server&apos;s.
+            {models.length > 0
+              ? "Pulled on that server. Pick one — or type a tag if you are about to pull it."
+              : "Press Connect to list what that server has. Clear the field to inherit the server's model."}
           </WithProvenance>
         }
       >
@@ -449,47 +529,93 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
             aria-label="Judge model"
             data-testid="keeper-judge-model"
           />
-          {/* Discovered from the endpoint, one click to use. A model name is
-              something to pick, not something to type from memory — a typo here
-              is a fail-closed DENY on every credential request. */}
           {models.length > 0 && (
-            <span className="flex flex-wrap justify-end gap-1 max-w-[19rem]" data-testid="keeper-judge-models">
-              {models.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => form.set("model", m)}
-                  disabled={!canEdit}
-                  className={cn(
-                    "px-1.5 h-[18px] rounded border text-[10px] font-mono transition-colors",
-                    m === form.draft.model
-                      ? "border-primary/40 bg-primary/[0.08] text-primary/90"
-                      : "border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {m}
-                </button>
-              ))}
+            <span className="flex flex-col items-end gap-1" data-testid="keeper-judge-models">
+              <span className="text-[10px] text-muted-foreground/70">
+                on this server — click to use
+              </span>
+              <span className="flex flex-wrap justify-end gap-1 max-w-[21rem]">
+                {models.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => form.set("model", m)}
+                    disabled={!canEdit}
+                    className={cn(
+                      "px-1.5 h-[19px] rounded border text-[10px] font-mono transition-colors",
+                      m === form.draft.model.trim()
+                        ? "border-primary/50 bg-primary/[0.12] text-primary/90"
+                        : "border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground hover:border-border",
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </span>
+            </span>
+          )}
+          {/* A model that is not on the endpoint is the single most common real
+              failure, and it is silent until a credential request denies. Say it
+              at the field, while it is still one click from being right. */}
+          {models.length > 0 && form.draft.model.trim() !== "" && !models.includes(form.draft.model.trim()) && (
+            <span className="text-[10px] text-warn max-w-[21rem] text-right leading-snug" data-testid="keeper-judge-model-missing">
+              {form.draft.model.trim()} is not on that server — pull it there, or pick one above.
             </span>
           )}
           {models.length === 0 && modelsError && (
-            <span className="text-[10px] text-muted-foreground/70 max-w-[19rem] text-right leading-snug">
+            <span className="text-[10px] text-muted-foreground/70 max-w-[21rem] text-right leading-snug">
               {modelsError}
             </span>
           )}
         </span>
       </SettingsRow>
 
+      {/* Step 3. Prove it, then turn it on. Test is here rather than in the card
+          header because it belongs to this step: it is the thing you do before
+          flipping the switch, and it is the only check that makes the model
+          actually return a verdict. */}
       <SettingsRow
-        label="Wire format"
-        description="The instance judge speaks the native Ollama API. An OpenAI-compatible or Anthropic judge is configured per workspace as the governance model below, which carries its endpoint and key in the vault."
+        label={<StepLabel n={3}>Turn it on</StepLabel>}
+        description={
+          <WithProvenance source={cfg.enabled.source}>
+            With Keeper on, SECRET credentials are withheld from agents and must be requested — so
+            test the judge first. Applies to runs started after the change. A local model costs
+            nothing per decision.
+          </WithProvenance>
+        }
         border={false}
       >
-        <span className="text-[11px] text-muted-foreground font-mono" data-testid="keeper-judge-wire">
-          {cfg.judge_provider.value || "—"}
-          {cfg.judge_wire.value ? ` / ${cfg.judge_wire.value}` : ""}
+        <span className="flex items-center gap-2">
+          {canEdit && (
+            <Button
+              variant="soft"
+              size="sm"
+              className="h-8 px-2.5 text-xs"
+              onClick={() => { void handleTest() }}
+              disabled={testing}
+              data-testid="keeper-judge-test"
+            >
+              {testing ? "Testing…" : "Test"}
+            </Button>
+          )}
+          <Switch
+            checked={form.draft.enabled}
+            onCheckedChange={(checked) => form.set("enabled", checked)}
+            disabled={!canEdit}
+            aria-label="Toggle the Keeper engine"
+            data-testid="keeper-judge-enabled"
+          />
         </span>
       </SettingsRow>
+
+      {/* Provider/wire is not a step — it is a fact about what the instance judge
+          speaks, and it moves out of the flow into a footnote. */}
+      <div className="px-4 py-2 border-t border-border/40 text-[10px] text-muted-foreground/70">
+        Speaks the native Ollama API (<span className="font-mono" data-testid="keeper-judge-wire">
+          {cfg.judge_provider.value || "—"}{cfg.judge_wire.value ? ` / ${cfg.judge_wire.value}` : ""}
+        </span>). An OpenAI-compatible or Anthropic judge is configured per workspace as the
+        governance model below, which carries its endpoint and key in the vault.
+      </div>
 
       {testResult && (
         <div

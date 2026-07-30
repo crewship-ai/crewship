@@ -241,6 +241,79 @@ describe("KeeperJudgeCard", () => {
     expect(screen.queryByTestId("keeper-judge-endpoint")).not.toBeInTheDocument()
   })
 
+  // Step 1 of the flow: "is anything there", asked explicitly, before choosing a
+  // model. A background effect is not an answer — pressing a button and being
+  // told yes or no is.
+  it("connects on demand and reports what the server has", async () => {
+    mockRoutes(config(), { models: ["qwen2.5:7b", "llama3:8b"] })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.change(await screen.findByTestId("keeper-judge-endpoint"), {
+      target: { value: "http://192.168.1.222:11434" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-judge-connect"))
+
+    const result = await screen.findByTestId("keeper-judge-connect-result")
+    expect(result).toHaveTextContent(/connected · 2 models available/i)
+    expect(await screen.findByTestId("keeper-judge-models")).toHaveTextContent("qwen2.5:7b")
+  })
+
+  // One candidate and nothing chosen: picking it for them is the difference
+  // between a setup and a form.
+  it("adopts the only model on offer", async () => {
+    mockRoutes(config(), { models: ["qwen2.5:3b"] })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.change(await screen.findByTestId("keeper-judge-endpoint"), {
+      target: { value: "http://localhost:11434" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-judge-connect"))
+
+    await waitFor(() => expect(screen.getByTestId("keeper-judge-model")).toHaveValue("qwen2.5:3b"))
+  })
+
+  it("says so when the server answers but has nothing pulled", async () => {
+    mockRoutes(config(), { models: [] })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.change(await screen.findByTestId("keeper-judge-endpoint"), {
+      target: { value: "http://localhost:11434" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-judge-connect"))
+
+    const result = await screen.findByTestId("keeper-judge-connect-result")
+    expect(result).toHaveTextContent(/no models pulled/i)
+    expect(result).toHaveTextContent(/ollama pull/i)
+  })
+
+  it("reports a refused connection at the field", async () => {
+    mockRoutes(config(), { modelsError: "nothing is listening there. If Ollama runs on another machine, it must be bound to that machine's address (OLLAMA_HOST)" })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.change(await screen.findByTestId("keeper-judge-endpoint"), {
+      target: { value: "http://127.0.0.1:1" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-judge-connect"))
+
+    expect(await screen.findByTestId("keeper-judge-connect-result")).toHaveTextContent(/OLLAMA_HOST/)
+  })
+
+  // The most common real misconfiguration, caught while it is still one click
+  // from being right instead of at the first denied credential request.
+  it("warns when the typed model is not on that server", async () => {
+    mockRoutes(config(), { models: ["qwen2.5:3b"] })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.change(await screen.findByTestId("keeper-judge-endpoint"), {
+      target: { value: "http://localhost:11434" },
+    })
+    fireEvent.click(screen.getByTestId("keeper-judge-connect"))
+    await screen.findByTestId("keeper-judge-models")
+
+    fireEvent.change(screen.getByTestId("keeper-judge-model"), { target: { value: "qwen2.5:7b" } })
+    expect(screen.getByTestId("keeper-judge-model-missing")).toHaveTextContent(/is not on that server/i)
+  })
+
   // The flow the user asked for, end to end: paste an address, press Test, be
   // told in words whether it works.
   it("runs the three-stage check and reports each stage", async () => {
