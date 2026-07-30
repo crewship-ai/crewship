@@ -1,4 +1,4 @@
-// Shared vocabulary for the inbox preview surface.
+// Shared vocabulary for the inbox surface.
 
 /** Which list the page is showing. Chosen in the rail, not in a tab strip. */
 export type InboxView = "inbox" | "unread" | "archived"

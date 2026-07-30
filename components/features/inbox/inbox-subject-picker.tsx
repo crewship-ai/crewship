@@ -5,8 +5,8 @@ import { Check, Search, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-import { ActorAvatar } from "./actor"
-import type { Actor, ActorKind, SubjectFacet } from "./types"
+import { ActorAvatar } from "./inbox-actor"
+import type { Actor, ActorKind, SubjectFacet } from "./inbox-types"
 
 // =============================================================================
 // Subject picker — the answer to "what happens at a hundred agents".

@@ -5,7 +5,7 @@ import { ScrollText, ShieldCheck, Users } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
 
-import type { Actor } from "./types"
+import type { Actor } from "./inbox-types"
 
 // =============================================================================
 // Actor identity.

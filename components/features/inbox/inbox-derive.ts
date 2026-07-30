@@ -1,29 +1,52 @@
-import {
-  ArrowUpRight, CheckCircle2, CircleDot, FileDiff, MessageSquare, Play, Power, XCircle,
-} from "lucide-react"
+import { ArrowUpRight, CircleDot, MessageSquare } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
-import { CATEGORY_BY_KIND, PREVIEW_NOW, type PreviewInboxItem } from "./mock-data"
-import type { Actor, Bucket } from "./types"
+import type { InboxItem } from "@/hooks/use-inbox"
 
-// Derivations shared by all three layouts. Everything here reads a field the
-// producers actually write — see mock-data for where each key comes from.
+import type { Actor, Bucket } from "./inbox-types"
 
-export function payloadString(item: PreviewInboxItem, key: string): string {
+// Derivations the inbox surface shares. Everything here reads a field the Go
+// producers actually write; the call sites are named beside each one.
+
+export type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER"
+
+/**
+ * Mirrors internal/api/helpers.go canRole. "create" is MANAGER and up,
+ * "manage" is OWNER/ADMIN only — the gap that makes a MANAGER-targeted skill
+ * proposal undecidable by the very role it was addressed to.
+ */
+export function canRole(role: WorkspaceRole | null, action: "create" | "manage"): boolean {
+  if (!role) return false
+  if (action === "manage") return role === "OWNER" || role === "ADMIN"
+  return role === "OWNER" || role === "ADMIN" || role === "MANAGER"
+}
+
+/** Mirrors internal/notify/categories.go categoryByKind. */
+export const CATEGORY_BY_KIND: Record<string, string> = {
+  waitpoint: "agents.approval",
+  escalation: "agents.escalation",
+  failed_run: "routines.failed",
+  message: "chat.replies",
+  memory_consolidation: "memory",
+  schedule_missed: "routines.missed",
+  schedule_circuit_breaker_tripped: "routines.missed",
+}
+
+export function payloadString(item: InboxItem, key: string): string {
   const v = item.payload?.[key]
   return typeof v === "string" ? v : ""
 }
 
-export function payloadNumber(item: PreviewInboxItem, key: string): number | null {
+export function payloadNumber(item: InboxItem, key: string): number | null {
   const v = item.payload?.[key]
   return typeof v === "number" ? v : null
 }
 
-export function categoryOf(item: PreviewInboxItem): string {
+export function categoryOf(item: InboxItem): string {
   return CATEGORY_BY_KIND[item.kind] ?? item.kind
 }
 
-export function bucketOf(item: PreviewInboxItem): Bucket {
+export function bucketOf(item: InboxItem): Bucket {
   if (item.blocking || item.kind === "waitpoint" || item.kind === "escalation") return "decisions"
   if (item.kind === "message" && payloadString(item, "chat_url")) return "replies"
   if (item.kind === "message" && payloadString(item, "issue_identifier")) return "review"
@@ -40,7 +63,7 @@ export function bucketOf(item: PreviewInboxItem): Bucket {
  * agent the row concerns. Keying identity off sender_type alone, as the live
  * inbox does, puts a system glyph on "casey requested GH_TOKEN".
  */
-export function subjectOf(item: PreviewInboxItem): Actor {
+export function subjectOf(item: InboxItem): Actor {
   const agent = payloadString(item, "agent_name") || payloadString(item, "agent_slug")
   if (agent) return { kind: "agent", id: agent, label: agent, seed: agent }
   if (item.sender_type === "agent" && item.sender_name) {
@@ -56,15 +79,15 @@ export function subjectOf(item: PreviewInboxItem): Actor {
 }
 
 /** The human who closed it — archive only. */
-export function resolverOf(item: PreviewInboxItem): Actor | null {
+export function resolverOf(item: InboxItem): Actor | null {
   if (!item.resolved_by_user_id) return null
   return { kind: "user", id: item.resolved_by_user_id, label: item.resolved_by_user_id }
 }
 
-/** Fixed-clock relative time — see PREVIEW_NOW. */
+/** Fixed-clock relative time — see Date.now(). */
 export function since(iso?: string): string {
   if (!iso) return "—"
-  const mins = Math.round((PREVIEW_NOW - Date.parse(iso)) / 60_000)
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60_000)
   if (mins < 1) return "just now"
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.round(mins / 60)
@@ -86,33 +109,21 @@ export function durationLabel(minutes: number | null): string {
 }
 
 /** Minutes left on a waitpoint, from the payload key the current UI drops. */
-export function expiresIn(item: PreviewInboxItem): number | null {
+export function expiresIn(item: InboxItem): number | null {
   const raw = payloadString(item, "timeout_at")
   if (!raw) return null
-  const mins = Math.round((Date.parse(raw) - PREVIEW_NOW) / 60_000)
+  const mins = Math.round((Date.parse(raw) - Date.now()) / 60_000)
   return Number.isFinite(mins) ? mins : null
 }
 
-export interface DecisionAction {
-  label: string
-  icon?: LucideIcon
-  intent?: "approve" | "reject" | "neutral"
-}
-
-export interface DecisionSpec {
+export interface DecisionMeta {
   heading: string
   tone: "warn" | "default"
-  /** Which canRole action the server demands for this decision. */
+  /** Which canRole action the server demands to resolve this. */
   requires: "create" | "manage"
-  actions: DecisionAction[]
   /** Set when the endpoint this card implies does not exist yet. */
   missingEndpoint?: string
 }
-
-const APPROVE_REJECT: DecisionAction[] = [
-  { label: "Approve", icon: CheckCircle2, intent: "approve" },
-  { label: "Reject", icon: XCircle, intent: "reject" },
-]
 
 /**
  * What this row asks of a human, and which role the server lets do it.
@@ -120,28 +131,29 @@ const APPROVE_REJECT: DecisionAction[] = [
  * The `requires` values are read off the router: waitpoint approve, escalation
  * resolve and routine approve are roleCreate (MANAGER+), while skill-proposal
  * and consolidation approve are roleManage (OWNER/ADMIN). That mismatch — a
- * MANAGER-targeted row whose decision needs ADMIN — is what the role switch in
- * the rail exists to show.
+ * MANAGER-targeted row whose decision needs ADMIN — is why the card names who
+ * decides instead of offering a button that returns 403.
+ *
+ * The buttons themselves come from KindActions, which owns the endpoints.
  */
-export function decisionFor(item: PreviewInboxItem): DecisionSpec | null {
+export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
   const sub = payloadString(item, "kind")
 
   if (item.kind === "waitpoint") {
-    return { heading: "Waiting on your decision", tone: "warn", requires: "create", actions: APPROVE_REJECT }
+    return { heading: "Waiting on your decision", tone: "warn", requires: "create" }
   }
 
   if (item.kind === "escalation") {
     if (sub === "skill_proposal") {
-      return { heading: "Proposed skill", tone: "warn", requires: "manage", actions: APPROVE_REJECT }
+      return { heading: "Proposed skill", tone: "warn", requires: "manage" }
     }
     if (sub === "routine_proposal") {
-      return { heading: "Proposed routine", tone: "warn", requires: "create", actions: APPROVE_REJECT }
+      return { heading: "Proposed routine", tone: "warn", requires: "create" }
     }
     return {
       heading: "Access request",
       tone: "warn",
       requires: "create",
-      actions: APPROVE_REJECT,
       missingEndpoint: payloadString(item, "request_type") === "access"
         ? "a keeper request has no resolve endpoint yet"
         : undefined,
@@ -149,48 +161,22 @@ export function decisionFor(item: PreviewInboxItem): DecisionSpec | null {
   }
 
   if (item.kind === "schedule_circuit_breaker_tripped") {
-    return {
-      heading: "Routine is disabled",
-      tone: "warn",
-      requires: "create",
-      actions: [
-        { label: "Re-enable schedule", icon: Power, intent: "approve" },
-        { label: "Recent runs", icon: ArrowUpRight, intent: "neutral" },
-      ],
-      missingEndpoint: "re-enabling a schedule needs an API + CLI command",
-    }
+    return { heading: "Routine is disabled", tone: "warn", requires: "create" }
   }
 
   if (item.kind === "schedule_missed") {
-    return {
-      heading: "Missed occurrences",
-      tone: "warn",
-      requires: "create",
-      actions: [
-        { label: "Run now", icon: Play, intent: "approve" },
-        { label: "Open schedule", icon: ArrowUpRight, intent: "neutral" },
-      ],
-    }
+    return { heading: "Missed occurrences", tone: "warn", requires: "create" }
   }
 
   if (item.kind === "memory_consolidation") {
-    return {
-      heading: "Proposed memory consolidation",
-      tone: "default",
-      requires: "manage",
-      actions: [
-        { label: "Accept", icon: CheckCircle2, intent: "approve" },
-        { label: "Reject", icon: XCircle, intent: "reject" },
-        { label: "Diff", icon: FileDiff, intent: "neutral" },
-      ],
-    }
+    return { heading: "Proposed memory consolidation", tone: "default", requires: "manage" }
   }
 
   return null
 }
 
 /** Non-decision rows still have somewhere to go. */
-export function jumpFor(item: PreviewInboxItem): { label: string; icon: LucideIcon } | null {
+export function jumpFor(item: InboxItem): { label: string; icon: LucideIcon } | null {
   if (payloadString(item, "chat_url")) return { label: "Open chat", icon: MessageSquare }
   const issue = payloadString(item, "issue_identifier")
   if (issue) return { label: `Open ${issue}`, icon: CircleDot }

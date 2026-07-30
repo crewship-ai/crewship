@@ -13,7 +13,20 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 export interface InboxItem {
   id: string
   workspace_id: string
-  kind: "waitpoint" | "escalation" | "failed_run" | "message"
+  /**
+   * Every value inbox.AllKinds writes. The union used to stop at four, so
+   * memory_consolidation, schedule_missed and schedule_circuit_breaker_tripped
+   * — all of which the backend has written since v90/v155/v168 — had no place
+   * in the type and fell through the UI as generic notifications.
+   */
+  kind:
+    | "waitpoint"
+    | "escalation"
+    | "failed_run"
+    | "message"
+    | "memory_consolidation"
+    | "schedule_missed"
+    | "schedule_circuit_breaker_tripped"
   source_id: string
   target_user_id?: string
   target_role?: string

@@ -8,9 +8,13 @@ import { Button } from "@/components/ui/button"
 import { Pill } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 
-import { ActorAvatar } from "./actor"
-import { canRole, type PreviewInboxItem, type WorkspaceRole } from "./mock-data"
-import { bucketOf, categoryOf, decisionFor, expiresIn, since, subjectOf } from "./logic"
+import type { InboxItem } from "@/hooks/use-inbox"
+
+import { ActorAvatar } from "./inbox-actor"
+import {
+  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, since, subjectOf,
+  type WorkspaceRole,
+} from "./inbox-derive"
 
 // =============================================================================
 // The top-bar inbox popover.
@@ -36,15 +40,18 @@ import { bucketOf, categoryOf, decisionFor, expiresIn, since, subjectOf } from "
 // the subject's own face, and a row that deep-links to the item.
 // =============================================================================
 
-export interface InboxBellPreviewProps {
-  items: PreviewInboxItem[]
-  role: WorkspaceRole
+export interface InboxBellViewProps {
+  items: InboxItem[]
+  role: WorkspaceRole | null
+  /** Deep-link to the item. Today /inbox selects the newest match; the
+   *  follow-up is ?item=<id> so the row the popover showed opens directly. */
   onOpenItem: (id: string) => void
+  onOpenInbox: () => void
 }
 
 const MAX_PER_SECTION = 4
 
-export function InboxBellPreview({ items, role, onOpenItem }: InboxBellPreviewProps) {
+export function InboxBellView({ items, role, onOpenItem, onOpenInbox }: InboxBellViewProps) {
   const [open, setOpen] = useState(false)
 
   const { decisions, recent, unread, soonest } = useMemo(() => {
@@ -169,7 +176,7 @@ export function InboxBellPreview({ items, role, onOpenItem }: InboxBellPreviewPr
                 </button>
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={() => { setOpen(false); onOpenInbox() }}
                   className="type-meta ml-auto rounded px-2 py-1 text-primary hover:underline"
                 >
                   Open inbox →
@@ -188,8 +195,8 @@ function Section({
 }: {
   label: string
   count: number
-  items: PreviewInboxItem[]
-  role: WorkspaceRole
+  items: InboxItem[]
+  role: WorkspaceRole | null
   tone?: "warn"
   onOpenItem: (id: string) => void
 }) {
@@ -218,11 +225,11 @@ function Section({
 function BellRow({
   item, role, onOpen,
 }: {
-  item: PreviewInboxItem
-  role: WorkspaceRole
+  item: InboxItem
+  role: WorkspaceRole | null
   onOpen: () => void
 }) {
-  const spec = decisionFor(item)
+  const spec = decisionMetaFor(item)
   const blocked = spec != null && !canRole(role, spec.requires)
   const mins = expiresIn(item)
   const subject = subjectOf(item)

@@ -15,13 +15,15 @@ import { SidebarActiveChip, SidebarActiveChips, SidebarFilterButton, SidebarSear
 import { TabBar } from "@/components/ui/tab-bar"
 import { cn } from "@/lib/utils"
 
-import { ActorAvatar } from "./actor"
-import { SubjectPicker } from "./subject-picker"
-import { InboxBellPreview } from "./inbox-bell-preview"
-import { PREVIEW_DIRECTORY } from "./mock-data"
-import { canRole, type PreviewInboxItem, type WorkspaceRole } from "./mock-data"
-import { bucketOf, categoryOf, decisionFor, expiresIn, since, subjectOf } from "./logic"
-import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./types"
+import type { InboxItem } from "@/hooks/use-inbox"
+
+import { ActorAvatar } from "./inbox-actor"
+import { SubjectPicker, type DirectoryEntry } from "./inbox-subject-picker"
+import {
+  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, since, subjectOf,
+  type WorkspaceRole,
+} from "./inbox-derive"
+import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./inbox-types"
 
 // =============================================================================
 // The list panel — the inbox's own column, the way the shipped page has it.
@@ -89,9 +91,9 @@ const OUTCOME_DOT: Record<string, string> = {
 }
 
 export interface InboxListPanelProps {
-  rows: PreviewInboxItem[]
+  rows: InboxItem[]
   total: number
-  role: WorkspaceRole
+  role: WorkspaceRole | null
 
   view: InboxView
   onViewChange: (v: InboxView) => void
@@ -124,8 +126,14 @@ export interface InboxListPanelProps {
   search: string
   onSearchChange: (v: string) => void
 
-  /** Everything visible to this person, for the top-bar popover demo. */
-  allVisible: PreviewInboxItem[]
+  /** The workspace roster the subject picker searches. */
+  directory: DirectoryEntry[]
+
+  /** Bulk apply over the ticked ids. The server refuses decision items. */
+  onBulk: (ids: string[], state: "read" | "resolved", action?: string) => void | Promise<void>
+
+  loading?: boolean
+  error?: string | null
 }
 
 export function InboxListPanel(props: InboxListPanelProps) {
@@ -134,7 +142,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
     bucket, onBucketChange, bucketCounts, subjects, selectedSubject, onSubjectChange,
     outcome, onOutcomeChange, outcomeCounts, actor, onActorChange, actorCounts,
     period, onPeriodChange, groupBy, onGroupByChange, sort, onSortChange,
-    search, onSearchChange, allVisible,
+    search, onSearchChange, directory, onBulk, loading, error,
   } = props
 
   const [filterOpen, setFilterOpen] = useState(false)
@@ -144,12 +152,23 @@ export function InboxListPanel(props: InboxListPanelProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   /** Index of the last row clicked, so shift-click has a range to span. */
   const [anchor, setAnchor] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function run(fn: () => void | Promise<void>) {
+    setBusy(true)
+    try {
+      await fn()
+      setChecked(new Set())
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const archive = view === "archived"
 
   const groups = useMemo(() => {
     if (groupBy === "none") return [{ key: "all", label: "All", items: rows }]
-    const map = new Map<string, { key: string; label: string; items: PreviewInboxItem[] }>()
+    const map = new Map<string, { key: string; label: string; items: InboxItem[] }>()
     for (const item of rows) {
       const [key, label] =
         groupBy === "smart" ? [bucketOf(item), BUCKET_LABEL[bucketOf(item)]]
@@ -180,7 +199,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
     [groups, collapsed],
   )
 
-  function toggleRow(item: PreviewInboxItem, index: number, shiftKey: boolean) {
+  function toggleRow(item: InboxItem, index: number, shiftKey: boolean) {
     setChecked((prev) => {
       const next = new Set(prev)
       if (shiftKey && anchor != null) {
@@ -197,7 +216,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
     if (!shiftKey) setAnchor(index)
   }
 
-  function toggleGroup(key: string, items: PreviewInboxItem[]) {
+  function toggleGroup(key: string, items: InboxItem[]) {
     setChecked((prev) => {
       const next = new Set(prev)
       const allOn = items.every((i) => next.has(i.id))
@@ -218,7 +237,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
   // A waitpoint or an escalation is an agent standing still until a human
   // answers. The server refuses to close those in bulk, so the bar says so
   // before the click rather than after it.
-  const protectedCount = rows.filter((r) => checked.has(r.id) && decisionFor(r) != null).length
+  const protectedCount = rows.filter((r) => checked.has(r.id) && decisionMetaFor(r) != null).length
 
   const activeFilters = archive
     ? (outcome ? 1 : 0) + (actor ? 1 : 0) + (period !== "30" ? 1 : 0) + (selectedSubject ? 1 : 0)
@@ -232,7 +251,10 @@ export function InboxListPanel(props: InboxListPanelProps) {
   let flatIndex = -1
 
   return (
-    <div className="flex w-[460px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-card">
+    <div
+      data-testid="inbox-list"
+      className="flex w-[460px] shrink-0 flex-col overflow-hidden border-r border-white/[0.06] bg-card"
+    >
       {/* ── Search + Select ── */}
       <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2">
         <SidebarSearch
@@ -240,10 +262,6 @@ export function InboxListPanel(props: InboxListPanelProps) {
           onValueChange={onSearchChange}
           placeholder={archive ? "Search the archive…" : "Search inbox…"}
         />
-        {/* The top-bar popover, mounted here so its design can be judged
-            without a second toolbar on the page. In production this is the
-            bell in the app toolbar and nothing else changes. */}
-        <InboxBellPreview items={allVisible} role={role} onOpenItem={onSelect} />
         <Button
           variant={selectMode ? "secondary" : "ghost"}
           size="icon-sm"
@@ -358,7 +376,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
                       rows; see subject-picker for why that distinction matters. */}
                   <SubjectPicker
                     subjects={subjects}
-                    directory={PREVIEW_DIRECTORY}
+                    directory={directory}
                     selected={selectedSubject}
                     onChange={onSubjectChange}
                   />
@@ -423,8 +441,16 @@ export function InboxListPanel(props: InboxListPanelProps) {
 
       {/* ── Rows ── */}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {rows.length === 0 && (
-          <p className="type-row px-4 py-10 text-center text-muted-foreground-soft">Nothing here.</p>
+        {loading && rows.length === 0 && (
+          <p className="type-row px-4 py-10 text-center text-muted-foreground-soft">Loading…</p>
+        )}
+        {error && (
+          <p className="type-row px-4 py-10 text-center text-destructive">Inbox unavailable: {error}</p>
+        )}
+        {!loading && !error && rows.length === 0 && (
+          <p className="type-row px-4 py-10 text-center text-muted-foreground-soft">
+            {archive ? "Nothing archived yet." : "Nothing waiting on you."}
+          </p>
         )}
         {groups.map((group) => {
           const isCollapsed = collapsed.has(group.key)
@@ -495,11 +521,22 @@ export function InboxListPanel(props: InboxListPanelProps) {
           <div className="flex items-center gap-2">
             <span className="type-row font-medium">{checked.size} selected</span>
             <div className="ml-auto flex items-center gap-1.5">
-              <Button size="sm" className="gap-1.5" disabled={!canRole(role, "create")}>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={!canRole(role, "create") || busy}
+                onClick={() => void run(() => onBulk([...checked], "resolved", "dismissed"))}
+              >
                 <CheckCheck className="h-3 w-3" />
-                Resolve
+                {busy ? "Working…" : "Resolve"}
               </Button>
-              <Button size="sm" variant="ghost" className="gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1.5"
+                disabled={busy}
+                onClick={() => void run(() => onBulk([...checked], "read"))}
+              >
                 <MailOpen className="h-3 w-3" />
                 Mark read
               </Button>
@@ -567,8 +604,8 @@ function MenuOption({
 function MailRow({
   item, role, index, selectMode, checked, selected, onToggle, onSelect,
 }: {
-  item: PreviewInboxItem
-  role: WorkspaceRole
+  item: InboxItem
+  role: WorkspaceRole | null
   index: number
   selectMode: boolean
   checked: boolean
@@ -576,7 +613,7 @@ function MailRow({
   onToggle: (shiftKey: boolean) => void
   onSelect: () => void
 }) {
-  const spec = decisionFor(item)
+  const spec = decisionMetaFor(item)
   const blocked = spec != null && !canRole(role, spec.requires)
   const mins = expiresIn(item)
   const subject = subjectOf(item)
