@@ -5,15 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -250,28 +247,19 @@ func TestLockout_ConcurrentBadPasswordsAdvanceCounter(t *testing.T) {
 	}
 }
 
-// concurrentTestDB is the file-backed equivalent of setupTestDB needed
-// for goroutine tests — the default `:memory:` shape gives each pool
-// connection its own private schema, which torpedoes any test that
-// hammers multiple goroutines through the same handle.
+// concurrentTestDB is setupTestDB with a wider connection pool for the
+// goroutine tests.
 func concurrentTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "lockout.db")+"?_foreign_keys=on&_journal=WAL&_busy_timeout=5000")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
+	db := testutil.MigratedSQLDB(t)
 	// Multi-connection so TestLockout_ConcurrentBadPasswordsAdvanceCounter
 	// exercises real DB-level concurrency on the UPDATE...RETURNING.
 	// SetMaxOpenConns(1) serialised everything at the Go layer and a
-	// non-atomic implementation could have passed.
+	// non-atomic implementation could have passed. database.Open caps the
+	// pool at production's 5, which is still >1 but not enough contention to
+	// make the race the test is hunting for likely, so widen it here.
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(8)
-	t.Cleanup(func() { db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(t.Context(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	return db
 }
 

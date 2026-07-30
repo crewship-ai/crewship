@@ -2,13 +2,10 @@ package main
 
 import (
 	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // TestSetOptIn_FreshDB_DoesNotPanic guards the bug found in critical
@@ -21,17 +18,9 @@ import (
 // invariant that fix relies on: Open + Migrate + SetOptIn on a
 // previously-unused DB file must succeed.
 func TestSetOptIn_FreshDB_DoesNotPanic(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "fresh.db")
-	db, err := database.Open("file:" + dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	// Fresh = migrated but never written to, which is exactly what the shared
+	// fixture hands out.
+	db := testutil.MigratedDB(t)
 
 	on, id, err := crashreport.SetOptIn(context.Background(), db.DB, true)
 	if err != nil {

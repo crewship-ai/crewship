@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/gorilla/websocket"
 )
 
@@ -95,15 +94,7 @@ func (i *closableInteractiveMock) ExecResize(_ context.Context, _ string, rows, 
 func TestServeHTTP_ShellSession_DataFlow(t *testing.T) {
 	t.Parallel()
 	v := newTestValidator(t)
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "term.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
@@ -201,15 +192,7 @@ func (s startFailMock) EnsureCrewRuntime(context.Context, provider.CrewConfig) (
 func TestServeHTTP_ContainerStartFailure(t *testing.T) {
 	t.Parallel()
 	v := newTestValidator(t)
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "csf.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
@@ -249,15 +232,7 @@ func TestServeHTTP_ContainerStartFailure(t *testing.T) {
 func TestServeHTTP_DBLookupFailureFailsClosed(t *testing.T) {
 	t.Parallel()
 	v := newTestValidator(t)
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "dblookup.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)

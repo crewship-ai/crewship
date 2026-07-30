@@ -16,12 +16,19 @@ import (
 // initialBuf and maxBuf size the scanner's line buffer (SSE lines are usually
 // small, but tool payloads can be large).
 //
+// sawDone reports whether the "[DONE]" sentinel itself was seen. It is a
+// positive, protocol-level end-of-stream signal (the Chat Completions SSE
+// wire format sends it as the last line of every completed response) —
+// callers that also key completion off a payload field (e.g. OpenAI's
+// finish_reason) need this to avoid mistaking a "[DONE]"-terminated stream
+// for a truncated one just because that field happened to be absent.
+//
 // The two error returns are deliberately separate so callers can preserve
 // distinct behavior: fnErr is the first error returned by fn, which aborts the
 // scan immediately (scanErr is nil in that case); scanErr is scanner.Err()
 // after the loop ends. fn may also return stop=true to end the scan early
 // without an error, in which case scanner.Err() is still reported.
-func forEachSSEData(r io.Reader, initialBuf, maxBuf int, fn func(data string) (stop bool, err error)) (fnErr, scanErr error) {
+func forEachSSEData(r io.Reader, initialBuf, maxBuf int, fn func(data string) (stop bool, err error)) (sawDone bool, fnErr, scanErr error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, initialBuf), maxBuf)
 
@@ -32,15 +39,16 @@ func forEachSSEData(r io.Reader, initialBuf, maxBuf int, fn func(data string) (s
 		}
 		data := line[6:]
 		if data == "[DONE]" {
+			sawDone = true
 			break
 		}
 		stop, err := fn(data)
 		if err != nil {
-			return err, nil
+			return sawDone, err, nil
 		}
 		if stop {
 			break
 		}
 	}
-	return nil, scanner.Err()
+	return sawDone, nil, scanner.Err()
 }

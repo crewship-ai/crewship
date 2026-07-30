@@ -26,7 +26,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   cryptographic crew in preference to the forgeable query parameter. The
   loopback exemption for the crew-less in-process `TokenSyncer` is
   connection-based (`r.RemoteAddr`), never header-based. Crew-less runs
-  fall back to the workspace-bound `wsv1` token unchanged.
+  fall back to the workspace-bound `wsv1` token unchanged. A follow-up
+  audit pins the closure end-to-end — real derived token → `requireInternal`
+  → handler, from a Docker-bridge origin — and adds a sentinel for the one
+  surviving residual: a crew-less (workspace-bound) caller still gets its
+  own workspace's credential metadata, because that is the token's true
+  scope and because an empty listing would make the sidecar's credential
+  reaper evict every provider key the container booted with.
 - **Privileged crews now emit a provision-time WARN (#1032).** A crew
   provisioned with `--privileged` (e.g. DinD) collapses the UID 1001/1002
   boundary that isolates the sidecar's IPC token and injected credentials

@@ -213,16 +213,48 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		)`
 		args = append(args, crewID, leaseNow, crewID)
 	} else if !requestIsLoopback(r) {
-		// Hardening (#1031): the crew scoping above is opt-in — a caller that
-		// omits crew_id gets the full workspace-wide listing, fail-open. A
-		// legitimate non-loopback caller always has a crew_id to send (the
-		// sidecar attaches its own bound crew), so a non-loopback call
-		// WITHOUT one is either an old/misconfigured sidecar or a bypass
-		// attempt. Full closure needs crew-bound internal tokens (not just
-		// crew_id, which any caller with a valid X-Internal-Token can forge);
-		// until then, at least make the bypass visible in ops.
+		// This branch used to carry a "fail-open, needs crew-bound internal
+		// tokens" tombstone. That blocker is RESOLVED and the closure shipped:
+		// crew-bound tokens (crwv1.<ws>.<crew>.<mac>) are issued to every crew
+		// run's sidecar (orchestrator.sidecarIPCToken), requireInternal
+		// verifies the MAC and pins the crew in the request context, and the
+		// branch above takes that context crew in preference to the query — so
+		// a crew caller can neither omit crew_id to widen the listing nor
+		// forge a sibling's. Pinned end-to-end (real derived token →
+		// middleware → handler) in
+		// internal_credentials_crew_token_closure_sec_test.go.
+		//
+		// What still reaches HERE is a genuinely CREW-LESS caller: a
+		// workspace-bound token, whose only issuer is sidecarIPCToken for a
+		// run with no crew. Workspace-wide IS that token's true scope
+		// (requireInternal injected the bound workspace_id), so this is not an
+		// omission the caller chose and not a scope it can escape — it cannot
+		// mint a workspace token or downgrade its crew one without the master
+		// secret, which never enters a container. The master token cannot
+		// reach here from a container at all (non-loopback master calls are
+		// refused unless CREWSHIP_INTERNAL_ALLOW_ANY=true).
+		//
+		// Deliberately NOT tightened to an empty listing: this endpoint is
+		// what the sidecar's credential reaper reconciles against
+		// (internal/sidecar/credstore_reap.go), and a 200 with an empty body
+		// makes it drop EVERY provider key the container booted with. Trading
+		// metadata-only visibility for an availability break in the credential
+		// lifeline of running agents is the wrong trade — see the sentinel
+		// TestSecCredsWorkspaceToken_CrewlessListingStaysWorkspaceWide before
+		// changing this.
+		//
+		// The WARN stays: on a crew RUN it means a sidecar somehow lost its
+		// crew binding (stale container from before #1159, or a run whose
+		// crew_id never got threaded through), which is worth an operator's
+		// attention. token_binding distinguishes the expected crew-less
+		// sidecar (workspace) from an ALLOW_ANY master call arriving over the
+		// network (master) — very different levels of alarm.
+		binding := "master"
+		if InternalTokenWorkspaceFromContext(r.Context()) != "" {
+			binding = "workspace"
+		}
 		h.logger.Warn("internal credentials: workspace-wide listing (no crew_id) from non-loopback caller",
-			"remote_addr", r.RemoteAddr, "workspace_id", workspaceID)
+			"remote_addr", r.RemoteAddr, "workspace_id", workspaceID, "token_binding", binding)
 	}
 	query += " ORDER BY type ASC, created_at ASC"
 

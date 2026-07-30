@@ -512,21 +512,38 @@ func (h *AssignmentHandler) runAssignment(
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
+		// In-band failure: the CLI exited 0 and then reported its own turn
+		// failed, so unlike a crashed exec this run usually DID produce text —
+		// a refusal, or partial work before the turn cap. Hand that text to
+		// finishAssignment alongside the error so result_summary is written
+		// instead of NULL: the assignment (and the mission task behind it) is
+		// still FAILED — status is driven by errMsg, and every consumer branches
+		// on errMsg first — but the delegating agent and the mission timeline can
+		// still read what the sub-agent managed to say. Matches the chat path's
+		// persistInBandFailureTurn; without it the correct FAILED status would
+		// silently discard the output.
+		partial := ""
+		if errors.Is(err, orchestrator.ErrAgentInBandFailure) {
+			partial = joinAssignmentOutput(outputParts)
+		}
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, partial,
 			fmt.Sprintf("execution error: %v", err))
 		return
 	}
 
-	// Build result from collected output (cap at 10k chars)
-	result := ""
-	for _, part := range outputParts {
-		result += part
-	}
-	if len(result) > 10000 {
-		result = result[:10000] + "...(truncated)"
-	}
+	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID,
+		joinAssignmentOutput(outputParts), "")
+}
 
-	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, result, "")
+// joinAssignmentOutput concatenates the collected agent text into the
+// assignment's result_summary, capped so a chatty agent can't bloat the row.
+func joinAssignmentOutput(parts []string) string {
+	const maxLen = 10000
+	result := strings.Join(parts, "")
+	if len(result) > maxLen {
+		result = result[:maxLen] + "...(truncated)"
+	}
+	return result
 }
 
 // buildAssignmentRunRequest constructs the AgentRunRequest for an assignment

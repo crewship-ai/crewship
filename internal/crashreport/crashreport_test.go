@@ -5,12 +5,12 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/getsentry/sentry-go"
 )
 
@@ -44,16 +44,7 @@ func newEventWithSensitiveData() *sentry.Event {
 
 func setupDB(t *testing.T) *database.DB {
 	t.Helper()
-	db, err := database.Open("file:" + filepath.Join(t.TempDir(), "cr.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return db
+	return testutil.MigratedDB(t)
 }
 
 // fakeBackend records what Capture/Flush received so the tests can assert

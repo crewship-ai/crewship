@@ -5,14 +5,13 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/testutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -26,14 +25,7 @@ func siLogger() *slog.Logger {
 // workspace/crew/agent/skill fixtures the observer resolves against.
 func siDB(t *testing.T) *sql.DB {
 	t.Helper()
-	d, err := database.Open("file:" + filepath.Join(t.TempDir(), "si.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	if err := database.Migrate(context.Background(), d.DB, siLogger()); err != nil {
-		t.Fatal(err)
-	}
+	d := testutil.MigratedDB(t)
 	mustExec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := d.DB.Exec(q, args...); err != nil {

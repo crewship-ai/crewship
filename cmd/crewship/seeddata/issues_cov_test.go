@@ -78,14 +78,23 @@ func TestStatusPathFrom_DirectAndMultiHop(t *testing.T) {
 	}
 }
 
-func TestStatusPathFrom_UnreachableTarget(t *testing.T) {
+func TestStatusPathFrom_DuplicateReachableButTerminal(t *testing.T) {
 	t.Parallel()
-	// DUPLICATE is a sink in the DAG: it exists as a key (so the target
-	// check passes) but nothing transitions INTO it.
-	if got := StatusPathFrom("BACKLOG", "DUPLICATE"); got != nil {
-		t.Errorf("unreachable target must return nil; got %v", got)
+	// DUPLICATE used to be a dead end: it existed as a key (so the target
+	// check passed) but nothing transitioned INTO it, making it impossible
+	// to ever reach even though the CLI/API advertised it as a valid
+	// status. internal/statuses/transitions.go now gives BACKLOG, TODO,
+	// IN_PROGRESS and REVIEW a direct hop to DUPLICATE (mirroring
+	// CANCELLED's reachability), so it is a real one-hop target.
+	got := StatusPathFrom("BACKLOG", "DUPLICATE")
+	if got == nil {
+		t.Fatal("BACKLOG→DUPLICATE must now have a path")
 	}
-	// And nothing leaves it either.
+	if len(got) != 1 || got[0] != "DUPLICATE" {
+		t.Errorf("path = %v, want a direct one-hop [\"DUPLICATE\"]", got)
+	}
+	// It remains a sink: nothing transitions out of it. That half of the
+	// original invariant still holds and is unchanged by the fix.
 	if got := StatusPathFrom("DUPLICATE", "BACKLOG"); got != nil {
 		t.Errorf("path out of DUPLICATE must be nil; got %v", got)
 	}

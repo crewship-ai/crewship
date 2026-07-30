@@ -3,35 +3,21 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"io"
 	"log/slog"
-	"sync/atomic"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	_ "modernc.org/sqlite"
 )
-
-var notifyITCounter atomic.Int64
 
 // newNotifyIntegrationDB brings up a fully-migrated in-memory DB so the
 // notify step's two DB-backed collaborators (the inbox sink + the
 // membership checker) can be exercised against the real schema, not a fake.
 func newNotifyIntegrationDB(t *testing.T) *sql.DB {
 	t.Helper()
-	name := fmt.Sprintf("crewship-notify-it-%d", notifyITCounter.Add(1))
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(ON)", name)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
+	return testutil.MigratedSQLDB(t)
 }
 
 // TestSQLInboxNotifier_InsertsAndDedupes proves the production sink writes

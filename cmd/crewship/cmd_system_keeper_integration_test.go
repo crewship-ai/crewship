@@ -1,19 +1,17 @@
 package main
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // cmd_system_keeper_integration_test.go — regression guard for #896.
@@ -46,18 +44,8 @@ func sha256HexToken(tok string) string {
 func setupKeeperRouterServer(t *testing.T) (server *httptest.Server, ownerToken, memberToken string) {
 	t.Helper()
 
-	dir := t.TempDir()
-	dbh, err := database.Open("file:" + filepath.Join(dir, "keeper-it.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { dbh.Close() })
-
+	dbh := testutil.MigratedDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), dbh.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
 	db := dbh.DB
 	mustExec := func(q string, args ...any) {
 		t.Helper()

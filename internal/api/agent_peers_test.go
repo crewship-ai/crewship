@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 type peerTestRig struct {
@@ -32,16 +32,10 @@ type peerTestRig struct {
 // — every test extends from there.
 func peerTestSetup(t *testing.T) *peerTestRig {
 	t.Helper()
+	dbh := testutil.MigratedDB(t)
+	// Memory root for the handlers; unrelated to where the DB file lives.
 	dir := t.TempDir()
-	dbh, err := database.Open("file:" + filepath.Join(dir, "p.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), dbh.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = dbh.Close() })
 	if _, err := dbh.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w')`); err != nil {
 		t.Fatalf("seed ws: %v", err)
 	}

@@ -2,13 +2,12 @@ package server
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // W5 boot wiring: the orchestrator-level tests for
@@ -19,16 +18,8 @@ import (
 // covers the recovery step that precedes this one in Start().
 func TestBootReattach_InProgressMissionGetsDriver(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "reattach.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := testutil.MigratedDB(t)
 	logger := logging.New("error", "json", nil)
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatal(err)
-	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)

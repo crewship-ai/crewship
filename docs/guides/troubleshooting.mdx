@@ -50,6 +50,28 @@ Find your symptom below; each panel expands to its diagnosis and fix.
 
 <AccordionGroup>
 
+<Accordion title="A run says failed with `agent reported a failed run`, but the CLI exited 0">
+
+This is an **in-band failure**: the agent CLI exited cleanly and then said, in its own final stream event, that the turn failed — a refusal, an internal CLI error, or an exhausted quota. Crewship marks those runs `error` instead of `completed`, because the alternative is a mission or routine continuing on an empty answer while the run looks green and still gets billed.
+
+The error message quotes the CLI's own text. To confirm and find the cause:
+
+1. Open the run in the journal and find the `exec.command` end entry. An in-band failure has severity `warn` with `exit_code: 0` **and** `in_band_error: true` — that pair is the fingerprint.
+2. Read the `result` event's metadata on the same run; it carries the CLI's terminal envelope with usage and cost.
+
+In chat, the turn is still **persisted**: the agent's text (a refusal, or whatever it managed to say) plus an error part carrying the reason, so a reload shows the failure rather than an empty bubble. A delegated assignment keeps the sub-agent's output in `result_summary` for the same reason. In a routine, the step fails and — under the default `on_fail: escalate_tier` — walks to the next fallback tier. It is **not** retried on the same tier: an in-band failure is deterministic, so retrying it just bills for the same answer ([details](/guides/routines#retry-transient-failures)).
+
+Common causes by message:
+
+- **`turn cap (N turns)`** — the agent ran out of agent-loop turns mid-task. Raise `max_turns` on the step, or split the work. Note that the step still walks the fallback-tier chain, so a task that flails for 20 turns can replay them on a pricier model; `on_fail: abort` stops that.
+- **a refusal** ("I cannot help with…") — reword the task, or lower the tool profile's blast radius.
+- **a usage / quota message** — check [Paymaster](/guides/paymaster) and the credential's plan.
+- **an internal CLI error** — the vendor CLI in the crew image may be stale; reprovision the crew.
+
+Per-adapter signal shapes and the run-level vs tool-level boundary are documented in [CLI Adapters → In-band failures](/guides/cli-adapters#in-band-failures-when-exit-0-still-means-the-run-failed). A failed **tool** call does *not* fail a run.
+
+</Accordion>
+
 <Accordion title="Interactive `crewship ask` / `run` fails with `ws read: EOF`">
 
 The interactive path opens a WebSocket to the server. When the connection is refused **after** the upgrade (the `101` succeeds, then the socket closes), the CLI now prints the server's reason instead of a bare `ws read: EOF` — for example:
@@ -66,6 +88,16 @@ Match the reason to the fix:
 - **`session_revoked`** — your browser session was revoked; re-authenticate.
 
 On the **server**, every post-upgrade rejection now logs a `WARN` line — grep the server log for `ws connection rejected after upgrade` to see the reason and `remote_addr`. If you also see a **version-skew** warning when the CLI fetches its ws-token, upgrade the stale side first.
+
+</Accordion>
+
+<Accordion title='A run fails with "stream ended without a message_stop event", "…without a finish_reason", or "…without a done:true event"'>
+
+This is the LLM provider connection dropping mid-generation — a network blip or the provider load-shedding — not a bug in your prompt or agent. Before this check existed, a cleanly-closed connection with no terminal event from the provider (no `message_stop` for Anthropic, no `finish_reason` for OpenAI-compatible backends, no NDJSON line with `"done":true` for Ollama) looked identical to a normal completion, and the run silently succeeded with truncated content: half-written code, cut-off JSON, no error anywhere. For Ollama it was worse than mislabeled success — the aggregated response content came back completely empty even though tokens had streamed in, because it was only assembled once the terminal line arrived. All three now surface as a real failure instead.
+
+The error message always ends in `unexpected EOF`, which the pipeline's transient-error matcher recognizes — the same task tier is retried automatically the way a `500`/`502` from the provider would be. You only need to act if it keeps failing after retries: check the provider's status page, or (for a custom `openai_compat` endpoint, or a self-hosted Ollama behind a proxy) confirm the proxy isn't buffering/timing out chunked responses before the model finishes.
+
+This is unrelated to a deliberate cancellation (stopping a run, or a timeout) — those still surface as a cancellation, never as this message.
 
 </Accordion>
 
