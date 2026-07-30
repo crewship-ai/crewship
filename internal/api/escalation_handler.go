@@ -415,6 +415,18 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		// not the workspace opted in. A workspace that has NOT opted in still gets
 		// the rule for L4 only, which is the narrowest reading of what the level
 		// means (internal/keeper/tier.go).
+		// The tier is read here and the escalation is resolved by the
+		// compare-and-swap UPDATE further down, so a tier change committed in
+		// between would be decided against. Left as a read rather than folded into
+		// a transaction spanning the resolve, deliberately:
+		//
+		// changing a credential's tier needs roleManage — the same right this
+		// handler already requires — so an admin who wanted to escape their own
+		// four-eyes requirement can lower the tier and approve SERIALLY. The race
+		// grants nothing the actor cannot do without it, and the workspace toggle
+		// is unaffected either way. Making it atomic means a transaction around
+		// the resolve, the credential activation and the lease mint; worth doing,
+		// not worth doing inside this branch.
 		tierForces := false
 		if credentialID.Valid && credentialID.String != "" {
 			var lvl int
