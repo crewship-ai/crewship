@@ -155,12 +155,17 @@ var containerOnlyHosts = map[string]bool{
 // fail to connect. Callers that care about cleartext (an endpoint carrying a
 // token) enforce that separately — validateEndpointURL already does.
 func Normalize(raw string) (Endpoint, error) {
+	// Both of these are ErrParse, not policy rejections: callers fall back to
+	// the raw value for a policy rejection, on the theory that an odd
+	// deployment may have worked. Neither an empty string nor a multi-kilobyte
+	// blob was ever a working endpoint, so falling back to it would trade a
+	// clear "that is not a URL" for an obscure failure at request time.
 	if len(raw) > maxRawLen {
-		return Endpoint{}, fmt.Errorf("endpoint URL is too long (max %d bytes)", maxRawLen)
+		return Endpoint{}, fmt.Errorf("%w: endpoint URL is too long (max %d bytes)", ErrParse, maxRawLen)
 	}
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return Endpoint{}, errors.New("endpoint URL is empty")
+		return Endpoint{}, fmt.Errorf("%w: endpoint URL is empty", ErrParse)
 	}
 	if !strings.Contains(trimmed, "://") {
 		trimmed = "http://" + trimmed

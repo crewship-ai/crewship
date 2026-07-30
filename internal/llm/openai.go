@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -62,11 +63,33 @@ func (o *OpenAI) chatURL() string {
 // modelsURL is the discovery target. The mount prefix and any query string
 // (Azure addresses by ?api-version=) survive normalization, which is what the
 // previous hand-rolled suffix rewrite was protecting.
+//
+// The fallback has to DERIVE the models path, not hand back the raw base: the
+// raw base is the chat target, so returning it verbatim would make ListModels
+// query /chat/completions and parse whatever came back as a model list. That
+// path is reachable — a base rejected on policy (embedded credentials, an odd
+// scheme) deliberately keeps working via the raw value — so it is the same
+// suffix rewrite this package replaced, kept for exactly those deployments.
+// Ollama's tagsURL fallback does the equivalent.
 func (o *OpenAI) modelsURL() string {
 	if o.ep.Root == nil {
-		return o.baseURL
+		return rawModelsURL(o.baseURL)
 	}
 	return o.ep.ModelsURL()
+}
+
+// rawModelsURL is the pre-normalization derivation: rewrite a trailing
+// "/chat/completions" to "/models". Going through net/url preserves the query
+// (Azure's ?api-version=), which a suffix trim on the whole string mangles. An
+// unparseable base has nothing to rewrite, so it is returned as-is and fails at
+// request time the way it always did.
+func rawModelsURL(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/chat/completions") + "/models"
+	return u.String()
 }
 
 // NewOpenAI creates a provider that calls the OpenAI Chat Completions API.

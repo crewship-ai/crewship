@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -205,6 +206,50 @@ func TestOllama_PolicyRejectedBaseFallsBack(t *testing.T) {
 	got := p.chatURL()
 	if !strings.Contains(got, "user:pass@ollama.internal:11434") || !strings.HasSuffix(got, "/api/chat") {
 		t.Fatalf("chat URL = %q, want the raw value preserved with /api/chat appended", got)
+	}
+}
+
+// The fallback for a policy-rejected base has to DERIVE the models path. The
+// raw base is the CHAT target, so handing it back verbatim made ListModels GET
+// /chat/completions and parse the answer as a model list — silently, on the
+// one configuration the fallback exists to keep working.
+func TestOpenAI_PolicyRejectedBaseStillDerivesTheModelsPath(t *testing.T) {
+	p := NewOpenAIWithBaseURL("k", "http://user:pass@proxy.internal/v1/chat/completions?api-version=2024-02-01")
+
+	chat := p.chatURL()
+	if !strings.HasSuffix(chatPath(t, chat), "/v1/chat/completions") {
+		t.Fatalf("chat URL = %q, want the raw value preserved", chat)
+	}
+	models := p.modelsURL()
+	if got := chatPath(t, models); got != "/v1/models" {
+		t.Fatalf("models path = %q, want /v1/models — the chat target was returned instead", got)
+	}
+	if !strings.Contains(models, "user:pass@proxy.internal") {
+		t.Errorf("models URL dropped the credentials the deployment relies on: %q", models)
+	}
+	if !strings.Contains(models, "api-version=2024-02-01") {
+		t.Errorf("models URL dropped the query: %q", models)
+	}
+}
+
+func chatPath(t *testing.T, raw string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	return u.Path
+}
+
+// An empty endpoint value is unambiguously "not a URL at all", so it must
+// classify as a parse error. Treating it as a policy rejection sent it down the
+// raw-value fallback, where an empty base fails at request time with something
+// that never names the actual problem.
+func TestOpenAI_EmptyBaseIsAParseError(t *testing.T) {
+	p := NewOpenAIWithBaseURL("k", "")
+	if _, err := p.ListModels(context.Background()); err == nil ||
+		!strings.Contains(err.Error(), "parse base url") {
+		t.Fatalf("ListModels error = %v, want it to mention parse base url", err)
 	}
 }
 
