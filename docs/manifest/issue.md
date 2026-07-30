@@ -46,7 +46,7 @@ spec:
   description: |               # optional — markdown body
     The login e2e flakes ~1 in 5 runs on CI.
   priority: high               # optional — none | low | medium | high | urgent
-  status: todo                 # optional — backlog | todo | in_progress | review | done | failed | cancelled
+  status: todo                 # optional — backlog | todo | in_progress | review | done | failed | cancelled | duplicate
   assignee_slug: daniel        # optional — agent slug → assignee
   project_slug: q2-roadmap     # optional — attach to a project
   labels: [bug, ci]            # optional — label slugs (== names)
@@ -62,7 +62,7 @@ spec:
 | `spec.title` | string | * | The on-the-row title. Falls back to `metadata.name`. |
 | `spec.description` | string | no | Free-form markdown body. |
 | `spec.priority` | enum | no | One of `none` \| `low` \| `medium` \| `high` \| `urgent`. Empty → server default `none`. |
-| `spec.status` | enum | no | One of `backlog` \| `todo` \| `in_progress` \| `review` \| `done` \| `failed` \| `cancelled` (uppercase also accepted; up-cased before sending). See the create-status quirk below. |
+| `spec.status` | enum | no | One of `backlog` \| `todo` \| `in_progress` \| `review` \| `done` \| `failed` \| `cancelled` \| `duplicate` (uppercase also accepted; up-cased before sending). See the create-status quirk below. |
 | `spec.assignee_slug` | string | no | Agent slug → `assignee_type=agent` + `assignee_id`. |
 | `spec.project_slug` | string | no | Project slug → `project_id`. |
 | `spec.labels` | []string | no | Label slugs (the [Label](/manifest/label) kind enforces slug == name). No duplicates, no empty entries. |
