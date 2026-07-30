@@ -17,8 +17,28 @@ import (
 // appendToCanonical) had quietly bypassed it with a plain os.WriteFile
 // or an un-synced O_APPEND. This test closes the CLASS of bug, not
 // just those two instances: any future os.WriteFile / mutating
-// os.OpenFile call added anywhere in internal/consolidate or
-// internal/memory that isn't on the allowlist below fails the build.
+// os.OpenFile call added anywhere in internal/consolidate,
+// internal/memory, or internal/backup that isn't on the allowlist below
+// fails the build.
+//
+// internal/backup is included because it is the other place memory
+// content gets written back to disk: a restore replays a backup bundle's
+// memory/ entries onto the live PERSONA.md / learned-*.md / etc. paths,
+// which is exactly the class of write this guard exists for. As of this
+// commit internal/backup has no such call site yet — the restore-side
+// memory write lands in a concurrently-developed PR (#1537,
+// internal/backup/memoryblobs.go's restoreMemoryBlobFile), which is not
+// present on this branch. Scanning internal/backup now, before that file
+// exists, is deliberate: the guard is green today because there is
+// nothing to catch, and it will go red the moment that PR merges with a
+// tmp-write+rename-no-fsync memory write, forcing the same fix this PR
+// already applied elsewhere instead of shipping a ninth silent instance.
+//
+// Deliberately NOT in scope: cmd/crewship/cmd_seed_data_memory.go's
+// writeFileIfAbsent uses a raw os.WriteFile, but it is a dev-only seed
+// helper gated by "only write if the file doesn't already exist" (never
+// overwrites live content), and cmd/crewship is not a package this guard
+// walks. Noted here so it isn't re-flagged or re-investigated later.
 //
 // Two shapes are recognised:
 //
@@ -49,19 +69,22 @@ import (
 // injection at the primitive/caller level) and, beyond that, a
 // physical guarantee this test suite cannot exercise.
 func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
-	dirs := []string{".", "../memory"}
+	dirs := []string{".", "../memory", "../backup"}
 
 	// allowedLines maps "dir|trimmed source line" to a written reason a
 	// human reviewer accepted for NOT routing through the durable
 	// helper. Every entry here is a whole-file overwrite that is
-	// either the helper's own primitive, or content that is not
-	// persistent memory (lock sentinels, health probes).
+	// either the helper's own primitive, content that is not
+	// persistent memory (lock sentinels, health probes), or a generic
+	// streaming primitive that is not itself a memory-content write.
 	allowedWholeFile := map[string]string{
 		"../memory|f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)":     "durable_write.go: this line IS the writeFileDurable primitive every other call site delegates to; covered directly by TestWriteFileDurable_* in durable_write_test.go",
 		"../memory|f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)":    "writer.go: WriteFile's own inline temp+fsync+rename+dir-fsync sequence, written before writeFileDurable was extracted from it — already durable, not a shortcut around the helper",
 		"../memory|f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)": "writer_lock_unix.go: flock sentinel file, not memory content — only its existence as an flock anchor matters, not durability of its (empty) bytes",
 		"../memory|f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0o600)":                 "writer_lock_windows.go: same flock-sentinel reasoning as the unix build",
 		`../memory|if err := os.WriteFile(probe, []byte("ok"), 0o644); err != nil {`:            "provider.go: ephemeral health-probe file, created and removed within the same function call — never persisted content",
+		"../backup|f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0o600)":                 "keyring_flock_unix.go: flock sentinel file for the backup keyring, same reasoning as memory's writer_lock_unix.go — not memory content",
+		"../backup|f, err := os.OpenFile(clean, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)":      "storage.go: LocalStorageOps.Create, a generic io.WriteCloser primitive backup bundle/keyring/dump code streams arbitrary bytes into (tar entries, keyring JSON, DB dumps) — not itself a memory-content write, and bundle/keyring durability is the backup subsystem's own separate, already-tracked concern",
 	}
 
 	// appendLines lists O_APPEND call sites accepted under the
