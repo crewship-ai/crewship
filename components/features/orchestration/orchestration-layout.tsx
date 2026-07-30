@@ -58,8 +58,8 @@ import { UnifiedExplorer } from "@/components/features/orchestration/unified-exp
 import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 
-import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { setTaskStatus } from "@/components/features/orchestration/task-actions"
 import { useAppStore } from "@/lib/store"
 import type { BreadcrumbItem } from "@/lib/store"
 import { ActivityTab } from "@/components/features/crews/bottom-panel/activity-tab"
@@ -477,28 +477,18 @@ export function OrchestrationLayout({
   }, [])
 
   const handleTaskAction = useCallback(async (action: "edit" | "retry" | "skip", taskId: string, missionId: string) => {
+    // "edit" — detail panel is already visible, nothing to write.
+    if (action === "edit") return
     const mission = missions.find(m => m.id === missionId)
-    if (!mission) return
-    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+    if (!mission?.crew_id) return
 
-    if (action === "retry") {
-      await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "PENDING" }),
-      })
-      toast.success("Task queued for retry")
-      onRefresh()
-    } else if (action === "skip") {
-      await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "SKIPPED" }),
-      })
-      toast.success("Task skipped")
-      onRefresh()
-    }
-    // "edit" — detail panel is already visible
+    const landed = await setTaskStatus(action, {
+      crewId: mission.crew_id,
+      missionId,
+      taskId,
+      workspaceId,
+    })
+    if (landed) onRefresh()
   }, [missions, workspaceId, onRefresh])
 
   const handleDrawerTabClick = useCallback((tab: DrawerTab) => {
