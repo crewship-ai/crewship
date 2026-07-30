@@ -48,9 +48,10 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 	for _, issueID := range req.IDs {
 		// Verify issue belongs to workspace
 		var currentStatus string
+		var currentAssigneeType sql.NullString
 		err := h.db.QueryRowContext(r.Context(),
-			`SELECT status FROM missions WHERE id = ? AND workspace_id = ?`,
-			issueID, wsID).Scan(&currentStatus)
+			`SELECT status, assignee_type FROM missions WHERE id = ? AND workspace_id = ?`,
+			issueID, wsID).Scan(&currentStatus, &currentAssigneeType)
 		if err != nil {
 			continue // skip missing issues
 		}
@@ -69,6 +70,31 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Updates.Priority != nil {
 			ub.Set("priority", *req.Updates.Priority)
+		}
+		if req.Updates.AssigneeID != nil {
+			if *req.Updates.AssigneeID != "" {
+				// Same workspace-scoping as Create/Update (issue_handler_create.go,
+				// issue_handler_update.go): pre-fix this went straight into the
+				// UPDATE, so a bulk request could assign issues to a guessed or
+				// enumerated cross-workspace user/agent ID. assignee_type may
+				// arrive in the same request or be left unset; fall back to the
+				// row's current assignee_type in that case.
+				assigneeType := currentAssigneeType.String
+				if req.Updates.AssigneeType != nil {
+					assigneeType = *req.Updates.AssigneeType
+				}
+				if assigneeType != "user" && assigneeType != "agent" {
+					continue // skip: invalid/unrecognized assignee_type, same as any other bad per-item field
+				}
+				ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.Updates.AssigneeID, wsID)
+				if vErr != nil {
+					h.logger.Error("bulk validate assignee_id", "error", vErr, "issue_id", issueID)
+					continue
+				}
+				if !ok {
+					continue // skip: cross-workspace assignee_id, consistent with the invalid-transition skip above
+				}
+			}
 		}
 		if req.Updates.AssigneeType != nil {
 			ub.Set("assignee_type", *req.Updates.AssigneeType)

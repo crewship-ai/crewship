@@ -154,6 +154,23 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Same workspace-scoping for assignee_id as issue Create/Update
+	// (issue_handler_create.go, issue_handler_update.go): pre-fix this went
+	// straight into the INSERT. triage_rules has no assignee_type column —
+	// Process() always writes matched rows with assignee_type='agent' — so
+	// the rule's assignee_id is validated as an agent, not a user.
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, "agent", *req.AssigneeID, wsID)
+		if vErr != nil {
+			internalError(w, r, h.logger, "validate assignee_id", vErr)
+			return
+		}
+		if !ok {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+			return
+		}
+	}
+
 	// Get next position
 	var maxPos int
 	if err := h.db.QueryRowContext(r.Context(),
@@ -278,6 +295,17 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		if *req.AssigneeID == "" {
 			ub.SetNull("assignee_id")
 		} else {
+			// Same workspace-scoping as CreateRule above: validated as an agent,
+			// since triage_rules has no assignee_type column.
+			ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, "agent", *req.AssigneeID, wsID)
+			if vErr != nil {
+				internalError(w, r, h.logger, "validate assignee_id", vErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+				return
+			}
 			ub.Set("assignee_id", *req.AssigneeID)
 		}
 	}
