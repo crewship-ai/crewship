@@ -436,7 +436,7 @@ sha256: %q
 		time.Now().UTC().Format(time.RFC3339),
 		hit.Category, hit.Pattern, sourcePath, sha,
 	)
-	if err := os.WriteFile(qPath, []byte(header+original), 0o600); err != nil {
+	if err := writeFileDurable(qPath, []byte(header+original), 0o600); err != nil {
 		return "", "", fmt.Errorf("quarantine: write %s: %w", qPath, err)
 	}
 
