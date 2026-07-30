@@ -40,7 +40,43 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   line surfaces the trust downgrade in ops the moment such a crew is
   provisioned.
 
+- **`POST /workspaces/{id}/skills/generate` spent the wrong tenant's Anthropic
+  key.** The handler took its workspace from `r.PathValue("workspaceId")`, but
+  `RequireWorkspace` resolves the tenant with `?workspace_id=` taking priority
+  over the path — so the two could disagree. An OWNER of workspace A could send
+  `POST /api/v1/workspaces/<B>/skills/generate?workspace_id=<A>`: the middleware
+  validated A's membership and let the request through, then the handler
+  evaluated A's role against workspace B and looked up, decrypted, and spent B's
+  Anthropic API key. It now reads `WorkspaceIDFromContext`, the only value
+  membership was ever checked against. A source guard
+  (`TestNoHandlerReadsWorkspaceFromPath`, AST-based, allowlist with reasons)
+  fails the build on any new handler that re-reads the path, so the class is
+  closed rather than the one instance.
+
+- **Six write paths persisted foreign-workspace references.** `project_id` and
+  `milestone_id` on issue create/update, `project_id` on recurring-issue
+  create/update, `crew_id` and `project_id` on triage-rule create/update, and
+  `lead_id` on project create/update all went into their INSERT verbatim. This
+  is the #1471 class on the columns that fix did not reach: the caller never
+  requests the foreign row, they name it, and the read path resolves it — so an
+  issue listing rendered another tenant's project name, and a triage rule could
+  route this tenant's incoming issues into another tenant's crew on every match.
+  `assertFKInWorkspace` now carries a per-table membership query (it previously
+  supported only `agents` and `crews`, and projects/milestones were documented
+  as "deliberately not listed", which is why those handlers validated nothing),
+  and `fkInWorkspaceOrReject` makes a call site one line. Found by the new
+  cross-workspace fence matrix rather than by review.
+
 ### Fixed
+
+- **Renaming a label was a 500 for everyone.** `PATCH /api/v1/labels/{labelId}`
+  built its statement with `newUpdate()`, which always emits `updated_at = ?`
+  first; the `labels` table has only `created_at`, so SQLite answered "no such
+  column: updated_at" on every call since the endpoint shipped. The statement is
+  now built from the columns the table actually has. Worth noting how it
+  surfaced: a route that 500s cannot be tested for tenancy — the UPDATE never
+  executed, so nothing could be said about its `WHERE` clause — and fixing the
+  500 is what made the fence assertion on that route real.
 
 - **A local-model endpoint now works whatever shape it was stored in.** One
   `ENDPOINT_URL` credential was consumed by three code paths that each expected a

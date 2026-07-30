@@ -62,21 +62,51 @@ func TestSkillGenerate_RoleForbidden(t *testing.T) {
 	}
 }
 
+// TestSkillGenerate_MissingWorkspaceID pins where the handler gets its tenant:
+// the request context, which is the only value RequireWorkspace validated
+// membership against.
+//
+// This test previously did the opposite. It set an OWNER workspace *context*,
+// deliberately left the path value empty, and asserted 400 — which passed only
+// because the handler read r.PathValue("workspaceId") and ignored the context.
+// That was the bug: the two sources can disagree, and a caller could put their
+// own workspace in ?workspace_id= (satisfying the middleware) and someone
+// else's in the path, at which point this handler resolved, decrypted, and
+// spent the other tenant's Anthropic key. The test was pinning the vulnerable
+// read as if it were the contract, so it had to change with the fix — see
+// cross_workspace_path_query_test.go for the live reproduction and the
+// class-level source guard.
+//
+// Both directions are asserted now, because "reads the context" is only half
+// the statement; the other half is "and does not fall back to the path".
 func TestSkillGenerate_MissingWorkspaceID(t *testing.T) {
 	h := newSkillGenHandler(t)
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 
-	req := httptest.NewRequest("POST", "/api/v1/workspaces//skills/generate",
+	// No workspace in context → 400, even though the PATH carries a real,
+	// existing workspace id. A handler that fell back to the path would 200/412
+	// here instead.
+	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/generate",
 		strings.NewReader(`{"slug":"x","prompt":"y"}`))
-	// Intentionally do not call SetPathValue("workspaceId", ...) — the
-	// handler reads r.PathValue and must 400 when it's empty even though
-	// the role context is OWNER (we need to pass the role gate first).
-	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	req.SetPathValue("workspaceId", wsID)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	rr := httptest.NewRecorder()
 	h.Generate(rr, req)
 	if rr.Code != http.StatusBadRequest {
-		t.Errorf("missing workspaceId code = %d, want 400", rr.Code)
+		t.Errorf("no workspace in context = %d, want 400 (the path value must not be a fallback)", rr.Code)
+	}
+
+	// Workspace in context and nothing in the path → the handler proceeds past
+	// the workspace check. It stops at the missing Anthropic credential (412),
+	// which is proof it resolved a workspace and looked inside it.
+	req = httptest.NewRequest("POST", "/api/v1/workspaces//skills/generate",
+		strings.NewReader(`{"slug":"x","prompt":"y"}`))
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr = httptest.NewRecorder()
+	h.Generate(rr, req)
+	if rr.Code != http.StatusPreconditionFailed {
+		t.Errorf("workspace from context, empty path = %d, want 412 (proceeded to the credential lookup)", rr.Code)
 	}
 }
 

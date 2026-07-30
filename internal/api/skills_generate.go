@@ -92,7 +92,21 @@ You will receive the user's intent in the next message. Respond with the SKILL.m
 // minutes of polling. Same role as `skill import` to keep the surface
 // uniform.
 func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) {
-	wsID := r.PathValue("workspaceId")
+	// The workspace comes from the context, NOT from r.PathValue("workspaceId").
+	// RequireWorkspace resolves the tenant with the query parameter taking
+	// priority over the path (middleware.go), so the two can disagree: a caller
+	// who is an OWNER of workspace A can request
+	//
+	//	POST /api/v1/workspaces/<B>/skills/generate?workspace_id=<A>
+	//
+	// and the middleware validates membership of A while this line used to read
+	// B. Everything downstream then ran against B — the role/capability gate was
+	// evaluated for a workspace the caller does not belong to, and
+	// resolveAnthropicProvider looked up, decrypted, and spent B's Anthropic API
+	// key. Found by the cross-workspace fence work; pinned by
+	// TestCrossWorkspaceFence_SkillsGenerate_PathQueryDivergence and by the
+	// source guard in cross_workspace_path_query_test.go.
+	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID == "" {
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
 		return

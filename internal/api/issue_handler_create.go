@@ -224,6 +224,28 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// project_id and milestone_id had no such guard, though they are the same
+	// shape as parent_issue_id twenty lines up: an id the caller supplies that
+	// the read path later resolves to a name. A workspace-A member could file
+	// an issue into a workspace-B project, and every issue listing that joins
+	// projects would then render B's project name to A. The fence matrix found
+	// both live (POST and PATCH).
+	for _, fk := range []struct {
+		field string
+		table string
+		value *string
+	}{
+		{"project_id", "projects", req.ProjectID},
+		{"milestone_id", "milestones", req.MilestoneID},
+	} {
+		if fk.value == nil || *fk.value == "" {
+			continue
+		}
+		if !fkInWorkspaceOrReject(w, r, h.db, h.logger, fk.table, fk.field, *fk.value, wsID) {
+			return
+		}
+	}
+
 	// Creator attribution (v129): this handler is only reachable with an
 	// authenticated user (JWT middleware + the role/capability gate above),
 	// so the caller IS the creator. Slash-command creates flow through this

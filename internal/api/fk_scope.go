@@ -5,25 +5,41 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 )
 
 // errFKNotInWorkspace is returned by assertFKInWorkspace when the referenced
 // row is absent, soft-deleted, or belongs to a different workspace.
 var errFKNotInWorkspace = errors.New("foreign key not found in workspace")
 
-// fkScopeTables is the closed set of tables assertFKInWorkspace will probe.
-// Restricting to a constant allowlist keeps the table-name interpolation below
-// provably free of any user-controlled identifier (the SQL text is built only
-// from these literals + parameterized id/workspace_id). ONLY tables that have
-// BOTH a workspace_id and a deleted_at column belong here, because the query is
-// hardcoded with `AND workspace_id = ? AND deleted_at IS NULL`. agents and
-// crews qualify; projects/labels are workspace-scoped but have no deleted_at,
-// and milestones are project-scoped (no workspace_id) — validating those needs
-// a different query shape, so they are deliberately NOT listed (a call for them
-// returns the unsupported-table error rather than a silent 500).
-var fkScopeTables = map[string]struct{}{
-	"agents": {},
-	"crews":  {},
+// fkScopeQueries is the closed set of references assertFKInWorkspace will
+// probe, each mapped to the exact membership question for that table. Every
+// query is a constant here and takes (id, workspace_id) as its two parameters,
+// so no user-controlled identifier ever reaches the SQL text.
+//
+// The map replaced an allowlist of table *names* plus one hardcoded query
+// shape. That shape was `AND workspace_id = ? AND deleted_at IS NULL`, which
+// only agents and crews satisfy — so projects (workspace-scoped, no deleted_at)
+// and milestones (project-scoped, no workspace_id at all) were documented as
+// "deliberately NOT listed", and the handlers that needed them simply did not
+// validate. The cross-workspace fence matrix then found six live leaks through
+// exactly those columns. Carrying a per-table query costs one line each and
+// removes the reason to leave a reference unchecked.
+var fkScopeQueries = map[string]string{
+	"agents": "SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+	"crews":  "SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+	// projects and labels are workspace-scoped but carry no deleted_at.
+	"projects": "SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?",
+	"labels":   "SELECT 1 FROM labels WHERE id = ? AND workspace_id = ?",
+	// milestones hang off a project; the tenant is reached through it.
+	"milestones": `SELECT 1 FROM milestones m
+	                 JOIN projects p ON p.id = m.project_id
+	                WHERE m.id = ? AND p.workspace_id = ?`,
+	// "users" asks the only question worth asking about a user id arriving in a
+	// request body: is this person a member of the caller's workspace? A row in
+	// `users` proves nothing — the users table is instance-wide.
+	"users": "SELECT 1 FROM workspace_members WHERE user_id = ? AND workspace_id = ?",
 }
 
 // assertFKInWorkspace verifies that row `id` in `table` exists, is not
@@ -41,15 +57,36 @@ func assertFKInWorkspace(ctx context.Context, db *sql.DB, table, id, wsID string
 	if id == "" || wsID == "" {
 		return errFKNotInWorkspace
 	}
-	if _, ok := fkScopeTables[table]; !ok {
+	query, ok := fkScopeQueries[table]
+	if !ok {
 		return fmt.Errorf("assertFKInWorkspace: unsupported table %q", table)
 	}
 	var one int
-	err := db.QueryRowContext(ctx,
-		"SELECT 1 FROM "+table+" WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		id, wsID).Scan(&one)
+	err := db.QueryRowContext(ctx, query, id, wsID).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errFKNotInWorkspace
 	}
 	return err
+}
+
+// fkInWorkspaceOrReject is assertFKInWorkspace wired to an HTTP response: it
+// returns true when the reference is in-workspace, and otherwise writes the
+// right status (400 for a foreign/absent id, 500 for a database failure — a
+// transient error is not an authorization decision) and returns false.
+//
+// It exists so a call site is one `if !… { return }`. The reason the six leaks
+// the fence matrix found went unfixed for so long is that each one needed six
+// lines of near-identical query + error mapping, and that is exactly the tax
+// that gets skipped under deadline.
+func fkInWorkspaceOrReject(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger,
+	table, field, id, wsID string) bool {
+	if err := assertFKInWorkspace(r.Context(), db, table, id, wsID); err != nil {
+		if errors.Is(err, errFKNotInWorkspace) {
+			writeProblem(w, r, http.StatusBadRequest, field+" does not exist in this workspace")
+			return false
+		}
+		internalError(w, r, logger, "validate "+field, err)
+		return false
+	}
+	return true
 }

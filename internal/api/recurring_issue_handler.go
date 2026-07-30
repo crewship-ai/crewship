@@ -200,6 +200,26 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// crew_id and assignee_id were fenced above; project_id and milestone_id
+	// were not, and they ride the same INSERT. Every issue this template fires
+	// would carry the foreign reference forward, which is worse than the
+	// one-off case: the leak recurs on a cron.
+	for _, fk := range []struct {
+		field string
+		table string
+		value *string
+	}{
+		{"project_id", "projects", req.ProjectID},
+		{"milestone_id", "milestones", req.MilestoneID},
+	} {
+		if fk.value == nil || *fk.value == "" {
+			continue
+		}
+		if !fkInWorkspaceOrReject(w, r, h.db, h.logger, fk.table, fk.field, *fk.value, wsID) {
+			return
+		}
+	}
+
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -321,6 +341,9 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.ProjectID == "" {
 			ub.SetNull("project_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "projects", "project_id", *req.ProjectID, wsID) {
+				return
+			}
 			ub.Set("project_id", *req.ProjectID)
 		}
 	}
@@ -328,6 +351,9 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.MilestoneID == "" {
 			ub.SetNull("milestone_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "milestones", "milestone_id", *req.MilestoneID, wsID) {
+				return
+			}
 			ub.Set("milestone_id", *req.MilestoneID)
 		}
 	}
