@@ -159,6 +159,37 @@ describe("IssuesListView bulk update", () => {
     expect(screen.getByText("2 selected")).toBeTruthy()
   })
 
+  // The refusal names the rows it refused. Once the selection changes it is
+  // describing something else, so it must not outlive the selection it was
+  // about.
+  it("drops the error when the selection it described is changed", async () => {
+    apiFetch.mockResolvedValue(json(409, { error: "2 issues are locked by a running mission" }))
+    render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
+
+    bulkSetDone()
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
+
+    // Deselect one row: the message no longer applies to what is selected.
+    fireEvent.click(screen.getAllByRole("checkbox")[1])
+
+    expect(screen.getByText("1 selected")).toBeTruthy()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("does not bring a stale error back with the next select-all", async () => {
+    apiFetch.mockResolvedValue(json(409, { error: "2 issues are locked by a running mission" }))
+    render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)
+
+    bulkSetDone()
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
+
+    fireEvent.click(screen.getAllByRole("checkbox")[0]) // deselect all
+    fireEvent.click(screen.getAllByRole("checkbox")[0]) // and select all again
+
+    expect(screen.getByText("2 selected")).toBeTruthy()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
   it("clears a stale error once a fresh attempt succeeds", async () => {
     apiFetch.mockResolvedValueOnce(json(409, { error: "conflict" }))
     render(<IssuesListView issues={issues} onIssueClick={vi.fn()} workspaceId="ws-1" />)

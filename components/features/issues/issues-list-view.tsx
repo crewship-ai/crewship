@@ -89,8 +89,12 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   // the time you are deciding whether to retry.
   const [bulkError, setBulkError] = useState<string | null>(null)
 
+  // The refusal names the issues it refused ("3 of 2 are locked by a running
+  // mission"). Change the selection and it is describing something that is no
+  // longer on screen, so it goes with the selection it belonged to.
   const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    setBulkError(null)
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -100,6 +104,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   }, [])
 
   const toggleAll = useCallback(() => {
+    setBulkError(null)
     if (selectedIds.size === issues.length) {
       setSelectedIds(new Set())
     } else {
