@@ -856,6 +856,7 @@ need a restart, and both the card and `aux list` say so on the row.
 
 ```bash
 crewship keeper aux list                                   # every slot + where its model comes from
+crewship keeper aux test behavior                          # call that evaluator's model once
 crewship keeper aux set behavior --model claude-opus-5      # a sharper watchdog
 crewship keeper aux set curator --provider ollama --model qwen2.5:7b
 crewship keeper aux set memory_health --timeout 45s
@@ -908,7 +909,8 @@ rendering a status page must not call a paid API. That default is right and it
 used to be a dead end: five configured judges and no way to learn whether any of
 them worked until a sweep ran and failed.
 
-Each row now has a **test** link. It runs one real evaluation against that slot's
+Each row has a **test** link, and `crewship keeper aux test <slot>` is the same
+check from a shell. It runs one real evaluation against that slot's
 resolved model and reports the same stages the judge check uses — a verdict, and
 whether it arrived inside the credential path's budget — so a local and a hosted
 evaluator are held to the same bar. It costs one call, on a button you pressed,

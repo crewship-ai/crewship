@@ -12,8 +12,9 @@ import (
 // keeperJudgeCmd drives the two endpoints that make configuring a local judge a
 // one-minute job instead of a guessing game:
 //
-//	POST /api/v1/admin/keeper/judge/test    — four stages
-//	GET  /api/v1/admin/keeper/judge/models  — what that endpoint serves
+//	POST /api/v1/admin/keeper/judge/test         — four stages, local judge
+//	POST /api/v1/admin/keeper/judge/test-hosted  — the same question, hosted judge
+//	GET  /api/v1/admin/keeper/judge/models       — what that endpoint serves
 //
 // Keeper is fail-closed, so every way of being misconfigured arrives as the same
 // DENY on every credential request. The stages separate the causes an operator can
@@ -56,6 +57,28 @@ type keeperJudgeTestResult struct {
 	Decision string             `json:"decision"`
 }
 
+// printJudgeStages renders a check's stages. Three states, not two: a SKIPPED
+// stage is not a passing one, and a green tick for "we never got far enough to
+// ask" is how a check ends up lying — which is exactly what the judge check did
+// before it learned to compare its own latency against the credential path's
+// budget.
+func printJudgeStages(stages []keeperJudgeStage) {
+	for _, s := range stages {
+		mark, colour := "✗", cli.Red
+		switch {
+		case s.OK:
+			mark, colour = "✓", cli.Green
+		case s.Skipped:
+			mark, colour = "–", cli.Dim
+		}
+		latency := ""
+		if s.LatencyMS > 0 {
+			latency = fmt.Sprintf(" %s(%dms)%s", cli.Dim, s.LatencyMS, cli.Reset)
+		}
+		fmt.Printf("  %s%s%s %-22s %s%s\n", colour, mark, cli.Reset, s.Label, s.Detail, latency)
+	}
+}
+
 type keeperJudgeModelsResult struct {
 	Endpoint string   `json:"endpoint"`
 	Models   []string `json:"models"`
@@ -72,8 +95,10 @@ type keeperJudgeModelsResult struct {
 }
 
 var (
-	flagKeeperJudgeEndpoint string
-	flagKeeperJudgeModel    string
+	flagKeeperJudgeEndpoint   string
+	flagKeeperJudgeModel      string
+	flagKeeperJudgeProvider   string
+	flagKeeperJudgeCredential string
 )
 
 var keeperJudgeTestCmd = &cobra.Command{
@@ -108,7 +133,29 @@ Exits non-zero when any stage fails, so it works in a script or a cron.`,
 		}
 
 		var out keeperJudgeTestResult
-		if err := postJSON(client, "/api/v1/admin/keeper/judge/test", body, &out); err != nil {
+		// A hosted provider is a different endpoint with different stages — there
+		// is no address to reach and no model to pull, but there IS a key that can
+		// be missing, revoked or of the wrong type. Same command, because the
+		// question an operator is asking is identical: does this judge work.
+		path := "/api/v1/admin/keeper/judge/test"
+		if provider := strings.ToLower(strings.TrimSpace(flagKeeperJudgeProvider)); provider != "" && provider != "ollama" {
+			if strings.TrimSpace(flagKeeperJudgeModel) == "" {
+				return fmt.Errorf("--provider %s needs --model (a provider alone has nothing to ask)", provider)
+			}
+			path = "/api/v1/admin/keeper/judge/test-hosted"
+			body = map[string]any{"provider": provider, "model": strings.TrimSpace(flagKeeperJudgeModel)}
+			if ref := strings.TrimSpace(flagKeeperJudgeCredential); ref != "" {
+				// Accept the NAME an operator reads in `credential list`, not just
+				// the id — several stored keys per provider is the normal case, and
+				// picking between them by cuid is not picking.
+				id, err := resolveCredentialID(client, ref)
+				if err != nil {
+					return err
+				}
+				body["credential_id"] = id
+			}
+		}
+		if err := postJSON(client, path, body, &out); err != nil {
 			return keeperPermissionHint(err)
 		}
 
@@ -118,20 +165,7 @@ Exits non-zero when any stage fails, so it works in a script or a cron.`,
 				fmt.Printf("  ·  %s", out.Model)
 			}
 			fmt.Println()
-			for _, s := range out.Stages {
-				mark, colour := "✗", cli.Red
-				switch {
-				case s.OK:
-					mark, colour = "✓", cli.Green
-				case s.Skipped:
-					mark, colour = "–", cli.Dim
-				}
-				latency := ""
-				if s.LatencyMS > 0 {
-					latency = fmt.Sprintf(" %s(%dms)%s", cli.Dim, s.LatencyMS, cli.Reset)
-				}
-				fmt.Printf("  %s%s%s %-22s %s%s\n", colour, mark, cli.Reset, s.Label, s.Detail, latency)
-			}
+			printJudgeStages(out.Stages)
 			if len(out.Models) > 0 {
 				fmt.Printf("%sModels on this endpoint:%s %s\n", cli.Dim, cli.Reset, strings.Join(out.Models, ", "))
 			}
@@ -209,6 +243,10 @@ func init() {
 	for _, c := range []*cobra.Command{keeperJudgeTestCmd, keeperJudgeModelsCmd} {
 		c.Flags().StringVar(&flagKeeperJudgeEndpoint, "endpoint", "", "check this endpoint instead of the saved one")
 	}
+	keeperJudgeTestCmd.Flags().StringVar(&flagKeeperJudgeProvider, "provider", "",
+		"test a HOSTED judge instead of the local one: anthropic or openai_compat")
+	keeperJudgeTestCmd.Flags().StringVar(&flagKeeperJudgeCredential, "credential", "",
+		"name or id of the stored credential the hosted provider authenticates with")
 	keeperJudgeTestCmd.Flags().StringVar(&flagKeeperJudgeModel, "model", "", "check this model instead of the saved one")
 
 	keeperJudgeCmd.AddCommand(keeperJudgeTestCmd)

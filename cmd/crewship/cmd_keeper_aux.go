@@ -47,6 +47,7 @@ Examples:
   crewship keeper aux list
   crewship keeper aux set behavior --model claude-opus-5
   crewship keeper aux set curator --provider ollama --model qwen2.5:7b
+  crewship keeper aux test behavior      # call that evaluator's model once
   crewship keeper aux use-judge          # every slot onto the local judge, no per-token cost
   crewship keeper aux reset behavior
   crewship keeper aux reset --all`,
@@ -250,6 +251,59 @@ this is a cost decision, not a free one. Requires a configured judge; run
 	},
 }
 
+var keeperAuxTestCmd = &cobra.Command{
+	Use:   "test <slot>",
+	Short: "Call one evaluator's model once and report what happened",
+	Long: `Run a single real evaluation against the model a slot resolves to.
+
+The Judge models card reports every evaluator as "not checked", because rendering
+a status page must not call a paid API. That default is right and it leaves one
+question unanswered: whether any of these judges actually works. You only find out
+when a sweep runs and fails, which is the worst moment.
+
+This is that check, on request, one slot at a time. It reports the same stages the
+judge check does — whether a verdict came back, and whether it arrived inside the
+budget the credential path allows — so a local and a hosted evaluator are held to
+the same bar.
+
+It costs one model call. Hosted slots bill for it, and it shares the instance-wide
+probe rate limit with 'keeper judge test'.
+
+Examples:
+  crewship keeper aux test behavior
+  crewship keeper aux test curator`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		slot := strings.TrimSpace(args[0])
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		var out keeperJudgeTestResult
+		if err := postJSON(client, keeperAuxPath+"/"+slot+"/probe", map[string]any{}, &out); err != nil {
+			return keeperPermissionHint(err)
+		}
+		if ferr := newFormatter().AutoHuman(out, func() {
+			fmt.Printf("%sEvaluator check%s  %s", cli.Bold, cli.Reset, slot)
+			if out.Model != "" {
+				fmt.Printf("  ·  %s", out.Model)
+			}
+			fmt.Println()
+			printJudgeStages(out.Stages)
+			if out.OK {
+				cli.PrintSuccess("This evaluator works.")
+			}
+		}); ferr != nil {
+			return ferr
+		}
+		if !out.OK {
+			// The exit code is the machine-readable half of the same answer.
+			return cli.WithExitCode(fmt.Errorf("evaluator %q is not usable — see the failed stage above", slot), cli.ExitGeneric)
+		}
+		return nil
+	},
+}
+
 var keeperAuxResetCmd = &cobra.Command{
 	Use:   "reset [slot]",
 	Short: "Drop the override for one slot, or for every slot with --all",
@@ -308,6 +362,7 @@ func init() {
 	keeperAuxResetCmd.Flags().BoolVar(&flagKeeperAuxResetAll, "all", false, "clear the override on every slot")
 
 	keeperAuxCmd.AddCommand(keeperAuxListCmd)
+	keeperAuxCmd.AddCommand(keeperAuxTestCmd)
 	keeperAuxCmd.AddCommand(keeperAuxSetCmd)
 	keeperAuxCmd.AddCommand(keeperAuxUseJudgeCmd)
 	keeperAuxCmd.AddCommand(keeperAuxResetCmd)
