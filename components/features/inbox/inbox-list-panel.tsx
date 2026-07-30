@@ -97,7 +97,7 @@ export interface InboxListPanelProps {
 
   view: InboxView
   onViewChange: (v: InboxView) => void
-  viewCounts: Record<InboxView, number>
+  viewCounts: Record<InboxView, number | null>
 
   selectedId: string | null
   onSelect: (id: string) => void
@@ -284,7 +284,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
           className="min-w-0 flex-1 border-b-0"
         >
           <TabBar.Item value="inbox" count={viewCounts.inbox}>Inbox</TabBar.Item>
-          <TabBar.Item value="unread" count={viewCounts.unread || null}>Unread</TabBar.Item>
+          <TabBar.Item value="unread" count={viewCounts.unread}>Unread</TabBar.Item>
           <TabBar.Item value="archived" count={viewCounts.archived}>Archived</TabBar.Item>
         </TabBar>
 

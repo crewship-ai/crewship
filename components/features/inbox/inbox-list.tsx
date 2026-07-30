@@ -117,15 +117,19 @@ export function InboxList() {
     return out
   }, [agents, pipelines, items])
 
-  const viewCounts = useMemo<Record<InboxView, number>>(() => ({
-    // Only the active list is loaded, so the other two counts are what the
-    // server told us plus what is on screen. The honest fix is per-state counts
-    // in the list response; until then unread comes from the count endpoint
-    // (which the badge uses) and the rest reflects this window.
-    inbox: archive || view === "unread" ? items.length : items.length,
-    unread: unreadCount,
-    archived: archive ? items.length : 0,
-  }), [items.length, unreadCount, archive, view])
+  const viewCounts = useMemo<Record<InboxView, number | null>>(() => ({
+    // Only ONE list is loaded at a time, so only the active tab has a number we
+    // actually know. Unread is the exception: it comes from /inbox/count, the
+    // same source the bell badge reads, so it is right from any tab.
+    //
+    // The others render without a count rather than borrowing the loaded list's
+    // length — a tab that says "10" because that is how many ARCHIVED rows are
+    // in memory is worse than a tab that says nothing. Per-state counts in the
+    // list response would fix it for real.
+    inbox: view === "inbox" ? items.length : null,
+    unread: unreadCount || null,
+    archived: view === "archived" ? items.length : null,
+  }), [items.length, unreadCount, view])
 
   const bucketCounts = useMemo(() => {
     const counts: Record<Bucket, number> = { decisions: 0, replies: 0, review: 0, routines: 0, other: 0 }
