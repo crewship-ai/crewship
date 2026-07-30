@@ -379,17 +379,19 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
 
     const trigger = await screen.findByTestId("keeper-gov-provider")
-    // Defaults to the server-default option, and no model input until a
-    // concrete provider is chosen.
-    expect(trigger).toHaveTextContent(/server default/i)
+    // Defaults to "use the instance judge", and no model input until a concrete
+    // provider is chosen. The labels name the DECISION rather than the provider
+    // taxonomy: an operator picking a judge is choosing where it thinks and what
+    // it costs, and "Server default" told them neither.
+    expect(trigger).toHaveTextContent(/use the instance judge/i)
     expect(screen.queryByTestId("keeper-gov-model-id")).not.toBeInTheDocument()
 
     openSelect(trigger)
     for (const label of [
-      /server default/i,
-      /ollama \(local\)/i,
-      /anthropic/i,
-      /openai-compatible/i,
+      /use the instance judge/i,
+      /a different local model/i,
+      /anthropic \(claude\)/i,
+      /openai-compatible endpoint/i,
     ]) {
       expect(await screen.findByRole("option", { name: label })).toBeInTheDocument()
     }
@@ -457,7 +459,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
 
     expect(await screen.findByTestId("keeper-gov-model-id")).toHaveValue("qwen2.5:3b-instruct")
-    expect(screen.getByTestId("keeper-gov-provider")).toHaveTextContent(/ollama/i)
+    expect(screen.getByTestId("keeper-gov-provider")).toHaveTextContent(/a different local model/i)
     expect(screen.queryByTestId("keeper-gov-model-save")).not.toBeInTheDocument()
   })
 
@@ -472,7 +474,7 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
 
     const trigger = await screen.findByTestId("keeper-gov-provider")
     openSelect(trigger)
-    fireEvent.click(await screen.findByRole("option", { name: /server default/i }))
+    fireEvent.click(await screen.findByRole("option", { name: /use the instance judge/i }))
     fireEvent.click(screen.getByTestId("keeper-gov-model-save"))
 
     await waitFor(() => expect(putBodies()).toHaveLength(1))

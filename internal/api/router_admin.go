@@ -96,9 +96,15 @@ func (r *Router) registerAdminRoutes() {
 	// it can actually return a verdict. OWNER/ADMIN on both — they dial an
 	// address the caller can supply, which is a write-class capability even
 	// though one of them only returns a model list.
-	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger)
+	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger).WithGovJudge(r.govModelJudge)
 	r.authedMut("POST", "/api/v1/admin/keeper/judge/test", roleManage, keeperJudge.Test)
 	r.authedMut("GET", "/api/v1/admin/keeper/judge/models", roleManage, keeperJudge.Models)
+	// The same check for a HOSTED judge (Anthropic / OpenAI-compatible built from
+	// a vault key). Separate route rather than a mode flag on /test: the stages
+	// differ because the failure modes do — there is no endpoint to reach and no
+	// model to pull, but there IS a key that can be missing, revoked or of the
+	// wrong type.
+	r.authedMut("POST", "/api/v1/admin/keeper/judge/test-hosted", roleManage, keeperJudge.TestHosted)
 
 	// Keeper evaluator models. Same instance layer, for the OTHER half of the
 	// Keeper model stack: the five aux slots behind the watchdog and the Reviews

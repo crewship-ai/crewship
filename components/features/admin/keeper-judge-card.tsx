@@ -465,10 +465,21 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
         label={<StepLabel n={1}>Model server</StepLabel>}
         description={
           <WithProvenance source={cfg.judge_endpoint_url.source}>
-            Where the judge asks. Run Ollama on this machine and it is
-            <code className="mx-1 px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">http://localhost:11434</code>;
-            on another machine, that machine&apos;s address. Repoints the judge only — the episodic
-            embedder and the chat summarizer keep the server&apos;s own URL.
+            {/* "this machine" was the wrong words in a browser. Read from a
+                laptop it means the laptop; the dial happens from the Crewship
+                SERVER, which is usually a different box entirely — and an
+                operator running Ollama locally reasonably concluded that
+                localhost:11434 was their own and could not understand why it
+                worked. Name the machine that dials, every time. */}
+            Where the judge asks — dialled <strong className="text-foreground/80">by the Crewship
+            server</strong>, not by your browser.
+            <code className="mx-1 px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">http://localhost:11434</code>
+            means Ollama running on the server itself; Ollama on your own laptop needs that
+            laptop&apos;s LAN address, e.g.
+            <code className="mx-1 px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">http://192.168.1.20:11434</code>,
+            and <code className="px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">OLLAMA_HOST</code> set
+            so it listens on more than loopback. Repoints the judge only — the episodic embedder and
+            the chat summarizer keep the server&apos;s own URL.
           </WithProvenance>
         }
       >

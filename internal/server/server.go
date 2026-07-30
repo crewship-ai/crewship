@@ -718,6 +718,9 @@ func (s *Server) mountAPIRouter(
 	})
 	opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 	opts = append(opts, goapi.WithGovModelStatus(govResolver))
+	// Same object, concretely typed, so the admin judge routes can probe a hosted
+	// judge configuration (provider + model + vault key) before it is saved.
+	opts = append(opts, goapi.WithGovModelJudge(govResolver))
 	if eff := keeperSettings.Effective(); eff.Enabled.Value {
 		logger.Info("keeper gatekeeper enabled",
 			"endpoint", eff.EndpointURL.Value, "model", eff.Model.Value,

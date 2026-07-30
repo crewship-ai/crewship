@@ -310,3 +310,46 @@ func govModelSSRFClient() *http.Client {
 // Unwrapped as _ = gatekeeper.GovModelResolver(...) at wiring time; kept here as
 // a compile-time assertion that Resolve matches the seam signature.
 var _ gatekeeper.GovModelResolver = (*GovModelResolver)(nil).Resolve
+
+// BuildCandidate resolves and builds a provider for a governance-model config
+// that has NOT been saved yet, so the console can test a hosted judge before
+// committing to it.
+//
+// Why this exists: the instance judge has a four-stage check and a hosted judge
+// had none. An operator picking "Anthropic" and one of several stored API keys
+// got no feedback at all until the next real credential request — and if the key
+// they picked was the exhausted one, or the wrong type, that feedback arrived as
+// a fail-closed DENY. "Which of my keys is this, and does it work" is the whole
+// question, and it was unanswerable from the page that asks it.
+//
+// It deliberately shares governance.ResolveGovModel and buildProvider with the
+// live path, including the §4.4 degrade: a candidate whose credential is revoked
+// resolves the same way the running judge would, so the test tells the operator
+// what will actually happen rather than what would happen with a working key.
+// The degrade is REPORTED here rather than journalled — nothing is in force yet.
+func (r *GovModelResolver) BuildCandidate(
+	ctx context.Context, workspaceID, provider, model, credentialID string,
+) (llm.Provider, governance.ResolvedGovModel, error) {
+	if r == nil || r.db == nil {
+		return nil, governance.ResolvedGovModel{}, fmt.Errorf("governance model resolution is not available on this server")
+	}
+	if workspaceID == "" {
+		return nil, governance.ResolvedGovModel{}, fmt.Errorf("a workspace is required to resolve a credential")
+	}
+	// A candidate is exactly a Settings with the three fields the card edits, so
+	// the same resolver sees it — no second code path that could disagree with
+	// the live one about what a config means.
+	resolved, found := governance.ResolveGovModel(ctx, governance.Settings{
+		GovModelProvider:     provider,
+		GovModelID:           model,
+		GovModelCredentialID: credentialID,
+	}, workspaceID, r.lookup, r.defaults())
+	if !found {
+		return nil, resolved, fmt.Errorf("no provider selected")
+	}
+	p, err := r.buildProvider(resolved)
+	if err != nil {
+		return nil, resolved, err
+	}
+	return p, resolved, nil
+}

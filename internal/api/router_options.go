@@ -133,6 +133,18 @@ func WithGovModelStatus(s GovModelStatusProvider) RouterOption {
 	}
 }
 
+// WithGovModelJudge attaches the CONCRETE governance-model resolver, so the
+// admin judge routes can build and probe a hosted judge configuration (provider +
+// model + vault key) before it is saved. WithGovModelStatus carries the same
+// object behind a read-only interface for the status card; this one is the write/
+// probe capability and is deliberately a separate option, so a router that only
+// wants the status surface does not get the dialling one.
+func WithGovModelJudge(g *GovModelResolver) RouterOption {
+	return func(r *Router) {
+		r.govModelJudge = g
+	}
+}
+
 // WithKeeperSecrets attaches a SecretGetter to the router for the keeper execute handler.
 // If not set, /keeper/execute will return 500 on ALLOW decisions (execute not configured).
 func WithKeeperSecrets(sg SecretGetter) RouterOption {

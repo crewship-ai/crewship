@@ -847,6 +847,35 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/judge/test-hosted": {
+      "post": {
+        "operationId": "post_api_v1_admin_keeper_judge_test-hosted",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/keeper/requests": {
       "get": {
         "operationId": "get_api_v1_admin_keeper_requests",

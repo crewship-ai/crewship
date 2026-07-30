@@ -47,6 +47,7 @@ import { SettingsCard, SettingsRow } from "@/components/features/settings/shared
 import { useAbilities } from "@/hooks/use-abilities"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
 
 interface GovernanceResponse {
   configured: boolean
@@ -82,16 +83,90 @@ interface GovernanceResponse {
 const GOV_PROVIDER_DEFAULT = "__server_default__"
 const GOV_CREDENTIAL_NONE = "__none__"
 
-const GOV_MODEL_PROVIDERS: { value: string; label: string; modelHint?: string }[] = [
-  { value: "", label: "Server default" },
-  { value: "ollama", label: "Ollama (local)", modelHint: "qwen2.5:3b-instruct" },
-  { value: "anthropic", label: "Anthropic", modelHint: "claude-haiku-4-5" },
-  { value: "openai_compat", label: "OpenAI-compatible", modelHint: "gpt-4o-mini" },
+const GOV_MODEL_PROVIDERS: {
+  value: string
+  label: string
+  modelHint?: string
+  /** Uppercase provider for GET /api/v1/models, when a picker can be offered. */
+  catalogue?: string
+  /** What choosing this costs and needs — the two things the label cannot say. */
+  note?: string
+}[] = [
+  {
+    value: "",
+    label: "Use the instance judge",
+    note: "Whatever the Credential access judge above is set to. Nothing extra to configure.",
+  },
+  {
+    value: "ollama",
+    label: "A different local model",
+    modelHint: "qwen2.5:3b-instruct",
+    catalogue: "OLLAMA",
+    note: "Costs nothing per decision. Needs an ENDPOINT_URL credential if the model server is not the one the instance judge uses.",
+  },
+  {
+    value: "anthropic",
+    label: "Anthropic (Claude)",
+    modelHint: "claude-haiku-4-5",
+    catalogue: "ANTHROPIC",
+    note: "Bills per decision against the API key you pick below. Sharper than a small local model on ambiguous intents.",
+  },
+  {
+    value: "openai_compat",
+    label: "OpenAI-compatible endpoint",
+    modelHint: "gpt-4o-mini",
+    catalogue: "OPENAI",
+    note: "Any endpoint that speaks the OpenAI chat API. Needs an ENDPOINT_URL credential; add an API_KEY one if it authenticates.",
+  },
 ]
 
 // Credential types usable as a governance-model credential: an API key
 // (anthropic / openai_compat) or an endpoint URL (a remote ollama / compat host).
 const GOV_CREDENTIAL_TYPES = new Set(["API_KEY", "ENDPOINT_URL"])
+
+/** One stage of the hosted-judge check — mirrors internal/api/admin_keeper_judge.go. */
+interface GovTestStage {
+  name: string
+  label: string
+  ok: boolean
+  skipped?: boolean
+  detail: string
+  latency_ms?: number
+}
+
+interface GovTestResult {
+  ok?: boolean
+  stages: GovTestStage[]
+  decision?: string
+}
+
+/**
+ * Three states, not two. A skipped stage is not a passing one: "we did not get
+ * far enough to ask" and "we asked and it worked" are the two answers an operator
+ * most needs to tell apart, and a green tick for the first is how a check ends up
+ * lying — which is exactly what the local judge check did before it learned to
+ * compare its own latency against the credential path's budget.
+ */
+function GovStageRow({ stage }: { stage: GovTestStage }) {
+  const mark = stage.ok ? "✓" : stage.skipped ? "–" : "✗"
+  const colour = stage.ok
+    ? "text-success"
+    : stage.skipped
+      ? "text-muted-foreground/60"
+      : "text-destructive"
+  return (
+    <div className="flex items-start gap-2 px-4 py-1.5 text-[11px]">
+      <span className={`shrink-0 font-mono ${colour}`} aria-hidden="true">{mark}</span>
+      <span className="w-[13rem] shrink-0 text-foreground/80">{stage.label}</span>
+      <span className={`min-w-0 flex-1 leading-snug ${stage.ok ? "text-muted-foreground" : colour}`}>
+        {stage.detail}
+      </span>
+      {stage.latency_ms ? (
+        <span className="shrink-0 tabular-nums text-muted-foreground/60">{stage.latency_ms}ms</span>
+      ) : null}
+    </div>
+  )
+}
 
 // Mirrors governance.MaxWatchSpecLen (the server + CLI cap on the free-form spec).
 const WATCH_SPEC_MAX_LEN = 4096
@@ -314,7 +389,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
       <WatchdogCard gov={gov} serverEnabled={serverEnabled} canEdit={canEdit} put={put} />
       <FindingsRoutingCard gov={gov} admins={admins} canEdit={canEdit} put={put} workspaceId={workspaceId} />
       <CredentialLeasesCard gov={gov} canEdit={canEdit} put={put} />
-      <GovernanceModelCard gov={gov} credentials={govCredentials} canEdit={canEdit} put={put} />
+      <GovernanceModelCard gov={gov} credentials={govCredentials} canEdit={canEdit} put={put} workspaceId={workspaceId} />
     </>
   )
 })
@@ -777,12 +852,15 @@ function CredentialLeasesCard({
 // ── Workspace governance model: this workspace's own judge ──────────────────
 
 function GovernanceModelCard({
-  gov, credentials, canEdit, put,
+  gov, credentials, canEdit, put, workspaceId,
 }: {
   gov: GovernanceResponse
   credentials: { id: string; name: string; type: string }[]
   canEdit: boolean
   put: PutGovernance
+  /** Scopes the model catalogue lookup, which lists live from this workspace's
+   *  credential for the provider when there is one. */
+  workspaceId: string
 }) {
   const form = useDirtyForm({
     provider: gov.gov_model_provider ?? "",
@@ -793,6 +871,68 @@ function GovernanceModelCard({
   // A non-empty provider REQUIRES a model id (the server 400s otherwise); block
   // save and surface the requirement client-side.
   const modelMissing = form.draft.provider !== "" && form.draft.modelId.trim() === ""
+  const chosen = GOV_MODEL_PROVIDERS.find((p) => p.value === form.draft.provider)
+
+  // Verification, for the same reason the local judge has it: this card asks the
+  // operator to pick one of several stored API keys, and picking the wrong or
+  // exhausted one produced no feedback at all until the next real credential
+  // request denied. A 401 and a 429 are both one-click fixes here and were both
+  // invisible.
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<GovTestResult | null>(null)
+
+  // The model list for the selected provider, from the endpoint the rest of the
+  // app uses (live from a workspace credential, curated fallback otherwise). It
+  // replaces typing a tag from memory, which for a fail-closed judge means every
+  // credential request denying on a typo.
+  const [catalogue, setCatalogue] = React.useState<string[]>([])
+  const catalogueFor = chosen?.catalogue
+  React.useEffect(() => {
+    if (!catalogueFor) { setCatalogue([]); return }
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const qs = new URLSearchParams({ provider: catalogueFor })
+        if (workspaceId) qs.set("workspace_id", workspaceId)
+        const res = await apiFetch(`/api/v1/models?${qs.toString()}`, { signal: controller.signal })
+        if (!res.ok) { setCatalogue([]); return }
+        const body = await res.json()
+        if (controller.signal.aborted) return
+        setCatalogue(((body?.models ?? []) as { id: string }[]).map((m) => m.id).slice(0, 10))
+      } catch {
+        // Silent: a missing picker degrades to the free-text field, which still
+        // works. An error banner here would bury the field it is about.
+        setCatalogue([])
+      }
+    })()
+    return () => controller.abort()
+  }, [catalogueFor, workspaceId])
+
+  async function handleTest() {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const res = await apiFetch("/api/v1/admin/keeper/judge/test-hosted", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: form.draft.provider,
+          model: form.draft.modelId.trim(),
+          credential_id: form.draft.credentialId,
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setTestResult({ ok: false, stages: [{ name: "error", label: "Test", ok: false, detail: body?.error || `HTTP ${res.status}` }] })
+        return
+      }
+      setTestResult(body as GovTestResult)
+    } catch (e) {
+      setTestResult({ ok: false, stages: [{ name: "error", label: "Test", ok: false, detail: e instanceof Error ? e.message : "Network error" }] })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   function handleSave() {
     void form.submit(async (draft) => {
@@ -810,12 +950,26 @@ function GovernanceModelCard({
 
   return (
     <SettingsCard
-      title="Workspace governance model"
-      description="Override the instance judge for this workspace only. Governs the credential-access gatekeeper and every Keeper Reviews evaluator, resolved per request."
+      title="Judge for this workspace"
+      description="Which model decides credential access here — including a hosted one, on an API key you have stored. Overrides the instance judge for this workspace only, and governs the Reviews evaluators too. Resolved per request; no restart."
+      actions={
+        canEdit && form.draft.provider !== "" && !modelMissing ? (
+          <Button
+            variant="soft"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => { void handleTest() }}
+            disabled={testing}
+            data-testid="keeper-gov-test"
+          >
+            {testing ? "Testing…" : "Test"}
+          </Button>
+        ) : undefined
+      }
     >
       <SettingsRow
-        label="Provider"
-        description="Leave on server default unless this workspace needs its own judge."
+        label="What decides"
+        description={chosen?.note ?? "Leave on the instance judge unless this workspace needs its own."}
       >
         <Select
           value={form.draft.provider === "" ? GOV_PROVIDER_DEFAULT : form.draft.provider}
@@ -846,35 +1000,60 @@ function GovernanceModelCard({
       {form.draft.provider !== "" && (
         <>
           <SettingsRow
-            label="Model id"
-            description="Required when a provider is set."
+            label="Model"
+            description="Required. Pick one the provider serves — typing a tag from memory is how a judge ends up denying every request."
           >
-            <span className="flex flex-col items-end gap-1">
+            <span className="flex flex-col items-end gap-1.5">
               <Input
                 type="text"
                 value={form.draft.modelId}
                 onChange={(e) => form.set("modelId", e.target.value)}
                 disabled={!canEdit}
-                placeholder={
-                  GOV_MODEL_PROVIDERS.find((p) => p.value === form.draft.provider)?.modelHint
-                }
-                className="h-8 w-[220px] text-xs font-mono"
+                placeholder={chosen?.modelHint}
+                className="h-8 w-[240px] text-xs font-mono"
                 aria-label="Governance model id"
                 aria-required="true"
                 aria-invalid={modelMissing}
                 data-testid="keeper-gov-model-id"
               />
+              {/* The catalogue the rest of the app already uses, so this picker
+                  and the crew-canvas one cannot drift into offering different
+                  Claude ids. Free text stays available for a model that is not
+                  in the list yet. */}
+              {catalogue.length > 0 && (
+                <span className="flex flex-col items-end gap-1" data-testid="keeper-gov-models">
+                  <span className="text-[10px] text-muted-foreground/70">click to use</span>
+                  <span className="flex flex-wrap justify-end gap-1 max-w-[22rem]">
+                    {catalogue.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => form.set("modelId", m)}
+                        disabled={!canEdit}
+                        className={cn(
+                          "h-[19px] rounded border px-1.5 font-mono text-[10px] transition-colors",
+                          m === form.draft.modelId.trim()
+                            ? "border-primary/50 bg-primary/[0.12] text-primary/90"
+                            : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground",
+                        )}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </span>
+                </span>
+              )}
               {modelMissing && (
                 <span className="text-[11px] text-destructive/90" data-testid="keeper-gov-model-required">
-                  A model id is required for this provider.
+                  A model is required for this provider.
                 </span>
               )}
             </span>
           </SettingsRow>
 
           <SettingsRow
-            label="Credential"
-            description="Optional. API key or endpoint URL the provider authenticates with."
+            label="Key"
+            description="Which stored credential authenticates it. Several Anthropic keys is the normal case on an orchestration platform — each carries its own subscription limit — so this picks by NAME, and Test tells you whether the one you picked still answers."
             border={false}
           >
             <Select
@@ -910,6 +1089,23 @@ function GovernanceModelCard({
             </Select>
           </SettingsRow>
         </>
+      )}
+
+      {testResult && (
+        <div
+          className="border-t border-border/40 bg-muted/[0.15] py-1"
+          role="status"
+          data-testid="keeper-gov-test-result"
+        >
+          {testResult.stages.map((st) => (
+            <GovStageRow key={st.name} stage={st} />
+          ))}
+          {testResult.ok && (
+            <p className="px-4 py-1.5 text-[11px] text-success">
+              This judge works. Save to put it in force for this workspace.
+            </p>
+          )}
+        </div>
       )}
 
       {canEdit && (
