@@ -201,7 +201,18 @@ export function InboxList() {
   // Keep the last opened item rendered even after it leaves the filtered list
   // — opening an unread row marks it read, which drops it from the Unread
   // view, and a pane derived purely from `rows` would snap shut underneath.
+  //
+  // The snapshot covers that transition and NOTHING ELSE. Holding it after a
+  // resolve is what made the surface look broken: the row left the list, the
+  // pane kept rendering the stale copy with its buttons still enabled, and
+  // clicking Dismiss appeared to do nothing while the server had already done
+  // it. After a decision the selection advances instead.
   const [snapshot, setSnapshot] = useState<InboxItem | null>(null)
+
+  function advance() {
+    setSelectedId(null)
+    setSnapshot(null)
+  }
   const live = rows.find((r) => r.id === selectedId) ?? null
   useEffect(() => { if (live) setSnapshot(live) }, [live])
   const selected =
@@ -284,7 +295,7 @@ export function InboxList() {
         error={error}
       />
 
-      <div className="min-w-0 flex-1 overflow-y-auto bg-background p-4">
+      <div data-testid="reading-pane" className="min-w-0 flex-1 overflow-y-auto bg-background p-4">
         {selected ? (
           <InboxDetail
             key={selected.id}
@@ -293,22 +304,31 @@ export function InboxList() {
             onResolve={async (action) => {
               await patch(selected.id, "resolved", action)
               toast.success(`Marked as ${action}`)
+              advance()
               await refresh()
             }}
             onArchive={async () => {
               const prev = selected.state
-              await patch(selected.id, "resolved", "archived")
+              const id = selected.id
+              await patch(id, "resolved", "archived")
+              advance()
               toast.success("Archived", {
                 action: {
                   label: "Undo",
                   onClick: () => {
-                    void patch(selected.id, prev === "unread" ? "unread" : "read").then(refresh).catch(() => {})
+                    void patch(id, prev === "unread" ? "unread" : "read").then(refresh).catch(() => {})
                   },
                 },
               })
             }}
             onMarkUnread={() => void patch(selected.id, "unread").then(refresh).catch(() => {})}
-            onRefresh={refresh}
+            // A source-managed decision (waitpoint / escalation) is closed by
+            // its own endpoint, which cascades the inbox row server-side. The
+            // pane has to move on for the same reason a dismissal does.
+            onRefresh={async () => {
+              advance()
+              await refresh()
+            }}
           />
         ) : (
           <p className="type-row px-4 py-10 text-center text-muted-foreground-soft">

@@ -273,6 +273,7 @@ export interface InboxDetailProps {
 
 export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh }: InboxDetailProps) {
   const isResolved = item.state === "resolved"
+  const decision = decisionMetaFor(item)
   const jump = jumpFor(item)
   const category = categoryOf(item)
   const subject = subjectOf(item)
@@ -289,8 +290,22 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
 
   return (
     <div className="flex flex-col gap-3">
+      {/* A message and a failed run have no decision to frame, but they DO
+          have actions — Open chat, Open ENG-6, Retry, Dismiss. Rendering
+          KindActions only inside the decision card is what made Dismiss
+          disappear for exactly the rows whose only affordance it was. */}
       <Appear order={0}>
-        <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} />
+        {decision ? (
+          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} />
+        ) : (
+          <DetailCard>
+            <div className="flex flex-col gap-3">
+              <div className="text-body font-semibold">{item.title}</div>
+              <DecisionSubject item={item} />
+              <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} />
+            </div>
+          </DetailCard>
+        )}
       </Appear>
 
       <Appear order={1}>
