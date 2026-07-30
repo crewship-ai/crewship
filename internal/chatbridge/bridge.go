@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -851,6 +852,18 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
+		// In-band failure: the CLI exited 0 and then reported that the turn
+		// failed. Unlike a crashed exec, such a run usually DID produce output —
+		// a refusal, or a partial answer before the error — and the failure
+		// reason is itself the most useful thing on the screen. Persist the turn
+		// as well as streaming the error, the same way the #545 zero-output
+		// branch below does: live viewers get the error event, and a later
+		// reload still shows what the agent said and why the run failed.
+		// Without this, the (correct) FAILED status would cost the user text
+		// they could previously see.
+		if errors.Is(runErr, orchestrator.ErrAgentInBandFailure) {
+			b.persistInBandFailureTurn(ctx, chatID, info, acc.Text(), partAcc.Parts(), errMsg)
+		}
 		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
 		return fmt.Errorf("run agent: %w", runErr)
 	}
@@ -978,6 +991,51 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	streamFn(doneEvt)
 
 	return nil
+}
+
+// persistInBandFailureTurn writes the conversation turn for a run the agent
+// itself reported as failed while exiting 0. Mirrors the #545 zero-output
+// branch: the run stays FAILED, but the turn is persisted so a reload shows
+// what happened instead of nothing.
+//
+// The reason is always appended as an `error` part — that is what renders the
+// failure in the transcript. Whether the turn is an assistant reply or a system
+// notice depends on whether the agent actually said anything: a refusal is the
+// agent speaking (assistant, with its text preserved), while a silent internal
+// error is a system notice whose content is the reason itself.
+//
+// Best-effort by design: a persist failure is logged, never returned. The caller
+// is already on its way to returning the run error, and swapping that for a
+// storage error would hide the real cause.
+func (b *Bridge) persistInBandFailureTurn(
+	ctx context.Context,
+	chatID string,
+	info *ChatInfo,
+	text string,
+	parts []conversation.Part,
+	reason string,
+) {
+	role := conversation.RoleAssistant
+	content := text
+	if text == "" && len(parts) == 0 {
+		role = conversation.RoleSystem
+		content = reason
+	}
+	if err := b.convStore.Append(ctx, chatID, conversation.Message{
+		ID:        generateMsgID(),
+		AgentID:   info.AgentID,
+		Role:      role,
+		Content:   content,
+		Parts:     append(parts, conversation.Part{Type: "error", Content: reason}),
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		b.logger.Error("failed to persist in-band failure turn", "error", err, "chat_id", chatID)
+		return
+	}
+	// user turn + failure turn
+	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
+	}
 }
 
 // classifyCrewRuntimeError maps a raw EnsureCrewRuntime failure to a stable code

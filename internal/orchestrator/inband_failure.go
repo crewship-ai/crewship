@@ -1,9 +1,36 @@
 package orchestrator
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrAgentInBandFailure classifies an error as "the agent reported that its own
+// turn failed", as opposed to a transport/exec fault. Callers match it with
+// errors.Is — through any number of fmt.Errorf("...: %w") wraps on the way up.
+//
+// It exists because the user-facing message quotes the CLI's own text, and
+// downstream classifiers do substring matching on error strings. In particular
+// internal/pipeline's isTransientRunnerError treats "500", "timeout", "eof",
+// "rate limit" (and friends) as retry-worthy transports; a refusal that happens
+// to read "I cannot process a list of 500 items" would otherwise be retried on
+// the same tier — repeating a deterministic failure and billing for it. The
+// classification must come from the error's identity, never from its prose.
+var ErrAgentInBandFailure = errors.New("agent-reported in-band failure")
+
+// inBandError carries the user-facing message while keeping the machine-readable
+// identity in Unwrap, so Error() stays clean copy for chat and journal.
+type inBandError struct{ msg string }
+
+func (e *inBandError) Error() string { return e.msg }
+func (e *inBandError) Unwrap() error { return ErrAgentInBandFailure }
+
+// NewInBandFailureError wraps a user-facing message as an agent-reported
+// in-band failure. This is the only constructor — production (RunAgent) and
+// the tests that pin the downstream classification both go through it, so a
+// test can't accidentally assert against an error shape that never ships.
+func NewInBandFailureError(msg string) error { return &inBandError{msg: msg} }
 
 // inBandFailure tracks a run-level failure that the agent CLI reported *in
 // band* — inside its own event stream — while still exiting 0.
@@ -85,7 +112,9 @@ const inBandDetailCap = 300
 // Err returns the user-facing error for a recorded in-band failure, or nil if
 // none was seen. Mirrors the exit-code surface in RunAgent: the string is
 // rendered directly in chat and in the journal, so it must name a cause and,
-// where the CLI gave one, quote it.
+// where the CLI gave one, quote it. The returned error always satisfies
+// errors.Is(err, ErrAgentInBandFailure) — that identity, not the quoted prose,
+// is what downstream classifiers must key off.
 func (f *inBandFailure) Err() error {
 	if !f.seen {
 		return nil
@@ -96,11 +125,11 @@ func (f *inBandFailure) Err() error {
 	}
 	switch {
 	case detail != "" && f.subtype != "":
-		return fmt.Errorf("agent reported a failed run (%s): %s", f.subtype, detail)
+		return NewInBandFailureError(fmt.Sprintf("agent reported a failed run (%s): %s", f.subtype, detail))
 	case detail != "":
-		return fmt.Errorf("agent reported a failed run: %s", detail)
+		return NewInBandFailureError("agent reported a failed run: " + detail)
 	case f.subtype != "":
-		return fmt.Errorf("agent reported a failed run (%s) — the CLI exited 0 but its own final event says the turn failed; check the journal for that event", f.subtype)
+		return NewInBandFailureError(fmt.Sprintf("agent reported a failed run (%s) — the CLI exited 0 but its own final event says the turn failed; check the journal for that event", f.subtype))
 	}
-	return fmt.Errorf("agent reported a failed run — the CLI exited 0 but its own final event says the turn failed (a refusal, an internal CLI error, or an exhausted quota); check the journal for that event")
+	return NewInBandFailureError("agent reported a failed run — the CLI exited 0 but its own final event says the turn failed (a refusal, an internal CLI error, or an exhausted quota); check the journal for that event")
 }

@@ -238,6 +238,13 @@ Tool failures still surface: the tool result carries `is_error` in its journal m
 
 The check is **sticky**, not last-one-wins: once a CLI has reported a failed turn, a later successful envelope does not clear it. Adapters emit several terminal envelopes per run (Droid emits both `completion` and `result`, OpenCode one `step_finish` per step, Codex one `turn.completed` per turn) and their ordering is not guaranteed across CLI versions.
 
+### What a failed run does downstream
+
+- **Chat** — the turn is still persisted. The agent's own text (a refusal is the agent speaking) is kept as the assistant turn, with an error part carrying the reason; when the agent produced nothing at all, the turn is a system notice whose body *is* the reason. A reload shows the failure either way — the same treatment a run that produced no output at all gets. The correct `error` status never costs the user text they could otherwise read.
+- **Routines / pipelines** — the step fails and, under the default `on_fail: escalate_tier`, walks to the next fallback tier. It is deliberately **not** retried on the same tier: an in-band failure is the agent's verdict on its own work, not a transport fault, so a retry repeats a deterministic failure and bills for it. The classifier keys off the error's identity, not its prose — a refusal reading "I cannot process a list of 500 items" does not become "transient" because it contains `500`. See [Retry transient failures](/guides/routines#retry-transient-failures).
+- **Missions** — the assignment is `FAILED` and the mission task fails, instead of the mission advancing on an empty answer.
+- **Memory** — the post-run consolidator does not fire. We don't learn from a run the agent called a failure.
+
 ### Where to look when a run fails this way
 
 - The chat / API error message quotes the CLI's own text (truncated at 300 characters).
