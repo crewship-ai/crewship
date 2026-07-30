@@ -279,7 +279,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 |---|---|---|---|---|
 | `name` | string | Yes | -- | Display name (2-100 characters) |
 | `slug` | string | Yes | -- | URL-safe identifier (2-50 chars, lowercase letters/digits/hyphens) |
-| `crew_id` | string | Conditional | `null` | Parent crew ID. Required when `agent_role` is `LEAD`; optional for `AGENT` (`internal/api/agents_create.go:73`) |
+| `crew_id` | string | Conditional | `null` | Parent crew ID. Required when `agent_role` is `LEAD`; optional for `AGENT` (`internal/api/agents_create.go:73`). Must belong to the caller's own workspace — a crew from another workspace is rejected with `400`. |
 | `description` | string | No | `null` | Agent description |
 | `role_title` | string | No | `null` | Human-readable role title |
 | `agent_role` | string | No | `"AGENT"` | `AGENT` or `LEAD` |
@@ -322,7 +322,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid name, slug, role, or missing required crew_id |
+| `400` | Invalid name, slug, role, missing required crew_id, or crew_id belongs to another workspace |
 | `402` | License agent limit exceeded |
 | `403` | Insufficient role |
 | `409` | Slug already taken, or crew already has a LEAD agent |
