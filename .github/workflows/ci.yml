@@ -311,12 +311,20 @@ jobs:
       # job's wall clock is governed by timeout-minutes instead, and that is
       # the number to raise if this step grows.
       #
-      # NOTE: this is the timeout/diagnosability fix, NOT a speed fix. The
-      # actual speed work — hoisting internal/api's `migratedTemplateOnce`
-      # into a shared internal/testutil helper so 51 files stop running
-      # all 155 migrations per test — is a separate PR. When that lands,
-      # re-measure and consider whether this shard is still worth its
-      # extra runner minutes.
+      # ⚠⚠ THIS SHARD IS CALIBRATED TO PRE-#1547 TIMINGS. This is the
+      # timeout/diagnosability fix, NOT a speed fix — the speed work is PR
+      # #1547 (perf/shared-migrated-test-db), which hoists
+      # migratedTemplateOnce into internal/testutil across 23 packages and
+      # measures 1205.6s → 195.3s (6.2x). Relevant to THIS shard:
+      # internal/api goes 378.7s → 62.2s, internal/server 266.0s → 18.7s,
+      # internal/backup 269.1s → 59.3s, cmd/crewship 168.0s → 28.7s.
+      #
+      # ➜ AFTER #1547 MERGES: RE-MEASURE. At 62s, internal/api is no longer
+      #   the floor under the wall clock, so the whole reason for splitting
+      #   `go-api` out disappears and the two jobs should probably collapse
+      #   back into one — saving a runner. The timeout INVARIANT above stays
+      #   correct regardless; it is only the shard and the numbers that are
+      #   provisional.
       #
       # Execution order stays SOURCE ORDER here, deliberately. -shuffle=on
       # lives in the non-blocking `go-shuffle` job below; see that job for
@@ -434,11 +442,19 @@ jobs:
   # order-dependent state, so this job's expected result is GREEN and a red X
   # means a NEW order dependency rather than being permanent wallpaper.
   #
+  # OPEN FINDINGS: 2 packages, both excluded below and both diagnosed above.
+  # Highest observed count in one run was 59 failing top-level tests (58 in
+  # cmd/crewship + 1 in internal/api); the per-run number varies with the
+  # seed. When both packages are fixed and dropped from the exclusion list,
+  # this job's exclusion count reaches 0 and there is nothing left to stage.
+  #
   # Still `continue-on-error` for now, and the reason is honest rather than
   # convenient: one green run is not enough evidence that a randomised gate is
   # stable, and shipping a blocking gate that flakes on an unlucky seed would
   # be worse than shipping an advisory one. That makes this a staged rollout
-  # with a stated promotion criterion, not an escape hatch.
+  # with a stated promotion criterion, not an escape hatch. Unlike `go-race`,
+  # this cannot be closed out in this PR: order-dependence here is shared
+  # mutable state across ~59 tests in two packages, not one buffer.
   #
   # ➜ TO PROMOTE TO BLOCKING: after a handful of consecutive green runs on
   #   main, delete `continue-on-error`. Independently, fix the two excluded
@@ -557,18 +573,37 @@ jobs:
   # entry stops resolving to a real package (so the list cannot rot
   # silently), and the fix is tracked rather than assumed —
   #
-  # ➜ DELETE THIS LIST and go back to `./...` once the shared migrated-DB
-  #   test template lands (hoisting internal/api's migratedTemplateOnce
-  #   into internal/testutil). That is what makes the other ~90 packages
-  #   affordable under -race. Until then, do not grow this list to chase
-  #   coverage — grow it only as packages become fast enough.
+  # ⚠⚠ THIS LIST IS CALIBRATED TO PRE-#1547 TIMINGS AND IS EXPECTED TO DIE.
+  #
+  # PR #1547 (perf/shared-migrated-test-db) hoists internal/api's
+  # migratedTemplateOnce into internal/testutil and adopts it in 23
+  # packages, measured there at 1205.6s → 195.3s (6.2x). It removes the
+  # exact cause of every measurement above — the 155-migrations-per-test
+  # cost — at the source:
+  #
+  #   package                  this PR measured   after #1547
+  #   internal/api                      378.7s        62.2s
+  #   internal/server                   266.0s        18.7s
+  #   internal/backup                   269.1s        59.3s
+  #   internal/auth/sessions   1500s (under -race)     1.0s
+  #   cmd/crewship                      168.0s        28.7s
+  #
+  # ➜ AFTER #1547 MERGES: RE-MEASURE, then delete this allow-list and go
+  #   back to plain `./...` with a deny-list (or no list at all). The
+  #   allow-list exists only because full-suite -race could not finish; at
+  #   6.2x faster fixtures that reason evaporates. Do not treat these 18
+  #   packages as the intended permanent scope — a deny-list is the right
+  #   polarity and should be restored as soon as it is affordable.
+  #   Until then, do not grow this list to chase coverage — grow it only as
+  #   packages become fast enough.
   go-race:
     needs: [merge-conflict-markers]
     name: Go Race
     runs-on: ubuntu-latest
-    # Blocking. The one known finding (internal/telemetry, see the step
-    # below) is excluded by name with a waiver rather than the whole gate
-    # being made advisory, so this check means what it says.
+    # BLOCKING, with no continue-on-error and nothing excluded for being
+    # broken. The single finding this gate produced (internal/telemetry) is
+    # fixed in this same PR, so the check means exactly what it says from
+    # the first run. If it ever goes red, a race landed.
     #
     # Same invariant as the `go` job: cap MUST exceed overhead + the
     # `go test -timeout` below, so Go's goroutine-dumping panic wins the
@@ -594,18 +629,11 @@ jobs:
           # comment on this job for why this is an allow-list and what has
           # to happen before it can go back to `./...`.
           #
-          # internal/telemetry is DELIBERATELY ABSENT. It has a live finding
-          # (4 race warnings, one root cause): the pprof tests hand a bare
-          # *bytes.Buffer to slog.NewTextHandler and then read buf.String()
-          # while the goroutine StartPProfServer spawns at pprof.go:72 is
-          # still logging into it at pprof.go:73 — bytes.Buffer is not
-          # goroutine-safe. Reproduce in 0.65s:
-          #     go test ./internal/telemetry -race -count=1
-          # Not fixed here because this PR establishes the gate and the fix
-          # belongs to a change that owns internal/telemetry (a synchronised
-          # io.Writer for the test logger, or asserting only after a
-          # synchronising shutdown() — not silencing the detector).
-          # ➜ ADD internal/telemetry BACK TO THIS LIST WITH THAT FIX.
+          # internal/telemetry is IN the list. It was the one finding this
+          # gate produced (4 warnings, one root cause: the pprof tests shared
+          # a bare *bytes.Buffer with the goroutine StartPProfServer spawns).
+          # Fixed in this PR with a mutex-guarded sink in pprof_cov_test.go,
+          # so the gate that found it also guards it.
           listfile="${RUNNER_TEMP:-/tmp}/race-pkgs.txt"
           cat > "$listfile" <<'PKGS'
           github.com/crewship-ai/crewship/internal/chatbridge
@@ -624,6 +652,7 @@ jobs:
           github.com/crewship-ai/crewship/internal/presence
           github.com/crewship-ai/crewship/internal/scheduler
           github.com/crewship-ai/crewship/internal/sidecar
+          github.com/crewship-ai/crewship/internal/telemetry
           github.com/crewship-ai/crewship/internal/tokenutil
           github.com/crewship-ai/crewship/internal/ws
           PKGS
