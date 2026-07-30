@@ -29,6 +29,27 @@ pnpm build              # confirm static export still builds (cross-cutting chan
 Multi-instance: a clone named `crewship_N` auto-offsets all ports/data/sockets,
 so parallel agents/worktrees run conflict-free (see `dev.sh`).
 
+## Before you merge: confirm the review happened
+
+Wait ~2–5 min after `gh pr create` for CodeRabbit, and never merge before it
+posts — merging first kills the run ("Review failed — PR is closed") and the
+findings are gone. **A green CodeRabbit check does not mean it reviewed**: when
+rate-limited it posts a notice instead and the status still reads `pass`
+(description `Review rate limited`, not `Review completed`). Check the posted
+bodies, not the check:
+
+```bash
+scripts/review-status.sh              # reviewed / throttled / failed / pending / absent per open PR
+scripts/review-status.sh 1568 --checks   # one PR, plus its skipped-but-green checks
+scripts/review-status.sh --retrigger --dry-run   # queued re-review, spaced by the limit
+```
+
+Exit 3 = at least one PR is not reviewed. Same trap, other producers: a check
+that concluded `skipped` or `neutral` is green without having run, and CodeQL
+findings can live only in a run's annotations. Details and the re-trigger
+policy: [CONTRIBUTING.md → Wait for
+CodeRabbit](CONTRIBUTING.md#wait-for-coderabbit--and-check-that-it-actually-reviewed).
+
 ## Architecture map (`internal/`)
 
 ```text
