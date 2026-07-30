@@ -292,3 +292,42 @@ func TestHandleFileDownload_PermissionDeniedIs500(t *testing.T) {
 		t.Errorf("status = %d, want 500 (EACCES is not a 404)", w.Code)
 	}
 }
+
+// TestCrewIDTraversalForbidden pins the crew-id guard. The id arrives from
+// the request path and every containment check in these handlers is relative
+// to the crew directory — so before this guard, an id of "../.." made the
+// crew directory the check's own base and the check passed trivially,
+// handing out any file the process could read.
+func TestCrewIDTraversalForbidden(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "outputs")
+	if err := os.MkdirAll(base, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	secret := filepath.Join(root, "secret.txt")
+	if err := os.WriteFile(secret, []byte("topsecret"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s := NewServer(base)
+
+	for _, crewID := range []string{"..", "../..", "../", ".", "", "a/b", root} {
+		t.Run("list "+crewID, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.HandleFileList(w, listRequest(crewID, ""))
+			if w.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403 for crew id %q", w.Code, crewID)
+			}
+		})
+		t.Run("download "+crewID, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			s.HandleFileDownload(w, downloadRequest(crewID, "secret.txt"))
+			if w.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403 for crew id %q", w.Code, crewID)
+			}
+			if w.Body.String() == "topsecret" {
+				t.Errorf("crew id %q leaked a file outside the storage tree", crewID)
+			}
+		})
+	}
+}
