@@ -265,13 +265,14 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 
 | From | Allowed To |
 |---|---|
-| `BACKLOG` | `TODO`, `IN_PROGRESS`, `CANCELLED` |
-| `TODO` | `IN_PROGRESS`, `BACKLOG`, `CANCELLED` |
-| `IN_PROGRESS` | `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `TODO` |
-| `REVIEW` | `DONE`, `TODO`, `IN_PROGRESS`, `FAILED`, `CANCELLED` |
+| `BACKLOG` | `TODO`, `IN_PROGRESS`, `CANCELLED`, `DUPLICATE` |
+| `TODO` | `IN_PROGRESS`, `BACKLOG`, `CANCELLED`, `DUPLICATE` |
+| `IN_PROGRESS` | `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `TODO`, `DUPLICATE` |
+| `REVIEW` | `DONE`, `TODO`, `IN_PROGRESS`, `FAILED`, `CANCELLED`, `DUPLICATE` |
 | `DONE` | `BACKLOG` |
 | `FAILED` | `BACKLOG`, `TODO`, `IN_PROGRESS` |
 | `CANCELLED` | `BACKLOG`, `TODO` |
+| `DUPLICATE` | *(none -- terminal)* |
 
 When status changes to `DONE` or `CANCELLED`, `completed_at` is automatically set.
 
