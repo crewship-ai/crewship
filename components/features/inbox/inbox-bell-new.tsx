@@ -47,11 +47,14 @@ export interface InboxBellViewProps {
    *  follow-up is ?item=<id> so the row the popover showed opens directly. */
   onOpenItem: (id: string) => void
   onOpenInbox: () => void
+  /** Marks every unread row read. Undefined hides the affordance entirely. */
+  onMarkAllRead?: (ids: string[]) => void | Promise<void>
 }
 
 const MAX_PER_SECTION = 4
 
-export function InboxBellView({ items, role, onOpenItem, onOpenInbox }: InboxBellViewProps) {
+export function InboxBellView({ items, role, onOpenItem, onOpenInbox, onMarkAllRead }: InboxBellViewProps) {
+  const [marking, setMarking] = useState(false)
   const [open, setOpen] = useState(false)
 
   const { decisions, recent, unread, soonest } = useMemo(() => {
@@ -171,9 +174,23 @@ export function InboxBellView({ items, role, onOpenItem, onOpenInbox }: InboxBel
               </div>
 
               <div className="flex items-center gap-2 border-t border-white/[0.06] px-2 py-1.5">
-                <button type="button" className="type-meta rounded px-2 py-1 text-muted-foreground hover:text-foreground">
-                  Mark all read
-                </button>
+                {onMarkAllRead && unread > 0 && (
+                  <button
+                    type="button"
+                    disabled={marking}
+                    onClick={async () => {
+                      setMarking(true)
+                      try {
+                        await onMarkAllRead(items.filter((i) => i.state === "unread").map((i) => i.id))
+                      } finally {
+                        setMarking(false)
+                      }
+                    }}
+                    className="type-meta rounded px-2 py-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    {marking ? "Marking…" : `Mark ${unread} read`}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => { setOpen(false); onOpenInbox() }}
