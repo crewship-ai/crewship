@@ -47,19 +47,21 @@ fi
 # `(` so a `t.Skipped()` read or a `t.Skip` mention in a comment doesn't count.
 # grep -o counts occurrences rather than lines, so two skips on one line both
 # register.
-COUNT="$(
-  git ls-files -z -- '*_test.go' \
-    | xargs -0 grep -ohE '\bt\.Skip(f|Now)?\(' \
-    | wc -l \
-    | tr -d '[:space:]'
-)"
+SKIP_RE='\bt\.Skip(f|Now)?\('
 
-FILES="$(
+# `|| true` on the grep side is load-bearing under `set -o pipefail`: grep
+# exits 1 when nothing matches and xargs turns that into 123, which would
+# abort the script on the one outcome we are actually working toward (zero
+# skips in the tree). Counting zero is a pass, not an error.
+count_matches() { # <grep-flags...>
   git ls-files -z -- '*_test.go' \
-    | xargs -0 grep -lE '\bt\.Skip(f|Now)?\(' \
+    | { xargs -0 grep "$@" -E "$SKIP_RE" || true; } \
     | wc -l \
     | tr -d '[:space:]'
-)"
+}
+
+COUNT="$(count_matches -oh)"  # occurrences (two on one line both count)
+FILES="$(count_matches -l)"   # files containing at least one
 
 printf 'skip budget: %s t.Skip call(s) across %s test file(s); baseline %s\n' \
   "$COUNT" "$FILES" "$BASELINE"
