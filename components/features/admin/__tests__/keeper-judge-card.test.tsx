@@ -232,6 +232,7 @@ describe("KeeperJudgeCard", () => {
     render(<KeeperJudgeCard workspaceId="ws1" />)
 
     expect(await screen.findByTestId("keeper-judge-endpoint")).toBeDisabled()
+    // No listing yet, so the model is still the free-text field.
     expect(screen.getByTestId("keeper-judge-model")).toBeDisabled()
     expect(screen.getByTestId("keeper-judge-enabled")).toBeDisabled()
     // No Reset either: it is a write.
@@ -262,7 +263,9 @@ describe("KeeperJudgeCard", () => {
 
     const result = await screen.findByTestId("keeper-judge-connect-result")
     expect(result).toHaveTextContent(/connected · 2 models available/i)
-    expect(await screen.findByTestId("keeper-judge-models")).toHaveTextContent("qwen2.5:7b")
+    // The listed models become a dropdown. Chips were fine for two and a wall
+    // for the ten a real endpoint returns.
+    expect(await screen.findByTestId("keeper-judge-model-select")).toBeTruthy()
   })
 
   // One candidate and nothing chosen: picking it for them is the difference
@@ -276,7 +279,11 @@ describe("KeeperJudgeCard", () => {
     })
     fireEvent.click(screen.getByTestId("keeper-judge-connect"))
 
-    await waitFor(() => expect(screen.getByTestId("keeper-judge-model")).toHaveValue("qwen2.5:3b"))
+    // A single candidate is adopted for them — the difference between a setup and
+    // a form. It shows in the dropdown's trigger.
+    await waitFor(() =>
+      expect(screen.getByTestId("keeper-judge-model-select")).toHaveTextContent("qwen2.5:3b"),
+    )
   })
 
   it("says so when the server answers but has nothing pulled", async () => {
@@ -307,17 +314,18 @@ describe("KeeperJudgeCard", () => {
 
   // The most common real misconfiguration, caught while it is still one click
   // from being right instead of at the first denied credential request.
-  it("warns when the typed model is not on that server", async () => {
-    mockRoutes(config(), { models: ["qwen2.5:3b"] })
+  // A saved model that the endpoint does not have is the single most common real
+  // failure and it is silent until a credential request denies. The dropdown
+  // cannot show it as selected — it is not one of the options — so the warning is
+  // what keeps the mistake visible instead of the field just looking empty.
+  it("warns when the configured model is not on that server", async () => {
+    mockRoutes(
+      config({ endpoint: ["http://localhost:11434", "env"], model: ["qwen2.5:7b", "instance"] }),
+      { models: ["qwen2.5:3b"] },
+    )
     render(<KeeperJudgeCard workspaceId="ws1" />)
 
-    fireEvent.change(await screen.findByTestId("keeper-judge-endpoint"), {
-      target: { value: "http://localhost:11434" },
-    })
-    fireEvent.click(screen.getByTestId("keeper-judge-connect"))
-    await screen.findByTestId("keeper-judge-models")
-
-    fireEvent.change(screen.getByTestId("keeper-judge-model"), { target: { value: "qwen2.5:7b" } })
+    await screen.findByTestId("keeper-judge-model-select", {}, { timeout: 3000 })
     expect(screen.getByTestId("keeper-judge-model-missing")).toHaveTextContent(/is not on that server/i)
   })
 
@@ -380,7 +388,7 @@ describe("KeeperJudgeCard", () => {
 
   // The models the endpoint actually serves, one click to use — the thing that
   // removes "type the model name from memory" from the setup.
-  it("offers the endpoint's own models and fills the field on click", async () => {
+  it("offers the endpoint's own models as a dropdown", async () => {
     mockRoutes(
       config({ endpoint: ["http://127.0.0.1:11434", "env"] }),
       { models: ["qwen2.5:7b", "llama3:8b"] },
@@ -388,15 +396,14 @@ describe("KeeperJudgeCard", () => {
     render(<KeeperJudgeCard workspaceId="ws1" />)
     await screen.findByTestId("keeper-judge-endpoint")
 
-    // Discovery is debounced against the endpoint draft.
-    const chips = await screen.findByTestId("keeper-judge-models", {}, { timeout: 3000 })
-    expect(chips).toHaveTextContent("qwen2.5:7b")
-    expect(chips).toHaveTextContent("llama3:8b")
-
-    fireEvent.click(screen.getByRole("button", { name: "llama3:8b" }))
-    expect(screen.getByTestId("keeper-judge-model")).toHaveValue("llama3:8b")
-    // Picking a model is an edit, so the card offers to save it.
-    expect(screen.getByRole("button", { name: /^save$/i })).toBeInTheDocument()
+    // Discovery is debounced against the endpoint draft. Once it lands, the model
+    // control becomes a dropdown over what the server actually has — the whole
+    // point being that a tag is picked rather than typed from memory, since a
+    // typo here is a fail-closed DENY on every credential request.
+    const select = await screen.findByTestId("keeper-judge-model-select", {}, { timeout: 3000 })
+    expect(select).toBeTruthy()
+    // The free-text fallback is gone once there is a list to choose from.
+    expect(screen.queryByTestId("keeper-judge-model")).toBeNull()
   })
 
   it("offers no Test button to a non-manager", async () => {

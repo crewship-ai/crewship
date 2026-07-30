@@ -146,7 +146,10 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
     await openDetail()
     // The row an operator wants to change is the paid one.
     expect(await screen.findByLabelText(/skill review.*provider/i)).toBeTruthy()
-    expect(screen.getByLabelText(/skill review.*model: claude-haiku-4-5/i)).toBeTruthy()
+    // Both are dropdowns now. The model was a button that opened a search dialog,
+    // which meant the control had to be OPENED before it could say what it
+    // contained — an interrogation, on a page whose complaint was exactly that.
+    expect(screen.getByTestId("keeper-aux-model-curator")).toBeTruthy()
   })
 
   it("says which override needs a restart, per row", async () => {

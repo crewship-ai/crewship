@@ -26,6 +26,9 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { adminFetch } from "@/lib/admin-api"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -517,21 +520,14 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
         label={<StepLabel n={1}>Model server</StepLabel>}
         description={
           <WithProvenance source={cfg.judge_endpoint_url?.source ?? "default"}>
-            {/* "this machine" was the wrong words in a browser. Read from a
-                laptop it means the laptop; the dial happens from the Crewship
-                SERVER, which is usually a different box entirely — and an
-                operator running Ollama locally reasonably concluded that
-                localhost:11434 was their own and could not understand why it
-                worked. Name the machine that dials, every time. */}
-            Where the judge asks — dialled <strong className="text-foreground/80">by the Crewship
-            server</strong>, not by your browser.
-            <code className="mx-1 px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">http://localhost:11434</code>
-            means Ollama running on the server itself; Ollama on your own laptop needs that
-            laptop&apos;s LAN address, e.g.
-            <code className="mx-1 px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">http://192.168.1.20:11434</code>,
-            and <code className="px-1 rounded bg-muted/60 border border-border/60 text-[10px] font-mono">OLLAMA_HOST</code> set
-            so it listens on more than loopback. Repoints the judge only — the episodic embedder and
-            the chat summarizer keep the server&apos;s own URL.
+            {/* Two sentences, not eight. "this machine" was the wrong words in a
+                browser — the dial happens from the SERVER — and that one fact is
+                worth saying every time; the rest (LAN address, OLLAMA_HOST) is
+                troubleshooting, and it belongs where the trouble appears, which
+                is the Connect error. */}
+            Dialled <strong className="text-foreground/80">by the Crewship server</strong>, not by your
+            browser — so <code className="px-1 rounded bg-muted/60 border border-border/60 font-mono">localhost</code> means
+            the server&apos;s own Ollama. Press Connect to see what it has.
           </WithProvenance>
         }
       >
@@ -609,53 +605,56 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
         description={
           <WithProvenance source={cfg.judge_model?.source ?? "default"}>
             {models.length > 0
-              ? "Pulled on that server. Pick one — or type a tag if you are about to pull it."
-              : "Press Connect to list what that server has. Clear the field to inherit the server's model."}
+              ? "What that server has pulled."
+              : "Press Connect to list what that server has."}
           </WithProvenance>
         }
       >
         <span className="flex flex-col items-end gap-1.5">
-          <Input
-            type="text"
-            value={form.draft.model}
-            onChange={(e) => form.set("model", e.target.value)}
-            disabled={!canEdit}
-            placeholder="qwen2.5:7b"
-            className="h-8 w-[240px] text-xs font-mono"
-            aria-label="Judge model"
-            data-testid="keeper-judge-model"
-          />
-          {models.length > 0 && (
-            <span className="flex flex-col items-end gap-1" data-testid="keeper-judge-models">
-              <span className="text-[10px] text-muted-foreground/70">
-                on this server — click to use
-              </span>
-              <span className="flex flex-wrap justify-end gap-1 max-w-[21rem]">
+          {/* A dropdown once we know what the server has — the conventional
+              control for "one of these", and it scales: this endpoint returned
+              ten models, which as chips was a wall and as a list is a list. The
+              free-text field stays for the case the dropdown cannot serve, which
+              is a tag you are about to pull. */}
+          {models.length > 0 ? (
+            <Select
+              value={models.includes(form.draft.model.trim()) ? form.draft.model.trim() : undefined}
+              onValueChange={(v) => form.set("model", v)}
+              disabled={!canEdit}
+            >
+              <SelectTrigger
+                className="h-8 w-[240px] text-xs font-mono"
+                aria-label="Judge model"
+                data-testid="keeper-judge-model-select"
+              >
+                <SelectValue placeholder="Pick a model" />
+              </SelectTrigger>
+              <SelectContent>
                 {models.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => form.set("model", m)}
-                    disabled={!canEdit}
-                    className={cn(
-                      "px-1.5 h-[19px] rounded border text-[10px] font-mono transition-colors",
-                      m === form.draft.model.trim()
-                        ? "border-primary/50 bg-primary/[0.12] text-primary/90"
-                        : "border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground hover:border-border",
-                    )}
-                  >
-                    {m}
-                  </button>
+                  <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
                 ))}
-              </span>
-            </span>
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              type="text"
+              value={form.draft.model}
+              onChange={(e) => form.set("model", e.target.value)}
+              disabled={!canEdit}
+              placeholder="qwen2.5:7b"
+              className="h-8 w-[240px] text-xs font-mono"
+              aria-label="Judge model"
+              data-testid="keeper-judge-model"
+            />
           )}
           {/* A model that is not on the endpoint is the single most common real
               failure, and it is silent until a credential request denies. Say it
-              at the field, while it is still one click from being right. */}
+              at the field, while it is still one click from being right — and keep
+              the typed value visible, because clearing it would hide the mistake
+              rather than name it. */}
           {models.length > 0 && form.draft.model.trim() !== "" && !models.includes(form.draft.model.trim()) && (
-            <span className="text-[10px] text-warn max-w-[21rem] text-right leading-snug" data-testid="keeper-judge-model-missing">
-              {form.draft.model.trim()} is not on that server — pull it there, or pick one above.
+            <span className="text-[11px] text-warn max-w-[21rem] text-right leading-snug" data-testid="keeper-judge-model-missing">
+              <span className="font-mono">{form.draft.model.trim()}</span> is not on that server — pull it there, or pick one from the list.
             </span>
           )}
           {models.length === 0 && modelsError && (

@@ -1,16 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { RefreshCw, ChevronsUpDown, Check, Loader2 } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { adminFetch } from "@/lib/admin-api"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
-} from "@/components/ui/command"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -469,7 +466,44 @@ function SlotEditor({
   probing: boolean
   probeResult?: { ok: boolean; detail: string }
 }) {
-  const [pickerOpen, setPickerOpen] = useState(false)
+  // The models this slot's provider can serve. Loaded with the row rather than
+  // behind a dialog: a control that has to be OPENED before it can tell you what
+  // it contains is a control you have to interrogate, and the whole complaint
+  // about this page was having to interrogate it.
+  const [catalogue, setCatalogue] = useState<string[]>([])
+  const [catalogueError, setCatalogueError] = useState<string | null>(null)
+  const provider = slot.provider.value
+  useEffect(() => {
+    if (!workspaceId || !provider) { setCatalogue([]); return }
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const res = provider === "ollama"
+          ? await adminFetch("/api/v1/admin/keeper/judge/models", workspaceId, { signal: controller.signal })
+          : await apiFetch(
+              `/api/v1/models?provider=${encodeURIComponent(provider.toUpperCase())}&workspace_id=${encodeURIComponent(workspaceId)}`,
+              { signal: controller.signal },
+            )
+        const body = await res.json().catch(() => ({}))
+        if (controller.signal.aborted) return
+        if (!res.ok || body?.error) {
+          setCatalogue([])
+          setCatalogueError(body?.error ?? body?.detail ?? null)
+          return
+        }
+        setCatalogueError(null)
+        setCatalogue(
+          provider === "ollama"
+            ? ((body?.models ?? []) as string[])
+            : ((body?.models ?? []) as { id: string }[]).map((m) => m.id),
+        )
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return
+        setCatalogue([])
+      }
+    })()
+    return () => controller.abort()
+  }, [provider, workspaceId])
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -479,10 +513,10 @@ function SlotEditor({
           disabled={busy}
           onValueChange={(next) => {
             if (next === slot.provider.value) return
-            // A provider alone cannot resolve (the builder needs both, and the
-            // server refuses it), so changing provider opens the model picker
-            // rather than saving a half-configured slot.
-            void onSave(slot.slot, { provider: next, model: slot.model.value }).then(() => setPickerOpen(true))
+            // A provider alone cannot resolve — the builder needs both, and the
+            // server refuses it — so the current model rides along and the
+            // dropdown beside this reloads with what the new provider offers.
+            void onSave(slot.slot, { provider: next, model: slot.model.value })
           }}
         >
           <SelectTrigger size="sm" className="h-7 w-[7.5rem] text-[11px]" aria-label={`${slot.label} provider`}>
@@ -495,21 +529,43 @@ function SlotEditor({
           </SelectContent>
         </Select>
 
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => setPickerOpen(true)}
-          aria-label={`${slot.label} model: ${slot.model.value || "not set"}`}
-          className={cn(
-            "flex h-7 min-w-[10rem] items-center gap-1.5 rounded-lg border border-border bg-background px-2.5",
-            "text-left text-[11px] font-mono text-foreground outline-none transition-[border-color]",
-            "hover:border-foreground/25 focus:border-primary disabled:opacity-60",
-          )}
+        <Select
+          value={catalogue.includes(slot.model.value) ? slot.model.value : undefined}
+          disabled={busy || catalogue.length === 0}
+          onValueChange={(next) => {
+            if (next === slot.model.value) return
+            void onSave(slot.slot, { provider: slot.provider.value, model: next })
+          }}
         >
-          <span className="min-w-0 flex-1 truncate">{slot.model.value || "choose a model"}</span>
-          <ChevronsUpDown className="size-3 shrink-0 text-muted-foreground" />
-        </button>
+          <SelectTrigger
+            size="sm"
+            className="h-7 min-w-[11rem] text-[11px] font-mono"
+            aria-label={`${slot.label} model`}
+            data-testid={`keeper-aux-model-${slot.slot}`}
+          >
+            <SelectValue placeholder={catalogue.length === 0 ? "loading…" : "choose a model"} />
+          </SelectTrigger>
+          <SelectContent>
+            {catalogue.map((m) => (
+              <SelectItem key={m} value={m} className="text-[11px] font-mono">{m}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
+
+      {/* The configured model is not one the provider offers. Silent until a
+          sweep fails, so it is said here — and the value is spelled out, because
+          the dropdown cannot show a selection that is not in its list. */}
+      {slot.model.value !== "" && catalogue.length > 0 && !catalogue.includes(slot.model.value) && (
+        <span className="max-w-[22rem] text-right text-[11px] leading-snug text-warn">
+          <span className="font-mono">{slot.model.value}</span> is not offered by {slot.provider.value} — pick one from the list.
+        </span>
+      )}
+      {catalogueError && (
+        <span className="max-w-[22rem] text-right text-[11px] leading-snug text-muted-foreground">
+          {catalogueError}
+        </span>
+      )}
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
         {/* One real evaluation, on request. Explicitly a button rather than
@@ -553,115 +609,6 @@ function SlotEditor({
         </span>
       )}
 
-      <ModelPicker
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        provider={slot.provider.value}
-        workspaceId={workspaceId}
-        current={slot.model.value}
-        onPick={(id) => void onSave(slot.slot, { provider: slot.provider.value, model: id })}
-      />
     </div>
-  )
-}
-
-/**
- * The model list for one provider.
- *
- * Two sources, because there are two kinds of provider here: a hosted one is
- * listed by GET /api/v1/models (live from the workspace credential, curated
- * fallback when there is no key) — the same endpoint the crew canvas picker
- * uses, so the two cannot drift into offering different Claude ids. A local
- * one is whatever the instance judge's endpoint actually serves, which only
- * the judge-models probe can answer.
- */
-function ModelPicker({
-  open, onOpenChange, provider, workspaceId, current, onPick,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  provider: string
-  workspaceId: string | null
-  current: string
-  onPick: (id: string) => void
-}) {
-  const [models, setModels] = useState<string[] | null>(null)
-  const [note, setNote] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    const controller = new AbortController()
-    const run = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        if (provider === "ollama") {
-          const res = await adminFetch("/api/v1/admin/keeper/judge/models", workspaceId, { signal: controller.signal })
-          const body = await res.json()
-          if (controller.signal.aborted) return
-          if (body?.error) { setError(body.error); setModels([]); return }
-          setModels(Array.isArray(body?.models) ? body.models : [])
-          setNote(body?.endpoint ? `Served by ${body.endpoint}` : "")
-        } else {
-          const qs = new URLSearchParams({ provider: provider.toUpperCase() })
-          if (workspaceId) qs.set("workspace_id", workspaceId)
-          const res = await apiFetch(`/api/v1/models?${qs.toString()}`, { signal: controller.signal })
-          if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`)
-          const body = await res.json()
-          if (controller.signal.aborted) return
-          setModels((body?.models ?? []).map((m: { id: string }) => m.id))
-          setNote(body?.source === "live"
-            ? "Listed live from this workspace's credential."
-            : "No usable credential for this provider — showing the known set.")
-        }
-      } catch (err) {
-        if ((err as { name?: string })?.name === "AbortError") return
-        // "No models" and "we could not ask" are different answers, and only
-        // the second one tells the operator what to fix.
-        setError(err instanceof Error ? err.message : "Could not list models")
-        setModels([])
-      } finally {
-        if (!controller.signal.aborted) setLoading(false)
-      }
-    }
-    void run()
-    return () => controller.abort()
-  }, [open, provider, workspaceId])
-
-  return (
-    <CommandDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={`${provider || "provider"} models`}
-      description={note || "Models this provider can serve."}
-    >
-      <CommandInput placeholder="Search models…" />
-      <CommandList>
-        {loading && (
-          <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            Asking {provider || "the provider"}…
-          </div>
-        )}
-        {!loading && error && <div className="px-4 py-6 text-xs text-destructive">{error}</div>}
-        {!loading && !error && <CommandEmpty>No model matches.</CommandEmpty>}
-        {!loading && !error && models && models.length > 0 && (
-          <CommandGroup>
-            {models.map((id) => (
-              <CommandItem
-                key={id}
-                value={id}
-                onSelect={() => { onOpenChange(false); if (id !== current) onPick(id) }}
-              >
-                <Check className={cn("size-3.5 shrink-0", id === current ? "opacity-100 text-primary" : "opacity-0")} />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{id}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        )}
-      </CommandList>
-    </CommandDialog>
   )
 }
