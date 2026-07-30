@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func newSilentLogger() *slog.Logger {
@@ -638,16 +638,7 @@ func TestHandleContainerFileList_NoContainer(t *testing.T) {
 func TestHandleContainerGitLog_CrewNotFound(t *testing.T) {
 	t.Parallel()
 	cfg := silentCfg()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "git.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-
-	if err := database.Migrate(context.Background(), db.DB, newSilentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{Container: &mockContainer{}, DB: db.DB})
 	s.startedAt = time.Now()

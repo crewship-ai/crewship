@@ -312,9 +312,20 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 	var toolCalls []ToolCall
 	var currentToolID, currentToolName string
 	var currentToolInput strings.Builder
+	// sawMessageStop tracks whether the terminal "message_stop" event ever
+	// arrived. A connection can close cleanly (plain io.EOF, scanner.Err() ==
+	// nil) mid-generation — a network blip or load-shedding event — and
+	// without this flag that looked identical to a normal completion, so the
+	// caller got nil error with truncated content. See the check after the
+	// scan loop below.
+	var sawMessageStop bool
 
 	// 4KB initial (SSE lines are small), 1MB max for tool results.
-	fnErr, scanErr := forEachSSEData(r, 4*1024, 1024*1024, func(data string) (bool, error) {
+	// Real Anthropic streams end on "message_stop" and don't send "[DONE]" at
+	// all, so the sentinel isn't a signal this parser needs -- discarded here,
+	// but still part of forEachSSEData's return shape since OpenAI's parser
+	// below relies on it.
+	_, fnErr, scanErr := forEachSSEData(r, 4*1024, 1024*1024, func(data string) (bool, error) {
 		var event struct {
 			Type         string `json:"type"`
 			Index        int    `json:"index"`
@@ -338,12 +349,28 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			} `json:"usage"`
+			Error *struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			return false, nil
 		}
 
 		switch event.Type {
+		case "error":
+			// Anthropic's own explicit error event (e.g. overloaded_error,
+			// api_error) mid-stream. Surface its real type/message instead of
+			// letting the scan end "cleanly" and fall through to the generic
+			// "ended without message_stop" classification below -- that would
+			// still be an error, but a misleading one that hides what the
+			// provider actually said.
+			if event.Error != nil {
+				return false, fmt.Errorf("anthropic stream error (%s): %s", event.Error.Type, event.Error.Message)
+			}
+			return false, fmt.Errorf("anthropic stream error event with no error payload")
+
 		case "message_start":
 			// Anthropic ships the full usage block (incl. cache token counts)
 			// on message_start. Both the streaming caller's final.* slots and
@@ -408,7 +435,7 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 			}
 
 		case "message_stop":
-			// stream complete
+			sawMessageStop = true
 		}
 		return false, nil
 	})
@@ -418,6 +445,21 @@ func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error)
 
 	final.Content = strings.Join(textParts, "")
 	final.ToolCalls = toolCalls
+
+	// The scan loop ended without an fnErr. If it also ended without a real
+	// scanner error, that normally means a clean io.EOF -- which is exactly
+	// what a legitimate finish looks like AND exactly what a mid-generation
+	// connection drop looks like. sawMessageStop is what tells them apart: a
+	// real completion always emits "message_stop" before Anthropic closes the
+	// connection. Without this, a cut stream silently returned nil error with
+	// truncated content as if it were a full response.
+	//
+	// A genuine scanErr (including context.Canceled from a caller-initiated
+	// cancellation) is left untouched here and returned as-is below, so
+	// cancellation semantics are unchanged.
+	if scanErr == nil && !sawMessageStop {
+		scanErr = fmt.Errorf("anthropic stream ended without a message_stop event (connection closed unexpectedly after %d bytes of content): %w", len(final.Content), io.ErrUnexpectedEOF)
+	}
 
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {
 		return final, err

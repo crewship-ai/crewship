@@ -68,6 +68,28 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// parity with Update/Delete.
 	effective := role
 	if req.CrewID != nil && *req.CrewID != "" {
+		// Foreign-workspace guard, mirrors the crewExists check
+		// agents_update.go already runs before touching crew_id: a
+		// crew_id that doesn't belong to the caller's workspace must
+		// be rejected here, before it's used for the per-crew RBAC
+		// lookup below, the license check, the LEAD uniqueness query,
+		// or the INSERT. Without this, CrewRoleFromDB's "" (caller
+		// isn't a member of the crew's workspace) falls through to
+		// the caller's own workspace role, canRole passes, and the
+		// rest of the handler happily writes a row where workspace_id
+		// (caller's) and crew_id (foreign) disagree.
+		crewFound, existsErr := crewExists(r.Context(), h.db, *req.CrewID, workspaceID)
+		if existsErr != nil {
+			h.logger.Error("agent.create: crew exists check", "error", existsErr,
+				"crew_id", *req.CrewID, "user_id", callerUserID)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if !crewFound {
+			replyError(w, http.StatusBadRequest, "Invalid crew_id")
+			return
+		}
+
 		crewRole, crewErr := CrewRoleFromDB(r.Context(), h.db, callerUserID, *req.CrewID)
 		if crewErr != nil {
 			h.logger.Error("agent.create: crew role lookup", "error", crewErr,

@@ -405,7 +405,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		}
 		ub.Set("status", req.Status)
 		statusChanged = true
-		if req.Status == "DONE" || req.Status == "CANCELLED" {
+		if req.Status == "DONE" || req.Status == "CANCELLED" || req.Status == "DUPLICATE" {
 			ub.Set("completed_at", time.Now().UTC().Format(time.RFC3339))
 		}
 	}

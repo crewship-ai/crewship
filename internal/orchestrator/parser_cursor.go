@@ -190,6 +190,11 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 		if len(msg.Usage) > 0 {
 			_ = json.Unmarshal(msg.Usage, &usage)
 		}
+		// The result envelope carries the outcome twice — `subtype`
+		// (success/error, per cursor.com/docs/cli/reference/output-format) and
+		// `is_error`. Trust either: a build that sets only the subtype would
+		// otherwise report a failed run as a clean success. Scoped to this arm,
+		// so the tool_call arm's own `subtype` (started/completed) is untouched.
 		handler(AgentEvent{
 			Type:    "result",
 			Content: msg.Result,
@@ -197,7 +202,7 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 				"subtype":         msg.Subtype,
 				"duration_ms":     msg.DurationMs,
 				"duration_api_ms": msg.DurationAPIMs,
-				"is_error":        msg.IsError,
+				"is_error":        msg.IsError || msg.Subtype == "error",
 				"session_id":      msg.SessionID,
 				"request_id":      msg.RequestID,
 				"usage":           usage,

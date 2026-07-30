@@ -2,7 +2,6 @@ package bundled_test
 
 import (
 	"context"
-	"database/sql"
 	"io/fs"
 	"log/slog"
 	"strings"
@@ -10,9 +9,9 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/skills/bundled"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // TestEmbedFS_ContainsAnthropicSkills proves the //go:embed directive
@@ -93,20 +92,13 @@ func TestRoutineAuthorSkill_ParsesWithRequiredSections(t *testing.T) {
 // skills API) can link it to the crew Leads.
 func TestInstall_PopulatesCrewshipVendor(t *testing.T) {
 	t.Parallel()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
+	db := testutil.MigratedSQLDB(t)
 	logger := slog.New(slog.NewTextHandler(discardWriter{}, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	if err := bundled.Install(context.Background(), db, logger); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	var category, spdx, maturity, source string
-	err = db.QueryRow(`
+	err := db.QueryRow(`
 		SELECT category, spdx_license, maturity, source
 		FROM skills WHERE vendor = 'crewship' AND slug = 'routine-author'
 	`).Scan(&category, &spdx, &maturity, &source)
@@ -124,16 +116,8 @@ func TestInstall_PopulatesCrewshipVendor(t *testing.T) {
 // metadata applied (vendor, license, maturity).
 func TestInstall_PopulatesSkillsTable(t *testing.T) {
 	t.Parallel()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
-
+	db := testutil.MigratedSQLDB(t)
 	logger := slog.New(slog.NewTextHandler(discardWriter{}, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 
 	if err := bundled.Install(context.Background(), db, logger); err != nil {
 		t.Fatalf("install: %v", err)
@@ -149,7 +133,7 @@ func TestInstall_PopulatesSkillsTable(t *testing.T) {
 
 	// Sample one row to confirm columns populated.
 	var slug, vendor, spdx, maturity, scanStatus, source string
-	err = db.QueryRow(`
+	err := db.QueryRow(`
 		SELECT slug, vendor, spdx_license, maturity, scan_status, source
 		FROM skills WHERE vendor = 'anthropic' AND slug = 'skill-creator'
 	`).Scan(&slug, &vendor, &spdx, &maturity, &scanStatus, &source)
@@ -168,15 +152,8 @@ func TestInstall_PopulatesSkillsTable(t *testing.T) {
 // query ever regresses to slug-only the count would balloon.
 func TestInstall_Idempotent(t *testing.T) {
 	t.Parallel()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	defer db.Close()
+	db := testutil.MigratedSQLDB(t)
 	logger := slog.New(slog.NewTextHandler(discardWriter{}, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	if err := bundled.Install(context.Background(), db, logger); err != nil {
 		t.Fatalf("install 1: %v", err)
 	}
