@@ -100,6 +100,10 @@ func TestRunAgent_InBandResultError_MarksRunFailed(t *testing.T) {
 		// into the user-facing error, so chat/journal show a cause rather
 		// than a bare "failed".
 		wantDetail string
+		// notDetail, when set, must NOT appear in the error — used where the
+		// stream carries both a cause and the agent's answer, and only the
+		// cause is a legitimate explanation of the failure.
+		notDetail string
 	}{
 		{
 			name:    "claude result is_error",
@@ -129,10 +133,43 @@ func TestRunAgent_InBandResultError_MarksRunFailed(t *testing.T) {
 			wantDetail: "model refused to continue",
 		},
 		{
+			// Gemini's canonical failed-result shape carries the cause in
+			// `error`, NOT in `response` — `response` is the model's answer.
+			// (An earlier version of this row used `response` to prove the
+			// detail survived; that shape is not one gemini-cli emits, and it
+			// hid the fact that the real cause was being dropped entirely.
+			// parser_gemini_test.go:114 pins the canonical shape.)
 			name:       "gemini result status=error",
 			adapter:    "GEMINI_CLI",
-			stream:     `{"type":"result","status":"error","response":"quota exhausted","stats":{}}` + "\n",
-			wantDetail: "quota exhausted",
+			stream:     `{"type":"result","status":"error","error":"429 quota exceeded for project X","stats":{}}` + "\n",
+			wantDetail: "429 quota exceeded for project X",
+		},
+		{
+			// Same failure with a partial answer alongside the cause. The
+			// answer must NOT be reported as the reason the run failed.
+			name:    "gemini result status=error with partial response",
+			adapter: "GEMINI_CLI",
+			stream: `{"type":"result","status":"error","error":"429 quota exceeded",` +
+				`"response":"partial answer so far","stats":{}}` + "\n",
+			wantDetail: "429 quota exceeded",
+			notDetail:  "partial answer so far",
+		},
+		{
+			// Droid's result envelope with the camelCase spelling of the flag.
+			// Pre-fix this decoded into the tool_result field and the run read
+			// as a clean success.
+			name:       "droid result isError (camelCase on result envelope)",
+			adapter:    "FACTORY_DROID",
+			stream:     `{"type":"result","subtype":"error","isError":true,"result":"provider auth failed"}` + "\n",
+			wantDetail: "provider auth failed",
+		},
+		{
+			// Cursor states the outcome twice; a build that sets only the
+			// subtype must still fail the run.
+			name:       "cursor result subtype=error without is_error",
+			adapter:    "CURSOR_CLI",
+			stream:     `{"type":"result","subtype":"error","result":"session aborted upstream","request_id":"req-2"}` + "\n",
+			wantDetail: "session aborted upstream",
 		},
 		{
 			// OpenCode never stamps is_error on its result envelopes; its only
@@ -158,7 +195,43 @@ func TestRunAgent_InBandResultError_MarksRunFailed(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.wantDetail) {
 				t.Errorf("error %q does not carry the CLI's own message %q", err.Error(), tc.wantDetail)
 			}
+			if tc.notDetail != "" && strings.Contains(err.Error(), tc.notDetail) {
+				t.Errorf("error %q reports the agent's answer %q as the failure reason", err.Error(), tc.notDetail)
+			}
 		})
+	}
+}
+
+// Claude Code's turn cap is stamped on every run (--max-turns is always passed;
+// unattended routine runs get the tighter RoutineMaxTurns), so `error_max_turns`
+// is the in-band failure operators will meet most often — and it is the one the
+// generic "check the journal for that event" copy serves worst, because the fix
+// is a specific knob the user can turn. The message must name the cap and the
+// two ways out, and must NOT quote the `result` field: on this subtype that
+// field holds partial work, not a cause.
+func TestRunAgent_InBandMaxTurns_NamesTheCapNotTheJournal(t *testing.T) {
+	const partial = "Here is what I found so far, still working"
+	status, err := runInBandCase(t, "CLAUDE_CODE",
+		`{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":20,`+
+			`"result":"`+partial+`"}`+"\n")
+
+	if status != "error" {
+		t.Errorf("run status = %q, want %q", status, "error")
+	}
+	if err == nil {
+		t.Fatal("expected a non-nil error for a turn-cap failure")
+	}
+	msg := err.Error()
+	for _, want := range []string{"turn cap", "20 turns", "max_turns"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q is missing %q — the user cannot tell which limit they hit or how to raise it", msg, want)
+		}
+	}
+	if strings.Contains(msg, "check the journal") {
+		t.Errorf("error %q fell back to the generic copy for a cause we can name exactly", msg)
+	}
+	if strings.Contains(msg, partial) {
+		t.Errorf("error %q quotes the agent's partial work as the failure reason", msg)
 	}
 }
 
@@ -210,6 +283,24 @@ func TestRunAgent_ToolLevelError_KeepsRunCompleted(t *testing.T) {
 			adapter: "CURSOR_CLI",
 			stream: `{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"readToolCall":{}}}` + "\n" +
 				`{"type":"result","subtype":"success","is_error":false,"result":"done"}` + "\n",
+		},
+		{
+			// Guards the Cursor widening (subtype=error now fails the run):
+			// `subtype` also exists on tool_call envelopes, and a failing tool
+			// there must stay tool-scoped. Only the `result` arm was widened.
+			name:    "cursor tool_call subtype=error then success",
+			adapter: "CURSOR_CLI",
+			stream: `{"type":"tool_call","subtype":"error","call_id":"c1","tool_call":{"function":{}}}` + "\n" +
+				`{"type":"result","subtype":"success","is_error":false,"result":"done"}` + "\n",
+		},
+		{
+			// Guards the Droid widening (camelCase isError on `result` now
+			// fails the run): the identical spelling on a tool_result must not,
+			// and the `completion` envelope still reports success.
+			name:    "droid camelCase isError tool_result then completion",
+			adapter: "FACTORY_DROID",
+			stream: `{"type":"tool_result","toolId":"t1","isError":true,"value":"grep: no match"}` + "\n" +
+				`{"type":"completion","finalText":"done","numTurns":2,"durationMs":10}` + "\n",
 		},
 	}
 

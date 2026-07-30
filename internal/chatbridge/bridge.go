@@ -1021,12 +1021,19 @@ func (b *Bridge) persistInBandFailureTurn(
 		role = conversation.RoleSystem
 		content = reason
 	}
+	// Copy before appending: `parts` is the accumulator's slice, and appending
+	// into spare capacity would write through to the array it still owns. No
+	// consequence today (the caller is done with it), but it is the kind of trap
+	// that only shows up once someone reuses the accumulator afterwards.
+	failParts := make([]conversation.Part, 0, len(parts)+1)
+	failParts = append(failParts, parts...)
+	failParts = append(failParts, conversation.Part{Type: "error", Content: reason})
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
 		AgentID:   info.AgentID,
 		Role:      role,
 		Content:   content,
-		Parts:     append(parts, conversation.Part{Type: "error", Content: reason}),
+		Parts:     failParts,
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		b.logger.Error("failed to persist in-band failure turn", "error", err, "chat_id", chatID)

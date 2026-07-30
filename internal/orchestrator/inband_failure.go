@@ -73,7 +73,17 @@ type inBandFailure struct {
 	seen    bool
 	subtype string
 	message string
+	turns   int
 }
+
+// maxTurnsSubtype is Claude Code's result subtype for "the agent-loop turn cap
+// was reached before the task finished". It gets its own copy in Err() because
+// the generic message ("check the journal") tells a user nothing about a limit
+// they can actually raise — and because the cap is stamped on every run
+// (adapter_claude.go passes --max-turns unconditionally; unattended routine runs
+// carry the tighter RoutineMaxTurns), so this is the in-band failure operators
+// are most likely to meet.
+const maxTurnsSubtype = "error_max_turns"
 
 // observe inspects one streamed AgentEvent and records the first run-level
 // failure it carries. Safe to call for every event; non-terminal events and
@@ -89,19 +99,45 @@ func (f *inBandFailure) observe(e AgentEvent) {
 			return
 		}
 		subtype, _ := meta["subtype"].(string)
-		f.record(subtype, e.Content)
+		// Prefer an explicit error string over the event content. Content is
+		// the agent's ANSWER (Gemini puts msg.Response there, Claude
+		// msg.Result), and on a failed turn an answer is not a reason —
+		// reporting a partial answer as the cause of the failure is worse than
+		// saying nothing, because it reads as if the agent's own words were the
+		// error. Parsers stamp meta["error"] with the actual cause when they
+		// have one (see parser_gemini.go).
+		detail := e.Content
+		if s, _ := meta["error"].(string); s != "" {
+			detail = s
+		}
+		f.record(subtype, detail, metaInt(meta, "num_turns"))
 	case "error":
-		f.record("", e.Content)
+		f.record("", e.Content, 0)
 	}
 }
 
-func (f *inBandFailure) record(subtype, message string) {
+// metaInt reads an integer out of event metadata, tolerating both the in-process
+// int (parsers build the map directly) and the float64 a JSON round-trip yields.
+func metaInt(meta map[string]interface{}, key string) int {
+	switch v := meta[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
+}
+
+func (f *inBandFailure) record(subtype, message string, turns int) {
 	if f.seen {
 		return
 	}
 	f.seen = true
 	f.subtype = subtype
 	f.message = strings.TrimSpace(message)
+	f.turns = turns
 }
 
 // inBandDetailCap bounds how much of the CLI's own message we fold into the
@@ -118,6 +154,19 @@ const inBandDetailCap = 300
 func (f *inBandFailure) Err() error {
 	if !f.seen {
 		return nil
+	}
+	// Turn cap: name the limit and the two ways out. Deliberately does NOT
+	// quote f.message — on this subtype the CLI puts its partial answer in
+	// `result`, which is work-in-progress, not a cause.
+	if f.subtype == maxTurnsSubtype {
+		if f.turns > 0 {
+			return NewInBandFailureError(fmt.Sprintf(
+				"agent stopped at its turn cap (%d turns) before finishing the task — raise max_turns for this run, or split the work into smaller steps",
+				f.turns,
+			))
+		}
+		return NewInBandFailureError(
+			"agent stopped at its turn cap before finishing the task — raise max_turns for this run, or split the work into smaller steps")
 	}
 	detail := f.message
 	if len(detail) > inBandDetailCap {
