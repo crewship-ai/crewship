@@ -156,7 +156,7 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `comment_count` | integer | Number of comments |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
-| `completed_at` | string? | When issue was completed/cancelled |
+| `completed_at` | string? | When issue was completed/cancelled/marked duplicate |
 
 </Accordion>
 
@@ -265,15 +265,16 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 
 | From | Allowed To |
 |---|---|
-| `BACKLOG` | `TODO`, `IN_PROGRESS`, `CANCELLED` |
-| `TODO` | `IN_PROGRESS`, `BACKLOG`, `CANCELLED` |
-| `IN_PROGRESS` | `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `TODO` |
-| `REVIEW` | `DONE`, `TODO`, `IN_PROGRESS`, `FAILED`, `CANCELLED` |
+| `BACKLOG` | `TODO`, `IN_PROGRESS`, `CANCELLED`, `DUPLICATE` |
+| `TODO` | `IN_PROGRESS`, `BACKLOG`, `CANCELLED`, `DUPLICATE` |
+| `IN_PROGRESS` | `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `TODO`, `DUPLICATE` |
+| `REVIEW` | `DONE`, `TODO`, `IN_PROGRESS`, `FAILED`, `CANCELLED`, `DUPLICATE` |
 | `DONE` | `BACKLOG` |
 | `FAILED` | `BACKLOG`, `TODO`, `IN_PROGRESS` |
 | `CANCELLED` | `BACKLOG`, `TODO` |
+| `DUPLICATE` | *(none -- terminal)* |
 
-When status changes to `DONE` or `CANCELLED`, `completed_at` is automatically set.
+When status changes to `DONE`, `CANCELLED`, or `DUPLICATE`, `completed_at` is automatically set.
 
 Significant changes (status, assignee, priority) are logged as activity entries.
 
@@ -435,7 +436,7 @@ Apply a single set of field updates to up to 100 issues at once. Used by the boa
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `ids` | string[] | Yes | 1-100 mission ids. Ids outside the caller's workspace are skipped silently. |
-| `updates.status` | string | No | New status. Invalid transitions are skipped per-issue (not 400). When `DONE` or `CANCELLED`, `completed_at` is set automatically. |
+| `updates.status` | string | No | New status. Invalid transitions are skipped per-issue (not 400). When `DONE`, `CANCELLED`, or `DUPLICATE`, `completed_at` is set automatically. |
 | `updates.priority` | string | No | Priority level. |
 | `updates.assignee_type` | string | No | `"user"` or `"agent"`. |
 | `updates.assignee_id` | string | No | Assignee id. |

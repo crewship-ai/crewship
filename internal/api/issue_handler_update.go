@@ -46,11 +46,13 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up current status
+	// Look up current status (and current assignee_type — needed as a
+	// fallback below when a PATCH sets assignee_id but not assignee_type).
 	var missionID, currentStatus string
+	var currentAssigneeType sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &currentStatus)
+		`SELECT id, status, assignee_type FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &currentStatus, &currentAssigneeType)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -75,6 +77,32 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("assignee_type", *req.AssigneeType)
 	}
 	if req.AssigneeID != nil {
+		if *req.AssigneeID != "" {
+			// Workspace check matches the same gate in Create/parent_issue_id —
+			// pre-fix a caller could PATCH assignee_id to point at another
+			// workspace's user or agent, and the read path would then hand
+			// that foreign identity's display name to anyone viewing the
+			// issue. assignee_type may arrive in the same request or be left
+			// unset (client only changing the assignee, not the type); fall
+			// back to the row's current assignee_type in that case.
+			assigneeType := currentAssigneeType.String
+			if req.AssigneeType != nil {
+				assigneeType = *req.AssigneeType
+			}
+			if assigneeType != "user" && assigneeType != "agent" {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
+				return
+			}
+			ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.AssigneeID, wsID)
+			if vErr != nil {
+				internalError(w, r, h.logger, "validate assignee_id", vErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+				return
+			}
+		}
 		ub.Set("assignee_id", *req.AssigneeID)
 	}
 	if req.DueDate != nil {
@@ -175,7 +203,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("status", newStatus)
 
-		if newStatus == "DONE" || newStatus == "CANCELLED" {
+		if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
 			now := time.Now().UTC().Format(time.RFC3339)
 			ub.Set("completed_at", now)
 		}

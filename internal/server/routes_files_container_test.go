@@ -148,6 +148,15 @@ func newContainerFallbackServer(t *testing.T, stor provider.StorageProvider, ctr
 	cfg.Auth.JWTSecret = "test-secret-for-files-container-32ch"
 	logger := logging.New("error", "json", nil)
 	db := openTestDB(t)
+	// crews.workspace_id REFERENCES workspaces(id), so ws1 has to exist first.
+	// It did not need to before: openTestDB used to pass `_foreign_keys=on`,
+	// which modernc.org/sqlite does not recognise (it wants
+	// `_pragma=foreign_keys(on)`), so this package ran with foreign keys OFF
+	// and this crew dangled off a workspace that was never created.
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?,?,?)`,
+		"ws1", "WS1", "ws1"); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
 	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?,?,?,?)`,
 		"crewX", "ws1", "CrewX", "crewx-slug"); err != nil {
 		t.Fatalf("seed crew: %v", err)

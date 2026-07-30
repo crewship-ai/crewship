@@ -158,6 +158,14 @@ func parseDroidStreamJSON(line []byte, handler EventHandler) {
 		// Snake_case-flavoured result event (different convention from
 		// completion above — Droid is internally inconsistent). Carries
 		// is_error, duration_ms, num_turns, result.
+		//
+		// Accept BOTH spellings of the flag here. Droid's inconsistency is
+		// per-event, not per-field, so a build that emits `isError` on its
+		// result envelope would otherwise read as a clean success — the flag
+		// decodes into IsError (the tool_result field) and IsErrorSnake stays
+		// false. On a `result` envelope there is no tool block, so either
+		// spelling can only mean "the run failed"; the tool_result arm above
+		// keeps reading IsError alone and stays tool-scoped.
 		handler(AgentEvent{
 			Type:    "result",
 			Content: msg.ResultText,
@@ -165,7 +173,7 @@ func parseDroidStreamJSON(line []byte, handler EventHandler) {
 				"subtype":     msg.Subtype,
 				"num_turns":   msg.NumTurnsSnake,
 				"duration_ms": msg.DurationMsSnk,
-				"is_error":    msg.IsErrorSnake,
+				"is_error":    msg.IsErrorSnake || msg.IsError,
 			},
 			Timestamp: time.Now(),
 		})

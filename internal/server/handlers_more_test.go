@@ -6,17 +6,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // execMockContainer extends mockContainer to return canned Exec output so we
@@ -41,15 +40,7 @@ func (e *execMockContainer) Exec(_ context.Context, _ provider.ExecConfig) (*pro
 
 func TestHandleContainerFileList_ParsesFindOutput(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "fl.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, newSilentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)
@@ -86,15 +77,7 @@ func TestHandleContainerFileList_ParsesFindOutput(t *testing.T) {
 
 func TestHandleContainerFileList_InvalidSubdir(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "fl2.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, newSilentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)
@@ -121,15 +104,7 @@ func TestHandleContainerFileList_InvalidSubdir(t *testing.T) {
 
 func TestHandleContainerGitLog_ParsesCommits(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "gl.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, newSilentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)

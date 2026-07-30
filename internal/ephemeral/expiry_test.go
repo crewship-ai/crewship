@@ -10,28 +10,17 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db.DB
+	return testutil.MigratedSQLDB(t)
 }
 
 func seedWorkspaceAndCrew(t *testing.T, db *sql.DB) (wsID, crewID string) {

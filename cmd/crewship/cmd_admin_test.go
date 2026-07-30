@@ -4,16 +4,13 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // newAdminResetCmdForTest builds a fresh cobra.Command instance that
@@ -31,17 +28,11 @@ func newAdminResetCmdForTest() *cobra.Command {
 
 func initTestDB(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	dbURL := "file:" + filepath.Join(dir, "test.db")
-	db, err := database.Open(dbURL)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	db.Close()
+	db := testutil.MigratedDB(t)
+	dbURL := "file:" + db.Path()
+	// The command under test opens this URL itself, so hand back a file no
+	// one is holding. The fixture's own cleanup close is a no-op afterwards.
+	_ = db.Close()
 	return dbURL
 }
 

@@ -9,14 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // captureRecord is one event captured by the fake crashreport backend.
@@ -73,15 +72,7 @@ func enableCrashCapture(t *testing.T) *recordingCrashBackend {
 
 	// In-memory SQLite + migrations so consentState / SetOptIn / Init can
 	// read and write app_settings.
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "crash.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := testutil.MigratedDB(t)
 
 	prevDSN := crashreport.DSN
 	crashreport.DSN = "https://fake@sentry.example/1"

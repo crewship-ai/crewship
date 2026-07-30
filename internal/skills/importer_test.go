@@ -9,14 +9,13 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/skills"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // installRewriteClient swaps the importer's http.Client for one whose
@@ -39,17 +38,7 @@ func installRewriteClient(t *testing.T, imp *skills.Importer, srv *httptest.Serv
 
 func setupSkillTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db.DB
+	return testutil.MigratedSQLDB(t)
 }
 
 const validSkillMD = `---

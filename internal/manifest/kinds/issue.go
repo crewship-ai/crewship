@@ -129,6 +129,7 @@ var validIssueStatuses = map[string]string{
 	"done":        "DONE",
 	"failed":      "FAILED",
 	"cancelled":   "CANCELLED",
+	"duplicate":   "DUPLICATE",
 	"BACKLOG":     "BACKLOG",
 	"TODO":        "TODO",
 	"IN_PROGRESS": "IN_PROGRESS",
@@ -136,6 +137,7 @@ var validIssueStatuses = map[string]string{
 	"DONE":        "DONE",
 	"FAILED":      "FAILED",
 	"CANCELLED":   "CANCELLED",
+	"DUPLICATE":   "DUPLICATE",
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -324,7 +326,7 @@ func (d *IssueDocument) Validate(wsCtx internalapi.WorkspaceContext) error {
 	}
 	if d.Spec.Status != "" {
 		if _, ok := validIssueStatuses[d.Spec.Status]; !ok {
-			return fmt.Errorf("issue %q: invalid status %q (want one of backlog|todo|in_progress|review|done|failed|cancelled)",
+			return fmt.Errorf("issue %q: invalid status %q (want one of backlog|todo|in_progress|review|done|failed|cancelled|duplicate)",
 				d.Metadata.Slug, d.Spec.Status)
 		}
 	}

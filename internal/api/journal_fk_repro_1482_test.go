@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	_ "modernc.org/sqlite"
 )
 
@@ -40,23 +40,14 @@ import (
 func TestJournalChain_MissionDeleteKeepsAuditRows_1482(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef") //gitleaks:allow — fake test fixture key
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-
-	ctx := context.Background()
-	if err := database.Migrate(ctx, db, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	// SQLite only enforces foreign keys — and therefore only performs their
-	// actions — when this is on. The server turns it on; so must the test, or
-	// the very behaviour under test cannot happen.
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-		t.Fatalf("pragma: %v", err)
-	}
+	// actions — when the pragma is on, so the very behaviour under test cannot
+	// happen without it. The fixture opens through database.Open, which sets
+	// foreign_keys(ON) in the DSN: that applies to every pooled connection,
+	// unlike the `PRAGMA foreign_keys = ON` this test used to run, which only
+	// bound the one connection it happened to land on.
+	db := testutil.MigratedSQLDB(t)
+	ctx := context.Background()
 
 	const wsID, crewID, missionID = "ws_1482", "crew_1482", "mission_1482"
 	mustExec1482(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?,?,?)`, wsID, "repro", "repro-1482")
@@ -134,21 +125,10 @@ func TestJournalChain_MissionDeleteKeepsAuditRows_1482(t *testing.T) {
 func TestJournalChain_CrewDeleteKeepsAuditRows_1482(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-0123456789abcdef") //gitleaks:allow — fake test fixture key
 
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-
+	// foreign_keys(ON) comes from the fixture's DSN — see the sibling test.
+	db := testutil.MigratedSQLDB(t)
 	ctx := context.Background()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(ctx, db, quiet); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-		t.Fatalf("pragma: %v", err)
-	}
 
 	const wsID, crewID, agentID = "ws_cascade", "crew_cascade", "agent_cascade"
 	mustExec1482(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?,?,?)`, wsID, "cascade", "cascade")

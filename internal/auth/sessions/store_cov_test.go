@@ -14,10 +14,18 @@ import (
 // newBareDB opens a SQLite database WITHOUT running migrations, so
 // every statement against user_sessions fails with "no such table".
 // Used to exercise the SQL-error branches of the store.
+//
+// No pragmas, deliberately. This used to pass `?_foreign_keys=on`, which
+// modernc.org/sqlite silently ignores — it only honours the `_pragma=` form,
+// the same trap that left this package's sibling fixture running with
+// busy_timeout=0 (see the DSN note in store_test.go). Here it made no
+// difference, since a database with no tables has no foreign keys to enforce,
+// but leaving the parameter in place would keep the broken pattern alive as
+// something to copy. There is nothing to enable, so nothing is passed.
 func newBareDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := sql.Open("sqlite", "file:"+dir+"/bare.db?_foreign_keys=on")
+	db, err := sql.Open("sqlite", "file:"+dir+"/bare.db")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

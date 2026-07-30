@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // newCovTestDB opens a temp SQLite database with the full migration set
@@ -22,17 +22,7 @@ import (
 // (which is not visible from the internal one).
 func newCovTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "cov.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	logger := covTestLogger()
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db.DB
+	return testutil.MigratedSQLDB(t)
 }
 
 func covTestLogger() *slog.Logger {

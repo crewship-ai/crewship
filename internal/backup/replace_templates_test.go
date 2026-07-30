@@ -3,11 +3,9 @@ package backup
 import (
 	"context"
 	"database/sql"
-	"io"
-	"log/slog"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // migratedForTemplates opens a database with the REAL migrations applied.
@@ -15,16 +13,7 @@ import (
 // cannot answer whether a table added by a migration is reachable.
 func migratedForTemplates(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+t.TempDir()+"/discover.db?_pragma=foreign_keys(1)")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db,
-		slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
+	return testutil.MigratedSQLDB(t)
 }
 
 // notification_templates must be wiped by a --replace restore.

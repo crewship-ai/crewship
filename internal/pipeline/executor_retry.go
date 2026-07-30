@@ -7,6 +7,8 @@ import (
 	mathrand "math/rand/v2"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // runStepWithRetry wraps runStep with the per-step retry policy.
@@ -386,11 +388,28 @@ var transientErrorMarkers = []string{
 // markers we treat as worth retrying. context.Cancelled / DeadlineExceeded
 // are NOT transient for this purpose — those mean the caller wanted
 // the work to stop, and retrying would race against the cleanup.
+//
+// Identity checks come FIRST, before any substring matching. The markers below
+// are matched case-insensitively against the whole error string, and some error
+// strings quote text the agent produced — so an error whose *identity* says
+// "not transient" must be excluded before its prose gets a vote.
 func isTransientRunnerError(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	// An in-band failure is the agent's own verdict on its turn: the CLI reached
+	// the model, ran, and reported that the turn failed (a refusal, an internal
+	// CLI error, an exhausted quota). Nothing about the transport was at fault,
+	// so a same-tier retry just repeats a deterministic failure and bills for
+	// it — escalating the tier (or failing fast) is the right response.
+	//
+	// This check MUST precede the marker loop: the error quotes the CLI's own
+	// message, so a refusal like "I cannot process a list of 500 items" or
+	// "that request would time out" matches "500" / "timeout" on prose alone.
+	if errors.Is(err, orchestrator.ErrAgentInBandFailure) {
 		return false
 	}
 	msg := strings.ToLower(err.Error())

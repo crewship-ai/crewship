@@ -5,15 +5,13 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/keeper/secrets"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func setTestEncKey(t *testing.T) {
@@ -27,17 +25,7 @@ func setTestEncKey(t *testing.T) {
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db.DB
+	return testutil.MigratedSQLDB(t)
 }
 
 func seedUsers(t *testing.T, db *sql.DB) string {
