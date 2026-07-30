@@ -68,9 +68,20 @@ var (
 // single test: the template outlives every individual test in the process, so
 // there is no test whose lifetime it could be tied to. Go's test binary has no
 // "process exit" hook that is safe here either (TestMain belongs to the package
-// under test, not to this helper). It is a handful of KiB in os.TempDir() that
-// the OS reclaims; that is the right trade for a helper that must be callable
-// from any package without ceremony.
+// under test, not to this helper).
+//
+// So it leaks, and the size is worth stating accurately rather than waving at.
+// A migrated template measures 2,879,488 bytes (2.75 MiB). One is built per
+// test binary, and 23 packages use this helper, so a full `go test ./...`
+// leaves ~63 MiB in os.TempDir() for the OS to reclaim. Before this helper
+// existed the same leak was one template (internal/api's), so this is 23x more
+// of an existing habit, not a new kind of problem — but it is not "a handful of
+// KiB" either, and someone running the suite in a loop will notice.
+//
+// Making the template content-addressed and shared across processes would end
+// the leak and save the per-binary build as well; that is a separate change
+// with its own blast radius and is tracked as follow-up on the PR, not smuggled
+// in here.
 func buildMigratedTemplate() {
 	dir, err := os.MkdirTemp("", "crewship-migrated-template-")
 	if err != nil {
@@ -91,9 +102,28 @@ func buildMigratedTemplate() {
 	}
 	// Fold the WAL back into the main file so a plain file copy carries the
 	// complete schema — no -wal/-shm sidecars to copy alongside it.
-	if _, err := db.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+	//
+	// QueryRow, not Exec. `PRAGMA wal_checkpoint` reports failure as a RESULT
+	// ROW — (busy, log, checkpointed) — not as an error, and Exec discards
+	// rows. A busy checkpoint through Exec therefore returns nil while leaving
+	// pages in the -wal that the copy does not carry, and every fixture in the
+	// process would silently get a truncated schema. This build is
+	// single-threaded so busy is not realistically reachable, and
+	// TestMigratedDB_SchemaMatchesMigrateRunner would catch it if it were, but
+	// a check that costs one line should not be left to a downstream assertion.
+	var busy, walPages, checkpointed int
+	if err := db.DB.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
+		Scan(&busy, &walPages, &checkpointed); err != nil {
 		db.Close()
-		migratedTemplateErr = err
+		migratedTemplateErr = fmt.Errorf("checkpoint template wal: %w", err)
+		return
+	}
+	if busy != 0 {
+		db.Close()
+		migratedTemplateErr = fmt.Errorf(
+			"checkpoint template wal: busy (log=%d pages, checkpointed=%d) — "+
+				"template would be missing schema still held in the -wal",
+			walPages, checkpointed)
 		return
 	}
 	if err := db.Close(); err != nil {
