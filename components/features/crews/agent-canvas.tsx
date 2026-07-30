@@ -25,7 +25,6 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import { Pill } from "@/components/ui/detail"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import { isGhost, effectiveStatus, ttlRemaining, latestHireReason } from "@/lib/agent-ephemeral"
 import { apiFetch } from "@/lib/api-fetch"
@@ -37,11 +36,9 @@ import {
   usePatchEntity,
   useResetTabOnSlugChange,
 } from "./canvas-base"
-import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
 import { ConfigTab } from "./agent-canvas-tabs/config-tab"
 import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
-import { WorkspaceTab } from "./agent-canvas-tabs/workspace-tab"
 import type {
   AgentRecord,
   ChatRow as ChatRowType,
