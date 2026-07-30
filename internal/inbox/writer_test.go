@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,12 +13,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 	_ "modernc.org/sqlite"
 )
-
-// inboxTestCounter generates unique in-memory DB names per parallel
-// test. Same pattern as internal/database/migrate_v89_test.go — a bare
-// `file::memory:?cache=shared` DSN points every connection at the SAME
-// global in-memory database and leaks rows between t.Parallel() siblings.
-var inboxTestCounter atomic.Int64
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))

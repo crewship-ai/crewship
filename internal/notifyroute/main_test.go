@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/notify"
@@ -29,8 +28,6 @@ func TestMain(m *testing.M) {
 // throwaway 32-byte AES key, built at runtime so no secret scanner flags a
 // literal.
 var testEncKey = strings.Repeat("0123456789abcdef", 4)
-
-var routeTestCounter atomic.Int64
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))

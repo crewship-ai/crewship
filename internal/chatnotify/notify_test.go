@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,8 +13,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/testutil"
 	_ "modernc.org/sqlite"
 )
-
-var notifyTestCounter atomic.Int64
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))

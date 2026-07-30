@@ -5,15 +5,12 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
-	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/testutil"
 	_ "modernc.org/sqlite"
 )
-
-var notifyITCounter atomic.Int64
 
 // newNotifyIntegrationDB brings up a fully-migrated in-memory DB so the
 // notify step's two DB-backed collaborators (the inbox sink + the
