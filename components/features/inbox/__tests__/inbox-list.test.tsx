@@ -127,7 +127,7 @@ describe("InboxList — the deadline nobody rendered", () => {
     fireEvent.click(list().getByText("Approve step promote in docs-publish"))
 
     const card = screen.getByTestId("decision-card")
-    expect(within(card).getByText(/in 11 min/)).toBeInTheDocument()
+    expect(within(card).getByText(/in 11m/)).toBeInTheDocument()
   })
 })
 

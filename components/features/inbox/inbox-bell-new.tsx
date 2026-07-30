@@ -12,7 +12,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 
 import { ActorAvatar } from "./inbox-actor"
 import {
-  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, since, subjectOf,
+  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, since, subjectOf,
   type WorkspaceRole,
 } from "./inbox-derive"
 
@@ -134,7 +134,7 @@ export function InboxBellView({ items, role, onOpenItem, onOpenInbox, onMarkAllR
               <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
                 <span className="type-row font-medium">Inbox</span>
                 {soonest != null && (
-                  <Pill tone="destructive">expires in {soonest}m</Pill>
+                  <Pill tone="destructive">expires in {remainingLabel(soonest)}</Pill>
                 )}
                 <span className="type-meta ml-auto text-muted-foreground">
                   {decisions.length > 0
@@ -271,7 +271,7 @@ function BellRow({
         </span>
         <span className="shrink-0 text-right">
           {mins != null && mins > 0 ? (
-            <span className="type-meta font-medium text-destructive">in {mins}m</span>
+            <span className="type-meta font-medium text-destructive">in {remainingLabel(mins)}</span>
           ) : (
             <span className="type-meta text-muted-foreground-soft">{since(item.created_at)}</span>
           )}

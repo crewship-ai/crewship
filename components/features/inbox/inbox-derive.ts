@@ -102,6 +102,19 @@ export function absolute(iso?: string): string {
   })
 }
 
+/**
+ * How long is left, in the largest unit that still reads as a number.
+ *
+ * A waitpoint's default timeout is a day, and "expires in 1428m" is a figure
+ * nobody converts in their head — the countdown is supposed to make urgency
+ * obvious, and minutes stop doing that within the hour.
+ */
+export function remainingLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)}h`
+  return `${Math.round(minutes / (24 * 60))}d`
+}
+
 export function durationLabel(minutes: number | null): string {
   if (minutes == null) return "—"
   if (minutes < 60) return `${minutes}m`

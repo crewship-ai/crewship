@@ -20,7 +20,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 import { ActorAvatar } from "./inbox-actor"
 import { SubjectPicker, type DirectoryEntry } from "./inbox-subject-picker"
 import {
-  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, since, subjectOf,
+  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, since, subjectOf,
   type WorkspaceRole,
 } from "./inbox-derive"
 import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./inbox-types"
@@ -661,7 +661,7 @@ function MailRow({
           <span>·</span>
           <span className="truncate font-mono">{categoryOf(item)}</span>
           {mins != null && mins > 0 && (
-            <span className="shrink-0 font-medium text-destructive">· expires in {mins}m</span>
+            <span className="shrink-0 font-medium text-destructive">· expires in {remainingLabel(mins)}</span>
           )}
           {blocked && <span className="shrink-0">· admin decides</span>}
         </span>

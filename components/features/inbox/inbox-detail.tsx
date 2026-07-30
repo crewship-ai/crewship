@@ -14,7 +14,7 @@ import { ActorLabel } from "./inbox-actor"
 import { KindActions } from "./kind-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
-  absolute, canRole, categoryOf, decisionMetaFor, expiresIn, jumpFor, payloadNumber,
+  absolute, canRole, categoryOf, decisionMetaFor, expiresIn, jumpFor, payloadNumber, remainingLabel,
   payloadString, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
 
@@ -154,7 +154,7 @@ export function DecisionCard({
           </span>
           {mins != null && mins > 0 && (
             <span className="type-meta ml-auto font-mono text-destructive">
-              expires {absolute(payloadString(item, "timeout_at"))} · in {mins} min
+              expires {absolute(payloadString(item, "timeout_at"))} · in {remainingLabel(mins)}
             </span>
           )}
           {mins != null && mins <= 0 && (
