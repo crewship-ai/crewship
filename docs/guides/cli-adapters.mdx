@@ -116,6 +116,13 @@ OpenCode can route to a local, OpenAI-compatible model server instead of a cloud
    for an agent could 404 for the Keeper judge. A reverse-proxy mount prefix
    (`https://gw.example.com/ollama`) is preserved.
 
+   **Azure is addressed on two levels, and both are handled.** Store the
+   deployment URL you were given
+   (`https://acme.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=…`)
+   — completions go to that deployment, while model discovery goes to the
+   resource's own list at `.../openai/models`, because Azure serves no model
+   list under a deployment. The `?api-version=` query rides along on both.
+
    **The host is not.** `host.docker.internal` is right for an *agent*, which
    dials from inside its crew container. Anything dialling from the daemon — the
    Keeper judge, `crewship doctor`, model discovery — needs `localhost` or the

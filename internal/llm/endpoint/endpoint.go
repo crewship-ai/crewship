@@ -264,7 +264,40 @@ func (e Endpoint) ModelsURL() string {
 	if e.Wire == WireOllama {
 		return e.join("/api/tags")
 	}
+	// Azure's classic layout addresses ONE deployment
+	// (".../openai/deployments/{name}"), but the model list is a property of
+	// the resource, not of a deployment: it answers at ".../openai/models".
+	// Appending "/models" to the deployment root — which is what the chat
+	// path correctly does — asks for a route Azure does not serve, so
+	// discovery and the "is that model pulled?" probe both 404 against an
+	// otherwise working endpoint.
+	if root, ok := azureResourceRoot(e.Root); ok {
+		e.Root = root
+	}
 	return e.join(e.versionPrefix() + "/models")
+}
+
+// azureResourceRoot drops a trailing "/deployments/{name}" from a root,
+// reporting whether it found one. Only the classic layout has it; Azure's
+// newer "/openai/v1" surface lists models at its own root and is untouched.
+func azureResourceRoot(root *url.URL) (*url.URL, bool) {
+	if root == nil {
+		return nil, false
+	}
+	idx := strings.LastIndex(root.Path, "/deployments/")
+	if idx < 0 {
+		return nil, false
+	}
+	// Only when "/deployments/" is followed by a single deployment name —
+	// a proxy that happens to mount UNDER a path containing more segments
+	// after the name is not the layout this repairs.
+	rest := strings.Trim(root.Path[idx+len("/deployments/"):], "/")
+	if rest == "" || strings.Contains(rest, "/") {
+		return nil, false
+	}
+	trimmed := *root
+	trimmed.Path = root.Path[:idx]
+	return &trimmed, true
 }
 
 // TagsURL is Ollama's native model list regardless of wire. The connection test

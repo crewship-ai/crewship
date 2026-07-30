@@ -234,7 +234,11 @@ func TestOpenAI_UnversionedBaseKeepsItsLayout(t *testing.T) {
 	if got := p.chatURL(); got != wantChat {
 		t.Fatalf("chat URL = %q, want %q", got, wantChat)
 	}
-	wantModels := "https://acme.openai.azure.com/openai/deployments/x/models?api-version=2024-02-01"
+	// The model list is a property of the RESOURCE, not of one deployment:
+	// Azure serves it at ".../openai/models". Deriving it from the deployment
+	// root the chat path uses asks for a route Azure does not have, so an
+	// endpoint whose completions work would fail discovery with a 404.
+	wantModels := "https://acme.openai.azure.com/openai/models?api-version=2024-02-01"
 	if got := p.modelsURL(); got != wantModels {
 		t.Fatalf("models URL = %q, want %q", got, wantModels)
 	}

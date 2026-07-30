@@ -241,3 +241,49 @@ func TestIsHostOnlyResolvableInContainers(t *testing.T) {
 		}
 	}
 }
+
+// The chat path and the models path diverge on Azure's classic layout: chat is
+// addressed per deployment, the model list per resource. One root, two correct
+// answers — so the derivation cannot be "append to whatever the root is".
+func TestModelsURL_AzureDeploymentRootListsAtTheResource(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, wantChat, wantModels string
+	}{
+		{
+			name:       "classic deployment layout",
+			raw:        "https://acme.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-01",
+			wantChat:   "https://acme.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=2024-02-01",
+			wantModels: "https://acme.openai.azure.com/openai/models?api-version=2024-02-01",
+		},
+		{
+			name:       "newer versioned surface is untouched",
+			raw:        "https://acme.openai.azure.com/openai/v1/chat/completions?api-version=2026-02-01",
+			wantChat:   "https://acme.openai.azure.com/openai/v1/chat/completions?api-version=2026-02-01",
+			wantModels: "https://acme.openai.azure.com/openai/v1/models?api-version=2026-02-01",
+		},
+		{
+			name:       "a plain server with no deployments segment is untouched",
+			raw:        "https://api.example.com/v1",
+			wantChat:   "https://api.example.com/v1/chat/completions",
+			wantModels: "https://api.example.com/v1/models",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ep, err := Normalize(tc.raw)
+			if err != nil {
+				t.Fatalf("Normalize(%q): %v", tc.raw, err)
+			}
+			if got := ep.ChatURL(); got != tc.wantChat {
+				t.Errorf("chat URL = %q, want %q", got, tc.wantChat)
+			}
+			if got := ep.ModelsURL(); got != tc.wantModels {
+				t.Errorf("models URL = %q, want %q", got, tc.wantModels)
+			}
+			// Repairing the models URL must not mutate the endpoint: the next
+			// caller asking for chat has to get the deployment root back.
+			if got := ep.ChatURL(); got != tc.wantChat {
+				t.Errorf("chat URL after ModelsURL = %q, want %q — ModelsURL mutated the receiver", got, tc.wantChat)
+			}
+		})
+	}
+}
