@@ -100,6 +100,11 @@ describe("ScheduleEditor", () => {
     // 2. Nothing anywhere in the editor says the save worked.
     expect(screen.queryByText("Saved")).toBeNull()
 
+    // 2b. And the reason stays on screen after the toast has faded — the
+    //     inline alert next to the button you retry with, not only the toast.
+    const alert = screen.getByRole("alert")
+    expect(alert.textContent).toBe("cron expression has 6 fields, expected 5")
+
     // 3. The edit is still there to retry — the editor stays open with the
     //    typed value intact, and the read-only view (which would show the
     //    stale server value as if it were current) is not rendered.
@@ -110,5 +115,28 @@ describe("ScheduleEditor", () => {
     // 4. And it is re-submittable: Save is not left stuck in "Saving…".
     const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement
     expect(save.disabled).toBe(false)
+  })
+
+  it("saves the schedule as the switch currently shows it, not as the not-yet-refetched prop does", async () => {
+    // The switch writes on its own and the parent only learns about it when
+    // its refetch lands. Saving a cron edit inside that window must not send
+    // the stale `enabled` back and undo a toggle the server already accepted.
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ScheduleEditor cron="0 9 * * 1-5" prompt="do things" enabled={false} onSave={onSave} />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { pressed: false }))
+    await waitFor(() => expect(screen.getByRole("button", { pressed: true })).toBeTruthy())
+    onSave.mockClear()
+
+    // The `enabled` prop is deliberately left at false: this is the window
+    // before the parent has re-rendered with the value it just wrote.
+    startEditing("30 6 * * *")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ cron: "30 6 * * *", prompt: "do things", enabled: true }),
+    )
   })
 })

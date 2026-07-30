@@ -71,10 +71,13 @@ export function ScheduleEditor({
     let landed = false
     await form.submit(async (draft) => {
       try {
-        // `enabled` comes from the props, not from the draft: the switch has
-        // already committed it on its own, so re-sending a stale copy here
-        // would silently undo it.
-        await onSave({ cron: draft.cron, prompt: draft.prompt, enabled })
+        // `enabled` comes from the switch, not from the draft: it commits on
+        // its own, so re-sending a stale copy here would silently undo it.
+        // `toggleEnabled` and not the `enabled` prop, because the prop is the
+        // copy that lags — a toggle the server has already accepted is only
+        // visible in the prop once the parent's refetch lands, and saving a
+        // cron edit in that window would write the old value back.
+        await onSave({ cron: draft.cron, prompt: draft.prompt, enabled: toggleEnabled })
         landed = true
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to save schedule")
