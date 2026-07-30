@@ -11,15 +11,8 @@ export type InboxView = "inbox" | "unread" | "archived"
  */
 export type Bucket = "decisions" | "replies" | "review" | "routines" | "other"
 
-/**
- * The three arrangements this preview exists to compare. The rail is the same
- * in all of them — what differs is what sits to the right of it.
- *
- *   split  — mail-client: a list column and a reading pane.
- *   table  — the /routines catalog shape: dense rows, detail in a drawer.
- *   stream — detail-kit cards, decision on the card, no reading pane.
- */
-export type LayoutStyle = "split" | "table" | "stream"
+/** How the list column stacks its rows. Chosen in Display, as it is today. */
+export type GroupBy = "smart" | "category" | "subject" | "none"
 
 /**
  * Who a row is about or from.

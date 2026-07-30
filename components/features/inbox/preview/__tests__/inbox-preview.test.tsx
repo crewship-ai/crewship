@@ -72,34 +72,77 @@ describe("InboxPreview — buckets and facets", () => {
     expect(screen.queryByText("Approve step \u201cpromote\u201d in docs-publish")).not.toBeInTheDocument()
   })
 
-  it("shows the resolved outcome and actor in the archive", () => {
+  it("reads the archive through the same list", () => {
     render(<InboxPreview initialRole="OWNER" initialView="archived" />)
 
-    const row = screen.getByText("casey requested GH_TOKEN for crewship-ai/docs").closest("[data-row]")
-    expect(row).not.toBeNull()
-    expect(within(row as HTMLElement).getByText(/approved/i)).toBeInTheDocument()
-    expect(within(row as HTMLElement).getByText("pavel")).toBeInTheDocument()
+    expect(screen.getByText("casey requested GH_TOKEN for crewship-ai/docs")).toBeInTheDocument()
+    // A live-only row must not leak in. (An archived waitpoint shares its
+    // title with a live one, so the assertion picks a title that does not.)
+    expect(screen.queryByText("Skill log-parser proposed for review")).not.toBeInTheDocument()
   })
 })
 
-describe("InboxPreview — the rail swaps its facets with the view", () => {
-  it("replaces the bucket section with archive facets when Archiv is picked", () => {
+describe("InboxPreview — selecting messages", () => {
+  function enterSelectMode() {
+    fireEvent.click(screen.getByRole("button", { name: /Select items/i }))
+  }
+
+  it("ticks one row at a time", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    enterSelectMode()
+
+    fireEvent.click(screen.getByTestId("check-0").parentElement as HTMLElement)
+
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+  })
+
+  it("takes a range on shift-click, in the order the rows are shown", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    enterSelectMode()
+
+    fireEvent.click(screen.getByTestId("check-0").parentElement as HTMLElement)
+    fireEvent.click(screen.getByTestId("check-3").parentElement as HTMLElement, { shiftKey: true })
+
+    // 0..3 inclusive — the anchor, the shift target and everything between.
+    expect(screen.getByText("4 selected")).toBeInTheDocument()
+  })
+
+  it("warns that decisions will not be closed in bulk", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    enterSelectMode()
+
+    fireEvent.click(screen.getByTestId("check-0").parentElement as HTMLElement)
+
+    expect(screen.getByText(/waiting on/i)).toBeInTheDocument()
+  })
+
+  it("drops the selection when select mode is left", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    enterSelectMode()
+    fireEvent.click(screen.getByTestId("check-0").parentElement as HTMLElement)
+    expect(screen.getByText("1 selected")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /Done selecting/i }))
+
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument()
+  })
+})
+
+describe("InboxPreview — the filter swaps its facets with the view", () => {
+  it("replaces the bucket section with archive facets when Archived is picked", () => {
     render(<InboxPreview initialRole="OWNER" />)
     openFilter()
     expect(screen.getByTestId("facet-bucket-decisions")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("view-archived"))
+    fireEvent.click(screen.getByRole("tab", { name: /Archived/ }))
     openFilter()
 
     // Live buckets have no meaning over resolved rows, so they leave; the
     // questions the archive answers take their place.
     expect(screen.queryByTestId("facet-bucket-decisions")).not.toBeInTheDocument()
     expect(screen.getByTestId("outcome-approved")).toBeInTheDocument()
-    // Scoped to the rail: "Decided by" is also a column header in the archive
-    // table, and an unscoped query would pass on the wrong element.
-    const rail = screen.getByRole("complementary")
-    expect(within(rail).getByText("Decided by")).toBeInTheDocument()
-    expect(within(rail).getByText("Period")).toBeInTheDocument()
+    expect(screen.getByText("Decided by")).toBeInTheDocument()
+    expect(screen.getByText("Period")).toBeInTheDocument()
   })
 
   it("narrows the archive by outcome from the rail", () => {

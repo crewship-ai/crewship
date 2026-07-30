@@ -2,34 +2,29 @@
 
 import { useMemo, useState } from "react"
 
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { cn } from "@/lib/utils"
 
-import { InboxExplorer } from "./inbox-explorer"
-import { ArchiveTable, SplitLayout } from "./layouts"
-import { bucketOf, subjectOf } from "./logic"
-import { OUTCOME_LABEL } from "./logic"
+import { InboxListPanel } from "./inbox-list-panel"
+import { ItemDetail } from "./item-detail"
+import { OUTCOME_LABEL, bucketOf, expiresIn, subjectOf } from "./logic"
 import {
   PREVIEW_ARCHIVE, PREVIEW_ITEMS, PREVIEW_USER_ID, isVisibleTo,
   type PreviewInboxItem, type WorkspaceRole,
 } from "./mock-data"
-import type { Bucket, InboxView, SubjectFacet } from "./types"
+import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./types"
 
 // =============================================================================
 // /inbox/preview — the 1.0 inbox design rendered against the real kit.
 //
-// The page is the rail plus one content surface. There is no page sub-bar: it
-// held the title, a count and the role switch, and all three belong in the rail
-// — the title is its first section, the count is on every row of it, and the
-// role switch is a control, not chrome.
+// Two columns, as the shipped page has: the list carries its own chrome and
+// the reading pane sits beside it. An explorer rail was tried here and taken
+// back out — see inbox-list-panel for why.
 //
-// The role is whoever is signed in — the server decides it and the page reads
-// it. There is no picker: a person does not choose to be a VIEWER, and a
-// control that pretends they might is a control that lies about the product.
-// The two rules the server enforces still shape the page, they just take their
-// input from the session: inboxVisibilityClause for what is listed, canRole
-// for what is decidable.
+// The role is whoever is signed in. There is no picker: a person does not
+// choose to be a VIEWER, and a control that pretends they might is a control
+// that lies about the product. The two rules the server enforces still shape
+// the page, they just take their input from the session —
+// inboxVisibilityClause for what is listed, canRole for what is decidable.
 //
 // Rows come from a fixture set copied out of the Go producers, so the page can
 // be opened on any instance and still show the same screen.
@@ -42,11 +37,7 @@ export interface InboxPreviewProps {
   initialSelectedId?: string
 }
 
-export function InboxPreview({
-  initialRole,
-  initialView = "inbox",
-  initialSelectedId,
-}: InboxPreviewProps) {
+export function InboxPreview({ initialRole, initialView = "inbox", initialSelectedId }: InboxPreviewProps) {
   const { role: sessionRole } = useWorkspace()
   const role = (initialRole ?? sessionRole ?? null) as WorkspaceRole | null
 
@@ -57,8 +48,9 @@ export function InboxPreview({
   const [outcome, setOutcome] = useState<string | null>(null)
   const [actor, setActor] = useState<string | null>(null)
   const [period, setPeriod] = useState("30")
+  const [groupBy, setGroupBy] = useState<GroupBy>("smart")
+  const [sort, setSort] = useState("newest")
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? null)
-  const [railCollapsed, setRailCollapsed] = useState(false)
 
   const archive = view === "archived"
   const source = archive ? PREVIEW_ARCHIVE : PREVIEW_ITEMS
@@ -118,81 +110,93 @@ export function InboxPreview({
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return visible.filter((it: PreviewInboxItem) => {
+    const filtered = visible.filter((it: PreviewInboxItem) => {
       if (view === "unread" && it.state !== "unread") return false
       if (!archive && bucket && bucketOf(it) !== bucket) return false
       if (archive && outcome && it.resolved_action !== outcome) return false
       if (archive && actor && it.resolved_by_user_id !== actor) return false
       if (subject && subjectOf(it).id !== subject) return false
       if (q) {
+        // Body included: the sentence someone remembers is usually in the
+        // message, and the shipped search never looks there.
         const hay = `${it.title} ${it.sender_name ?? ""} ${it.body_md ?? ""}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
     })
-  }, [visible, view, archive, bucket, outcome, actor, subject, search])
 
+    return [...filtered].sort((a, b) => {
+      if (sort === "expiring") {
+        // A waitpoint is the only thing here with a deadline, so "expiring
+        // first" means those, soonest first, and everything else after them in
+        // the default order rather than interleaved by age.
+        const ea = expiresIn(a)
+        const eb = expiresIn(b)
+        if (ea != null && eb != null) return ea - eb
+        if (ea != null) return -1
+        if (eb != null) return 1
+      }
+      const ta = Date.parse(a.created_at)
+      const tb = Date.parse(b.created_at)
+      return sort === "oldest" ? ta - tb : tb - ta
+    })
+  }, [visible, view, archive, bucket, outcome, actor, subject, search, sort])
+
+  const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null
 
   return (
     <div className="flex h-[calc(100vh-3rem)] overflow-hidden">
-      <aside aria-label="Inbox filters"
-        className={cn(
-          "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all",
-          railCollapsed ? "w-9" : "w-[280px]",
-        )}
-      >
-        {railCollapsed ? (
-          <div className="flex h-full flex-col items-center pt-1.5">
-            <SidebarCollapseButton collapsed onToggle={() => setRailCollapsed(false)} />
-          </div>
-        ) : (
-          <InboxExplorer
-            view={view}
-            onViewChange={(v) => {
-              setView(v)
-              setBucket(null)
-              setOutcome(null)
-              setActor(null)
-              setSubject(null)
-              setSelectedId(null)
-            }}
-            viewCounts={viewCounts}
-            bucket={bucket}
-            onBucketChange={(b) => { setBucket(b); setSelectedId(null) }}
-            bucketCounts={bucketCounts}
-            subjects={subjects}
-            selectedSubject={subject}
-            onSubjectChange={(s) => { setSubject(s); setSelectedId(null) }}
-            outcome={outcome}
-            onOutcomeChange={(o) => { setOutcome(o); setSelectedId(null) }}
-            outcomeCounts={outcomeCounts}
-            actor={actor}
-            onActorChange={(a) => { setActor(a); setSelectedId(null) }}
-            actorCounts={actorCounts}
-            period={period}
-            onPeriodChange={setPeriod}
-            search={search}
-            onSearchChange={setSearch}
-            onToggleCollapse={() => setRailCollapsed(true)}
-          />
-        )}
-      </aside>
-
-      {!role ? (
-        <p className="type-row flex-1 px-6 py-10 text-center text-muted-foreground-soft">
-          Resolving your workspace role…
-        </p>
-      ) : archive ? (
-        <ArchiveTable rows={rows} total={visible.length} />
-      ) : (
-        <SplitLayout
+      {role && (
+        <InboxListPanel
           rows={rows}
           total={visible.length}
           role={role}
-          selectedId={selectedId}
+          view={view}
+          onViewChange={(v) => {
+            setView(v)
+            setBucket(null)
+            setOutcome(null)
+            setActor(null)
+            setSubject(null)
+            setSelectedId(null)
+          }}
+          viewCounts={viewCounts}
+          selectedId={selected?.id ?? null}
           onSelect={setSelectedId}
+          bucket={bucket}
+          onBucketChange={(b) => { setBucket(b); setSelectedId(null) }}
+          bucketCounts={bucketCounts}
+          subjects={subjects}
+          selectedSubject={subject}
+          onSubjectChange={(s) => { setSubject(s); setSelectedId(null) }}
+          outcome={outcome}
+          onOutcomeChange={(o) => { setOutcome(o); setSelectedId(null) }}
+          outcomeCounts={outcomeCounts}
+          actor={actor}
+          onActorChange={(a) => { setActor(a); setSelectedId(null) }}
+          actorCounts={actorCounts}
+          period={period}
+          onPeriodChange={setPeriod}
+          groupBy={groupBy}
+          onGroupByChange={setGroupBy}
+          sort={sort}
+          onSortChange={setSort}
+          search={search}
+          onSearchChange={setSearch}
         />
       )}
+
+      <div className="min-w-0 flex-1 overflow-y-auto bg-background p-4">
+        {!role ? (
+          <p className="type-row px-4 py-10 text-center text-muted-foreground-soft">
+            Resolving your workspace role…
+          </p>
+        ) : selected ? (
+          <ItemDetail key={selected.id} item={selected} role={role} />
+        ) : (
+          <p className="type-row px-4 py-10 text-center text-muted-foreground-soft">Pick an item.</p>
+        )}
+      </div>
     </div>
   )
 }
