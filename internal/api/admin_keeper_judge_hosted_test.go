@@ -100,3 +100,75 @@ func TestJudgeTestHosted_UnresolvableKeyFailsStageOneAndSkipsTheRest(t *testing.
 		t.Errorf("the failure does not explain what would happen instead: %s", body)
 	}
 }
+
+// Address suggestions.
+//
+// The question they answer — "how would I know my own machine's address, when the
+// thing that dials is a server somewhere else" — is one the operator genuinely
+// cannot answer and the daemon can. The trust rule matters: a suggestion is a URL
+// the operator may then ask the server to dial, so a header must not be able to
+// put an arbitrary address in front of them.
+func TestJudgeSuggestions_OffersTheServerAndTheCaller(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/admin/keeper/judge/models", nil)
+	req.RemoteAddr = "192.168.1.118:54321"
+
+	got := judgeSuggestions(req)
+	if len(got) < 2 {
+		t.Fatalf("got %d suggestions, want the server and the caller", len(got))
+	}
+	if got[0].URL != "http://localhost:11434" {
+		t.Errorf("first suggestion = %q, want the server's own loopback", got[0].URL)
+	}
+	if got[1].URL != "http://192.168.1.118:11434" {
+		t.Errorf("second suggestion = %q, want the caller's address", got[1].URL)
+	}
+	// The label has to say WHICH machine, because that is the entire confusion.
+	if !strings.Contains(strings.ToLower(got[1].Label), "browsing from") {
+		t.Errorf("label %q does not identify the machine", got[1].Label)
+	}
+}
+
+// Behind a same-box reverse proxy the peer is loopback and tells us nothing; the
+// forwarded hop is where the real LAN address appears. Only a PRIVATE one is
+// taken — a public or spoofed-arbitrary hop must not become a suggested dial
+// target.
+func TestJudgeSuggestions_TakesOnlyAPrivateForwardedHop(t *testing.T) {
+	for _, tc := range []struct {
+		name, xff string
+		wantURL   string
+	}{
+		{"private hop is used", "192.168.1.50", "http://192.168.1.50:11434"},
+		{"public hop is ignored", "8.8.8.8", ""},
+		{"garbage hop is ignored", "not-an-ip", ""},
+		{"first private hop in a chain", "8.8.8.8, 10.0.0.7", "http://10.0.0.7:11434"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/v1/admin/keeper/judge/models", nil)
+			req.RemoteAddr = "127.0.0.1:9999" // the proxy
+			req.Header.Set("X-Forwarded-For", tc.xff)
+
+			got := judgeSuggestions(req)
+			var caller string
+			if len(got) > 1 {
+				caller = got[1].URL
+			}
+			if caller != tc.wantURL {
+				t.Errorf("caller suggestion = %q, want %q", caller, tc.wantURL)
+			}
+			// The server's own loopback is always offered, whatever the header says.
+			if got[0].URL != "http://localhost:11434" {
+				t.Errorf("lost the server suggestion: %q", got[0].URL)
+			}
+		})
+	}
+}
+
+// A direct loopback caller (curl on the box) gets no second suggestion: it would
+// be the same address as the first, and a duplicate reads as two options.
+func TestJudgeSuggestions_NoDuplicateForALoopbackCaller(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/v1/admin/keeper/judge/models", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	if got := judgeSuggestions(req); len(got) != 1 {
+		t.Errorf("got %d suggestions for a loopback caller, want just the server", len(got))
+	}
+}

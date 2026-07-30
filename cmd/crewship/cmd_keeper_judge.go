@@ -60,6 +60,15 @@ type keeperJudgeModelsResult struct {
 	Endpoint string   `json:"endpoint"`
 	Models   []string `json:"models"`
 	Error    string   `json:"error"`
+	// Suggestions are candidate addresses the server proposes — its own loopback,
+	// and the address this client connected FROM. The second is the one worth
+	// printing: the machine that dials the judge is the SERVER, so the address an
+	// operator running Ollama on their own box needs is one only the server can
+	// see.
+	Suggestions []struct {
+		URL   string `json:"url"`
+		Label string `json:"label"`
+	} `json:"suggestions"`
 }
 
 var (
@@ -162,18 +171,30 @@ have not saved yet.`,
 		}
 
 		if ferr := newFormatter().AutoHuman(out, func() {
+			printJudgeSuggestions := func() {
+				if len(out.Suggestions) == 0 {
+					return
+				}
+				fmt.Printf("%sAddresses to try (the SERVER dials these, not your shell):%s\n", cli.Dim, cli.Reset)
+				for _, sg := range out.Suggestions {
+					fmt.Printf("  %-32s %s%s%s\n", sg.URL, cli.Dim, sg.Label, cli.Reset)
+				}
+			}
 			if out.Error != "" {
 				cli.PrintError(out.Error)
+				printJudgeSuggestions()
 				return
 			}
 			fmt.Printf("%sModels on %s%s\n", cli.Bold, out.Endpoint, cli.Reset)
 			if len(out.Models) == 0 {
 				fmt.Printf("  %s(none pulled — run `ollama pull qwen2.5:7b`)%s\n", cli.Yellow, cli.Reset)
+				printJudgeSuggestions()
 				return
 			}
 			for _, m := range out.Models {
 				fmt.Printf("  %s\n", m)
 			}
+			printJudgeSuggestions()
 		}); ferr != nil {
 			return ferr
 		}
