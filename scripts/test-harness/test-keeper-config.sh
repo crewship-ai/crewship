@@ -21,6 +21,10 @@
 # INHERITED goes back to inheriting rather than to a pinned copy of the same
 # value.
 
+# Private scratch: the fixed /tmp names this file used are guessable, so on a
+# shared host a local user can pre-create or symlink them.
+_TMP="$(mktemp -d "${TMPDIR:-/tmp}/cs-keeper-config.XXXXXX")"
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
@@ -71,7 +75,7 @@ restore_config() {
   if [[ "$ORIG_ENDPOINT_SRC" == "instance" ]]; then args+=(--endpoint "$ORIG_ENDPOINT"); else args+=(--endpoint ""); fi
   cs keeper config set "${args[@]}" >/dev/null 2>&1 || true
 }
-trap restore_config EXIT
+trap 'restore_config; rm -rf "$_TMP"' EXIT
 
 cfg_field() { cs keeper config get --format json 2>/dev/null | jq -r ".${1}.value  // empty"; }
 cfg_source() { cs keeper config get --format json 2>/dev/null | jq -r ".${1}.source // empty"; }
@@ -79,10 +83,10 @@ cfg_source() { cs keeper config get --format json 2>/dev/null | jq -r ".${1}.sou
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. config get reports the effective judge with provenance"
 # ─────────────────────────────────────────────────────────────────────────────
-if cs keeper config get >/tmp/cs-keeper-config.out 2>&1; then
+if cs keeper config get >"$_TMP/config.out" 2>&1; then
   _pass "keeper config get exits 0"
 else
-  _fail "keeper config get exits 0" "$(head -c 200 /tmp/cs-keeper-config.out | tr '\n' ' ')"
+  _fail "keeper config get exits 0" "$(head -c 200 "$_TMP/config.out" | tr '\n' ' ')"
 fi
 for f in enabled judge_provider judge_endpoint_url judge_wire judge_model; do
   assert_nonempty "get reports a source for $f" "$(cfg_source "$f")"
@@ -112,14 +116,36 @@ assert_eq "endpoint provenance survived it too"            "$BEFORE_ENDPOINT_SRC
 # ─────────────────────────────────────────────────────────────────────────────
 section "4. clearing a field returns it to the server configuration"
 # ─────────────────────────────────────────────────────────────────────────────
-cs keeper config set --model "" >/dev/null 2>&1 || true
-CLEARED_SRC="$(cfg_source judge_model)"
-if [[ "$CLEARED_SRC" == "instance" ]]; then
-  _fail "clearing the model drops the override" "still reports source=instance"
+# Two legal outcomes, and swallowing the exit code could not tell them apart —
+# which is how this section started reporting a product regression that was the
+# fail-closed guard working. With the engine ON and nothing to inherit, clearing
+# the model is REFUSED: an enabled Keeper with no judge denies every credential
+# request, so the server will not let you configure that state.
+# What is in force immediately BEFORE the attempt — section 3 has already moved
+# the model, so the starting value is the wrong thing to compare a refusal
+# against.
+BEFORE_CLEAR="$(cfg_field judge_model)"
+if cs keeper config set --model "" >"$_TMP/clear.out" 2>&1; then
+  CLEARED_SRC="$(cfg_source judge_model)"
+  if [[ "$CLEARED_SRC" == "instance" ]]; then
+    _fail "clearing the model drops the override" "still reports source=instance"
+  else
+    _pass "clearing the model drops the override (now $CLEARED_SRC)"
+  fi
+  assert_eq "the inherited model is back" "$ORIG_MODEL" "$(cfg_field judge_model)"
 else
-  _pass "clearing the model drops the override (now $CLEARED_SRC)"
+  # Refused. That is correct only when there is genuinely nothing to fall back
+  # to; a refusal with an inherited model waiting would be a real bug.
+  if [[ "$ORIG_ENABLED" == "true" && "$ORIG_MODEL_SRC" == "instance" ]]; then
+    _pass "clearing the only judge model is refused while the engine is on"
+    assert_contains "the refusal names the fail-closed reason" \
+      "$(tr '[:upper:]' '[:lower:]' <"$_TMP/clear.out")" "fail-closed"
+    assert_eq "and the model is untouched" "$BEFORE_CLEAR" "$(cfg_field judge_model)"
+  else
+    _fail "clearing the model drops the override" \
+      "refused even though there is an inherited value to fall back to: $(head -c 160 "$_TMP/clear.out" | tr '\n' ' ')"
+  fi
 fi
-assert_eq "the inherited model is back" "$ORIG_MODEL" "$(cfg_field judge_model)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "5. Keeper cannot be enabled without a judge (fail-closed guard)"
@@ -127,12 +153,12 @@ section "5. Keeper cannot be enabled without a judge (fail-closed guard)"
 # Only meaningful on a target with no judge configured; where one exists, this is
 # a legal request and there is nothing to assert.
 if [[ -z "$(cfg_field judge_endpoint_url)" || -z "$(cfg_field judge_model)" ]]; then
-  if cs keeper config set --enabled on >/tmp/cs-keeper-enable.out 2>&1; then
+  if cs keeper config set --enabled on >"$_TMP/enable.out" 2>&1; then
     _fail "enabling with no judge is refused" "the server accepted it — every credential request would DENY"
   else
     _pass "enabling with no judge is refused"
     assert_contains "the refusal names what is missing" \
-      "$(tr '[:upper:]' '[:lower:]' </tmp/cs-keeper-enable.out)" "model"
+      "$(tr '[:upper:]' '[:lower:]' <"$_TMP/enable.out")" "model"
   fi
 else
   skip "enabling with no judge is refused" "this target has a judge configured — nothing to provoke"
@@ -149,6 +175,14 @@ else
 fi
 assert_eq "nothing is overridden after a reset" "false" \
   "$(cs keeper config get --format json 2>/dev/null | jq -r '.overridden')"
-assert_eq "the server's model is in force again" "$ORIG_MODEL" "$(cfg_field judge_model)"
+# After a full reset the model is whatever the SERVER config says, which is the
+# starting value only when the starting value was inherited. When it was an
+# instance override, reset drops it — and on an instance with no KEEPER_MODEL that
+# legitimately leaves it empty.
+if [[ "$ORIG_MODEL_SRC" == "instance" ]]; then
+  assert_eq "the instance override is gone after a reset" "" "$(cfg_source judge_model | grep -x instance || true)"
+else
+  assert_eq "the server's model is in force again" "$ORIG_MODEL" "$(cfg_field judge_model)"
+fi
 
 finish
