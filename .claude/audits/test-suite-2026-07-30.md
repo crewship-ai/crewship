@@ -658,3 +658,88 @@ Poučení k §5 G4: „coverage neříká, co si myslíš" má ještě horší v
 **test může běžet proti jiné databázi než produkce a projít.** Žádné procento
 to nezachytí. Zachytilo to teprve to, že někdo ten DSN přečetl znak po znaku
 při jiné práci.
+
+---
+
+## 12. Co naučilo review kolo
+
+CodeRabbit vyčerpal rate limit na 17 PR naráz a žádný z nich nedostal review, takže
+je nahradilo 7 adversariálních reviewerů, každý na skupinu příbuzných PR, s jednou
+povinnou úlohou: **revertuj opravu a ověř, že test zčervená.** Našli devět věcí,
+z toho osm v PR, které už byly reportované jako hotové.
+
+Tři poučení jsou obecnější než ty konkrétní nálezy.
+
+### Falešný PASS u source-guard testů je vzor, ne nehoda
+
+Tři nezávisle napsané invarianty, tři varianty téže chyby:
+
+| test | varianta | rozsah slepoty |
+|---|---|---|
+| internalAuth invariant | fixní okno přeteklo do další registrace | chyceno autorem live |
+| read-route invariant | totéž | **76 z 219 rout** |
+| assignee-write invariant | `strings.Contains` na celém souboru místo per-write-site | 5 ze 6 souborů |
+
+U toho třetího to reviewer reprodukoval: přidal nechráněný zápis do souboru, který
+helper už jinde volá, a invariant **prošel**.
+
+Příčina je společná a je psychologická: autor ověří, že test **umí** zčervenat, a
+tím se uspokojí. Neověří, že červená **na tom správném místě** a že nezčervená na
+místě špatném.
+
+**Pravidlo pro každý budoucí source guard v tomhle repu — tři případy, ne jeden:**
+1. **RED** — odeber garanci → test ji pojmenuje, včetně `file:line`.
+2. **Žádný falešný pozitiv** — legitimní tvar (víceřádkový zápis, sousední chráněná
+   funkce ve stejném souboru) → zůstane zelený. Tohle je ta polovina, na kterou se
+   zapomíná, a falešně červený build-gate lidi „opraví" oslabením testu.
+3. **Vacuous pass** — rozbij matchovací regex → count guard padne. Bez něj nerozeznáš
+   „nic nenalezeno" od „nic nezkontrolováno".
+
+A pokud jde o Go kód, **parsuj AST, ne text.** Vítězná verze assignee invariantu
+používá `go/parser` a inspektuje jen `fd.Body` každého `*ast.FuncDecl` — hranice
+funkce je exaktní, kdežto „N řádek" je hádání. Textové okno je vždycky kompromis,
+který někdo objeví jako mezeru.
+
+### Nález z grepu je hypotéza, ne fakt
+
+Dvakrát v jednom sezení:
+- Hlásil jsem málem produkční bug, protože `grep '_foreign_keys='` se chytil na
+  konec slova `defer_foreign_keys=` v **komentáři** (`internal/backup/replace.go`).
+- Nález o sidecar credential fail-openu (§ korekce výše) pocházel z **komentáře v
+  kódu**, který zastaral směrem k pesimismu — vypadal jako přiznaná díra, takže ho
+  nikdo nepřekontroloval.
+
+Obojí by prošlo, kdyby se nekontrolovalo call site.
+
+### Vlastní paralelismus je součást měřicího aparátu
+
+Headline zrychlení testů (`1205,6 s → 195,3 s, 6,2×`) bylo **nadsazené na straně
+„před"**. Reviewer přeměřil tři balíky nezávisle: čísla „po" se reprodukují na
+desetinku, čísla „před" jsou systematicky 2,2–3,2× vyšší. Příčina: baseline se
+měřil na stroji, kde současně jelo sedm agentů s plnými suitami, a jeden z nich
+mimochodem vymazal sdílenou Go build cache uprostřed běhu.
+
+Zrychlení je reálné a velké (8,9× / 18,5× / 10,2× na těch třech balících). Ale
+**číslo, které nesedí, podkope důvěru ve zbytek**, a poctivý rozsah je lepší než
+přesně vypadající fikce. Když se měří na stroji, který si sám zatěžuješ, není to
+neutrální pozadí.
+
+### Nejcennější nález nebyl v žádném PR
+
+`restoreMemoryBlobFile` (backup) zapisoval bez fsync. Samo o sobě prošlo. Ale jak
+by přistál durable-writes PR, stalo by se z toho **jediné** nedurabilní zapsání
+memory obsahu v repu — a nový guard by ho nechytil, protože skenoval jen
+`internal/consolidate` a `internal/memory`.
+
+Dvě změny, každá o sobě správná, dohromady mezera, kterou nová zeď specificky
+nekryje. Per-PR review to najít nemůže. **Proto se PR reviewovaly ve skupinách po
+příbuznosti, ne po jednom** — a proto se u dvojic, které se dotýkají téhož
+invariantu, má review ptát „co se stane, až přistane ten druhý".
+
+### Vedlejší produkt: `-race` konečně proběhl
+
+198 balíků čistých. Jediné 4 warningy jsou v **testu**, ne v produkci
+(`bytes.Buffer` čtený testem, zatímco do něj loguje goroutina pprof serveru;
+reprodukuje se v 0,65 s). Na orchestrátor s 2 434 `t.Parallel()`, který `-race`
+nikdy neviděl, je to nad očekávání — a znamená to, že G3 z §5 byl reálný gap v
+*dokazování*, ne v kódu.
