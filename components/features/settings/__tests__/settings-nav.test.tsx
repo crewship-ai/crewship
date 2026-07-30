@@ -46,23 +46,24 @@ describe("SettingsNav visibility by role", () => {
     }
   })
 
-  it("hides Crew links and Audit Log from a MEMBER", () => {
+  it("hides Audit Log and Access & Secrets from a MEMBER", () => {
     renderNav("MEMBER")
-    // Crew links is a roleCreate (MANAGER+) route; the audit log is not
-    // readable at all below MANAGER, so its pane would render empty.
-    expect(row("Crew links")).toBeNull()
+    // Neither is readable below MANAGER server-side, so both panes would
+    // render empty — the one case where hiding beats read-only.
     expect(row("Audit Log")).toBeNull()
+    expect(row("Access & Secrets")).toBeNull()
   })
 
-  it("keeps General and Members visible to a MEMBER", () => {
+  it("keeps General, Crew links and Members visible to a MEMBER", () => {
     renderNav("MEMBER")
-    // Read-only, but readable: workspace identity + counts, the member roster.
-    for (const label of ["General", "Members", ...ACCOUNT_ITEMS]) {
+    // Read-only, but readable: workspace identity + counts, the link graph
+    // (which answers "why can my agent not reach that crew"), the roster.
+    for (const label of ["General", "Crew links", "Members", ...ACCOUNT_ITEMS]) {
       expect(row(label), `MEMBER should still see ${label}`).toBeTruthy()
     }
   })
 
-  it("gives a MANAGER Crew links and Audit Log", () => {
+  it("gives a MANAGER Audit Log", () => {
     renderNav("MANAGER")
     expect(row("Crew links")).toBeTruthy()
     expect(row("Audit Log")).toBeTruthy()
@@ -95,17 +96,18 @@ describe("SettingsNav visibility by role", () => {
 
   it("treats a VIEWER like a MEMBER for the manager-tier sections", () => {
     renderNav("VIEWER")
-    expect(row("Crew links")).toBeNull()
     expect(row("Audit Log")).toBeNull()
+    expect(row("Access & Secrets")).toBeNull()
     expect(row("Members")).toBeTruthy()
+    expect(row("Crew links")).toBeTruthy()
   })
 
   it("hides gated rows while the role is still unknown", () => {
     // Showing a row and retracting it a beat later is worse than showing it
     // late — matches isAdminTier/isManagerTier's own null handling.
     renderNav(null)
-    expect(row("Crew links")).toBeNull()
     expect(row("Audit Log")).toBeNull()
+    expect(row("Access & Secrets")).toBeNull()
     expect(row("Profile")).toBeTruthy()
   })
 
@@ -121,7 +123,8 @@ describe("isSettingsSectionVisible", () => {
   it("agrees with the rendered nav", () => {
     expect(isSettingsSectionVisible("audit", "MEMBER")).toBe(false)
     expect(isSettingsSectionVisible("audit", "MANAGER")).toBe(true)
-    expect(isSettingsSectionVisible("connections", "MEMBER")).toBe(false)
+    // The link graph reads at any tier; only its controls are MANAGER+.
+    expect(isSettingsSectionVisible("connections", "MEMBER")).toBe(true)
     expect(isSettingsSectionVisible("general", "MEMBER")).toBe(true)
     expect(isSettingsSectionVisible("members", "VIEWER")).toBe(true)
   })

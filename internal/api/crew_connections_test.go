@@ -375,30 +375,122 @@ func TestCrewConnections_Create_HappyPath_Returns201WithID(t *testing.T) {
 // translates any insert error into 409 with an "already exists"
 // message; verifying the status keeps the contract stable for clients
 // that retry idempotently.
-func TestCrewConnections_Create_DuplicatePair_Returns409(t *testing.T) {
-	h, _, userID, wsID, crewA, crewB := crewConnectionsRig(t)
-	body := `{"from_crew_id":"` + crewA + `","to_crew_id":"` + crewB + `"}`
+// Linking a pair that is already linked is not an error — it is the same
+// request twice. The UI's three-state control (not linked / one-way / both
+// ways) sends a link request for every state change, and a 409 would force it
+// to model "does a row already exist" itself, which is exactly the state the
+// server already holds. So Create upserts: same row, new direction.
+func TestCrewConnections_Create_ExistingPair_UpdatesDirectionInPlace(t *testing.T) {
+	h, db, userID, wsID, crewA, crewB := crewConnectionsRig(t)
 
-	// First create — must succeed.
-	req1 := withWorkspaceUser(
-		httptest.NewRequest("POST", "/api/v1/crew-connections", strings.NewReader(body)),
-		userID, wsID, "OWNER",
-	)
+	first := `{"from_crew_id":"` + crewA + `","to_crew_id":"` + crewB + `","direction":"unidirectional"}`
 	rr1 := httptest.NewRecorder()
-	h.Create(rr1, req1)
+	h.Create(rr1, withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/crew-connections", strings.NewReader(first)),
+		userID, wsID, "OWNER"))
 	if rr1.Code != http.StatusCreated {
 		t.Fatalf("first create status = %d, want 201; body=%s", rr1.Code, rr1.Body.String())
 	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rr1.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode first create: %v", err)
+	}
 
-	// Second create with the same pair — UNIQUE constraint trips.
-	req2 := withWorkspaceUser(
-		httptest.NewRequest("POST", "/api/v1/crew-connections", strings.NewReader(body)),
-		userID, wsID, "OWNER",
-	)
+	second := `{"from_crew_id":"` + crewA + `","to_crew_id":"` + crewB + `","direction":"bidirectional"}`
 	rr2 := httptest.NewRecorder()
-	h.Create(rr2, req2)
-	if rr2.Code != http.StatusConflict {
-		t.Fatalf("duplicate status = %d, want 409; body=%s", rr2.Code, rr2.Body.String())
+	h.Create(rr2, withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/crew-connections", strings.NewReader(second)),
+		userID, wsID, "OWNER"))
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("re-link status = %d, want 200; body=%s", rr2.Code, rr2.Body.String())
+	}
+	var updated struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rr2.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode re-link: %v", err)
+	}
+	if updated.ID != created.ID {
+		t.Fatalf("re-link returned id %q, want the existing %q", updated.ID, created.ID)
+	}
+
+	var rows int
+	var direction string
+	if err := db.QueryRow(`SELECT COUNT(*), MAX(direction) FROM crew_connections`).Scan(&rows, &direction); err != nil {
+		t.Fatalf("count connections: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("rows = %d, want 1 — a re-link must not add a second row", rows)
+	}
+	if direction != "bidirectional" {
+		t.Fatalf("direction = %q, want bidirectional", direction)
+	}
+}
+
+// A→B and B→A are the same edge seen from two ends. UNIQUE(from,to) does not
+// catch the reverse, so without normalisation a workspace ends up with two
+// rows that together mean "both ways" while each claims to be one-way — and
+// the UI has to render one edge as two contradictory links.
+func TestCrewConnections_Create_ReversePair_MergesIntoOneBidirectionalRow(t *testing.T) {
+	h, db, userID, wsID, crewA, crewB := crewConnectionsRig(t)
+
+	ab := `{"from_crew_id":"` + crewA + `","to_crew_id":"` + crewB + `","direction":"unidirectional"}`
+	rr1 := httptest.NewRecorder()
+	h.Create(rr1, withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/crew-connections", strings.NewReader(ab)),
+		userID, wsID, "OWNER"))
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("A→B status = %d, want 201; body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	// The opposite one-way link. Asking for B→A when A→B already exists means
+	// both directions are wanted.
+	ba := `{"from_crew_id":"` + crewB + `","to_crew_id":"` + crewA + `","direction":"unidirectional"}`
+	rr2 := httptest.NewRecorder()
+	h.Create(rr2, withWorkspaceUser(
+		httptest.NewRequest("POST", "/api/v1/crew-connections", strings.NewReader(ba)),
+		userID, wsID, "OWNER"))
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("B→A status = %d, want 200; body=%s", rr2.Code, rr2.Body.String())
+	}
+
+	var rows int
+	var direction string
+	if err := db.QueryRow(`SELECT COUNT(*), MAX(direction) FROM crew_connections`).Scan(&rows, &direction); err != nil {
+		t.Fatalf("count connections: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("rows = %d, want 1 — the reverse of an existing edge is the same edge", rows)
+	}
+	if direction != "bidirectional" {
+		t.Fatalf("direction = %q, want bidirectional (A→B plus B→A is both ways)", direction)
+	}
+}
+
+// A crew is soft-deleted, so its links survive the delete in the table. They
+// must not survive the LIST: on dev2 this left 24 of 27 rows pointing at
+// crews that no longer exist, which is most of what the settings page showed.
+func TestCrewConnections_List_OmitsLinksTouchingADeletedCrew(t *testing.T) {
+	h, db, userID, wsID, crewA, crewB := crewConnectionsRig(t)
+	insertConnection(t, db, "cc-live", wsID, crewA, crewB, "bidirectional")
+
+	if _, err := db.Exec(`UPDATE crews SET deleted_at = datetime('now') WHERE id = ?`, crewB); err != nil {
+		t.Fatalf("soft delete crew: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.List(rr, withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/crew-connections", nil), userID, wsID, "OWNER"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp []crewConnectionResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp) != 0 {
+		t.Fatalf("got %d rows, want 0 — a link to a deleted crew is not a link", len(resp))
 	}
 }
 

@@ -315,6 +315,10 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auditFromRequest(r, h.db, "crew.create", "CREW", crewID, map[string]interface{}{
+		"name": req.Name, "slug": req.Slug, "network_mode": networkMode,
+	})
+
 	writeJSON(w, http.StatusCreated, crewResponse{
 		ID:                    crewID,
 		WorkspaceID:           workspaceID,

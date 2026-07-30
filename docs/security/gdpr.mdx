@@ -213,14 +213,28 @@ ORDER BY initiated_at DESC;
 
 ## UI surface
 
-The `GET` and `DELETE` endpoints are reachable from the workspace
-**Settings → GDPR Actions** panel (Settings → Admin → GDPR Actions for
-operators who haven't reorganised the nav). The UI:
+Both endpoints are reachable from **Admin → Users**: search for the person,
+open their row, and the two actions are there — **Export data** and **Erase
+data**.
 
-1. Lets the admin search a user by email or paste a `user_id`
-2. Exposes two buttons — **Export user data (JSON)** + **Delete user data (cascade)**
-3. The delete button opens a confirmation dialog with a required reason field + an "I understand this is irreversible" checkbox
-4. The dialog stays open during the async DELETE (no auto-close) — a failed call surfaces the error toast without wiping the operator's input, so they can retry without re-typing
+They used to live behind their own "GDPR actions" nav row, which carried its
+own user picker: a second roster of the same people the Users list already
+showed, kept in step by hand. The actions belong to a person, so they live
+where people live.
+
+1. The roster searches by name, email or user id; one row opens at a time,
+   because one of these actions is irreversible and two open panels invite the
+   wrong one being used
+2. **Export data** downloads the JSON snapshot; **Erase data** opens a
+   confirmation dialog with a required reason field and an "I understand this
+   is irreversible" checkbox
+3. The dialog stays open during the async DELETE (no auto-close) — a failed
+   call surfaces the error toast without wiping the operator's input, so they
+   can retry without re-typing
+
+From a terminal, the same two operations are `crewship admin gdpr export` and
+`crewship admin gdpr delete --reason … --yes`, which is the better surface for
+a queue of requests.
 
 The reason field is the same one that lands in `gdpr_actions.reason` — operators are encouraged to paste their ticketing system's identifier ("SAR ticket #1234") rather than free-form text, so the audit query reads naturally.
 

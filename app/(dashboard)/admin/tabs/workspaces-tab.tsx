@@ -1,19 +1,43 @@
 import React from "react"
+import { Plus } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { SettingsCard } from "@/components/features/settings/shared"
+import { CreateWorkspaceDialog } from "@/components/layout/workspace-switcher"
 import type { AdminOrg } from "../types"
 
 interface WorkspacesTabProps {
   orgs: AdminOrg[]
+  /** Re-read the admin data after a create, so the list the operator is
+   *  looking at catches up on its own. A created workspace that does not
+   *  appear reads as a failed create. */
+  onRefresh: () => void
 }
 
-export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs }: WorkspacesTabProps) {
+export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs, onRefresh }: WorkspacesTabProps) {
+  const [createOpen, setCreateOpen] = React.useState(false)
+
   return (
+    <>
     <SettingsCard
       title="All workspaces"
       description={
         orgs.length === 0
           ? "No workspaces"
           : `${orgs.length} workspace${orgs.length === 1 ? "" : "s"} on this instance`
+      }
+      actions={
+        // The SAME dialog the workspace switcher opens, not a second
+        // implementation of it: two create forms for one object drift, and
+        // the slug rule is the kind of thing that drifts silently.
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus className="mr-1.5 h-3 w-3" />
+          Create workspace
+        </Button>
       }
     >
       {orgs.length === 0 ? (
@@ -63,5 +87,15 @@ export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs }: Workspa
         </>
       )}
     </SettingsCard>
+
+    <CreateWorkspaceDialog
+      open={createOpen}
+      onOpenChange={setCreateOpen}
+      // The switcher's version switches you INTO the new workspace; from the
+      // admin console you are auditing the instance, not moving house, so the
+      // list refreshes and the operator stays where they were.
+      onCreated={() => onRefresh()}
+    />
+    </>
   )
 })

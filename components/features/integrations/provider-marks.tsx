@@ -303,6 +303,7 @@ export function ProviderMark({
     if (bare) return img
     return (
       <span
+        data-provider-mark={key}
         className={cn(
           "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
           "bg-white/[0.06] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]",
@@ -330,6 +331,7 @@ export function ProviderMark({
     if (bare) return glyph
     return (
       <span
+        data-provider-mark={key}
         className={cn(
           "inline-flex shrink-0 items-center justify-center rounded-md",
           "h-7 w-7",
@@ -353,6 +355,7 @@ export function ProviderMark({
     if (bare) return <Icon className="h-full w-full" style={{ color: builtin.color }} />
     return (
       <span
+        data-provider-mark={key}
         className={cn("inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md", className)}
         style={{
           backgroundColor: `color-mix(in oklab, ${builtin.color} 18%, transparent)`,

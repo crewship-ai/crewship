@@ -154,6 +154,9 @@ func (d *Dispatcher) deliverCategoryEmail(ctx context.Context, ch Channel, msg C
 }
 
 func (d *Dispatcher) deliverCategoryShoutrrr(ctx context.Context, ch Channel, msg CategoryMessage) error {
+	if err := d.checkProviderEnabled(ctx, ch.Provider); err != nil {
+		return err
+	}
 	if ch.Secret == "" {
 		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
 	}

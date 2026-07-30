@@ -182,6 +182,39 @@ type Dispatcher struct {
 	// delivered relative, which is honest about not knowing rather than
 	// guessing a host and emitting links that 404.
 	publicURL string
+
+	// providerGate answers "is this shoutrrr provider enabled on this
+	// instance". It is the SAME toggle the channel-create path checks, read
+	// on the way out as well — a switch labelled enable/disable has to mean
+	// "nothing leaves through this provider", or it lies at exactly the
+	// moment someone reaches for it to stop a leak. Enforcing it only at
+	// create time left every channel made before the switch delivering.
+	//
+	// nil = no gate (embedded use, tests): previous behaviour, everything
+	// delivers.
+	providerGate func(ctx context.Context, provider string) (bool, error)
+}
+
+// SetProviderGate wires the instance-wide provider toggle into delivery.
+func (d *Dispatcher) SetProviderGate(fn func(ctx context.Context, provider string) (bool, error)) {
+	d.providerGate = fn
+}
+
+// checkProviderEnabled fails CLOSED. The gate exists to stop data leaving; if
+// its state cannot be read, holding the message is the safe direction and the
+// caller gets an error it can retry or surface, rather than a silent send.
+func (d *Dispatcher) checkProviderEnabled(ctx context.Context, provider string) error {
+	if d.providerGate == nil {
+		return nil
+	}
+	enabled, err := d.providerGate(ctx, provider)
+	if err != nil {
+		return fmt.Errorf("notify: cannot determine whether provider %q is enabled: %w", provider, err)
+	}
+	if !enabled {
+		return fmt.Errorf("notify: provider %q is disabled on this instance", provider)
+	}
+	return nil
 }
 
 // publicURLEnv names the browser-reachable base URL of this instance, e.g.
@@ -203,10 +236,43 @@ func (d *Dispatcher) WithPublicURL(u string) *Dispatcher {
 	return d
 }
 
+// ProviderSettingKey names the app_settings row that holds the instance-wide
+// enable/disable toggle for one shoutrrr provider. Exported so the handler
+// that writes the toggle and the dispatcher that reads it cannot drift onto
+// two different keys.
+func ProviderSettingKey(provider string) string {
+	return "notify.provider." + provider + ".enabled"
+}
+
+// DefaultProviderGate reads ProviderSettingKey from app_settings, defaulting
+// to enabled when no row exists — a freshly-upgraded instance should not need
+// an admin to opt every provider back in.
+func DefaultProviderGate(db *sql.DB) func(ctx context.Context, provider string) (bool, error) {
+	return func(ctx context.Context, provider string) (bool, error) {
+		var value string
+		err := db.QueryRowContext(ctx,
+			`SELECT value FROM app_settings WHERE key = ?`, ProviderSettingKey(provider)).Scan(&value)
+		if err == sql.ErrNoRows {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return value == "true", nil
+	}
+}
+
 // NewDispatcher wires a dispatcher. A nil mailer degrades e-mail delivery
 // to a logged no-op (webhook channels still work). db is the control-plane
 // handle the webhook path resolves the crew egress allowlist from (#1367);
 // pass nil only in unit paths with no crew policy to enforce.
+//
+// When db is present the provider gate is installed HERE rather than left to
+// the caller. Four production sites build a Dispatcher and only one of them
+// remembered to call SetProviderGate, so switching a provider off stopped
+// delivery on one path and not the other two — a kill switch that works
+// depending on which code sent the message is not a kill switch. Callers that
+// genuinely want no gate pass a nil db or override with SetProviderGate.
 func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger, db *sql.DB) *Dispatcher {
 	if logger == nil {
 		logger = slog.Default()
@@ -214,7 +280,7 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 	if mail == nil {
 		mail = mailer.Disabled{}
 	}
-	return &Dispatcher{
+	d := &Dispatcher{
 		lister:      lister,
 		mail:        mail,
 		scrub:       scrubber.New(),
@@ -224,6 +290,10 @@ func NewDispatcher(lister ChannelLister, mail mailer.Mailer, logger *slog.Logger
 		baseBackoff: 200 * time.Millisecond,
 		publicURL:   strings.TrimSpace(os.Getenv(publicURLEnv)),
 	}
+	if db != nil {
+		d.providerGate = DefaultProviderGate(db)
+	}
+	return d
 }
 
 // webhookClient builds the http.Client for one delivery via the shared gated
@@ -330,6 +400,9 @@ func (d *Dispatcher) deliver(ctx context.Context, ch Channel, ev NotificationEve
 // same secret_enc column the webhook signing secret uses; see
 // ChannelStore.Create).
 func (d *Dispatcher) deliverShoutrrr(ctx context.Context, ch Channel, ev NotificationEvent) error {
+	if err := d.checkProviderEnabled(ctx, ch.Provider); err != nil {
+		return err
+	}
 	if ch.Secret == "" {
 		return fmt.Errorf("notify: shoutrrr channel %s has no service url", ch.ID)
 	}

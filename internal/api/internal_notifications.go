@@ -57,7 +57,7 @@ func NewAgentNotifyHandler(db *sql.DB, mail mailer.Mailer, j journal.Emitter, lo
 		db:         db,
 		channels:   store,
 		pairings:   notify.NewPairingStore(db),
-		dispatcher: notify.NewDispatcher(store, mail, logger, db),
+		dispatcher: newGatedDispatcher(store, mail, logger, db),
 		limiter:    notifyroute.NewRateLimiter(3, 1.0/60.0),
 		journal:    j,
 		logger:     logger,

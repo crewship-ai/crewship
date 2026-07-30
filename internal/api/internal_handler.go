@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -59,6 +60,23 @@ func buildEthosBlock(agentRole string) string {
 // bigger rewrite than the value justifies, so we keep both: audit_logs
 // for the dedicated compliance view, journal_entries for the unified
 // timeline.
+// auditFromRequest records a workspace-state change against whoever made the
+// request. Every audited handler needs the same four lines to dig the caller
+// and the workspace out of the context; a helper keeps the call sites to one
+// line so adding an audit row is never the reason not to bother.
+//
+// The journal is deliberately nil: these are settings changes, not agent
+// activity, and the Crow's Nest already has its own richer entries for the
+// things it covers.
+func auditFromRequest(r *http.Request, db *sql.DB, action, entityType, entityID string, metadata map[string]interface{}) {
+	userID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		userID = u.ID
+	}
+	WriteAuditLog(r.Context(), db, nil, action, entityType, entityID, userID,
+		WorkspaceIDFromContext(r.Context()), metadata)
+}
+
 func WriteAuditLog(ctx context.Context, db *sql.DB, j journal.Emitter, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	metaJSON := "{}"

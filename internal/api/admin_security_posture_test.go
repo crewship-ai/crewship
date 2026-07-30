@@ -23,7 +23,7 @@ func postureFor(t *testing.T, env map[string]string, allowSignup, oauth, email b
 	for k, v := range env {
 		t.Setenv(k, v)
 	}
-	return buildSecurityPosture(allowSignup, oauth, email, false)
+	return buildSecurityPosture(allowSignup, oauth, email, false, postureState{BackupsRecorded: 1})
 }
 
 func warningKeys(p securityPostureResponse) map[string]string {
@@ -47,7 +47,7 @@ func TestSecurityPosture_NeverLeaksSecretValues(t *testing.T) {
 	t.Setenv(encryption.AllowPlaintextSecretsEnvVar, "true")
 	t.Setenv("CREWSHIP_ENV", "prod")
 
-	p := buildSecurityPosture(true, true, true, true)
+	p := buildSecurityPosture(true, true, true, true, postureState{BackupsRecorded: 1})
 	blob, err := json.Marshal(p)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -105,7 +105,7 @@ func TestSecurityPosture_RateLimitDisabledInProdIsIgnoredNotDisabled(t *testing.
 	// send an operator chasing an exposure that doesn't exist — but silently
 	// reporting "enabled" would hide that their config says otherwise.
 	t.Setenv("CREWSHIP_ENV", "production")
-	p := buildSecurityPosture(false, false, false, true /* operator asked for it off */)
+	p := buildSecurityPosture(false, false, false, true /* operator asked for it off */, postureState{BackupsRecorded: 1})
 
 	if !p.RateLimitDisabled {
 		t.Error("the operator's flag should still be reported as set")
@@ -168,7 +168,7 @@ func TestSecurityPosture_CleanInstanceHasNoHighWarnings(t *testing.T) {
 }
 
 func TestSecurityPosture_RequiresAdmin(t *testing.T) {
-	h := NewSecurityPostureHandler(false, false)
+	h := NewSecurityPostureHandler(false, false, nil, nil)
 	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/admin/security-posture", nil), "u1", "ws1", "MEMBER")
 	rr := httptest.NewRecorder()
 	h.Get(rr, req)
@@ -178,7 +178,7 @@ func TestSecurityPosture_RequiresAdmin(t *testing.T) {
 }
 
 func TestSecurityPosture_AdminGetsTheReport(t *testing.T) {
-	h := NewSecurityPostureHandler(false, false)
+	h := NewSecurityPostureHandler(false, false, nil, nil)
 	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/admin/security-posture", nil), "u1", "ws1", "OWNER")
 	rr := httptest.NewRecorder()
 	h.Get(rr, req)
@@ -204,12 +204,19 @@ func TestSecurityPosture_AdminGetsTheReport(t *testing.T) {
 // the doc list is checked against it by eye at review time.
 func TestSecurityPosture_WarningKeysAreTheDocumentedSet(t *testing.T) {
 	documented := map[string]bool{
+		// Environment-derived.
 		"plaintext_secrets_allowed":           true,
 		"encryption_key_missing":              true,
 		"rate_limit_disabled":                 true,
 		"rate_limit_disabled_ignored_in_prod": true,
 		"signup_open":                         true,
 		"private_endpoints_ceiling_open":      true,
+		// State-derived: what the instance became, not how it started.
+		"encryption_key_generated":       true,
+		"privileged_credentials_enabled": true,
+		"private_endpoints_in_use":       true,
+		"seed_account_default_password":  true,
+		"no_backup_recorded":             true,
 	}
 
 	// Drive every branch that can emit a warning and collect the keys.
@@ -224,10 +231,22 @@ func TestSecurityPosture_WarningKeysAreTheDocumentedSet(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "")
 	t.Setenv(encryption.AllowPlaintextSecretsEnvVar, "true")
 	t.Setenv("CREWSHIP_ALLOW_PRIVATE_ENDPOINTS", "1")
-	collect(buildSecurityPosture(true, false, false, true))
+	collect(buildSecurityPosture(true, false, false, true, postureState{BackupsRecorded: 1, BackupsRecordedKnown: true}))
 	// Prod with the limiter flag set — the only path to the ignored-in-prod key.
 	t.Setenv("CREWSHIP_ENV", "prod")
-	collect(buildSecurityPosture(true, false, false, true))
+	collect(buildSecurityPosture(true, false, false, true, postureState{BackupsRecorded: 1, BackupsRecordedKnown: true}))
+	// The state-derived half. These emit from postureState alone, so the
+	// env-driven cases above can never reach them — before this, five keys
+	// sat in the emitted set with no case that produced them and the
+	// contract passed by never looking.
+	collect(buildSecurityPosture(false, false, false, false, postureState{
+		EncryptionKeySource:            "generated",
+		PrivilegedCredentialWorkspaces: 2,
+		PrivateEndpointCrews:           3,
+		SeedAccountDefaultPassword:     true,
+		BackupsRecorded:                0,
+		BackupsRecordedKnown:           true,
+	}))
 
 	for k := range seen {
 		if !documented[k] {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
 )
 
@@ -31,8 +32,12 @@ func NewNotifyProvidersHandler(db *sql.DB, logger *slog.Logger) *NotifyProviders
 // providerSettingKey returns the app_settings key gating provider p.
 // Namespaced under "notify.provider." so a future admin-settings sweep
 // doesn't collide with the pre-existing telemetry keys in that table.
+//
+// Delegates to notify so the key the toggle WRITES and the key delivery
+// READS are one definition — two copies of a string like this drift, and the
+// symptom would be a switch that flips without stopping anything.
 func providerSettingKey(p string) string {
-	return "notify.provider." + p + ".enabled"
+	return notify.ProviderSettingKey(p)
 }
 
 // providerInfo describes one provider to a client. It carries the FORM
@@ -130,14 +135,23 @@ func (h *NotifyProvidersHandler) Patch(w http.ResponseWriter, r *http.Request) {
 // to true (enabled) when no row exists — a freshly-upgraded instance
 // doesn't need an admin to opt every provider back in. Shared with
 // NotifyChannelHandler.Create, which fails closed on a disabled provider.
+//
+// Delegates to the same reader delivery uses, so the create-time check and
+// the on-the-way-out check cannot answer differently.
 func providerEnabled(ctx context.Context, db *sql.DB, p string) (bool, error) {
-	var value string
-	err := db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, providerSettingKey(p)).Scan(&value)
-	if err == sql.ErrNoRows {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return value == "true", nil
+	return notify.DefaultProviderGate(db)(ctx, p)
+}
+
+// newGatedDispatcher builds a dispatcher that honours the instance-wide
+// provider toggle on delivery, not only when a channel is created.
+//
+// Without the gate, switching Discord off stopped nobody: every channel made
+// before the switch kept delivering, which is the opposite of what an
+// operator reaches for that switch to do.
+//
+// The gate now comes from notify.NewDispatcher itself — an opt-in that two of
+// the four construction sites missed is not a gate. This wrapper stays as the
+// named entry point for the handlers, and pins the default with a test.
+func newGatedDispatcher(store notify.ChannelLister, mail mailer.Mailer, logger *slog.Logger, db *sql.DB) *notify.Dispatcher {
+	return notify.NewDispatcher(store, mail, logger, db)
 }

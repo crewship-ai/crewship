@@ -484,6 +484,23 @@ export function getGradientPalette(colorId: string | null | undefined): Gradient
 }
 
 /**
+ * The crew colour as a hex, or null when it is a palette id (or nothing).
+ *
+ * Crew colour is stored as EITHER a palette id ("blue") or a raw hex
+ * ("#EF4444") depending on which picker wrote it, and `getGradientPalette`
+ * only knows ids: a hex missed the registry and fell back to the first
+ * palette, so crews stored as red, green and blue all rendered blue. Callers
+ * that can style inline ask here first and use the classes only when this
+ * returns null.
+ */
+export function crewColorHex(color: string | null | undefined): string | null {
+  if (!color) return null
+  if (Object.hasOwn(paletteById, color)) return null
+  const hex = color.startsWith("#") ? color : `#${color}`
+  return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : null
+}
+
+/**
  * Resolve a crew dot color. Specialised wrapper — has hex passthrough /
  * prefix-on-bare-hex behaviour beyond a plain registry lookup, so it doesn't
  * fit the generic `resolveEntity` shape cleanly.

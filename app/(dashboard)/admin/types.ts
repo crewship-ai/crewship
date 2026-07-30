@@ -2,6 +2,8 @@
 export interface Stats {
   workspaces: number
   users: number
+  /** What the licence caps first, so the overview reads it against max_crews. */
+  crews?: number
   agents: number
   running: number
 }
@@ -22,6 +24,10 @@ export interface AdminUser {
   id: string
   email: string
   full_name: string | null
+  /** Same-origin authed endpoint with a ?v= cache stamp. Returned by
+   *  /api/v1/admin/users since it was written; the type simply never
+   *  declared it, so no admin surface could draw a face. */
+  avatar_url?: string | null
   created_at: string
   workspace: { id: string; name: string } | null
   role: string | null
@@ -32,6 +38,42 @@ export interface AdminHealth {
   uptime_seconds: number
   db?: { connected: boolean; error?: string }
   disk?: { path?: string; error?: string; free_bytes?: number; total_bytes?: number; used_pct?: number }
+  /** Live level, the configured baseline, and the expiry of a timed override. */
+  log_level?: { level: string; baseline?: string; expires_at?: string | null }
+  /** Where ENCRYPTION_KEY came from. "generated" means the key file sits
+   *  beside the database, so a disk copy carries both it and the ciphertext. */
+  encryption_key_source?: string
+}
+
+/** GET /api/v1/system/version — build identity plus the update check. */
+export interface VersionInfo {
+  current: string
+  latest?: string | null
+  newer?: boolean
+  url?: string | null
+}
+
+/** One derived warning from GET /api/v1/admin/security-posture. */
+export interface PostureWarning {
+  key: string
+  severity: string
+  message: string
+}
+
+/** GET /api/v1/admin/security-posture — the instance's own read of itself. */
+export interface SecurityPosture {
+  environment?: string
+  warnings: PostureWarning[]
+}
+
+/** GET /api/v1/admin/journal/verify — the tamper-evident chain's own verdict. */
+export interface JournalIntegrity {
+  ok?: boolean
+  valid?: boolean
+  entries_verified?: number
+  entries?: number
+  checkpoints?: number
+  error?: string
 }
 
 /** License edition + limits — GET /api/v1/system/license (read-only). */
@@ -91,7 +133,6 @@ export type TabKey =
   | "overview"
   | "workspaces"
   | "users"
-  | "gdpr"
   | "providers"
   | "security"
   | "reviews"

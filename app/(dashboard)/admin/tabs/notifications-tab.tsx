@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import { ArrowUpRight, MessageSquare } from "lucide-react"
+import { ArrowUpRight } from "lucide-react"
 import { toast } from "sonner"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsCard } from "@/components/features/settings/shared"
+import { ProviderMark } from "@/components/features/integrations/provider-marks"
 import { apiFetch } from "@/lib/api-fetch"
 
 interface ProviderInfo {
@@ -85,7 +86,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
     <div className="space-y-4">
       <SettingsCard
         title="Notification providers"
-        description="Instance-wide enable/disable for each shoutrrr delivery provider — a disabled provider is rejected at channel-create time"
+        description="The instance-wide switch for each delivery provider. Turning one off stops delivery through it immediately — existing channels included — and refuses new ones."
       >
         {error ? (
           <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
@@ -101,7 +102,11 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
               }
             >
               <div className="flex items-center gap-2 text-xs text-foreground">
-                <MessageSquare className="size-3 text-muted-foreground" />
+                {/* The provider's own mark — the same component Integrations
+                    draws one click away. Eleven identical speech bubbles told
+                    the reader nothing and made the two pages look like two
+                    different products. */}
+                <ProviderMark provider={p.provider} label={p.provider} className="h-6 w-6" />
                 <span className="capitalize font-medium">{p.provider}</span>
                 <span className="text-[10px] text-muted-foreground font-mono">{p.scheme}://</span>
               </div>
@@ -117,8 +122,9 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
       </SettingsCard>
 
       <p className="text-[11px] text-muted-foreground">
-        Email and signed-webhook channels are always available — this toggle only governs Slack, Discord,
-        and Telegram (shoutrrr) channel creation.
+        This is the kill switch: switch a provider off and nothing more leaves through it, whatever
+        channels already exist. Email and signed-webhook channels are not governed here — they have
+        their own transports.
       </p>
 
       {/* This tab decides what MAY be connected; the channels themselves live

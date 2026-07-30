@@ -1,4 +1,4 @@
-import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
+import { crewColorHex, getCrewIconDef, getGradientPalette } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 
 interface CrewIconProps {
@@ -18,20 +18,35 @@ const sizeMap = {
 export function CrewIcon({ icon, color, size = "md", className }: CrewIconProps) {
   const def = getCrewIconDef(icon)
   const palette = getGradientPalette(color)
+  // A crew's colour is a palette id for some rows and a raw hex for most.
+  // The class-based palette can only express the ids, so a hex is tinted
+  // inline — otherwise every hex-coloured crew silently renders in the
+  // fallback palette and a workspace of five crews looks like one crew.
+  const hex = crewColorHex(color)
   const s = sizeMap[size]
   const IconComp = def.icon
 
   return (
     <div
       className={cn(
-        "bg-gradient-to-br flex items-center justify-center shrink-0",
-        palette.from,
-        palette.to,
+        "flex items-center justify-center shrink-0",
+        // The gradient utility and its stops belong together: with an inline
+        // tint they are not just unused, they would paint over it.
+        hex ? undefined : ["bg-gradient-to-br", palette.from, palette.to],
         s.box,
         className,
       )}
+      style={
+        hex
+          ? // Same weight as the class-based stops (15% → 8%), one hue.
+            { backgroundImage: `linear-gradient(to bottom right, ${hex}26, ${hex}14)` }
+          : undefined
+      }
     >
-      <IconComp className={cn(s.icon, palette.text)} />
+      <IconComp
+        className={cn(s.icon, hex ? undefined : palette.text)}
+        style={hex ? { color: hex } : undefined}
+      />
     </div>
   )
 }

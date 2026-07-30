@@ -523,6 +523,60 @@ func TestCrewDelete(t *testing.T) {
 	}
 }
 
+// Deleting a crew takes its links with it. They are meaningless once one end
+// is gone — nothing can dispatch to a deleted crew — and leaving them behind
+// is how a reseeded workspace ends up with more dead links than live ones.
+func TestCrewDelete_RemovesItsCrewConnections(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewCrewHandler(db, newTestLogger())
+	seedCrewRow(t, db, "crew-gone", wsID, "Gone", "gone")
+	seedCrewRow(t, db, "crew-stays", wsID, "Stays", "stays")
+	seedCrewRow(t, db, "crew-other", wsID, "Other", "other")
+
+	// One link on each side of the doomed crew, plus one that does not touch
+	// it at all — the untouched one must survive.
+	for _, c := range []struct{ id, from, to string }{
+		{"cc-out", "crew-gone", "crew-stays"},
+		{"cc-in", "crew-other", "crew-gone"},
+		{"cc-elsewhere", "crew-stays", "crew-other"},
+	} {
+		if _, err := db.Exec(
+			`INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, 'bidirectional', 'active', datetime('now'), datetime('now'))`,
+			c.id, wsID, c.from, c.to); err != nil {
+			t.Fatalf("seed connection %s: %v", c.id, err)
+		}
+	}
+
+	req := httptest.NewRequest("DELETE", "/api/v1/crews/crew-gone", nil)
+	req.SetPathValue("crewId", "crew-gone")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body: %s", rr.Code, rr.Body.String())
+	}
+
+	var remaining []string
+	rows, err := db.Query(`SELECT id FROM crew_connections ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query connections: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		remaining = append(remaining, id)
+	}
+	if len(remaining) != 1 || remaining[0] != "cc-elsewhere" {
+		t.Fatalf("remaining links = %v, want only [cc-elsewhere]", remaining)
+	}
+}
+
 func TestNormalizeDomain(t *testing.T) {
 	cases := []struct {
 		in, out string
@@ -1232,11 +1286,20 @@ func TestCrewConnections_CRUD(t *testing.T) {
 	}
 	json.Unmarshal(rr.Body.Bytes(), &created)
 
-	// Create duplicate → conflict
+	// Linking an already-linked pair upserts the one edge (200 + same id)
+	// rather than conflicting — see
+	// TestCrewConnections_Create_ExistingPair_UpdatesDirectionInPlace.
 	rrDup := httptest.NewRecorder()
 	h.Create(rrDup, withWorkspaceUser(httptest.NewRequest("POST", "/x", jsonBody(body)), userID, wsID, "OWNER"))
-	if rrDup.Code != http.StatusConflict {
-		t.Errorf("dup status = %d, want 409", rrDup.Code)
+	if rrDup.Code != http.StatusOK {
+		t.Errorf("re-link status = %d, want 200", rrDup.Code)
+	}
+	var relinked struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(rrDup.Body.Bytes(), &relinked)
+	if relinked.ID != created.ID {
+		t.Errorf("re-link id = %q, want the existing %q", relinked.ID, created.ID)
 	}
 
 	// Validation: same from/to

@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, FileLock,
+  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo,
   AlertTriangle, Bell, Gauge,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -15,7 +15,10 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
 
-import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth, LicenseInfo, TelemetryInfo } from "./types"
+import type {
+  TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth,
+  LicenseInfo, TelemetryInfo, VersionInfo, SecurityPosture, JournalIntegrity,
+} from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
@@ -24,7 +27,6 @@ import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
-import { GdprActionsPanel } from "@/components/features/admin/gdpr-actions-panel"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
 
@@ -55,7 +57,6 @@ const sections: NavSection[] = [
     items: [
       { key: "workspaces", label: "Workspaces", icon: Building },
       { key: "users", label: "Users", icon: Users },
-      { key: "gdpr", label: "GDPR actions", icon: FileLock },
     ],
   },
   {
@@ -108,6 +109,13 @@ export default function AdminPage() {
   const [health, setHealth] = useState<AdminHealth | null>(null)
   const [license, setLicense] = useState<LicenseInfo | null>(null)
   const [telemetry, setTelemetry] = useState<TelemetryInfo | null>(null)
+  // The instance already computes all three of these and the overview showed
+  // none of them: which build is running (and whether a newer one exists),
+  // what the instance thinks of its own security posture, and whether the
+  // tamper-evident journal still verifies.
+  const [version, setVersion] = useState<VersionInfo | null>(null)
+  const [posture, setPosture] = useState<SecurityPosture | null>(null)
+  const [journal, setJournal] = useState<JournalIntegrity | null>(null)
   const [loading, setLoading] = useState(true)
   // A 403/500/network failure on the primary fetches must be visible, not a
   // silently empty table (#868). Populated by fetchData; cleared on success.
@@ -164,23 +172,37 @@ export default function AdminPage() {
     }
   }, [wsLoading, role, router])
 
-  useEffect(() => {
+  // Lifted out of the effect so an action on a tab (creating a workspace,
+  // adding a member) can ask for the same refresh the page does on mount —
+  // a list that does not catch up after a create reads as a failed create.
+  // A generation counter rather than a captured flag: lifting this into a
+  // useCallback left a `const` that nothing could ever flip, so every
+  // staleness check below was unreachable and a slow response for the previous
+  // workspace could overwrite the current one's screen. A ref survives the
+  // callback being recreated, which a local no longer does.
+  const fetchGeneration = useRef(0)
+  const fetchData = useCallback(async () => {
     if (!workspaceId || !isAdmin) return
-
-    let cancelled = false
-
-    async function fetchData() {
+    const generation = ++fetchGeneration.current
+    const isStale = () => generation !== fetchGeneration.current
+    {
       setLoading(true)
       try {
-        const [statsRes, orgsRes, usersRes, healthRes, licenseRes, telemetryRes] = await Promise.all([
+        const [
+          statsRes, orgsRes, usersRes, healthRes, licenseRes, telemetryRes,
+          versionRes, postureRes, journalRes,
+        ] = await Promise.all([
           apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/health?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/system/license?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/system/telemetry`),
+          apiFetch(`/api/v1/system/version`),
+          apiFetch(`/api/v1/admin/security-posture?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/admin/journal/verify?workspace_id=${workspaceId}`),
         ])
-        if (cancelled) return
+        if (isStale()) return
 
         // Surface a failure on any of the three core tables instead of
         // rendering them empty — the whole point of the honesty pass (#868).
@@ -206,16 +228,20 @@ export default function AdminPage() {
         if (healthRes.ok) setHealth(await healthRes.json())
         if (licenseRes.ok) setLicense(await licenseRes.json())
         if (telemetryRes.ok) setTelemetry(await telemetryRes.json())
+        if (versionRes.ok) setVersion(await versionRes.json())
+        if (postureRes.ok) setPosture(await postureRes.json())
+        if (journalRes.ok) setJournal(await journalRes.json())
       } catch (e) {
-        if (!cancelled) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
+        if (!isStale()) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!isStale()) setLoading(false)
       }
     }
+  }, [workspaceId, isAdmin])
 
-    fetchData()
-    return () => { cancelled = true }
-  }, [workspaceId, role])
+  useEffect(() => {
+    void fetchData()
+  }, [fetchData])
 
   const fetchKeeperData = useCallback(async () => {
     setKeeperLoading(true)
@@ -239,7 +265,10 @@ export default function AdminPage() {
   }, [role, checkRuntime])
 
   useEffect(() => {
-    if (isAdmin && tab === "security") fetchKeeperData()
+    // Overview shows a one-line keeper verdict, so it needs the same status
+    // the Keeper tab does — otherwise the line reads "unknown" until someone
+    // happens to visit that tab.
+    if (isAdmin && (tab === "security" || tab === "overview")) fetchKeeperData()
   }, [role, tab, fetchKeeperData])
 
   if (wsLoading || !isAdmin) {
@@ -265,16 +294,20 @@ export default function AdminPage() {
           health={health}
           license={license}
           telemetry={telemetry}
+          version={version}
+          posture={posture}
+          journal={journal}
+          keeper={keeperStatus}
         />
       )
     }
 
     if (tab === "workspaces") {
-      return <WorkspacesTab orgs={orgs} />
+      return <WorkspacesTab orgs={orgs} onRefresh={fetchData} />
     }
 
     if (tab === "users") {
-      return <UsersTab users={users} />
+      return <UsersTab users={users} workspaceId={workspaceId} onRefresh={fetchData} />
     }
 
     if (tab === "providers") {
@@ -286,6 +319,7 @@ export default function AdminPage() {
           allRuntimes={allRuntimes}
           runtimeInstallLinks={runtimeInstallLinks}
           onCheckRuntime={checkRuntime}
+          workspaceId={workspaceId}
         />
       )
     }
@@ -306,9 +340,6 @@ export default function AdminPage() {
       return <KeeperQueuePanel workspaceId={workspaceId} />
     }
 
-    if (tab === "gdpr") {
-      return <GdprActionsPanel users={users} />
-    }
 
     if (tab === "security") {
       return (

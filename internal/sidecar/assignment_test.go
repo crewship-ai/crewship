@@ -229,3 +229,123 @@ func TestHandleResults_ProxiesToCrewshipd(t *testing.T) {
 		t.Errorf("expected status=COMPLETED, got %v", result["status"])
 	}
 }
+
+// ── Cross-crew assignment ───────────────────────────────────────────────
+//
+// The server has enforced "crews must be linked" on this path since crew
+// connections existed (assignments_run.go), but nothing could ever reach that
+// branch: the sidecar rejected any target outside its own crew and then sent
+// its OWN crew_id regardless. So the check was dead code and a lead had no
+// way to hand work to a crew it is linked to — a live delegation to a
+// connected crew failed with "not found in crew".
+//
+// Naming a crew makes the target explicit; the server still decides whether
+// it is allowed (link required, plus the workspace binding on crew_id).
+
+// stubCrewshipdForAssign returns a crewshipd stub that answers the crew
+// lookup the sidecar uses to resolve a slug, and records the forwarded
+// assignment body.
+func stubCrewshipdForAssign(t *testing.T, crews string, forwarded *map[string]string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/internal/crews":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(crews))
+		case "/api/v1/internal/assignments":
+			bodyBytes, _ := io.ReadAll(r.Body)
+			var got map[string]string
+			if err := json.Unmarshal(bodyBytes, &got); err != nil {
+				t.Errorf("invalid forwarded body: %v", err)
+			}
+			*forwarded = got
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"assignment_id":"a-1","status":"PENDING"}`))
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	}))
+}
+
+func TestHandleAssign_NamedCrew_ForwardsThatCrewID(t *testing.T) {
+	var forwarded map[string]string
+	mock := stubCrewshipdForAssign(t,
+		`[{"id":"crew-ops","slug":"ops"},{"id":"crew-1","slug":"engineering"}]`, &forwarded)
+	defer mock.Close()
+
+	srv := newAssignmentServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "tok", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1",
+	}, []CrewMember{{Slug: "alex", Name: "Alex"}})
+
+	// morgan is NOT a member of this crew — that is the point.
+	req := httptest.NewRequest(http.MethodPost, "/assign",
+		strings.NewReader(`{"target":"morgan","task":"page the on-call","crew":"ops"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleAssign(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body: %s", w.Code, w.Body.String())
+	}
+	if forwarded["crew_id"] != "crew-ops" {
+		t.Errorf("crew_id = %q, want crew-ops — the named crew, not the caller's", forwarded["crew_id"])
+	}
+	if forwarded["target_slug"] != "morgan" {
+		t.Errorf("target_slug = %q, want morgan", forwarded["target_slug"])
+	}
+	// workspace_id and chat_id stay the sidecar's own: the agent names WHO,
+	// never WHERE FROM.
+	if forwarded["workspace_id"] != "ws-1" || forwarded["chat_id"] != "chat-1" {
+		t.Errorf("identity fields were not injected by the sidecar: %+v", forwarded)
+	}
+}
+
+func TestHandleAssign_UnknownCrew_Returns404(t *testing.T) {
+	var forwarded map[string]string
+	mock := stubCrewshipdForAssign(t, `[{"id":"crew-1","slug":"engineering"}]`, &forwarded)
+	defer mock.Close()
+
+	srv := newAssignmentServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "tok", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1",
+	}, []CrewMember{{Slug: "alex", Name: "Alex"}})
+
+	req := httptest.NewRequest(http.MethodPost, "/assign",
+		strings.NewReader(`{"target":"morgan","task":"x","crew":"nope"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleAssign(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", w.Code, w.Body.String())
+	}
+	if forwarded != nil {
+		t.Errorf("an unresolvable crew must not reach crewshipd, forwarded %+v", forwarded)
+	}
+}
+
+// Naming your own crew is the same request as not naming one, so the
+// membership check still applies — otherwise the explicit form would be a way
+// to skip it.
+func TestHandleAssign_OwnCrewNamed_StillChecksMembership(t *testing.T) {
+	var forwarded map[string]string
+	mock := stubCrewshipdForAssign(t, `[{"id":"crew-1","slug":"engineering"}]`, &forwarded)
+	defer mock.Close()
+
+	srv := newAssignmentServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "tok", CrewID: "crew-1", WorkspaceID: "ws-1", ChatID: "chat-1",
+	}, []CrewMember{{Slug: "alex", Name: "Alex"}})
+
+	req := httptest.NewRequest(http.MethodPost, "/assign",
+		strings.NewReader(`{"target":"ghost","task":"x","crew":"engineering"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleAssign(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}
