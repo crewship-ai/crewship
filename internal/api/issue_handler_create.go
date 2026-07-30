@@ -175,6 +175,33 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Same workspace-scoping for assignee_id as the parent_issue_id / routine_id
+	// checks: pre-fix the field went into the INSERT verbatim, so a
+	// workspace-A caller could assign a new issue to a guessed or enumerated
+	// workspace-B user or agent ID. The read path (issueSelectQuery) resolves
+	// assignee_id to a display name for anyone viewing the issue, so an
+	// unvalidated cross-workspace assignee_id was a direct information
+	// disclosure, not just a dangling reference.
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		assigneeType := ""
+		if req.AssigneeType != nil {
+			assigneeType = *req.AssigneeType
+		}
+		if assigneeType != "user" && assigneeType != "agent" {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
+			return
+		}
+		ok, vErr := validateAssigneeWorkspace(r.Context(), tx, assigneeType, *req.AssigneeID, wsID)
+		if vErr != nil {
+			internalError(w, r, h.logger, "validate assignee_id", vErr)
+			return
+		}
+		if !ok {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+			return
+		}
+	}
+
 	// Same workspace-scoping for parent_issue_id. Pre-fix the field was
 	// inserted verbatim from the request — a workspace-A user could
 	// POST a new issue under their own crew with parent_issue_id pointing

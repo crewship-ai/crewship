@@ -38,6 +38,47 @@ func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Lo
 	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger, journal: noopEmitter{}}
 }
 
+// rowQuerier is the minimal interface shared by *sql.DB and *sql.Tx that
+// validateAssigneeWorkspace needs — it lets Create (which validates inside
+// its transaction) and Update (which validates directly against h.db)
+// share one implementation.
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row
+}
+
+// validateAssigneeWorkspace confirms assignee_id belongs to wsID before a
+// caller is allowed to persist it on an issue. Mirrors the existing
+// parent_issue_id / routine_id workspace-scoping checks in
+// issue_handler_create.go and issue_handler_update.go — same shape, same
+// "does not exist in this workspace" framing — extended to assignee_id,
+// which previously went straight into the INSERT/UPDATE unchecked.
+//
+// Users don't carry a workspace_id column; membership is resolved via
+// workspace_members(workspace_id, user_id). Agents carry workspace_id
+// directly. assignee_type must be exactly "user" or "agent" — anything
+// else (including empty/unset) is treated as invalid so callers can't
+// smuggle an assignee_id in under an unrecognized type.
+func validateAssigneeWorkspace(ctx context.Context, q rowQuerier, assigneeType, assigneeID, wsID string) (bool, error) {
+	var exists int
+	var err error
+	switch assigneeType {
+	case "user":
+		err = q.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM workspace_members WHERE user_id = ? AND workspace_id = ?`,
+			assigneeID, wsID).Scan(&exists)
+	case "agent":
+		err = q.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM agents WHERE id = ? AND workspace_id = ?`,
+			assigneeID, wsID).Scan(&exists)
+	default:
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return exists > 0, nil
+}
+
 // SetStoragePath wires the host storage root for the F4.5
 // mission-outcomes-to-crew-memory hook. See MissionHandler.SetStoragePath
 // for the same contract — handlers share the storage path because both
@@ -320,13 +361,28 @@ func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorTyp
 // cross-workspace IDs from being persisted, but defense-in-depth here
 // keeps the surface safe even if a row sneaks through (manual SQL,
 // imported backup, etc.).
+//
+// The assignee-name subqueries below carry the exact same defense-in-depth
+// requirement — and, pre-fix, didn't have it: they resolved full_name/name
+// for m.assignee_id regardless of workspace, so a cross-workspace
+// assignee_id (rejected at write time by Create/Update, but only there)
+// would still leak the foreign user's or agent's display name to anyone
+// reading the issue. Users don't carry a workspace_id column directly —
+// membership goes through workspace_members(workspace_id, user_id) — so
+// the user branch joins through that table; agents.workspace_id exists
+// directly. Both are scoped to m.workspace_id via correlation, so no
+// caller needs to pass the workspace in separately.
 func issueSelectQuery() string {
 	return `SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
 		m.number, m.identifier, m.title, m.description, m.status,
 		COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
 		CASE
-			WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-			WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
+			WHEN m.assignee_type = 'user' THEN (
+				SELECT u.full_name FROM users u
+				JOIN workspace_members wm ON wm.user_id = u.id
+				WHERE u.id = m.assignee_id AND wm.workspace_id = m.workspace_id)
+			WHEN m.assignee_type = 'agent' THEN (
+				SELECT name FROM agents WHERE id = m.assignee_id AND workspace_id = m.workspace_id)
 		END,
 		m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
