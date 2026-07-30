@@ -82,6 +82,50 @@ describe("InboxPreview — buckets and facets", () => {
   })
 })
 
+describe("InboxPreview — finding a subject at scale", () => {
+  it("shows only the subjects that have items, and says how many it is holding back", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openFilter()
+
+    expect(screen.getByTestId("subject-casey")).toBeInTheDocument()
+    // The roster is far larger than the inbox; the picker admits that instead
+    // of pretending the loaded rows are the whole workspace.
+    expect(screen.getByText(/in the workspace — type to find one/i)).toBeInTheDocument()
+  })
+
+  it("finds an agent that has no items in the loaded rows", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openFilter()
+
+    // harper never appears in the fixtures, so a facet built from the rows
+    // could not offer them — which is the bug this picker exists to fix.
+    expect(screen.queryByTestId("subject-harper")).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByTestId("subject-search"), { target: { value: "harp" } })
+
+    expect(screen.getByTestId("subject-harper")).toBeInTheDocument()
+  })
+
+  it("groups matches by kind", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openFilter()
+
+    fireEvent.change(screen.getByTestId("subject-search"), { target: { value: "e" } })
+
+    expect(screen.getByText("Agents")).toBeInTheDocument()
+    expect(screen.getByText("Routines")).toBeInTheDocument()
+  })
+
+  it("says so when nothing matches", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openFilter()
+
+    fireEvent.change(screen.getByTestId("subject-search"), { target: { value: "zzzz" } })
+
+    expect(screen.getByText(/No agent or routine matches/i)).toBeInTheDocument()
+  })
+})
+
 describe("InboxPreview — selecting messages", () => {
   function enterSelectMode() {
     fireEvent.click(screen.getByRole("button", { name: /Select items/i }))

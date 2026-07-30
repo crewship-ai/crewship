@@ -16,6 +16,8 @@ import { TabBar } from "@/components/ui/tab-bar"
 import { cn } from "@/lib/utils"
 
 import { ActorAvatar } from "./actor"
+import { SubjectPicker } from "./subject-picker"
+import { PREVIEW_DIRECTORY } from "./mock-data"
 import { canRole, type PreviewInboxItem, type WorkspaceRole } from "./mock-data"
 import { bucketOf, categoryOf, decisionFor, expiresIn, since, subjectOf } from "./logic"
 import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./types"
@@ -337,25 +339,17 @@ export function InboxListPanel(props: InboxListPanelProps) {
                     </>
                   )}
 
-                  {subjects.length > 0 && (
-                    <>
-                      <MenuDivider />
-                      {/* Who the rows are ABOUT — the subject from the payload,
-                          not the sender, so a Keeper request files under casey. */}
-                      <MenuHeading>Subject</MenuHeading>
-                      {subjects.map((s) => (
-                        <MenuOption
-                          key={s.id}
-                          active={selectedSubject === s.id}
-                          count={s.count}
-                          onClick={() => onSubjectChange(selectedSubject === s.id ? null : s.id)}
-                        >
-                          <ActorAvatar actor={s} size={20} />
-                          {s.label}
-                        </MenuOption>
-                      ))}
-                    </>
-                  )}
+                  <MenuDivider />
+                  {/* Who the rows are ABOUT — the subject from the payload, not
+                      the sender, so a Keeper request files under casey. The
+                      picker searches the workspace roster rather than the loaded
+                      rows; see subject-picker for why that distinction matters. */}
+                  <SubjectPicker
+                    subjects={subjects}
+                    directory={PREVIEW_DIRECTORY}
+                    selected={selectedSubject}
+                    onChange={onSubjectChange}
+                  />
                 </motion.div>
               </>
             )}

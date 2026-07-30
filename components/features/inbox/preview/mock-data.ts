@@ -419,3 +419,29 @@ export const PREVIEW_ARCHIVE: PreviewInboxItem[] = [
     payload: { escalation_type: "CREDENTIAL", credential_name: "NPM_TOKEN", agent_name: "casey" },
   }),
 ]
+
+/**
+ * The workspace roster the subject picker searches.
+ *
+ * This is the part the facet list got wrong: a subject list built from the
+ * loaded rows can only ever offer the subjects that happen to be in the
+ * LIMIT-100 window, so the agent you are looking for is missing exactly when
+ * they have been quiet — which is often why you are looking. In production
+ * this comes from the agents + pipelines the workspace already lists; here it
+ * is a fixture of the same shape, deliberately larger than the inbox.
+ */
+export const PREVIEW_DIRECTORY: { id: string; label: string; kind: "agent" | "routine" | "system" }[] = [
+  ...["casey", "atlas", "riley", "morgan", "alex", "sam", "robin", "quinn", "harper", "jordan",
+    "avery", "rowan", "sage", "ellis", "reese", "phoenix", "kai", "noor", "iris", "milan",
+    "devon", "lane", "marlow", "nova", "orin", "perry", "shay", "tate", "vale", "wren"]
+    .map((id) => ({ id, label: id, kind: "agent" as const })),
+  ...["docs-publish", "nightly-sweep", "nightly-deploy", "feed-watch", "cost-spike-probe",
+    "classify-ticket", "extract-contacts", "json-schema-validate", "eval-classify-sentiment",
+    "consistency-sweep", "diff-risk-score", "invoice-fields", "release-notes", "weekly-digest"]
+    .map((id) => ({ id, label: id, kind: "routine" as const })),
+  { id: "Keeper", label: "Keeper", kind: "system" },
+  { id: "Mission engine", label: "Mission engine", kind: "system" },
+  { id: "consolidator", label: "consolidator", kind: "system" },
+  { id: "Skill Curator", label: "Skill Curator", kind: "system" },
+  { id: "Memory Health", label: "Memory Health", kind: "system" },
+]
