@@ -16,6 +16,7 @@ import { LabelBadge } from "./label-badge"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { formatRelativeTime } from "@/lib/time"
 import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
 
@@ -83,6 +84,10 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkMenuOpen, setBulkMenuOpen] = useState<"status" | "priority" | null>(null)
+  // Why the last bulk edit was refused. Lives next to the selection it
+  // applies to, because the toast that carries the same sentence is gone by
+  // the time you are deciding whether to retry.
+  const [bulkError, setBulkError] = useState<string | null>(null)
 
   const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -105,6 +110,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set())
     setBulkMenuOpen(null)
+    setBulkError(null)
   }, [])
 
   const handleBulkUpdate = useCallback(
@@ -113,17 +119,49 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
       const ids = Array.from(selectedIds)
       if (onBulkAction) {
         onBulkAction(ids, updates)
-      } else if (workspaceId) {
-        try {
-          await apiFetch(`/api/v1/issues/bulk?workspace_id=${workspaceId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids, updates }),
-          })
-        } catch {
-          // silent
-        }
+        clearSelection()
+        return
       }
+      if (!workspaceId) return
+
+      setBulkError(null)
+      // Close the menu on the way out — the error belongs in the bar the
+      // dropdown was covering.
+      setBulkMenuOpen(null)
+      // A refused bulk edit used to be indistinguishable from an applied one:
+      // apiFetch resolves on 4xx/5xx, the response was discarded, and the
+      // selection was cleared regardless — taking away the one thing a retry
+      // needs (#1563).
+      const refuse = (message: string) => {
+        setBulkError(message)
+        toast.error(message)
+      }
+      try {
+        const res = await apiFetch(`/api/v1/issues/bulk?workspace_id=${encodeURIComponent(workspaceId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, updates }),
+        })
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as
+            | { error?: unknown; detail?: unknown }
+            | null
+          // The server's words: it knows which of the selected issues it
+          // refused and why, and a generic "bulk update failed" would throw
+          // that away.
+          const said = [body?.error, body?.detail].find((m) => typeof m === "string" && m.trim())
+          refuse(
+            typeof said === "string"
+              ? said
+              : `Could not update ${ids.length} ${ids.length === 1 ? "issue" : "issues"} (HTTP ${res.status})`,
+          )
+          return
+        }
+      } catch (e) {
+        refuse(e instanceof Error ? e.message : "Could not reach the server")
+        return
+      }
+      // Only a write the server accepted may drop the selection.
       clearSelection()
     },
     [selectedIds, onBulkAction, workspaceId, clearSelection],
@@ -244,6 +282,13 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               )}
             </div>
           </div>
+          {/* Outlives the toast: the reason the edit was refused has to still
+              be readable next to the selection you retry with. */}
+          {bulkError && (
+            <span role="alert" className="ml-2 min-w-0 truncate text-[11px] text-destructive">
+              {bulkError}
+            </span>
+          )}
           <div className="flex-1" />
           <button onClick={clearSelection} className="p-1 rounded hover:bg-white/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
             <X className="h-3.5 w-3.5" />
