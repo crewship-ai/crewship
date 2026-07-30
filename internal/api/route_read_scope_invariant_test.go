@@ -47,11 +47,25 @@ import (
 // keys on — same assumption (and same reason) as mutationVerbLine.
 var readVerbLine = regexp.MustCompile(`r\.mux\.(?:Handle|HandleFunc)\("(GET|HEAD) (/api/v1/[^"]*)"`)
 
-// readRouteWrapperLookahead is how many lines after the registration line are
-// joined before looking for the wrapper. A registration whose handler argument
-// wraps onto the next line still has to be classified correctly; three lines of
-// lookahead covers every multi-line form in the tree today.
+// readRouteWrapperLookahead caps how many lines after a registration are joined
+// before looking for the wrapper. A registration whose handler argument wraps
+// onto the next line still has to be classified correctly.
+//
+// The cap alone is not enough, and getting this wrong is silent. Registrations
+// in router_*.go sit one per line, so a fixed window bleeds into the NEXT
+// registration — and since the next one usually does carry wsCtx, an ungated
+// route reads as gated and the invariant passes. Measured on this tree: 76 of
+// 219 read routes had a wsCtx-bearing line within the following three, so a
+// fixed window was blind on a third of the surface. Removing wsCtx from
+// `GET /api/v1/crews` (router_crews.go:122) passed a fixed-window version of
+// this test. So the window also stops at the next registration — see
+// nextRegistrationStart.
 const readRouteWrapperLookahead = 4
+
+// registrationStart matches the beginning of ANY route registration, not just a
+// read one. It bounds the lookahead window: whatever follows belongs to the next
+// route, so it must not be read as this route's wrapper.
+var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut)\(`)
 
 // readRoutesWithoutWorkspace are the read routes that legitimately carry no
 // workspace dimension. Each entry needs a reason a reviewer can check — "it is
@@ -85,6 +99,20 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/mcp-registry/search":      "static registry catalog",
 
 	// Instance-global catalogs and status. No tenant rows involved.
+	//
+	// The three catalog routes below were surfaced by fixing the window-bleed
+	// bug (see readRouteWrapperLookahead) — a fixed window had been borrowing a
+	// neighbour's wsCtx and hiding them. Each was checked, not assumed:
+	// RecipeHandler.List discards the request entirely (`_ *http.Request`),
+	// RecipeHandler.Get holds no workspace reference, and RuntimeCatalogList
+	// reads runtimeFetcher.GetRuntimes. The sibling
+	// GET /recipes/{slug}/preview DOES carry wsCtx, because a preview resolves
+	// against the caller's workspace — catalog global, preview scoped, which is
+	// the coherent split rather than an oversight.
+	"GET /api/v1/recipes":          "static curated recipe catalog; List discards the request entirely",
+	"GET /api/v1/recipes/{slug}":   "one static recipe manifest; no workspace read (contrast: /preview is wsCtx-scoped)",
+	"GET /api/v1/runtimes/catalog": "runtime catalog from runtimeFetcher, not tenant rows",
+
 	"GET /api/v1/connectors":       "static connector catalog read off disk, not tenant rows",
 	"GET /api/v1/features/catalog": "static devcontainer feature catalog",
 	"GET /api/v1/mcp-registry":     "static MCP registry catalog",
@@ -223,6 +251,15 @@ func scanReadRoutes(t *testing.T) []readRoute {
 			end := i + readRouteWrapperLookahead
 			if end > len(lines) {
 				end = len(lines)
+			}
+			// Stop before the next registration so its wrapper is not read as
+			// this one's. Without this the window bleeds and an ungated route
+			// borrows its neighbour's wsCtx — see readRouteWrapperLookahead.
+			for j := i + 1; j < end; j++ {
+				if registrationStart.MatchString(lines[j]) {
+					end = j
+					break
+				}
 			}
 			routes = append(routes, readRoute{
 				file: f,
