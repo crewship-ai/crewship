@@ -622,7 +622,15 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token
 	// auth). serveInternal — not r.mux directly — is the single door onto that
 	// surface; see its doc comment for why (#1501).
-	if strings.HasPrefix(path, internalPathPrefix) {
+	//
+	// The prefix is tested against the CLEANED path as well as the raw one.
+	// `//api/v1/internal/credentials` does not literally start with
+	// "/api/v1/internal/", so a raw-path-only test drops it out of this branch
+	// and into the mux, which answers a non-canonical path with a 307 to the
+	// cleaned one — handing back the very path the fence exists to keep quiet,
+	// and reaching the internal surface by a door that is not serveInternal.
+	// Cleaning first puts every spelling of the prefix through the same door.
+	if isInternalPath(path) {
 		r.serveInternal(w, req)
 		return
 	}

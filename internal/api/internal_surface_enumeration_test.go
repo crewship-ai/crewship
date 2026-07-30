@@ -3,6 +3,9 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -237,5 +240,113 @@ func TestInternalSurface_LegitimateCallStillWorks(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), "Agent not found") {
 		t.Errorf("wildcard route did not reach its handler with {agentId} bound — status %d, body: %q",
 			rr.Code, rr.Body.String())
+	}
+}
+
+// TestInternalSurface_NonCanonicalPathGetsTheFence404 closes the second door
+// onto the surface.
+//
+// routeWithRateLimiting decides whether a request belongs to the internal
+// prefix, and it used to decide on the RAW path. ServeMux, however, cleans a
+// path before matching, so `//api/v1/internal/credentials`,
+// `/api/v1//internal/credentials` and `/api/v1/./internal/credentials` all
+// address the same route while none of them literally starts with
+// "/api/v1/internal/". Those spellings therefore skipped serveInternal entirely
+// and landed in the mux, which answers a non-canonical path with
+// `307 Temporary Redirect` and a `Location` holding the CLEANED path — the mux
+// handing back the canonical internal route to a caller the fence had just
+// finished refusing to confirm anything to.
+//
+// The response must be the ordinary fence 404, byte for byte, with no Location.
+func TestInternalSurface_NonCanonicalPathGetsTheFence404(t *testing.T) {
+	r, wsID := newFenceRouter(t)
+
+	ref := fenceProbe(t, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID, fenceAttackerAddr, nil)
+	if ref.Code != http.StatusNotFound {
+		t.Fatalf("reference fence probe: status = %d, want 404", ref.Code)
+	}
+	wantBody := ref.Body.String()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		target string
+	}{
+		{"leading double slash, real route", http.MethodGet, "//api/v1/internal/credentials?workspace_id=" + wsID},
+		{"leading double slash, fake route", http.MethodGet, "//api/v1/internal/definitely-not-a-real-route"},
+		{"inner double slash, real route", http.MethodGet, "/api/v1//internal/credentials?workspace_id=" + wsID},
+		{"dot segment, real route", http.MethodGet, "/api/v1/./internal/credentials?workspace_id=" + wsID},
+		{"dot-dot rejoining the prefix", http.MethodGet, "/api/v1/internal/keeper/../credentials?workspace_id=" + wsID},
+		{"non-canonical spelling of a POST-only route", http.MethodGet, "//api/v1/internal/keeper/request"},
+		{"trailing double slash", http.MethodGet, "/api/v1/internal/credentials//?workspace_id=" + wsID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := fenceProbe(t, r, tc.method, tc.target, fenceAttackerAddr, nil)
+			assertIndistinguishable404(t, tc.name, rr, wantBody)
+			if loc := rr.Header().Get("Location"); loc != "" {
+				t.Errorf("%s: Location = %q, want absent — a redirect echoes back the canonical internal path",
+					tc.name, loc)
+			}
+		})
+	}
+
+	// The same must hold for a caller the network gate lets through, so a
+	// non-canonical spelling is not a way around the fence from the LAN either.
+	rr := fenceProbe(t, r, http.MethodGet, "//api/v1/internal/keeper/request", fenceLoopbackAddr,
+		map[string]string{"X-Internal-Token": fenceInternalToken})
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("private-origin non-canonical probe: status = %d, want 404 — body: %q", rr.Code, rr.Body.String())
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Errorf("private-origin non-canonical probe: Location = %q, want absent", loc)
+	}
+}
+
+// internalSubtreePattern matches an /api/v1/internal/... route pattern
+// registered as a SUBTREE — i.e. ending in "/" before the closing quote.
+var internalSubtreePattern = regexp.MustCompile(`"[A-Z]+ ` + regexp.QuoteMeta(internalPathPrefix) + `[^"]*/"`)
+
+// TestInternalRoutes_NoSubtreePatterns is the guard serveInternal's doc comment
+// points at.
+//
+// internalRouteDispatches asks the mux whether it would dispatch, and treats a
+// non-empty pattern as yes. That is right for every ServeMux outcome except
+// one: when a SUBTREE pattern (`GET /api/v1/internal/foo/`) is registered and a
+// request omits the trailing slash, net/http answers `307` to `/foo/` while
+// still reporting `/foo/` as the pattern. The fence would wave that through and
+// the redirect would confirm the route exists — exactly the signal #1501 closed.
+//
+// The case cannot be detected from the returned pattern (a subtree pattern also
+// legitimately serves paths with no trailing slash), so it is prevented at the
+// registration end instead: no internal route may be a subtree. Every internal
+// route today is an exact path with an explicit method, and a wildcard segment
+// ({crewId}, {agentId}) is not a subtree — those are unaffected.
+func TestInternalRoutes_NoSubtreePatterns(t *testing.T) {
+	const routerFile = "router_internal.go"
+	src, err := os.ReadFile(routerFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", routerFile, err)
+	}
+	if !strings.Contains(string(src), internalPathPrefix) {
+		t.Fatalf("%s contains no %q registrations — this test is looking in the wrong place",
+			routerFile, internalPathPrefix)
+	}
+
+	var offenders []string
+	for i, line := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "//") {
+			continue
+		}
+		if internalSubtreePattern.MatchString(line) {
+			offenders = append(offenders, "  "+routerFile+":"+strconv.Itoa(i+1)+": "+strings.TrimSpace(line))
+		}
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("%d internal route(s) registered as a subtree pattern (trailing \"/\").\n"+
+			"net/http answers the no-trailing-slash form with a 307 to the cleaned path, and reports the\n"+
+			"subtree pattern while doing it — so serveInternal's fence lets it through and the redirect\n"+
+			"confirms the route exists (#1501). Register the exact path instead, or teach\n"+
+			"internalRouteDispatches to detect the redirect:\n%s",
+			len(offenders), strings.Join(offenders, "\n"))
 	}
 }

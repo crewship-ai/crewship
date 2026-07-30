@@ -3,11 +3,27 @@ package api
 import (
 	"net/http"
 	pathpkg "path"
+	"strings"
 )
 
 // internalPathPrefix is the sidecar-only IPC surface. Every route registered in
 // router_internal.go lives under it, and nothing else does.
 const internalPathPrefix = "/api/v1/internal/"
+
+// isInternalPath reports whether path addresses the internal surface, under any
+// spelling ServeMux would canonicalise onto it.
+//
+// The raw path is not enough. ServeMux cleans a path before matching, so
+// `//api/v1/internal/credentials`, `/api/v1//internal/credentials` and
+// `/api/v1/./internal/credentials` all reach the same route — but none of them
+// has "/api/v1/internal/" as a literal prefix. Testing the raw path alone would
+// route those spellings past serveInternal into the mux, which answers a
+// non-canonical path with a 307 whose Location is the cleaned path. That is a
+// second door onto the surface, and it echoes back the canonical route.
+func isInternalPath(path string) bool {
+	return strings.HasPrefix(path, internalPathPrefix) ||
+		strings.HasPrefix(cleanURLPath(path), internalPathPrefix)
+}
 
 // serveInternal is the single door onto /api/v1/internal/*.
 //
@@ -66,11 +82,20 @@ func (r *Router) serveInternal(w http.ResponseWriter, req *http.Request) {
 // distinction needed here.
 //
 // The non-canonical path check comes first because ServeMux answers a request
-// whose path needs cleaning with a redirect to the cleaned path, and it reports
-// the CLEANED path's pattern — so `//credentials` (real) would redirect while
-// `//nope` (fake) would not, re-opening the oracle one level down. The internal
-// surface has no use for path-cleaning redirects; sidecars build their URLs
-// from constants.
+// whose path needs cleaning with a `307` to the cleaned path, and it reports
+// the CLEANED path's pattern — so the redirect would both dispatch and echo the
+// canonical internal route back to the caller. The internal surface has no use
+// for path-cleaning redirects; sidecars build their URLs from constants.
+// (isInternalPath is what makes sure such a request arrives here at all.)
+//
+// One ServeMux redirect is NOT covered here: the `/tree` → `/tree/` rule, which
+// fires when a SUBTREE pattern (one ending in `/`) is registered and the request
+// omits the trailing slash. net/http reports the subtree pattern for it, so this
+// function would call it a dispatch and the mux would answer `307` — an
+// existence signal. No internal route is registered that way today, and
+// TestInternalRoutes_NoSubtreePatterns fails the build if one ever is, which is
+// the cheaper guard: the distinction is invisible from the returned pattern
+// (a subtree pattern legitimately serves paths that do not end in `/`).
 func (r *Router) internalRouteDispatches(req *http.Request) bool {
 	if escaped := req.URL.EscapedPath(); escaped != cleanURLPath(escaped) {
 		return false
