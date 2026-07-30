@@ -220,3 +220,105 @@ func TestSecCrewFilesResolve_RejectsUnsafeCrewIDs(t *testing.T) {
 		})
 	}
 }
+
+// --- Behaviour the containment fix must NOT take away ---
+//
+// os.Root refuses an *absolute* symlink outright, even one pointing back
+// inside the root: the walk sees "/..." and reports "path escapes from
+// parent" with no way to know the target is in-tree. Enforcing containment
+// with a Root therefore narrows what a read or a write can reach, and the
+// narrowing lands on paths that worked before this change and are not
+// escapes — surfacing as a 500, which reads as a server bug rather than a
+// refusal.
+//
+// PR #1569 handled exactly this in localfs.resolve, by re-deriving the
+// base-relative path from the *resolved* pair once EvalSymlinks has proved
+// the target in-base, so the Root walks real components only. These two
+// tests pin the same behaviour here, alongside the escape proofs above.
+
+// A file reachable through an ABSOLUTE symlink that stays inside the crew's
+// own shared directory must still be served.
+func TestSecCrewFilesRead_AbsoluteInTreeSymlinkIsStillServed(t *testing.T) {
+	h, _, _, storageDir, fromCrew, toCrew := secMsgRig(t)
+
+	shared := filepath.Join(storageDir, "crews", toCrew, "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatalf("mkdir shared: %v", err)
+	}
+	realFile := filepath.Join(shared, "real.txt")
+	if err := os.WriteFile(realFile, []byte("IN-TREE"), 0o644); err != nil {
+		t.Fatalf("seed real: %v", err)
+	}
+	// Absolute, and it points back inside the same shared dir.
+	if err := os.Symlink(realFile, filepath.Join(shared, "link.txt")); err != nil {
+		t.Fatalf("plant in-tree symlink: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ReadFile(rec, covMsgReadReq(toCrew, "link.txt", fromCrew))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for an in-tree symlink; body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "IN-TREE" {
+		t.Fatalf("body = %q, want %q", rec.Body.String(), "IN-TREE")
+	}
+}
+
+// The counterpart of the test above, and the reason it cannot simply trust
+// EvalSymlinks: re-anchoring rel on the resolved path must NOT let an
+// absolute symlink pointing OUT of the shared tree through. Asserted on the
+// body, so a handler that refuses for the wrong reason still fails.
+func TestSecCrewFilesRead_AbsoluteOutOfTreeSymlinkIsRefused(t *testing.T) {
+	h, _, base, storageDir, fromCrew, toCrew := secMsgRig(t)
+
+	shared := filepath.Join(storageDir, "crews", toCrew, "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatalf("mkdir shared: %v", err)
+	}
+	secret := filepath.Join(base, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET"), 0o644); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	if err := os.Symlink(secret, filepath.Join(shared, "link.txt")); err != nil {
+		t.Fatalf("plant escaping symlink: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ReadFile(rec, covMsgReadReq(toCrew, "link.txt", fromCrew))
+
+	if strings.Contains(rec.Body.String(), "TOP-SECRET") {
+		t.Fatalf("ESCAPE: a file outside the storage tree was served through a symlink (status %d)", rec.Code)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for an escaping symlink; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// Same narrowing on the write path: an ABSOLUTE symlink on an intermediate
+// component that resolves back inside the shared tree must not turn an
+// upload into a 500.
+func TestSecCrewFilesWrite_AbsoluteInTreeSymlinkedParentStillWrites(t *testing.T) {
+	h, _, _, storageDir, fromCrew, toCrew := secMsgRig(t)
+
+	shared := filepath.Join(storageDir, "crews", toCrew, "shared")
+	realIncoming := filepath.Join(shared, "incoming-real")
+	if err := os.MkdirAll(realIncoming, 0o755); err != nil {
+		t.Fatalf("mkdir incoming-real: %v", err)
+	}
+	// "incoming" is an absolute symlink to a directory inside the same tree.
+	if err := os.Symlink(realIncoming, filepath.Join(shared, "incoming")); err != nil {
+		t.Fatalf("plant in-tree dir symlink: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.WriteFile(rec, covMsgUpload(t, toCrew, fromCrew, "f.txt", "data", true))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 through an in-tree directory symlink; body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := os.ReadFile(filepath.Join(realIncoming, fromCrew, "f.txt"))
+	if err != nil || string(got) != "data" {
+		t.Fatalf("uploaded file = %q, err = %v; want %q inside the shared tree", got, err, "data")
+	}
+}
