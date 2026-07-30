@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 
@@ -103,5 +104,73 @@ func TestScheduler_TriggerAgent_FiresWhenLeader(t *testing.T) {
 	}
 	if len(resolver.createdRuns) != 1 {
 		t.Fatalf("created %d runs while leader; want exactly 1", len(resolver.createdRuns))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Leader-gate consumption at RegisterPlatformRoutine's fired closure (#1376).
+//
+// This is a SEPARATE call site from triggerAgent above — same underlying
+// isLeader() method, but its own independent `if !s.isLeader() { return }`
+// inside the cron closure RegisterPlatformRoutine hands to s.c.AddFunc.
+// Keeper Phase 2 sweeps (skill_review, memory_health_check) run through this
+// path and must fire once per cluster, not once per replica. Before this
+// test, deleting that check did not fail a single test either.
+//
+// No production code change was needed: cron.Cron already exposes Entries()
+// with a Job.Run() that invokes the registered closure synchronously and
+// directly — no need to wait on the real cron ticker (avoids the sleep-based
+// flakiness the existing @every-1s panic-recovery test accepts).
+// ---------------------------------------------------------------------------
+
+func TestScheduler_PlatformRoutine_NoopWhenNotLeader(t *testing.T) {
+	db := testDB(t)
+	s := New(db, nil, nil, &mockResolver{}, nil, nil, Config{}, testLogger())
+	defer s.Stop()
+	s.SetLeaderGate(stubLeaderGate{leader: false})
+
+	fired := make(chan struct{}, 1)
+	if err := s.RegisterPlatformRoutine("lg_platform_routine", "@every 1h", func(ctx context.Context) {
+		fired <- struct{}{}
+	}); err != nil {
+		t.Fatalf("RegisterPlatformRoutine: %v", err)
+	}
+
+	entries := s.c.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 registered cron entry, got %d", len(entries))
+	}
+	entries[0].Job.Run() // invoke the registered closure directly — synchronous, no ticker wait
+
+	select {
+	case <-fired:
+		t.Fatal("platform routine fired while not leader; want no-op — the leader gate was not consulted")
+	default:
+	}
+}
+
+func TestScheduler_PlatformRoutine_FiresWhenLeader(t *testing.T) {
+	db := testDB(t)
+	s := New(db, nil, nil, &mockResolver{}, nil, nil, Config{}, testLogger())
+	defer s.Stop()
+	s.SetLeaderGate(stubLeaderGate{leader: true})
+
+	fired := make(chan struct{}, 1)
+	if err := s.RegisterPlatformRoutine("lg_platform_routine", "@every 1h", func(ctx context.Context) {
+		fired <- struct{}{}
+	}); err != nil {
+		t.Fatalf("RegisterPlatformRoutine: %v", err)
+	}
+
+	entries := s.c.Entries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 registered cron entry, got %d", len(entries))
+	}
+	entries[0].Job.Run() // invoke the registered closure directly — synchronous, no ticker wait
+
+	select {
+	case <-fired:
+	default:
+		t.Fatal("platform routine did not fire while leader; want it to run")
 	}
 }
