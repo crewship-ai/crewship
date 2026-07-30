@@ -152,14 +152,24 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 		if len(msg.Stats) > 0 {
 			_ = json.Unmarshal(msg.Stats, &stats)
 		}
+		meta := map[string]interface{}{
+			"stats":    stats,
+			"status":   msg.Status,
+			"is_error": msg.Status == "error" || msg.Error != "",
+		}
+		// msg.Error is the CAUSE of the is_error above, and dropping it lost the
+		// only explanation the run had: it reached neither the journal nor the
+		// run-status gate, which then fell back to Content — i.e. msg.Response,
+		// the model's (partial) ANSWER — and presented that as the reason the
+		// run failed. Stamped only when present so the success-path metadata
+		// shape is unchanged.
+		if msg.Error != "" {
+			meta["error"] = msg.Error
+		}
 		handler(AgentEvent{
-			Type:    "result",
-			Content: msg.Response,
-			Metadata: map[string]interface{}{
-				"stats":    stats,
-				"status":   msg.Status,
-				"is_error": msg.Status == "error" || msg.Error != "",
-			},
+			Type:      "result",
+			Content:   msg.Response,
+			Metadata:  meta,
 			Timestamp: time.Now(),
 		})
 

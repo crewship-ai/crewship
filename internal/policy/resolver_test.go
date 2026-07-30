@@ -3,13 +3,10 @@ package policy
 import (
 	"context"
 	"database/sql"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -181,14 +178,7 @@ func (f *fakeClock) Now() time.Time { return f.now }
 
 func setupResolverDB(t *testing.T) *sql.DB {
 	t.Helper()
-	d, err := database.Open("file:" + filepath.Join(t.TempDir(), "policy.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), d.DB, migLogger); err != nil {
-		t.Fatal(err)
-	}
+	d := testutil.MigratedDB(t)
 	mustExec(t, d.DB, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`)
 	return d.DB
 }

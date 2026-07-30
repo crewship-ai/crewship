@@ -5,15 +5,14 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/testutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -36,14 +35,7 @@ func (c *cannedProvider) Name() string { return "canned" }
 
 func setupDB(t *testing.T, crewID, level, mode string) *policy.Resolver {
 	t.Helper()
-	d, err := database.Open("file:" + filepath.Join(t.TempDir(), "bh.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	if err := database.Migrate(context.Background(), d.DB, newLogger()); err != nil {
-		t.Fatal(err)
-	}
+	d := testutil.MigratedDB(t)
 	if _, err := d.DB.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`); err != nil {
 		t.Fatal(err)
 	}

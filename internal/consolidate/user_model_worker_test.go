@@ -10,22 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func userModelWorkerDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	dbh, err := database.Open("file:" + dir + "/umw.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), dbh.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = dbh.Close() })
+	dbh := testutil.MigratedDB(t)
 	return dbh.DB
 }
 

@@ -8,14 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/gorilla/websocket"
 )
 
@@ -203,15 +202,7 @@ func TestServeHTTP_InvalidAgentSlugRejected(t *testing.T) {
 	v := newTestValidator(t)
 	// Use a DB so verifyAccess succeeds. We seed user u1, workspace w1 (member),
 	// and crew c1 in workspace w1.
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "term.db"))
-	if err != nil {
-		t.Fatalf("db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u1@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','WS','ws',?,?)`, now, now)
@@ -249,15 +240,7 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 	t.Parallel()
 	v := newTestValidator(t)
 
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "term.db"))
-	if err != nil {
-		t.Fatalf("db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	// user uX is NOT in workspace w1
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('uX','x@x',?,?)`, now, now)
@@ -431,15 +414,7 @@ func TestVerifyAccess_NoDBFailsClosed(t *testing.T) {
 
 func TestVerifyAccess_ViewerRoleRejected(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "va.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u1@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','WS','ws',?,?)`, now, now)
@@ -447,7 +422,7 @@ func TestVerifyAccess_ViewerRoleRejected(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','Crew','c',?,?)`, now, now)
 
 	h := &Handler{db: db.DB, logger: silentLogger()}
-	err = h.verifyAccess(context.Background(), "u1", "c1")
+	err := h.verifyAccess(context.Background(), "u1", "c1")
 	if err == nil || !strings.Contains(err.Error(), "insufficient role") {
 		t.Errorf("expected insufficient role error, got %v", err)
 	}
@@ -455,15 +430,7 @@ func TestVerifyAccess_ViewerRoleRejected(t *testing.T) {
 
 func TestVerifyAccess_MemberRoleAllowed(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "va.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u1@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','WS','ws',?,?)`, now, now)

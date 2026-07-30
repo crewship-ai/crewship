@@ -1,0 +1,707 @@
+name: Nightly Harness
+
+# Runs `scripts/test-harness/` — the CLI integration suites that drive the REAL
+# `crewship` binary against a REAL running instance — as a nightly gate.
+#
+# Why this workflow exists
+# ------------------------
+# Until it landed, NOT ONE of the `scripts/test-harness/test-*.sh` suites ran in
+# CI. `ci.yml` runs `scripts/test-harness-lib-test.sh`, which unit-tests the
+# harness *library* (assertion helpers, exit codes) and never starts a server or
+# asserts a single product behaviour. So the tests CLAUDE.md calls "the universal
+# use case" — memory recall across sessions, crew-shared isolation,
+# delegation/hire, notifications after a routine, recipe determinism, credential
+# escalation, keeper ingress fence, TOCTOU, audit integrity — were gated by
+# nothing.
+#
+# No suite count is written down anywhere in this file on purpose: the first
+# draft said "19", and two suites landed in merged PRs before it shipped. What
+# matters is not a number but a property — every `test-*.sh` on disk must be
+# claimed by exactly one of the two matrices below or by EXCLUDED_SUITES — and
+# the `suite-coverage-guard` job enforces that property on every run.
+#
+# What this workflow does and does NOT gate — READ THIS BEFORE TRUSTING IT
+# -----------------------------------------------------------------------
+# The harness splits cleanly in two along one line: does the suite need a live
+# LLM to reach its assertions?
+#
+#   * `harness-control-plane` — suites whose assertions are pure control-plane
+#     (governance toggles, auth fence, credential lifecycle, CLI↔API parity).
+#     They pass against an ephemeral, seeded, Docker-less, key-less instance.
+#     These are a HARD GATE. Verified locally against a clean-DB bootstrap of
+#     this exact sequence: 87 assertions pass, 0 fail.
+#
+#   * `harness-runtime` — suites that need a real agent reply or a real routine
+#     run. Without a provider credential the server answers
+#         LLMRunner: provider: no active Anthropic credential in workspace
+#     and every assertion downstream of an `ask`/`routine run` fails. There is
+#     NO Anthropic secret in this repository's Actions secrets today, so this
+#     job is SKIPPED unless `SEED_ANTHROPIC_API_KEY` is configured. It is not
+#     `continue-on-error` — the day the secret exists, the job becomes a hard
+#     gate with no further edits. Until then the alert job below states, in the
+#     issue body, that this half is unguarded. Do not read a green nightly as
+#     "memory and delegation still work".
+#
+# Suites deliberately NOT run here, and why
+# -----------------------------------------
+#   test-realworld-github.sh      needs an authenticated in-container `gh`
+#   test-secretless-github.sh     needs SEED_GITHUB_TOKEN / _CLASSIC / _SSH_KEY
+#                                 + a throwaway private repo (SEED_GITHUB_TEST_REPO);
+#                                 pushes branches to it. Dev slots only.
+#   test-notifications-shoutrrr.sh binds a local webhook receiver the SERVER must
+#                                 reach, and writes into the live user's
+#                                 notification preference matrix
+#   test-ollama-local.sh          needs a reachable Ollama host (macOS dev box)
+#   test-datastore-redis-auth.sh  needs Docker + a fully PROVISIONED crew and
+#                                 `redis-cli` inside the agent container; the
+#                                 README marks it dev-VM only, and it is not in
+#                                 run-all.sh either
+#   test-redteam-insider.sh       attacks the instance from inside a crew
+#                                 container and carries xfail assertions for
+#                                 open issues (#1368); needs provisioned crews
+#
+# `run-all.sh` is deliberately not used: it is a flat sequential loop with no
+# per-suite timeout, so one wedged `ask` burns the whole job's budget and the
+# summary cannot tell you which subsystem broke. The matrix below gives each
+# suite its own runner, its own timeout, and its own red/green square.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 03:10 UTC — after e2e-devcontainer (02:30) so two heavy nightlies do not
+    # contend for runners, and off the on-the-hour Actions rush.
+    - cron: "10 3 * * *"
+
+# Cron jitter is ±5 min; cancel an in-flight run if a fresh schedule fires
+# rather than queueing duplicate ~15-minute jobs.
+concurrency:
+  group: nightly-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.5"
+  # Suites this workflow deliberately never runs. The reason for each is in the
+  # "Suites deliberately NOT run here" block above; this list is the machine-
+  # readable half, read by `suite-coverage-guard`. The two RUN lists are not
+  # duplicated here — the guard reads them out of the matrices themselves, so
+  # there is nothing to keep in sync.
+  EXCLUDED_SUITES: >-
+    test-datastore-redis-auth.sh
+    test-notifications-shoutrrr.sh
+    test-ollama-local.sh
+    test-realworld-github.sh
+    test-redteam-insider.sh
+    test-secretless-github.sh
+
+jobs:
+  # ── Guard: no suite may silently belong to no tier ──
+  suite-coverage-guard:
+    name: Every harness suite is in a tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert control-plane + runtime + EXCLUDED covers test-*.sh
+        # This job exists because the prose in this file already went stale once:
+        # it claimed "19 suites" while 20 were on disk, because test-crew-links.sh
+        # and test-secretless-github.sh landed in merged PRs in between. A number
+        # in a comment cannot be enforced; set membership can.
+        #
+        # The two RUN lists are parsed out of this workflow's own matrices rather
+        # than restated in env, so a suite added to a matrix is automatically
+        # accounted for and there is no second copy to drift. Only the EXCLUDED
+        # list needs declaring — those suites have no matrix to be read from.
+        #
+        # Fails on a suite in no tier (it would silently get zero nightly
+        # coverage, the exact failure mode this workflow exists to end) and on a
+        # tier naming a suite that no longer exists (renamed/deleted).
+        run: |
+          set -euo pipefail
+          # PyYAML is present on the hosted images today but is not a documented
+          # guarantee, and this guard must never red the nightly over a missing
+          # library. Install it only if the import fails.
+          python3 -c 'import yaml' 2>/dev/null \
+            || pip install --quiet --disable-pip-version-check pyyaml
+          python3 - <<'PY'
+          import os, pathlib, sys, yaml
+
+          wf = yaml.safe_load(open(".github/workflows/nightly-harness.yml"))
+          jobs = wf["jobs"]
+
+          def matrix_suites(job):
+              inc = jobs[job]["strategy"]["matrix"]["include"]
+              return {e["suite"] for e in inc}
+
+          gated = matrix_suites("harness-control-plane")
+          runtime = matrix_suites("harness-runtime")
+          excluded = set(os.environ["EXCLUDED_SUITES"].split())
+
+          overlap = (gated & runtime) | (gated & excluded) | (runtime & excluded)
+          claimed = gated | runtime | excluded
+          on_disk = {p.name for p in pathlib.Path("scripts/test-harness").glob("test-*.sh")}
+
+          unclaimed = sorted(on_disk - claimed)
+          phantom = sorted(claimed - on_disk)
+
+          print(f"on disk: {len(on_disk)}  gated: {len(gated)}  "
+                f"runtime: {len(runtime)}  excluded: {len(excluded)}")
+
+          rc = 0
+          if unclaimed:
+              print("::error::harness suite(s) in no tier — add to the "
+                    "harness-control-plane matrix, the harness-runtime matrix, or "
+                    "EXCLUDED_SUITES (with a reason in the workflow header):")
+              for s in unclaimed:
+                  print(f"  {s}")
+              rc = 1
+          if phantom:
+              print("::error::a tier names a suite that does not exist "
+                    "(renamed or deleted?):")
+              for s in phantom:
+                  print(f"  {s}")
+              rc = 1
+          if overlap:
+              print("::error::suite(s) claimed by more than one tier:")
+              for s in sorted(overlap):
+                  print(f"  {s}")
+              rc = 1
+          if rc == 0:
+              print(f"All {len(on_disk)} harness suites are accounted for.")
+          sys.exit(rc)
+          PY
+
+  # ── Hard gate: control-plane suites, no provider credential needed ──
+  harness-control-plane:
+    name: "Harness: ${{ matrix.suite }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      # One wedged subsystem must not hide the others — that is the whole
+      # reason this is a matrix and not run-all.sh.
+      fail-fast: false
+      matrix:
+        include:
+          # Keeper governance via the real `crewship keeper` CLI.
+          - suite: test-keeper.sh
+          # Internal /api/v1/internal/* auth fence: method matrix, token fuzz,
+          # oversized body, info-leak, timing probe, spoofed XFF (#1020).
+          - suite: test-keeper-ingress-fence.sh
+          # Credential rotate/scrub/unassign races — injection-time state.
+          - suite: test-keeper-toctou.sh
+          # #1385 remediation lever: admin reap-orphan-containers parity +
+          # a non-mutating dry-run sweep that must find ZERO orphans.
+          - suite: test-orphan-token-reap.sh
+          # Tier A perimeter probes (raw curl by design — it sends requests
+          # the CLI would never construct).
+          - suite: test-attack-surface.sh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build CLI
+        # The harness resolves its binary as $CREWSHIP → <repo-root>/crewship →
+        # `crewship` on PATH (lib.sh:_resolve_crewship), so building into the
+        # repo root is enough. We pass $CREWSHIP explicitly anyway.
+        run: go build -o crewship ./cmd/crewship
+
+      - name: Generate ephemeral instance secrets
+        # Per-run keys: nothing in the repo trips the Gitleaks high-entropy
+        # scanner and each run starts from a clean cryptographic slate.
+        # ::add-mask:: BEFORE the write — Actions echoes the resolved `env:`
+        # block of later steps and $GITHUB_ENV values are not secrets.
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+
+      - name: Start crewship server in background
+        env:
+          # The runner cannot write /var/lib/crewship (the default) — redirect
+          # state + storage + logs into the workspace. These env NAMES are not
+          # the yaml key paths: it is CREWSHIP_LOG_PATH / CREWSHIP_BOLT_PATH,
+          # not CREWSHIP_STORAGE_LOG_PATH etc. Get one wrong and the server
+          # silently falls back to /var/lib/crewship → permission denied.
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship.log 2>&1 &
+          echo $! > /tmp/crewship.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::server failed to start"
+          cat /tmp/crewship.log >&2
+          exit 1
+
+      - name: Seed the workspace
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        # Same bootstrap the e2e-devcontainer nightly uses: `seed` bootstraps
+        # demo@crewship.ai, mints the CLI token into the CLI config, and creates
+        # 3 crews / 7 agents / routines the suites address by slug.
+        #
+        # Retried: crew creation validates each crew's runtime_image against
+        # mcr.microsoft.com, and a cold first call reproducibly exceeds the
+        # CLI's client timeout ("invalid runtime_image: … context deadline
+        # exceeded"). Locally this needed 3 attempts from cold and then
+        # succeeded; a single-shot seed would flake the whole matrix on
+        # registry latency, which is not a product signal.
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "--- seed attempt $attempt ---"
+            if ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::seed failed after 3 attempts"
+          tail -100 /tmp/crewship.log >&2
+          exit 1
+
+      - name: Run ${{ matrix.suite }}
+        # Per-suite timeout. run-all.sh has none, so a wedged CLI call there
+        # eats the whole job budget; here it kills exactly one square.
+        timeout-minutes: 12
+        env:
+          CREWSHIP: ${{ github.workspace }}/crewship
+          CREWSHIP_SERVER: http://localhost:8080
+          SERVER: http://localhost:8080
+          # Bounded waits — the suites default to 180s/120s, which is right for
+          # a shared dev slot and far too patient for CI.
+          ASK_TIMEOUT: "90"
+          POLL_TIMEOUT: "60"
+          POLL_INTERVAL: "3"
+        run: |
+          set -euo pipefail
+          # test-attack-surface.sh resolves its bearer token by matching $SERVER
+          # against a cli-config profile. That lookup cannot resolve a loopback
+          # address, so the suite SKIPS its whole Tier A block unless the token
+          # and workspace are handed to it explicitly — a green skip that proves
+          # nothing. Mint both through the CLI (never a DB shell / hand-rolled
+          # curl, per CLAUDE.md) so A1–A4 actually run.
+          if [ "${{ matrix.suite }}" = "test-attack-surface.sh" ]; then
+            tok="$(./crewship token create nightly-harness-probe --quiet)"
+            echo "::add-mask::$tok"
+            CREWSHIP_ATTACK_TOKEN="$tok"
+            CREWSHIP_ATTACK_WS="$(./crewship whoami --format json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["id"])')"
+            export CREWSHIP_ATTACK_TOKEN CREWSHIP_ATTACK_WS
+          fi
+          bash "scripts/test-harness/${{ matrix.suite }}"
+
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+
+  # ── Gate the LLM half only when a provider credential exists ──
+  # A job-level `if:` cannot read `secrets.*` in a matrix expression cleanly,
+  # so resolve it once here into a plain output. Secret VALUES never leave this
+  # job — only the boolean.
+  provider-key:
+    name: Provider credential present?
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          KEY: ${{ secrets.SEED_ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEY:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "SEED_ANTHROPIC_API_KEY is configured — the runtime suites will run."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SEED_ANTHROPIC_API_KEY is NOT configured — the runtime harness suites (memory, delegation, notifications, orchestration, determinism, credentials) will be SKIPPED. Their assertions all sit downstream of a real agent reply or routine run, which the server refuses without a provider credential."
+          fi
+
+  # ── Runtime suites: real agent replies + real routine runs ──
+  # HONESTY NOTE: this job has never executed. There is no
+  # SEED_ANTHROPIC_API_KEY in this repository, so `provider-key` resolves to
+  # false and the job is skipped. Every step below is modelled on the
+  # control-plane job that WAS verified end-to-end, plus the seed flags the
+  # harness README documents — but the first run with a real secret should be a
+  # `workflow_dispatch`, not a nightly, and should expect to need adjustment
+  # (provisioning budget, per-suite timeouts, token spend).
+  harness-runtime:
+    name: "Harness (runtime): ${{ matrix.suite }}"
+    needs: [provider-key]
+    if: needs.provider-key.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The CLAUDE.md "core set". Each one needs a live model.
+          - suite: test-memory.sh
+          - suite: test-delegation.sh
+          - suite: test-notifications.sh
+          - suite: test-orchestration.sh
+          - suite: test-determinism.sh
+          # 21 of its 22 assertions pass with NO provider credential; the one
+          # that does not is the agent-driven credential escalation, which is
+          # the suite's whole point. Kept on this side of the line rather than
+          # shipped as a permanently-yellow square.
+          - suite: test-credentials.sh
+          # Needs a decided keeper request + an escalation, i.e. agent runs.
+          - suite: test-keeper-audit-integrity.sh
+          # §5 asserts the keeper decision path is online, which needs the
+          # gatekeeper model configured.
+          - suite: test-keeper-load.sh
+          # Crew links: delegation across a live link, so agent replies.
+          - suite: test-crew-links.sh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build sidecar + CLI
+        # Unlike the control-plane job, these suites drive agents, so the
+        # container/adapter path matters — build the sidecar too.
+        run: |
+          set -euo pipefail
+          make build:sidecar
+          go build -o crewship ./cmd/crewship
+
+      - name: Generate ephemeral instance secrets
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+
+      - name: Start crewship server in background
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship.log 2>&1 &
+          echo $! > /tmp/crewship.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::server failed to start"
+          cat /tmp/crewship.log >&2
+          exit 1
+
+      - name: Seed the workspace with memory + provider credential
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+          # Seeded as a workspace credential so the LLMRunner has an active
+          # provider. Without it every `ask` / `routine run` fails with
+          # "no active Anthropic credential in workspace".
+          SEED_ANTHROPIC_API_KEY: ${{ secrets.SEED_ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          # --wait-provision: agent runs need provisioned crews, and the
+          # default fire-and-forget seed returns while provisioning is still
+          # in flight, so the first `ask` would race it. --provision-timeout
+          # bounds it well under this job's budget (the default is 900s per
+          # crew, i.e. three retries could eat 45 minutes on their own).
+          for attempt in 1 2 3; do
+            echo "--- seed attempt $attempt ---"
+            if ./crewship seed --skip-issues --with-memory \
+                 --wait-provision --provision-timeout 420 \
+                 --server "$CREWSHIP_SERVER"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::seed failed after 3 attempts"
+          tail -100 /tmp/crewship.log >&2
+          exit 1
+
+      - name: Run ${{ matrix.suite }}
+        timeout-minutes: 20
+        env:
+          CREWSHIP: ${{ github.workspace }}/crewship
+          CREWSHIP_SERVER: http://localhost:8080
+          SERVER: http://localhost:8080
+          ASK_TIMEOUT: "180"
+          POLL_TIMEOUT: "120"
+          POLL_INTERVAL: "3"
+          # Determinism defaults to 5 runs of a real recipe; 3 is enough to
+          # prove byte-identical output and keeps the token bill honest.
+          RUNS: "3"
+        run: bash "scripts/test-harness/${{ matrix.suite }}"
+
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+
+  # ── A green tick must not overstate what ran ──
+  # On a fully green night the runtime tier does not execute at all (no provider
+  # credential), and the only trace of that is an ephemeral `::warning::` buried
+  # in the provider-key job log. Anyone who reads the tick in the Actions list
+  # and never opens the run learns nothing — which is the same "looks fine,
+  # verified less" shape that `continue-on-error` was rejected for.
+  #
+  # So write the coverage into $GITHUB_STEP_SUMMARY, which renders on the run
+  # page itself. Deliberately on the SUCCESS path too, not only on failure, and
+  # on every event rather than `schedule` only: a manual shakedown run should be
+  # just as honest about what it skipped.
+  #
+  # This never fails the workflow — a skipped runtime tier is a legitimate state
+  # until the secret exists. It just refuses to be silent about it.
+  coverage-summary:
+    name: What this run actually verified
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [suite-coverage-guard, provider-key, harness-control-plane, harness-runtime]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Write the tier coverage table to the run summary
+        env:
+          KEY_PRESENT: ${{ needs.provider-key.outputs.present }}
+          GUARD: ${{ needs.suite-coverage-guard.result }}
+          CONTROL_PLANE: ${{ needs.harness-control-plane.result }}
+          RUNTIME: ${{ needs.harness-runtime.result }}
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null \
+            || pip install --quiet --disable-pip-version-check pyyaml
+          # Suite names come from this workflow's own matrices + EXCLUDED_SUITES,
+          # the same single source of truth the guard reads, so the table cannot
+          # drift from what actually ran.
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os, yaml
+
+          wf = yaml.safe_load(open(".github/workflows/nightly-harness.yml"))
+          jobs = wf["jobs"]
+
+          def suites(job):
+              return sorted(e["suite"] for e in jobs[job]["strategy"]["matrix"]["include"])
+
+          gated = suites("harness-control-plane")
+          runtime = suites("harness-runtime")
+          excluded = sorted(os.environ["EXCLUDED_SUITES"].split())
+
+          key = os.environ["KEY_PRESENT"] == "true"
+          res = {
+              "guard": os.environ["GUARD"],
+              "cp": os.environ["CONTROL_PLANE"],
+              "rt": os.environ["RUNTIME"],
+          }
+          mark = {"success": "✅ passed", "failure": "❌ FAILED",
+                  "cancelled": "⏹ cancelled", "skipped": "⏭ skipped"}
+
+          def status(r):
+              return mark.get(r, f"⚠️ {r}")
+
+          rt_status = (status(res["rt"]) if key
+                       else "⚠️ **NOT RUN** — no provider credential configured")
+
+          out = ["## What this run actually verified", ""]
+          if not key:
+              out += [
+                  "> [!WARNING]",
+                  "> **A green tick here covers the control-plane tier only.**",
+                  "> `SEED_ANTHROPIC_API_KEY` is not configured in this repository, so the "
+                  f"{len(runtime)} runtime suites never executed. Their assertions all sit "
+                  "downstream of a real agent reply or routine run, which the server refuses "
+                  "without a provider credential (`LLMRunner: provider: no active Anthropic "
+                  "credential in workspace`). **This run does not show that memory, delegation, "
+                  "notifications, orchestration, determinism or credential escalation still "
+                  "work.** Configure the secret and this tier becomes a hard gate with no "
+                  "workflow edit.",
+                  "",
+              ]
+          out += [
+              "| tier | suites | this run |",
+              "|------|-------:|----------|",
+              f"| coverage guard (every `test-*.sh` is in a tier) | — | {status(res['guard'])} |",
+              f"| control-plane — **hard gate**, no credential needed | {len(gated)} | {status(res['cp'])} |",
+              f"| runtime — needs a provider credential | {len(runtime)} | {rt_status} |",
+              f"| excluded by design (secret / external service / shared slot) | {len(excluded)} | never run — see the workflow header |",
+              "",
+              "<details><summary>Which suites are in which tier</summary>",
+              "",
+              "**Control-plane (gated):**",
+              "",
+          ]
+          out += [f"- `{s}`" for s in gated]
+          out += ["", "**Runtime (gated only when a provider credential exists):**", ""]
+          out += [f"- `{s}`" for s in runtime]
+          out += ["", "**Excluded — reasons in the workflow header:**", ""]
+          out += [f"- `{s}`" for s in excluded]
+          out += ["", "</details>", ""]
+          print("\n".join(out))
+          PY
+          echo "coverage summary written"
+
+  # ── A nightly nobody notices is worth nothing: file/refresh ONE issue ──
+  # Same containment contract as security.yml's `scheduled-report`: label +
+  # bot author + title/marker match, so a human-filed issue carrying the label
+  # is never touched, and a green night closes the bot's own issue.
+  harness-alert:
+    name: Nightly harness alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [suite-coverage-guard, provider-key, harness-control-plane, harness-runtime]
+    if: always() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: File, update, or close the alert issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MARKER: "<!-- crewship:nightly-harness-alert -->"
+          TITLE: "Nightly harness failed on main"
+          KEY_PRESENT: ${{ needs.provider-key.outputs.present }}
+          CONTROL_PLANE: ${{ needs.harness-control-plane.result }}
+          RUNTIME: ${{ needs.harness-runtime.result }}
+          PROVIDER_KEY_JOB: ${{ needs.provider-key.result }}
+          GUARD: ${{ needs.suite-coverage-guard.result }}
+        run: |
+          set -euo pipefail
+
+          # Fail SAFE, not fail green (the security.yml lesson): enumerate the
+          # GOOD status, never the bad ones. `skipped`, `cancelled`,
+          # `timed_out` and whatever GitHub adds next all mean "the gate did
+          # not run", which is not a pass.
+          #
+          # The one legitimate skip: harness-runtime when no provider
+          # credential is configured. That is a known, stated gap — recorded in
+          # the issue body, not treated as a regression.
+          results="suite-coverage-guard=${GUARD}
+          provider-key=${PROVIDER_KEY_JOB}
+          harness-control-plane=${CONTROL_PLANE}"
+          if [ "$KEY_PRESENT" = "true" ]; then
+            results="${results}
+          harness-runtime=${RUNTIME}"
+          fi
+
+          results_clean=$(printf '%s\n' "$results" \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -v '^$' || true)
+          not_green=$(printf '%s\n' "$results_clean" \
+            | grep -vE '=success$' || true)
+          # Zero reported jobs is a bug in THIS workflow, not a green night.
+          if [ -z "$results_clean" ]; then
+            not_green="(no job results were reported — the results block was empty)"
+          fi
+
+          coverage_note="⚠️ \`SEED_ANTHROPIC_API_KEY\` is not configured in this repository, so the **runtime** half of the harness (memory, delegation, notifications, orchestration, determinism, credentials, crew-links, keeper audit/load) did **not** run. Those suites assert behaviour that only exists downstream of a real agent reply or routine run. A green control-plane night does not mean memory or delegation still work."
+          if [ "$KEY_PRESENT" = "true" ]; then
+            coverage_note="Both halves of the harness ran (a provider credential is configured)."
+          fi
+
+          # --force makes label creation idempotent across runs.
+          gh label create nightly-harness-alert --repo "$REPO" \
+            --color B60205 \
+            --description "Automated: nightly CLI integration harness failed on main" \
+            --force
+
+          # Only ever act on an issue THIS job filed.
+          existing=$(gh issue list --repo "$REPO" --label nightly-harness-alert \
+            --state open --json number,title,body,author \
+            --jq "[ .[]
+                    | select(.author.is_bot)
+                    | select(.title == \$ENV.TITLE
+                             or (.body // \"\" | contains(\$ENV.MARKER)))
+                  ] | .[0].number // empty")
+
+          if [ -z "$not_green" ]; then
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" \
+                --body "✅ The nightly harness is green again as of $RUN_URL. Closing.
+
+          $coverage_note"
+              gh issue close "$existing" --repo "$REPO" --reason completed
+              echo "Closed alert issue #$existing (harness green)."
+            else
+              echo "Harness green and no alert issue — nothing to do."
+            fi
+            exit 0
+          fi
+
+          echo "Jobs that did not report success:"; echo "$not_green"
+          body="$MARKER
+          The nightly CLI integration harness on \`main\` did not complete successfully.
+
+          Jobs below did not report \`success\` — a \`skipped\` or \`cancelled\` job means the gate never ran, which is **not** a green result:
+
+          \`\`\`
+          $not_green
+          \`\`\`
+
+          Run: $RUN_URL
+
+          $coverage_note
+
+          These suites drive the real \`crewship\` CLI against a real seeded instance, so a failure here is a **runtime** regression the Go/Vitest units cannot see (memory recall, crew isolation, the internal auth fence, credential lifecycle). Open the failing matrix square, read its per-assertion output, and check the \"Dump server log on failure\" step. Suite-by-suite contracts: \`scripts/test-harness/README.md\`.
+
+          A \`suite-coverage-guard\` failure is different: it means a \`scripts/test-harness/test-*.sh\` file is claimed by no tier (or a tier names one that no longer exists). Nothing regressed — a suite is about to get zero nightly coverage. Add it to the \`harness-control-plane\` matrix, the \`harness-runtime\` matrix, or \`EXCLUDED_SUITES\` with a reason.
+
+          The \"What this run actually verified\" section on the run page lists which tiers executed and which were skipped.
+
+          This issue auto-closes when the nightly is green again."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated existing alert issue #$existing"
+          else
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label nightly-harness-alert \
+              --body "$body"
+          fi

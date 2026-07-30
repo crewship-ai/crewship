@@ -5,169 +5,33 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
-// migratedTemplateDB caches a single fully-migrated SQLite file. Running the
-// full migration set on every setupTestDB call dominated the package's
-// wall-clock once the handler-coverage suites pushed it past 1,200 calls
-// (the CI Go job started hitting its 15-minute cap). Migrating once into a
-// template file and copying that file per-test turns a ~hundreds-of-ms
-// migration into a ~1ms file copy, with identical schema and full per-test
-// isolation (each test still gets its own DB file + connection pool).
-var (
-	migratedTemplateOnce sync.Once
-	migratedTemplatePath string
-	migratedTemplateErr  error
-)
-
-func buildMigratedTemplate() {
-	dir, err := os.MkdirTemp("", "api-db-template")
-	if err != nil {
-		migratedTemplateErr = err
-		return
-	}
-	path := filepath.Join(dir, "template.db")
-	db, err := database.Open("file:" + path)
-	if err != nil {
-		migratedTemplateErr = err
-		return
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		db.Close()
-		migratedTemplateErr = err
-		return
-	}
-	// Fold the WAL back into the main file so a plain file copy carries the
-	// complete schema (no -wal/-shm sidecars to track).
-	if _, err := db.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
-		db.Close()
-		migratedTemplateErr = err
-		return
-	}
-	if err := db.Close(); err != nil {
-		migratedTemplateErr = err
-		return
-	}
-	migratedTemplatePath = path
-}
-
+// setupTestDB returns a fully-migrated SQLite database that belongs to this
+// test alone.
+//
+// The migrate-once-into-a-template trick this package invented — the full
+// migration set was dominating its wall-clock once the handler-coverage suites
+// pushed setupTestDB past 1,200 calls, and the CI Go job started brushing its
+// 15-minute cap — now lives in internal/testutil so the other twenty-odd
+// packages that were still replaying 155 migrations per test can use it too.
+// testutil.MigratedSQLDB carries all of it forward: the process-wide template,
+// the per-test file copy, the database.Open pragmas, the non-t.TempDir cleanup
+// contract that stopped this package misattributing "directory not empty"
+// failures to bystander tests, and the deterministic quiescing that the
+// detached handler workers here require (EvalHandler.Replay/Regression fire a
+// context.WithoutCancel goroutine that keeps writing after the test body
+// returns — see #892). The reasoning for each is recorded at the helper.
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	migratedTemplateOnce.Do(buildMigratedTemplate)
-	if migratedTemplateErr != nil {
-		t.Fatalf("build migrated template: %v", migratedTemplateErr)
-	}
-
-	// Deliberately NOT t.TempDir(). Its cleanup contract is "if RemoveAll
-	// fails, fail the test", which is the wrong contract for this package:
-	// handlers here spawn detached background workers on purpose (see the
-	// quiescing comment below), so a straggler can re-touch the WAL inside
-	// RemoveAll's readdir→rmdir window and fail a test that has nothing to do
-	// with the leak. That is exactly how it presents — on 2026-07-20 three
-	// unrelated tests (TestCLITokenValidate, TestTokenScopeEnforcement_EndToEnd,
-	// TestSecWebhookIdemReservedRunIDMatchesCreatedRun) each failed once with
-	// "TempDir RemoveAll cleanup: unlinkat …: directory not empty" and passed
-	// standalone. Whichever test is unlucky gets blamed, so the signal is not
-	// just noisy, it is misattributed.
-	//
-	// The quiescing below still does the real work of not leaking. This only
-	// changes what happens when it doesn't fully succeed: log what survived —
-	// so the leak stays diagnosable and attributable to a named file — instead
-	// of failing a bystander. The OS reclaims the directory regardless.
-	dir, err := os.MkdirTemp("", "crewship-api-test-")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			leftovers, _ := os.ReadDir(dir)
-			names := make([]string, 0, len(leftovers))
-			for _, e := range leftovers {
-				names = append(names, e.Name())
-			}
-			t.Logf("test DB temp dir not fully removed (non-fatal): %v; survivors: %v", err, names)
-		}
-	})
-	dst := filepath.Join(dir, "test.db")
-	if err := copyFile(migratedTemplatePath, dst); err != nil {
-		t.Fatalf("copy template db: %v", err)
-	}
-
-	db, err := database.Open("file:" + dst)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	// Deterministic teardown for the whole package (#892).
-	//
-	// Several handlers spawn *detached* background workers on purpose —
-	// EvalHandler.Replay/Regression fire a `context.WithoutCancel` goroutine
-	// so the terminal run-status write survives the request context. In a real
-	// server that's correct; in a test it means a goroutine keeps writing to
-	// this DB after the test body returns. There is no handle to join them from
-	// here, so the old bare `db.Close()` left two intermittent failures that
-	// wandered between whichever cov test happened to be cleaning up while a
-	// neighbour's worker was still flushing:
-	//
-	//   - `sql: database is closed` bursts — the straggler's next query races
-	//     the close.
-	//   - `TempDir RemoveAll: unlinkat …: directory not empty` — the straggler
-	//     re-touches the WAL (`-wal`/`-shm`) in the window between RemoveAll
-	//     unlinking the sidecars and its final rmdir.
-	//
-	// Fix: quiesce the DB deterministically before Go's t.TempDir RemoveAll
-	// runs (this cleanup is registered after t.TempDir, so LIFO puts it first).
-	// db.Close() prevents any NEW query from starting and waits for in-flight
-	// ones, so once it returns no straggler can create a file. We fold the WAL
-	// back with a TRUNCATE checkpoint first (clean, empty sidecars on close)
-	// and then best-effort unlink any `-wal`/`-shm` that linger, with a short
-	// bounded retry to cover a worker that grew the WAL during the close.
-	t.Cleanup(func() {
-		// Best-effort: a checkpoint can return SQLITE_BUSY if a straggler still
-		// holds the writer; the explicit unlink below is the backstop.
-		_, _ = db.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
-		_ = db.Close()
-		// After Close returns, all connections are gone and no goroutine can
-		// reopen this handle, so the sidecars are safe to remove. Retry briefly
-		// in case the filesystem hasn't released a just-closed handle yet.
-		for _, suffix := range []string{"-wal", "-shm"} {
-			for attempt := 0; attempt < 20; attempt++ {
-				if err := os.Remove(dst + suffix); err == nil || os.IsNotExist(err) {
-					break
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
-	})
-	return db.DB
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return err
-	}
-	return out.Close()
+	return testutil.MigratedSQLDB(t)
 }
 
 func seedTestUser(t *testing.T, db *sql.DB) string {

@@ -13,11 +13,11 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/testutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -40,14 +40,7 @@ func (p *kp2Provider) Name() string { return "kp2" }
 
 func kp2DB(t *testing.T) (*sql.DB, *policy.Resolver) {
 	t.Helper()
-	d, err := database.Open("file:" + filepath.Join(t.TempDir(), "kp2.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	if err := database.Migrate(context.Background(), d.DB, kp2Logger()); err != nil {
-		t.Fatal(err)
-	}
+	d := testutil.MigratedDB(t)
 	if _, err := d.DB.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`); err != nil {
 		t.Fatal(err)
 	}

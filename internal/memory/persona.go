@@ -196,7 +196,7 @@ func WritePersona(p PersonaPaths, layer PersonaLayer, content string) error {
 		return fmt.Errorf("persona: lock: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := writeFileDurable(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("persona: write: %w", err)
 	}
 	return nil
@@ -277,7 +277,7 @@ func BackfillFromLegacy(p PersonaPaths, legacy string) (wrote bool, err error) {
 	// Inline write under the held lock — calling WritePersona would
 	// try to re-acquire the same flock and deadlock (or fail-fast
 	// with EAGAIN, depending on FileLock semantics).
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := writeFileDurable(path, []byte(body), 0o644); err != nil {
 		return false, fmt.Errorf("persona backfill: write: %w", err)
 	}
 	return true, nil

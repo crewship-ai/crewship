@@ -723,6 +723,19 @@ crew and keep the workspace-wide `include_values` path.
   API across a network hop, those master-token calls will be refused
   unless `CREWSHIP_INTERNAL_ALLOW_ANY=true` is also set — a deliberate
   fail-closed posture, documented here rather than silently relaxed.
+- The credential-metadata listing's crew scope binds to the **crew**, so a
+  **crew-less** run's sidecar (which is issued a workspace-bound token,
+  `orchestrator.sidecarIPCToken` with `crewID == ""`) still receives every
+  credential's metadata in its own workspace. That is the token's true scope,
+  injected server-side — not an omission the caller chose, and not a scope it
+  can escape: minting a workspace-bound token or rewriting a crew-bound one
+  requires the master secret, which never enters a container. The listing is
+  metadata only (`include_values` is separately loopback-gated), and it is
+  deliberately **not** narrowed to an empty response for such a caller: the
+  sidecar's credential reaper reconciles its in-memory `CredStore` against
+  this listing, so an empty `200` would evict every provider key the container
+  booted with. Pinned as a sentinel test in
+  `internal/api/internal_credentials_crew_token_closure_sec_test.go`.
 
 ### Hardening surface — what's locked vs. what's tracked
 
@@ -738,6 +751,7 @@ crew and keep the workspace-wide `include_values` path.
 | MCP tool-call audit writer (`POST /internal/mcp-tool-calls`) body workspace | ✅ closed — in-handler `assertInternalTokenWorkspace` (R-1) |
 | Cross-crew messaging / shared files (`/internal/crew-messages`, `/internal/crew-files`) connection-only auth | ✅ closed — caller-supplied crew IDs must resolve to the token's bound workspace (R-2) |
 | Crew-bound token, body-carried `crew_id` → sibling-crew attribution (cost / journal / keeper / pipelines / assignments / escalation / query / mcp-tool-calls / agent create) | ✅ closed — in-handler `assertBoundCrewWorkspaceDB` exact-crew match (#1186) |
+| Credential-metadata listing (`GET /internal/credentials`), omitted or forged `?crew_id` → sibling-crew enumeration (#1031) | ✅ closed — crew-bound token (#1159); crew taken from `InternalTokenCrewFromContext`, disagreeing query 403s, and the token→middleware→handler chain is pinned end-to-end in `internal_credentials_crew_token_closure_sec_test.go`. Crew-less (workspace-bound) callers keep the workspace-wide listing — see Residuals above |
 | F4 handler body-workspace drop | ⏳ PR-F25 (eliminate body workspace param — cleanup, no longer a security gap) |
 | Lessons memory tier agent-author write | ✅ closed — dispatcher rejects `tier="lessons"` |
 | Token-less sibling reads/writes a peer's memory tier (CRE-153) | ✅ closed — router-level prefix gate over `/memory/*` + `/mcp/memory*` (`refuseTokenlessMemory`), 403 on every route + route-enumeration test |

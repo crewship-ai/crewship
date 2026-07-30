@@ -207,6 +207,20 @@ func TestMemoryMetricsAdapter_EntriesSinceLastMemoryUpdate_ScopedByAgent(t *test
 
 func seedCostLedgerRow(t *testing.T, db *sql.DB, id, wsID, agentID string, cost float64, inTok, outTok int64, ts time.Time) {
 	t.Helper()
+	// cost_ledger.agent_id REFERENCES agents(id), so the agent has to exist.
+	// It did not need to before: openTestDB used to pass `_foreign_keys=on`,
+	// which modernc.org/sqlite does not recognise (it wants
+	// `_pragma=foreign_keys(on)`), so this package ran with foreign keys OFF
+	// and happily stored ledger rows pointing at agents that were never
+	// created. INSERT OR IGNORE because ScopedByWorkspace deliberately reuses
+	// one agent id across two workspaces — agents.id is the primary key, so
+	// the second insert is a no-op and the FK is satisfied either way.
+	if agentID != "" {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO agents (id, workspace_id, name, slug) VALUES (?, ?, 'Seed Agent', ?)`,
+			agentID, wsID, agentID); err != nil {
+			t.Fatalf("seed agent %s: %v", agentID, err)
+		}
+	}
 	if _, err := db.Exec(`INSERT INTO cost_ledger
 		(id, workspace_id, agent_id, ts, provider, model, input_tokens, output_tokens, cost_usd)
 		VALUES (?, ?, NULLIF(?, ''), ?, 'anthropic', 'claude', ?, ?, ?)`,

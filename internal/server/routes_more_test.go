@@ -15,12 +15,12 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func TestHandleAgentStop_RunningInState(t *testing.T) {
@@ -134,16 +134,8 @@ func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 
 func TestRecoverOrphanedRuns_MarksRunningCancelled(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "rec.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := testutil.MigratedDB(t)
 	logger := logging.New("error", "json", nil)
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatal(err)
-	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)
@@ -264,15 +256,12 @@ func TestDeps_ClosesStateProvider(t *testing.T) {
 func TestNew_WithJWTSecret_MountsAPI(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "api.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// MigratedDBAt, not MigratedDB: the DB file has to sit inside the same
+	// directory this test hands to cfg.Storage.BasePath, because the point is
+	// that Shutdown drains everything touching that directory.
+	db := testutil.MigratedDBAt(t, filepath.Join(dir, "api.db"))
 
 	logger := logging.New("error", "json", nil)
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatal(err)
-	}
 
 	cfg := config.Default()
 	cfg.Auth.JWTSecret = "supersecretkeythatisatleast32chars!!"
@@ -312,15 +301,11 @@ func TestNew_WithJWTSecret_MountsAPI(t *testing.T) {
 func TestNew_Shutdown_TempDirRemovableAfterward(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "api.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// MigratedDBAt, not MigratedDB: this test removes `dir` itself as the
+	// assertion, so the DB file must live in it.
+	db := testutil.MigratedDBAt(t, filepath.Join(dir, "api.db"))
 
 	logger := logging.New("error", "json", nil)
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatal(err)
-	}
 
 	cfg := config.Default()
 	cfg.Auth.JWTSecret = "supersecretkeythatisatleast32chars!!"

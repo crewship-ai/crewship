@@ -528,6 +528,12 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	if _, err := f.WriteString(block.String()); err != nil {
 		return false, fmt.Errorf("pins write: %w", err)
 	}
+	// fsync before close, same rationale (and same convention) as
+	// appendRules below: an append that returns success but never
+	// reaches disk is a silently lost pin.
+	if err := f.Sync(); err != nil {
+		return false, fmt.Errorf("pins sync: %w", err)
+	}
 	return true, nil
 }
 

@@ -9,10 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // gdprTestRig wires the AdminGDPRHandler against a real sqlite,
@@ -33,16 +32,10 @@ type gdprTestRig struct {
 
 func gdprTestSetup(t *testing.T) *gdprTestRig {
 	t.Helper()
+	dbh := testutil.MigratedDB(t)
+	// Output root for the handler; unrelated to where the DB file lives.
 	dir := t.TempDir()
-	dbh, err := database.Open("file:" + filepath.Join(dir, "g.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), dbh.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = dbh.Close() })
 	if _, err := dbh.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w')`); err != nil {
 		t.Fatalf("seed ws: %v", err)
 	}

@@ -2,12 +2,11 @@ package conversation
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // newSearchStore opens a migrated in-tree DB and returns a Store wired to
@@ -15,15 +14,9 @@ import (
 // against the real v111 schema (not a hand-rolled fixture).
 func newSearchStore(t *testing.T) *Store {
 	t.Helper()
+	db := testutil.MigratedDB(t)
+	// Transcript root for the store; separate from the DB file.
 	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "search.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, logging.New("error", "json", nil)); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	store := NewStore(dir, logging.New("error", "json", nil), WithDB(db.DB))
 	t.Cleanup(store.Close)
 	return store

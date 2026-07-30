@@ -5,29 +5,19 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // setupOnboardingDB returns a fresh DB with migrations + a workspace +
 // a user in the OnBoarding-needed state.
 func setupOnboardingDB(t *testing.T) (*database.DB, string, string) {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "ob.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := testutil.MigratedDB(t)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.Exec(`INSERT INTO users (id, email, onboarding_completed, created_at, updated_at) VALUES ('u1','u1@example.com',0,?,?)`, now, now); err != nil {

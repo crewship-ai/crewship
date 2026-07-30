@@ -28,6 +28,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // openMigratedDB returns a fresh on-disk SQLite DB with every migration
@@ -43,16 +44,8 @@ import (
 // would see FK violations on agent_skills restore for that reason.
 func openMigratedDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dbPath := t.TempDir() + "/test.db"
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := testutil.MigratedSQLDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	if err := database.SeedBundledSkills(context.Background(), db, logger); err != nil {
 		t.Fatalf("seed bundled skills: %v", err)
 	}
