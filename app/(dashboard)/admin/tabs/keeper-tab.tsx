@@ -9,6 +9,7 @@ import {
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
+import { KeeperJudgeCard } from "@/components/features/admin/keeper-judge-card"
 import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
 import { cn } from "@/lib/utils"
 import { redactSecrets, redactUrl } from "../utils"
@@ -51,31 +52,28 @@ export const KeeperTab = React.memo(function KeeperTab({
 }: KeeperTabProps) {
   return (
     <div className="space-y-5">
-      {/* ── Intro ── */}
-      <div>
-        <h3 className="text-body font-medium text-foreground/80 leading-none">
-          Keeper — credential access control
-        </h3>
-        <p className="text-[11px] text-muted-foreground mt-1 leading-snug max-w-2xl">
-          Keeper evaluates credential access requests using a local AI model (Ollama).
-          Agents never see raw credentials — Keeper decides ALLOW, DENY, or ESCALATE.
-        </p>
-      </div>
+      {/* Card order is the order an operator needs them in: what decides
+          (and can I change it) → is every judge able to run → what else is
+          watched → where findings go → how long access lasts → this
+          workspace's own override → what has happened.
+
+          The page title comes from the admin shell; a second "Keeper —
+          credential access control" heading here just pushed the first
+          control below the fold. */}
+      <KeeperJudgeCard workspaceId={workspaceId} />
 
       {/* Which model each judge actually uses, and whether it can run.
           Deliberately OUTSIDE the `keeperStatus &&` guard below: a null
           status means the keeper status endpoint failed, which is exactly
           when an operator needs to know whether the judges can run — hiding
-          it then removes the diagnosis along with the symptom. Sits under
-          the governance panel conceptually; that panel is what overrides
-          these per workspace. */}
+          it then removes the diagnosis along with the symptom. */}
       <JudgeModelsCard workspaceId={workspaceId} />
 
       {keeperLoading && <Skeleton className="h-[240px] rounded-xl" />}
 
       {!keeperLoading && keeperStatus && (
         <>
-          {/* ── Watchdog governance (issue #1001 M0) ── */}
+          {/* ── Watchdog / findings / leases / workspace model (#1001 M0) ── */}
           <KeeperGovernancePanel
             workspaceId={workspaceId}
             serverEnabled={keeperStatus.enabled}
@@ -136,15 +134,9 @@ export const KeeperTab = React.memo(function KeeperTab({
             {!keeperStatus.enabled && (
               <div className="px-4 py-2.5 bg-warn/[0.04] border-t border-warn/20">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  To enable Keeper, set{" "}
-                  <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
-                    KEEPER_OLLAMA_URL=http://localhost:11434
-                  </code>{" "}
-                  in your{" "}
-                  <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
-                    .env.local
-                  </code>{" "}
-                  and restart the server.
+                  Keeper is off, so SECRET credentials are injected into agents directly.
+                  Turn it on in <span className="text-foreground/80">Credential access judge</span> at
+                  the top of this page — no restart, no env editing.
                 </p>
               </div>
             )}
