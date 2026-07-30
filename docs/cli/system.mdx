@@ -20,7 +20,7 @@ crewship system <subcommand>
 | `keeper` | Show Keeper security system status |
 | `stats` | Show admin stats (workspaces, users, agents, running) |
 | `onboarding` | Onboarding status / setup / complete (subcommands: `status`, `setup`, `complete`) |
-| `aux-status` | Show auxiliary model assignment per slot (PR-B F3) |
+| `aux-status` | Show auxiliary model assignment and health per subsystem |
 | `openapi` | Print the server's generated OpenAPI spec (JSON) to stdout |
 
 ---
@@ -147,41 +147,65 @@ crewship system onboarding complete
 
 ## `crewship system aux-status`
 
-Show the resolved provider, model, timeout and source for every auxiliary-model slot (Curator, Keeper, Behavior, MemoryHealth, Negative). PR-B F3 introduced this diagnostic surface so operators can confirm `cfg.auxiliary.*` overrides actually landed before the first eval call falls back silently.
+Show which model judges each auxiliary subsystem — the credential-access judge, skill review, the behaviour monitor, memory health, negative lessons, run summaries — **and whether that model can actually run**. Same surface the admin console's *Judge models* card reads.
 
 ```bash
 crewship system aux-status
-crewship system aux-status --format json | jq '.slots[] | select(.source=="fallback")'
+crewship system aux-status --format json | jq '.subsystems[] | select(.reachable == false)'
 crewship system aux-status --format yaml
 ```
 
 <Note>
-Requires the **ADMIN** or **OWNER** role — the resolved provider/model/timeout
-matrix is operator configuration, not for every workspace member to enumerate.
-A **MEMBER** gets a `403`, same as [`system keeper`](#crewship-system-keeper)
-above.
+Requires the **ADMIN** or **OWNER** role **in the active workspace** — the
+resolved provider/model/timeout matrix is operator configuration, not for every
+workspace member to enumerate. A **MEMBER** gets a `403`, same as
+[`system keeper`](#crewship-system-keeper) above.
 </Note>
 
-**Source column values:**
+**Source column** — how the subsystem's model was resolved:
 
 | Source | Meaning |
 |---|---|
 | `explicit` | `cfg.auxiliary.<slot>` was set directly. |
 | `fallback` | The slot was empty; `cfg.auxiliary.fallback` was used instead. |
 | `unconfigured` | Neither the slot nor fallback had a provider — operator gap. |
+| `keeper_config` | The credential-access judge, built from `cfg.keeper` on its own path (not an aux slot). |
 
-Sample output (defaults are five slots on `anthropic/claude-haiku-4-5`):
+**Status column** — a different question from source: not *is this configured* but *can it run*.
+
+| Status | Meaning |
+|---|---|
+| `ok` | The provider builds **and** the model server answered just now. |
+| `ok (unprobed)` | The provider builds; reachability was not checked. Only self-hosted providers are dialled — rendering a status table must not bill you for a paid API call. |
+| `unreachable` | The provider builds, but nothing answered at the model server (the classic "Ollama isn't running" case, which used to report perfectly healthy). |
+| `unhealthy` | Not configured, or its provider cannot be built. |
+
+Sample output:
 
 ```
-SLOT          PROVIDER   MODEL              TIMEOUT  SOURCE
-curator       anthropic  claude-haiku-4-5   30.0s    explicit
-keeper        anthropic  claude-haiku-4-5   5.0s     explicit
-behavior      anthropic  claude-haiku-4-5   8.0s     explicit
-memory_health anthropic  claude-haiku-4-5   15.0s    explicit
-negative      anthropic  claude-haiku-4-5   5.0s     explicit
+SUBSYSTEM          ROLE                                 PROVIDER   MODEL             TIMEOUT  SOURCE         STATUS
+access_gatekeeper  Credential access judge              ollama     phi3:mini         —        keeper_config  unreachable
+curator            Skill review + memory consolidation  anthropic  claude-haiku-4-5  30.0s    explicit       ok (unprobed)
+behavior           Tool-call behaviour monitor          anthropic  claude-haiku-4-5  8.0s     fallback       ok (unprobed)
+memory_health      Memory-health audit                  anthropic  claude-haiku-4-5  15.0s    fallback       ok (unprobed)
+negative           Failure → lessons extraction         anthropic  claude-haiku-4-5  5.0s     fallback       ok (unprobed)
+run_summary        Run summary verdicts                 anthropic  claude-haiku-4-5  15.0s    fallback       ok (unprobed)
+
+1 of 6 subsystems cannot run right now — evaluations that need them fail closed.
+  access_gatekeeper: no response from http://localhost:11434
 ```
+
+Anything that cannot run is listed underneath with the server's own reason — a red status with no reason is not actionable.
 
 The timeout column renders in seconds when >=1s and milliseconds below that, so the 3-30s span the MVP defaults use stays readable without mental math.
+
+<Warning>
+Against a server older than the `subsystems` reshape (which still answers with
+the previous `{"slots": […]}` payload) the command **errors** rather than
+printing an empty table — an empty table reads as "nothing configured", which
+is the opposite of the truth. Upgrade the server, or run a CLI from the same
+release.
+</Warning>
 
 ## `crewship system log-level`
 

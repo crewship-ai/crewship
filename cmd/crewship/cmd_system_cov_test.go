@@ -356,8 +356,9 @@ func TestSystemOnboardingCompleteRunE_APIError(t *testing.T) {
 func TestSystemAuxStatusRunE_MillisecondTimeout(t *testing.T) {
 	stub := covSetupCli5(t)
 	stub.OnGet("/api/v1/system/aux-status", clitest.JSONResponse(200, map[string]any{
-		"slots": []map[string]any{
-			{"slot": "keeper", "provider": "ollama", "model": "phi3", "timeout_ms": 500, "source": "explicit"},
+		"subsystems": []map[string]any{
+			{"id": "access_gatekeeper", "label": "Credential access judge", "provider": "ollama",
+				"model": "phi3", "timeout_ms": 500, "source": "keeper_config", "healthy": true, "reachable": true},
 		},
 	}))
 
