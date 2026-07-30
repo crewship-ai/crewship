@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 
 import { ActorAvatar } from "./actor"
 import { SubjectPicker } from "./subject-picker"
+import { InboxBellPreview } from "./inbox-bell-preview"
 import { PREVIEW_DIRECTORY } from "./mock-data"
 import { canRole, type PreviewInboxItem, type WorkspaceRole } from "./mock-data"
 import { bucketOf, categoryOf, decisionFor, expiresIn, since, subjectOf } from "./logic"
@@ -122,6 +123,9 @@ export interface InboxListPanelProps {
 
   search: string
   onSearchChange: (v: string) => void
+
+  /** Everything visible to this person, for the top-bar popover demo. */
+  allVisible: PreviewInboxItem[]
 }
 
 export function InboxListPanel(props: InboxListPanelProps) {
@@ -130,7 +134,7 @@ export function InboxListPanel(props: InboxListPanelProps) {
     bucket, onBucketChange, bucketCounts, subjects, selectedSubject, onSubjectChange,
     outcome, onOutcomeChange, outcomeCounts, actor, onActorChange, actorCounts,
     period, onPeriodChange, groupBy, onGroupByChange, sort, onSortChange,
-    search, onSearchChange,
+    search, onSearchChange, allVisible,
   } = props
 
   const [filterOpen, setFilterOpen] = useState(false)
@@ -236,6 +240,10 @@ export function InboxListPanel(props: InboxListPanelProps) {
           onValueChange={onSearchChange}
           placeholder={archive ? "Search the archive…" : "Search inbox…"}
         />
+        {/* The top-bar popover, mounted here so its design can be judged
+            without a second toolbar on the page. In production this is the
+            bell in the app toolbar and nothing else changes. */}
+        <InboxBellPreview items={allVisible} role={role} onOpenItem={onSelect} />
         <Button
           variant={selectMode ? "secondary" : "ghost"}
           size="icon-sm"

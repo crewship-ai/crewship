@@ -183,6 +183,7 @@ export function InboxPreview({ initialRole, initialView = "inbox", initialSelect
           onSortChange={setSort}
           search={search}
           onSearchChange={setSearch}
+          allVisible={visible}
         />
       )}
 

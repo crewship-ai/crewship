@@ -82,6 +82,48 @@ describe("InboxPreview — buckets and facets", () => {
   })
 })
 
+describe("InboxPreview — the top-bar popover", () => {
+  function openBell() {
+    fireEvent.click(screen.getByTestId("bell-trigger"))
+  }
+
+  it("puts what expires soonest at the top, not what arrived last", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openBell()
+
+    const rows = within(screen.getByTestId("bell-popover")).getAllByRole("button")
+      .filter((b) => b.getAttribute("data-testid")?.startsWith("bell-row-"))
+
+    // The waitpoint expires in 11 minutes; the keeper escalation arrived four
+    // minutes ago and would win on recency. Urgency has to beat arrival.
+    expect(rows[0]).toHaveAttribute("data-testid", "bell-row-ibx_wp_promote")
+  })
+
+  it("keeps a blocking item that has already been read", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openBell()
+
+    // ibx_skill_logparser is state=read. It still blocks, so the bell keeps it;
+    // the shipped bell filters on unread and drops it.
+    expect(screen.getByTestId("bell-row-ibx_skill_logparser")).toBeInTheDocument()
+  })
+
+  it("counts decisions on the badge, not unread mail", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+
+    expect(screen.getByTestId("bell-badge")).toHaveTextContent("4")
+  })
+
+  it("opens the item it showed, not just the inbox", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+    openBell()
+
+    fireEvent.click(screen.getByTestId("bell-row-ibx_breaker_docs"))
+
+    expect(screen.getByTestId("decision-card")).toHaveTextContent(/Routine is disabled/i)
+  })
+})
+
 describe("InboxPreview — finding a subject at scale", () => {
   it("shows only the subjects that have items, and says how many it is holding back", () => {
     render(<InboxPreview initialRole="OWNER" />)
