@@ -416,6 +416,13 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	}
 	toolMap := make(map[int]*partialToolCall)
 
+	// sawFinishReason tracks whether any choice ever carried a non-empty
+	// finish_reason -- OpenAI's terminal signal, always sent on the last
+	// chunk before "[DONE]". A connection can also close cleanly (plain
+	// io.EOF, scanner.Err() == nil) mid-generation, which otherwise looked
+	// identical to a normal completion; see the check after the scan loop.
+	var sawFinishReason bool
+
 	fnErr, scanErr := forEachSSEData(r, 64*1024, 1024*1024, func(data string) (bool, error) {
 		var chunk struct {
 			Choices []struct {
@@ -476,6 +483,9 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 			ptc.Args.WriteString(tcDelta.Function.Arguments)
 		}
 
+		if choice.FinishReason != "" {
+			sawFinishReason = true
+		}
 		switch choice.FinishReason {
 		case "tool_calls":
 			final.StopReason = StopToolUse
@@ -501,6 +511,22 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		if err := handler(StreamEvent{Type: "tool_call", ToolCall: &tc}); err != nil {
 			return final, err
 		}
+	}
+
+	// The scan loop ended without an fnErr. If it also ended without a real
+	// scanner error, that normally means a clean io.EOF -- which is exactly
+	// what a legitimate finish looks like AND exactly what a mid-generation
+	// connection drop looks like. sawFinishReason is what tells them apart: a
+	// real completion always carries a finish_reason on its last chunk before
+	// OpenAI sends "[DONE]" and closes. Without this, a cut stream silently
+	// returned nil error with truncated content as if it were a full
+	// response.
+	//
+	// A genuine scanErr (including context.Canceled from a caller-initiated
+	// cancellation) is left untouched here and returned as-is below, so
+	// cancellation semantics are unchanged.
+	if scanErr == nil && !sawFinishReason {
+		scanErr = fmt.Errorf("openai stream ended without a finish_reason (connection closed unexpectedly after %d bytes of content): %w", len(final.Content), io.ErrUnexpectedEOF)
 	}
 
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {

@@ -69,6 +69,16 @@ On the **server**, every post-upgrade rejection now logs a `WARN` line — grep 
 
 </Accordion>
 
+<Accordion title='A run fails with "stream ended without a message_stop event" or "…without a finish_reason"'>
+
+This is the LLM provider connection dropping mid-generation — a network blip or the provider load-shedding — not a bug in your prompt or agent. Before this check existed, a cleanly-closed connection with no terminal event from the provider (no `message_stop` for Anthropic, no `finish_reason` for OpenAI-compatible backends) looked identical to a normal completion, and the run silently succeeded with truncated content: half-written code, cut-off JSON, no error anywhere. Now it surfaces as a real failure instead.
+
+The error message always ends in `unexpected EOF`, which the pipeline's transient-error matcher recognizes — the same task tier is retried automatically the way a `500`/`502` from the provider would be. You only need to act if it keeps failing after retries: check the provider's status page, or (for a custom `openai_compat` endpoint) confirm the proxy isn't buffering/timing out chunked responses before the model finishes.
+
+This is unrelated to a deliberate cancellation (stopping a run, or a timeout) — those still surface as a cancellation, never as this message.
+
+</Accordion>
+
 <Accordion title="`crewship start` exits immediately, no error">
 
 Almost always means migrations failed silently or the data directory
