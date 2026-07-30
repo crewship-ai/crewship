@@ -96,10 +96,15 @@ function humanizeKey(k: string): string {
 // ContextDetails renders payload as a clean key/value summary instead of
 // a raw <pre>{JSON}</pre> block. Strings that look like secrets are
 // masked with a reveal toggle; nested objects fall back to compact JSON.
-function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
-  const entries = Object.entries(payload).filter(
+/** The payload keys worth showing — plumbing and duplicates are dropped. */
+export function visibleContextEntries(payload: Record<string, unknown>): [string, unknown][] {
+  return Object.entries(payload).filter(
     ([k, v]) => !CONTEXT_HIDE_KEYS.has(k) && v !== null && v !== undefined && v !== "",
   )
+}
+
+function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
+  const entries = visibleContextEntries(payload)
   if (entries.length === 0) return null
   return (
     <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[11px]">
@@ -353,7 +358,10 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         </Appear>
       )}
 
-      {item.payload && Object.keys(item.payload).length > 0 && (
+      {/* Counted on the VISIBLE keys, not on the payload: a row whose payload
+          is nothing but reason/source/step_id would otherwise draw a Context
+          heading above an empty box. */}
+      {item.payload && visibleContextEntries(item.payload).length > 0 && (
         <Appear order={4}>
           <DetailCard title="Context" subtitle="secrets masked">
             <ContextDetails payload={item.payload} />
