@@ -38,6 +38,7 @@ type GovModelResolver struct {
 	logger  *slog.Logger
 	lookup  governance.CredentialLookup
 	dflt    governance.OllamaDefault
+	dfltFn  func() (endpointURL, model string)
 	ssrf    *http.Client
 
 	mu     sync.Mutex
@@ -75,13 +76,44 @@ func NewGovModelResolver(db *sql.DB, j journal.Emitter, logger *slog.Logger, oll
 	}
 }
 
+// SetDefaultJudgeResolver makes the §4.4 degrade fallback follow the runtime
+// instance configuration instead of the values captured at construction. Once
+// the judge endpoint is settable at runtime, degrading a revoked workspace
+// credential back to the URL the process happened to boot with would send
+// verdicts to a host the operator has since moved away from — a fallback that
+// silently stops working is worse than no fallback, because it looks fine.
+//
+// fn is called on every resolve (cheap: it reads a cached struct). Empty values
+// leave the construction-time default in place. Call this once at wiring time,
+// before the router serves — the field is deliberately unguarded, because a
+// mutex on the resolve path to protect a write that only ever happens at boot
+// would cost every credential decision.
+func (r *GovModelResolver) SetDefaultJudgeResolver(fn func() (endpointURL, model string)) {
+	if r == nil {
+		return
+	}
+	r.dfltFn = fn
+}
+
+// defaults returns the current degrade fallback.
+func (r *GovModelResolver) defaults() governance.OllamaDefault {
+	if r.dfltFn == nil {
+		return r.dflt
+	}
+	url, model := r.dfltFn()
+	if url == "" || model == "" {
+		return r.dflt
+	}
+	return governance.OllamaDefault{URL: url, Model: model}
+}
+
 // Resolve implements gatekeeper.GovModelResolver.
 func (r *GovModelResolver) Resolve(ctx context.Context, workspaceID string) (llm.Provider, string) {
 	if r == nil || r.db == nil || workspaceID == "" {
 		return nil, ""
 	}
 	settings := governance.Resolve(ctx, r.db, r.logger, workspaceID)
-	resolved, found := governance.ResolveGovModel(ctx, settings, workspaceID, r.lookup, r.dflt)
+	resolved, found := governance.ResolveGovModel(ctx, settings, workspaceID, r.lookup, r.defaults())
 	if !found {
 		return nil, "" // unconfigured — gatekeeper uses its default provider
 	}
@@ -145,7 +177,7 @@ func (r *GovModelResolver) Status(ctx context.Context, workspaceID string) GovMo
 		return GovModelStatus{}
 	}
 	settings := governance.Resolve(ctx, r.db, r.logger, workspaceID)
-	resolved, found := governance.ResolveGovModel(ctx, settings, workspaceID, r.lookup, r.dflt)
+	resolved, found := governance.ResolveGovModel(ctx, settings, workspaceID, r.lookup, r.defaults())
 	if !found {
 		return GovModelStatus{}
 	}
@@ -169,7 +201,7 @@ func (r *GovModelResolver) buildProvider(m governance.ResolvedGovModel) (llm.Pro
 		if m.Degraded || m.EndpointURL == "" {
 			url := m.EndpointURL
 			if url == "" {
-				url = r.dflt.URL
+				url = r.defaults().URL
 			}
 			return llm.NewOllama(url, m.Model), nil
 		}

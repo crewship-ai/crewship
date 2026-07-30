@@ -259,6 +259,70 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+### Changing the judge at runtime (no restart)
+
+Those three values are the **inherited layer**. An OWNER/ADMIN can override any of
+them at runtime, and the change applies to the next credential request — no
+restart, no shell access, no editing env on the box:
+
+```bash
+# What is in force right now, and where each value comes from
+crewship keeper config get
+
+# Point the judge at an Ollama on the LAN and turn Keeper on
+crewship keeper config set --endpoint http://192.168.1.40:11434 \
+                          --model qwen2.5:7b --enabled on
+
+# Change just the model; everything else is untouched
+crewship keeper config set --model qwen3:4b
+
+# Stop overriding a field — go back to inheriting the server config
+crewship keeper config set --model "" --enabled inherit
+
+# Drop every override at once
+crewship keeper config reset
+```
+
+`config get` prints provenance per field, which is the difference between the two
+states that used to look identical:
+
+| Source | Means |
+|---|---|
+| `instance` | set here, at runtime — this is what a *Reset* would remove |
+| `env` | inherited from `KEEPER_*` / YAML at boot |
+| `default` | nothing configured anywhere |
+
+Same surface over HTTP: `GET /api/v1/admin/keeper/config` (ADMIN+),
+`PUT` and `DELETE` (OWNER/ADMIN). `PUT` is a partial update — a field you omit is
+left alone, and a field you send as `""` (or `null` for `enabled`) returns to
+inheriting. Every change is journalled with the acting user.
+
+Three things worth knowing before you use it:
+
+- **`enabled` has three states, not two.** `on` / `off` are overrides; `inherit`
+  removes the override so `KEEPER_ENABLED` decides again. That is why the API
+  takes `true`, `false` **or `null`** rather than a plain boolean.
+- **The endpoint is judge-scoped.** It repoints the credential-access judge only.
+  The episodic embedder and the chat summarizer keep using `keeper.ollama_url`
+  from the server config — moving the embedder would silently invalidate every
+  stored vector, so it is deliberately not part of this.
+- **You cannot enable Keeper without a judge.** Keeper is fail-closed, so an
+  enabled engine with no endpoint or model would DENY every credential request.
+  That configuration is refused with an error rather than accepted.
+
+Turning Keeper on or off also changes how SECRET credentials reach agents
+(withheld and requested, versus injected directly). That takes effect for runs
+started after the change — a container already running keeps the environment it
+was handed.
+
+<Note>
+  The judge provider and wire format are reported by `config get` but are not yet
+  settable: the instance judge speaks the native Ollama wire. An
+  OpenAI-compatible or Anthropic judge is configured per workspace as the
+  [governance model](#governance-model-fully-local-no-api-key), which carries its
+  endpoint and API key in the vault.
+</Note>
+
 ## Watchdog Governance (per workspace)
 
 Beyond the credential gatekeeper, Keeper runs a **behavioral watchdog** — a

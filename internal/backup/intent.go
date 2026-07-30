@@ -290,6 +290,7 @@ var NonBackedUpTables = map[string]struct{}{
 	"app_settings":             {},
 	"instance_config":          {},
 	"rate_limit_overrides":     {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
+	"keeper_runtime_settings":  {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
 	"feature_flags":            {}, // global flag defaults (per-ws feature_flag_overrides IS backed up)
 	"scheduler_leader":         {}, // leader-election lease
 	"pipeline_run_idempotency": {}, // dispatch dedup keys, runtime

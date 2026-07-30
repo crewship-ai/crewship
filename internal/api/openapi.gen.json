@@ -523,6 +523,71 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/config": {
+      "delete": {
+        "operationId": "delete_api_v1_admin_keeper_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_v1_admin_keeper_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_admin_keeper_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/keeper/governance": {
       "get": {
         "operationId": "get_api_v1_admin_keeper_governance",

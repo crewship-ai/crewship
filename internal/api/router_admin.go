@@ -79,6 +79,18 @@ func (r *Router) registerAdminRoutes() {
 	r.authedMut("PUT", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Set)
 	r.authedMut("DELETE", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Reset)
 
+	// Keeper instance judge configuration. Read ADMIN+, write OWNER/ADMIN. This
+	// is the INSTANCE layer (keeper_runtime_settings) that the per-workspace
+	// governance model below overrides: whether Keeper runs, and what the
+	// credential-access judge is wired to. Before it, all three values were
+	// boot-time env — the console could diagnose a dead judge but not fix it,
+	// and an operator with no shell access could not turn Keeper on at all.
+	// A change takes effect on the next credential request; no restart.
+	keeperCfg := NewAdminKeeperConfigHandler(r.keeperSettings, r.Journal(), r.logger)
+	r.authedAdmin("GET", "/api/v1/admin/keeper/config", keeperCfg.Get)
+	r.authedMut("PUT", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Put)
+	r.authedMut("DELETE", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Reset)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())

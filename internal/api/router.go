@@ -21,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -96,6 +97,7 @@ type Router struct {
 	keeperSecrets       SecretGetter
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
+	keeperSettings      *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
 	govModelStatus      GovModelStatusProvider
 	composioConfig      *config.ComposioConfig
 	keeperConvReader    ConversationReader

@@ -24,6 +24,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
@@ -623,6 +624,46 @@ func (s *Server) mountAPIRouter(
 	// Wire Keeper gatekeeper (Ollama-based credential access control)
 	opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
 
+	// Instance judge configuration (internal/keepercfg). The
+	// store layers keeper_runtime_settings over cfg.Keeper, which is what turns
+	// "restart the server to change the judge" into "change it from the console".
+	// cfg.Keeper stays the inherited layer, so an instance nobody has configured
+	// behaves exactly as it did before this table existed.
+	keeperSettings := keepercfg.New(deps.DB, keepercfg.Defaults{
+		Enabled:     cfg.Keeper.Enabled,
+		EndpointURL: cfg.Keeper.OllamaURL,
+		Model:       cfg.Keeper.Model,
+	})
+	if err := keeperSettings.Load(context.Background()); err != nil {
+		// Non-fatal (New has no error return, and refusing to boot over one
+		// unreadable row is worse), but loud and specific: the instance is now
+		// running on env values, so an override an operator is relying on —
+		// including one that turned Keeper ON — is not in force.
+		logger.Error("keeper runtime settings failed to load; running on KEEPER_* env values only, any instance override is NOT in force",
+			"error", err)
+	}
+	opts = append(opts, goapi.WithKeeperSettings(keeperSettings))
+
+	// The orchestrator's credential gate follows the same setting: with Keeper
+	// on, SECRET credentials are withheld from agents and must be requested;
+	// with it off they are injected directly. A runtime flip applies to runs
+	// started afterwards — a container already running keeps the environment it
+	// was handed, which is why the log line below says so.
+	//
+	// Applied once here as well as on change: buildOrchestrator set the gate
+	// from cfg.Keeper before this store existed, so an instance that was turned
+	// on (or off) through the API would otherwise run with the env's answer
+	// until somebody edited the setting again.
+	orch.SetKeeperEnabled(keeperSettings.Effective().Enabled.Value)
+	keeperSettings.OnChange(func(eff keepercfg.Effective) {
+		if orch.KeeperEnabled() == eff.Enabled.Value {
+			return // the edit changed the judge, not whether Keeper runs
+		}
+		orch.SetKeeperEnabled(eff.Enabled.Value)
+		logger.Warn("keeper enablement changed at runtime; applies to runs started from now on",
+			"enabled", eff.Enabled.Value, "source", string(eff.Enabled.Source))
+	})
+
 	// Wire Composio managed-integration provider (API key from env/yaml)
 	opts = append(opts, goapi.WithComposioConfig(&cfg.Composio))
 
@@ -634,26 +675,45 @@ func (s *Server) mountAPIRouter(
 	// the aux evaluators below build even when the access gatekeeper is
 	// disabled — with cfg.Keeper.* as the local default/degrade judge.
 	govResolver := goapi.NewGovModelResolver(deps.DB, s.journalWriter, logger, cfg.Keeper.OllamaURL, cfg.Keeper.Model)
-	if cfg.Keeper.Enabled {
+	// The §4.4 degrade fallback follows the instance setting too: once the judge
+	// endpoint is settable at runtime, degrading a revoked workspace credential
+	// back to the URL this process happened to boot with would send verdicts to
+	// a host the operator has since moved away from.
+	govResolver.SetDefaultJudgeResolver(func() (string, string) {
+		eff := keeperSettings.Effective()
+		return eff.EndpointURL.Value, eff.Model.Value
+	})
+
+	// The access gatekeeper is now always attached and builds itself on demand
+	// from the effective configuration (keeper_lazy.go). It used to be
+	// constructed here, inside `if cfg.Keeper.Enabled`, from values captured at
+	// boot — which is what made Keeper impossible to turn on, or repoint,
+	// without a restart. "Disabled" is expressed as a decision by the lazy
+	// evaluator rather than as an absent dependency.
+	gk := newLazyGatekeeper(keeperSettings, logger, func(eff keepercfg.Effective) (gatekeeper.Evaluator, error) {
 		// Wrap the Ollama provider with the full middleware stack so
 		// gatekeeper LLM calls are cost-tracked, guardrail-scanned,
 		// and trace-instrumented. Local Ollama has zero dollar cost
 		// but the paymaster ledger still records token counts, which
 		// feeds the cache-hit metric and per-agent usage visibility.
-		base := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
+		base := llm.NewOllamaWithClient(eff.EndpointURL.Value, eff.Model.Value, keeperJudgeHTTPClient())
 		wrapped := llm.Middleware(base, s.journalWriter, deps.DB)
 		// M2a (#1001): the per-workspace vault-backed governance model
 		// overrides this default at request time when configured, degrading
 		// a revoked credential back to this same OLLAMA judge (§4.4). The
 		// resolver is built above so the aux evaluators share it.
-		gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger,
+		return gatekeeper.New(wrapped, eff.Model.Value, logger,
 			gatekeeper.WithWatchSpecResolver(watchSpecResolver(deps.DB, logger)),
-			gatekeeper.WithGovModelResolver(govResolver.Resolve))
-		opts = append(opts, goapi.WithKeeperGatekeeper(gk))
-		opts = append(opts, goapi.WithGovModelStatus(govResolver))
-		logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
+			gatekeeper.WithGovModelResolver(govResolver.Resolve)), nil
+	})
+	opts = append(opts, goapi.WithKeeperGatekeeper(gk))
+	opts = append(opts, goapi.WithGovModelStatus(govResolver))
+	if eff := keeperSettings.Effective(); eff.Enabled.Value {
+		logger.Info("keeper gatekeeper enabled",
+			"endpoint", eff.EndpointURL.Value, "model", eff.Model.Value,
+			"endpoint_source", string(eff.EndpointURL.Source), "enabled_source", string(eff.Enabled.Source))
 	} else {
-		logger.Info("keeper gatekeeper disabled (set KEEPER_ENABLED=true or KEEPER_OLLAMA_URL to enable)")
+		logger.Info("keeper gatekeeper disabled (enable it with `crewship keeper config set --enabled on`, or KEEPER_ENABLED=true / KEEPER_OLLAMA_URL at boot)")
 	}
 
 	// Wire keeper execute: load secrets store and pass container provider
@@ -904,6 +964,10 @@ func buildOrchestrator(cfg *config.Config, logger *slog.Logger, ctr provider.Con
 		orch.SetWorkspaceMemoryProvider(orchestratorWorkspaceProvider{reg: workspaceRegistry})
 		logger.Info("workspace memory tier wired", "root", cfg.Storage.MemoryRoot)
 	}
+	// Boot-time value only. mountAPIRouter re-applies the EFFECTIVE setting once
+	// the keepercfg store has loaded (and on every later change), so an instance
+	// override wins over this; leaving it here keeps the gate correct on the
+	// paths that build an orchestrator without mounting the API router.
 	if cfg.Keeper.Enabled {
 		orch.SetKeeperEnabled(true)
 	}

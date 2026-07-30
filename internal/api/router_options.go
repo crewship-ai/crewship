@@ -12,6 +12,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -152,6 +153,19 @@ func WithKeeperContainer(cp provider.ContainerProvider) RouterOption {
 func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 	return func(r *Router) {
 		r.keeperConfig = cfg
+	}
+}
+
+// WithKeeperSettings attaches the runtime-tunable instance judge configuration.
+// It supersedes WithKeeperConfig as the source of truth for what the judge is
+// wired to: the store layers keeper_runtime_settings over the same
+// cfg.KeeperConfig, so the status card reports what is in force rather than
+// what the process booted with, and the admin console can change it without a
+// restart. Unset (CLI processes, most tests) leaves the status endpoint reading
+// cfg.Keeper directly and the config endpoint reporting 503.
+func WithKeeperSettings(store *keepercfg.Store) RouterOption {
+	return func(r *Router) {
+		r.keeperSettings = store
 	}
 }
 
