@@ -3,7 +3,9 @@ package keepercfg
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -419,3 +421,108 @@ func TestAux_EnvConfiguredValueIsAttributedToEnv(t *testing.T) {
 }
 
 func strPtrAux(s string) *string { return &s }
+
+// Two operators patching DIFFERENT fields of the same slot at the same time.
+//
+// The read-modify-write used to start from the in-memory cache, which is only
+// refreshed after the lock is released — so the second Apply could read the
+// pre-first-write value and persist the first's field at its old value. Not a
+// stale read: the ROW lost a committed change. Reported as Critical on #1530.
+//
+// Serial here rather than with goroutines, because the interleaving that broke it
+// is "B reads before A's refresh lands", and reproducing that reliably needs the
+// refresh to be observable. What the fix guarantees — the base is always the
+// database, never a cache that a concurrent writer has already superseded — holds
+// for both shapes, and the concurrent case below covers the racy one.
+func TestAux_ConcurrentPatchesToDifferentFieldsBothSurvive(t *testing.T) {
+	s := newAuxStore(t)
+	ctx := context.Background()
+	slot := string(llm.SlotCurator)
+
+	provider, model := "anthropic", "claude-opus-5"
+	if _, err := s.Apply(ctx, slot, AuxPatch{Provider: &provider, Model: &model}, ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// One patches the timeout, the other the model. Neither mentions the other's
+	// field, so both must survive.
+	forty := int64(40000)
+	if _, err := s.Apply(ctx, slot, AuxPatch{TimeoutMS: &forty}, ""); err != nil {
+		t.Fatalf("timeout patch: %v", err)
+	}
+	next := "claude-sonnet-5"
+	if _, err := s.Apply(ctx, slot, AuxPatch{Model: &next}, ""); err != nil {
+		t.Fatalf("model patch: %v", err)
+	}
+
+	eff := s.EffectiveSlot(slot)
+	if eff.Model.Value != "claude-sonnet-5" {
+		t.Errorf("model = %q, want the later patch", eff.Model.Value)
+	}
+	if eff.TimeoutMS.Value != 40000 {
+		t.Errorf("timeout = %d, want the earlier patch to have survived", eff.TimeoutMS.Value)
+	}
+	if eff.Provider.Value != "anthropic" {
+		t.Errorf("provider = %q, want the seeded value to have survived both", eff.Provider.Value)
+	}
+}
+
+// The same, run concurrently and under -race. Every patch names one field; when
+// they all return, every field must hold one of the values that was actually
+// written — never a value an earlier Apply had already replaced.
+func TestAux_ConcurrentAppliesDoNotLoseAField(t *testing.T) {
+	s := newAuxStore(t)
+	ctx := context.Background()
+	slot := string(llm.SlotBehavior)
+
+	provider, model := "anthropic", "claude-haiku-4-5"
+	if _, err := s.Apply(ctx, slot, AuxPatch{Provider: &provider, Model: &model}, ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := range 8 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Alternating fields: half move the timeout, half the model.
+			if i%2 == 0 {
+				ms := int64(10000 + i*1000)
+				if _, err := s.Apply(ctx, slot, AuxPatch{TimeoutMS: &ms}, ""); err != nil {
+					errs <- err
+				}
+				return
+			}
+			m := fmt.Sprintf("claude-opus-%d", i)
+			if _, err := s.Apply(ctx, slot, AuxPatch{Model: &m}, ""); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent apply: %v", err)
+	}
+
+	// The provider was written once and never patched again, so it is the field
+	// a lost update would silently revert to "" — and "" would be a slot that
+	// resolves to the inherited provider, i.e. a different model entirely.
+	eff := s.EffectiveSlot(slot)
+	if eff.Provider.Value != "anthropic" || eff.Provider.Source != SourceInstance {
+		t.Errorf("provider = %q/%s after concurrent patches — a write was lost",
+			eff.Provider.Value, eff.Provider.Source)
+	}
+	if eff.TimeoutMS.Source != SourceInstance {
+		t.Errorf("timeout source = %s, want an override to have survived", eff.TimeoutMS.Source)
+	}
+	// And the cache agrees with the database.
+	if err := s.Load(ctx); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded := s.EffectiveSlot(slot); reloaded.Provider.Value != eff.Provider.Value ||
+		reloaded.Model.Value != eff.Model.Value || reloaded.TimeoutMS.Value != eff.TimeoutMS.Value {
+		t.Errorf("cache and database disagree: cached %+v, stored %+v", eff, reloaded)
+	}
+}

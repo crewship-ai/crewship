@@ -268,8 +268,15 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // (it could be looked at and not changed).
   const evaluatorRows = (rows ?? []).filter((r) => r.id !== "access_gatekeeper")
   const allSlots = aux?.slots ?? []
+  // Provider AND model. Keying on the model alone printed
+  // "<first slot's provider> / <model>" for a set that agreed on the model and
+  // disagreed on the provider — a summary asserting something it had not checked,
+  // and the provider is the half that decides whether the row costs money.
   const uniformModel =
-    allSlots.length > 0 && allSlots.every((sl) => sl.model.value === allSlots[0].model.value)
+    allSlots.length > 0 &&
+    allSlots.every(
+      (sl) => sl.model.value === allSlots[0].model.value && sl.provider.value === allSlots[0].provider.value,
+    )
       ? `${allSlots[0].provider.value} / ${allSlots[0].model.value}`
       : null
   // A tier that costs money says so. "ollama" is the local judge and bills

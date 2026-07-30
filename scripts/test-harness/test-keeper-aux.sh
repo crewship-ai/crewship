@@ -21,6 +21,11 @@
 # up front and restored on exit, including provenance: a slot that was
 # INHERITED goes back to inheriting rather than to a pinned copy of the value.
 
+# Private scratch. The fixed /tmp/cs-*.out names this file used are guessable, so
+# on a shared host a local user can pre-create or symlink them and redirect what
+# the harness writes.
+_TMP="$(mktemp -d "${TMPDIR:-/tmp}/cs-keeper-aux.XXXXXX")"
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
@@ -67,20 +72,32 @@ info "starting state: $SLOT=$ORIG_PROVIDER/$ORIG_MODEL ($ORIG_MODEL_SRC) any_ove
 # are left as the run found them.
 restore_aux() {
   cs keeper aux reset --all >/dev/null 2>&1 || true
-  if [[ "$ORIG_ANY" == "true" && "$ORIG_MODEL_SRC" == "instance" ]]; then
-    cs keeper aux set "$SLOT" --provider "$ORIG_PROVIDER" --model "$ORIG_MODEL" >/dev/null 2>&1 || true
-    info "other slots that were overridden before this run were cleared — 'keeper aux list' to check"
-  fi
+  # Replay the FULL snapshot taken at startup, slot by slot. Restoring only the
+  # probed slot left every other operator override cleared — on a shared dev
+  # instance that is data loss, and announcing it in a log line is not a restore.
+  [[ -z "${ORIG_JSON:-}" ]] && return 0
+  printf '%s' "$ORIG_JSON" | jq -r '
+      .slots[]
+      | select(.provider.source == "instance" or .model.source == "instance" or .timeout_ms.source == "instance")
+      | [.slot, .provider.value, .model.value, (.timeout_ms.value|tostring)] | @tsv' 2>/dev/null |
+  while IFS=$'\t' read -r slot provider model timeout; do
+    [[ -z "$slot" ]] && continue
+    local args=("$slot")
+    [[ -n "$provider" ]] && args+=(--provider "$provider")
+    [[ -n "$model" ]] && args+=(--model "$model")
+    [[ -n "$timeout" && "$timeout" != "0" && "$timeout" != "null" ]] && args+=(--timeout "${timeout}ms")
+    cs keeper aux set "${args[@]}" >/dev/null 2>&1 || true
+  done
 }
-trap restore_aux EXIT
+trap 'restore_aux; rm -rf "$_TMP"' EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. aux list reports every slot with provenance"
 # ─────────────────────────────────────────────────────────────────────────────
-if cs keeper aux list >/tmp/cs-keeper-aux.out 2>&1; then
+if cs keeper aux list >"$_TMP/aux.out" 2>&1; then
   _pass "keeper aux list exits 0"
 else
-  _fail "keeper aux list exits 0" "$(head -c 200 /tmp/cs-keeper-aux.out | tr '\n' ' ')"
+  _fail "keeper aux list exits 0" "$(head -c 200 "$_TMP/aux.out" | tr '\n' ' ')"
 fi
 for s in curator behavior memory_health negative run_summary fallback; do
   assert_nonempty "list reports a model source for $s" "$(slot_source "$s" model)"
@@ -111,19 +128,25 @@ assert_eq "any_overridden follows"                 "true"        "$(cs keeper au
 section "3. a partial update leaves fields it did not mention alone"
 # ─────────────────────────────────────────────────────────────────────────────
 BEFORE_TIMEOUT="$(slot_field "$SLOT" timeout_ms)"
-cs keeper aux set "$SLOT" --model claude-haiku-4-5 >/dev/null 2>&1 || true
+if ! cs keeper aux set "$SLOT" --model claude-haiku-4-5 >/dev/null 2>&1; then
+  _fail "a model-only update succeeds" "the partial update errored"
+fi
 assert_eq "provider survived a model-only update" "anthropic"       "$(slot_field "$SLOT" provider)"
 assert_eq "timeout survived it too"               "$BEFORE_TIMEOUT" "$(slot_field "$SLOT" timeout_ms)"
 
 # A timeout is its own field with its own provenance.
-cs keeper aux set "$SLOT" --timeout 21s >/dev/null 2>&1 || true
+if ! cs keeper aux set "$SLOT" --timeout 21s >/dev/null 2>&1; then
+  _fail "a timeout-only update succeeds" "the partial update errored"
+fi
 assert_eq "the timeout we set is in force"      "21000"    "$(slot_field "$SLOT" timeout_ms)"
 assert_eq "and reports as an instance override" "instance" "$(slot_source "$SLOT" timeout_ms)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "4. clearing a field returns it to the server configuration"
 # ─────────────────────────────────────────────────────────────────────────────
-cs keeper aux set "$SLOT" --timeout "" >/dev/null 2>&1 || true
+if ! cs keeper aux set "$SLOT" --timeout "" >/dev/null 2>&1; then
+  _fail "clearing the timeout succeeds" "the clear errored"
+fi
 CLEARED_SRC="$(slot_source "$SLOT" timeout_ms)"
 if [[ "$CLEARED_SRC" == "instance" ]]; then
   _fail "clearing the timeout drops the override" "still reports source=instance"
@@ -141,15 +164,15 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 section "5. a provider this build cannot construct is refused with the reason"
 # ─────────────────────────────────────────────────────────────────────────────
-if cs keeper aux set "$SLOT" --provider google --model gemini-2.0-flash >/tmp/cs-keeper-aux-bad.out 2>&1; then
+if cs keeper aux set "$SLOT" --provider google --model gemini-2.0-flash >"$_TMP/bad.out" 2>&1; then
   _fail "an unbuildable provider is refused" "the server accepted google — the slot would fail at first use"
 else
   _pass "an unbuildable provider is refused"
   assert_contains "the refusal says why, not just 'invalid'" \
-    "$(tr '[:upper:]' '[:lower:]' </tmp/cs-keeper-aux-bad.out)" "gemini"
+    "$(tr '[:upper:]' '[:lower:]' <"$_TMP/bad.out")" "gemini"
 fi
 # A provider with no model cannot resolve — the builder needs both.
-if cs keeper aux set curator --provider anthropic --model "" >/tmp/cs-keeper-aux-half.out 2>&1; then
+if cs keeper aux set curator --provider anthropic --model "" >"$_TMP/half.out" 2>&1; then
   _fail "a provider with no model is refused" "the server accepted a half-configured slot"
 else
   _pass "a provider with no model is refused"

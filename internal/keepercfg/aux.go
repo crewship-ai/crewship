@@ -3,6 +3,7 @@ package keepercfg
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -260,21 +261,25 @@ func (s *AuxStore) Effective() []AuxEffective {
 // EffectiveSlot resolves one slot. Nil-receiver safe: a process with no store
 // reports the built-in defaults rather than panicking.
 func (s *AuxStore) EffectiveSlot(slot string) AuxEffective {
-	var (
-		base    llm.AuxModel
-		builtin llm.AuxModel
-		o       AuxOverride
-	)
-	if s != nil {
-		base = auxBaseFor(s.dflt, slot)
-		builtin = auxBaseFor(s.builtin, slot)
-		s.mu.RLock()
-		o = s.cur[slot]
-		s.mu.RUnlock()
-	} else {
-		base = auxBaseFor(llm.DefaultAuxiliaryModels(), slot)
-		builtin = base
+	if s == nil {
+		return resolveAuxSlot(slot, llm.DefaultAuxiliaryModels(), llm.DefaultAuxiliaryModels(), AuxOverride{})
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.effectiveSlotLocked(slot)
+}
+
+// effectiveSlotLocked is EffectiveSlot without taking the mutex, for the write
+// path — which already holds it, and would deadlock re-entering.
+func (s *AuxStore) effectiveSlotLocked(slot string) AuxEffective {
+	return resolveAuxSlot(slot, s.dflt, s.builtin, s.cur[slot])
+}
+
+// resolveAuxSlot layers one slot: instance override over the configured value
+// over what we shipped, with the provenance that distinguishes them.
+func resolveAuxSlot(slot string, dflt, builtin llm.AuxiliaryModels, o AuxOverride) AuxEffective {
+	base := auxBaseFor(dflt, slot)
+	shipped := auxBaseFor(builtin, slot)
 
 	eff := AuxEffective{
 		Slot:       slot,
@@ -284,13 +289,13 @@ func (s *AuxStore) EffectiveSlot(slot string) AuxEffective {
 		UpdatedAt:  o.UpdatedAt,
 		UpdatedBy:  o.UpdatedBy,
 	}
-	eff.Provider = pickAux(o.Provider, base.Provider, builtin.Provider)
-	eff.Model = pickAux(o.Model, base.Model, builtin.Model)
+	eff.Provider = pickAux(o.Provider, base.Provider, shipped.Provider)
+	eff.Model = pickAux(o.Model, base.Model, shipped.Model)
 
 	switch {
 	case o.Timeout != nil:
 		eff.TimeoutMS = Field[int64]{Value: o.Timeout.Milliseconds(), Source: SourceInstance}
-	case base.Timeout != builtin.Timeout:
+	case base.Timeout != shipped.Timeout:
 		eff.TimeoutMS = Field[int64]{Value: base.Timeout.Milliseconds(), Source: SourceEnv}
 	default:
 		eff.TimeoutMS = Field[int64]{Value: base.Timeout.Milliseconds(), Source: SourceDefault}
@@ -344,8 +349,42 @@ func (s *AuxStore) Apply(ctx context.Context, slot string, p AuxPatch, actor str
 		return s.EffectiveSlot(slot), nil
 	}
 
+	// Read-modify-write inside ONE transaction, against the DATABASE rather than
+	// the in-memory cache.
+	//
+	// The cache used to be the base, and it is only refreshed after the lock is
+	// released. Two Apply calls patching DIFFERENT fields of the same slot could
+	// therefore both read the pre-first-write cache, and the second would persist
+	// the first's field at its old value — the row itself losing a committed
+	// change, not merely a stale read.
+	//
+	// A transaction rather than only moving the cache write inside the lock: the
+	// mutex serialises goroutines in THIS process, and the same interleaving
+	// across two connections would still lose the update.
 	s.mu.Lock()
-	next := s.cur[slot]
+	eff, err := s.applyLocked(ctx, slot, p, actor)
+	s.mu.Unlock()
+	if err != nil {
+		return AuxEffective{}, err
+	}
+	// Callbacks after the lock is dropped: they are free to read the store, and
+	// firing them under the write lock would deadlock the first one that did.
+	s.fireOnChange()
+	return eff, nil
+}
+
+// applyLocked does the transactional read-modify-write. Caller holds s.mu.
+func (s *AuxStore) applyLocked(ctx context.Context, slot string, p AuxPatch, actor string) (AuxEffective, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return AuxEffective{}, fmt.Errorf("keepercfg: begin aux update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	next, err := readAuxSlotTx(ctx, tx, slot)
+	if err != nil {
+		return AuxEffective{}, err
+	}
 	if p.Provider != nil {
 		next.Provider = strings.ToLower(strings.TrimSpace(*p.Provider))
 	}
@@ -361,21 +400,55 @@ func (s *AuxStore) Apply(ctx context.Context, slot string, p AuxPatch, actor str
 		}
 	}
 	if err := validateAux(next); err != nil {
-		s.mu.Unlock()
 		return AuxEffective{}, err
 	}
-	if err := s.persist(ctx, slot, next, actor); err != nil {
-		s.mu.Unlock()
+	if err := persistAuxTx(ctx, tx, slot, next, actor); err != nil {
 		return AuxEffective{}, err
 	}
-	s.mu.Unlock()
+	// Read back inside the same transaction, so updated_at/updated_by are the
+	// values the database wrote rather than a guess about its defaults.
+	saved, err := readAuxSlotTx(ctx, tx, slot)
+	if err != nil {
+		return AuxEffective{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuxEffective{}, fmt.Errorf("keepercfg: commit aux update: %w", err)
+	}
 
-	if err := s.Load(ctx); err != nil {
-		return AuxEffective{}, err
+	// Cached under the SAME lock as the write, so the next Apply cannot start
+	// from a value this one has already superseded.
+	if saved.empty() {
+		delete(s.cur, slot)
+	} else {
+		s.cur[slot] = saved
 	}
-	eff := s.EffectiveSlot(slot)
-	s.fireOnChange()
-	return eff, nil
+	return s.effectiveSlotLocked(slot), nil
+}
+
+// readAuxSlotTx reads one slot's stored override inside a transaction. A missing
+// row is the zero AuxOverride — "inherits everything" — not an error.
+func readAuxSlotTx(ctx context.Context, tx *sql.Tx, slot string) (AuxOverride, error) {
+	var (
+		o         AuxOverride
+		timeoutMS sql.NullInt64
+		updatedBy sql.NullString
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT provider, model, timeout_ms, updated_at, updated_by
+		  FROM keeper_aux_settings WHERE slot = ?`, slot).
+		Scan(&o.Provider, &o.Model, &timeoutMS, &o.UpdatedAt, &updatedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AuxOverride{}, nil
+	}
+	if err != nil {
+		return AuxOverride{}, fmt.Errorf("keepercfg: read aux slot %s: %w", slot, err)
+	}
+	if timeoutMS.Valid {
+		d := time.Duration(timeoutMS.Int64) * time.Millisecond
+		o.Timeout = &d
+	}
+	o.UpdatedBy = updatedBy.String
+	return o, nil
 }
 
 // Reset drops the override for one slot, or every slot when slot is empty.
@@ -452,12 +525,14 @@ func (s *AuxStore) fireOnChange() {
 	}
 }
 
-func (s *AuxStore) persist(ctx context.Context, slot string, o AuxOverride, actor string) error {
-	// A row whose every field is back to inherit is a deleted row, not a row of
-	// empty strings — otherwise `overridden` would stay true forever after the
-	// last field was cleared.
+// persistAuxTx writes one slot inside a transaction.
+//
+// A row whose every field is back to inherit is a DELETED row, not a row of
+// empty strings — otherwise `overridden` would stay true forever after the last
+// field was cleared.
+func persistAuxTx(ctx context.Context, tx *sql.Tx, slot string, o AuxOverride, actor string) error {
 	if o.empty() {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM keeper_aux_settings WHERE slot = ?`, slot); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM keeper_aux_settings WHERE slot = ?`, slot); err != nil {
 			return fmt.Errorf("keepercfg: clear aux slot %s: %w", slot, err)
 		}
 		return nil
@@ -466,7 +541,7 @@ func (s *AuxStore) persist(ctx context.Context, slot string, o AuxOverride, acto
 	if o.Timeout != nil {
 		timeout = o.Timeout.Milliseconds()
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO keeper_aux_settings (slot, provider, model, timeout_ms, updated_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		ON CONFLICT(slot) DO UPDATE SET

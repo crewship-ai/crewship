@@ -29,6 +29,9 @@
 # intent is not deterministic. The DETERMINISTIC parts — the tier floor, the
 # pre-model refusal, the auto-allow — are hard assertions, because those are ours.
 
+# Private scratch — see the note in test-keeper-aux.sh.
+_TMP="$(mktemp -d "${TMPDIR:-/tmp}/cs-keeper-esc.XXXXXX")"
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
@@ -50,11 +53,11 @@ fi
 
 # The judge has to work before any of this means anything: with a broken judge
 # every assertion below would pass for the wrong reason (fail-closed DENY).
-if ! cs keeper judge test >/tmp/cs-keeper-judge.out 2>&1; then
-  skip "keeper escalation flow" "the judge on this target is not usable: $(tail -2 /tmp/cs-keeper-judge.out | tr '\n' ' ')"
+if ! cs keeper judge test >"$_TMP/judge.out" 2>&1; then
+  skip "keeper escalation flow" "the judge on this target is not usable: $(tail -2 "$_TMP/judge.out" | tr '\n' ' ')"
   finish
 fi
-info "judge OK: $(grep -o 'verdict: [A-Z]*' /tmp/cs-keeper-judge.out | head -1)"
+info "judge OK: $(grep -o 'verdict: [A-Z]*' "$_TMP/judge.out" | head -1)"
 
 AGENT="${KEEPER_AGENT:-$(cs agent list --format json 2>/dev/null | jq -r '.[0].slug // empty')}"
 if [[ -z "$AGENT" ]]; then
@@ -77,7 +80,7 @@ cleanup() {
     cs keeper config set --enabled off >/dev/null 2>&1 || true
   fi
 }
-trap cleanup EXIT
+trap 'cleanup; rm -rf "$_TMP"' EXIT
 
 ORIG_ENABLED="$(cs keeper config get --format json 2>/dev/null | jq -r '.enabled.value')"
 if [[ "$ORIG_ENABLED" != "true" ]]; then

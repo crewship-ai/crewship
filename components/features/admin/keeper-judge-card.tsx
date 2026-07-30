@@ -309,10 +309,13 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           { signal: controller.signal },
         )
         if (!res.ok) {
-          // A 403 here means the caller cannot manage; silence beats a scary
-          // banner on a field they cannot use anyway.
           setModels([])
-          setModelsError(null)
+          // 403 means the caller cannot manage — silence beats a scary banner on
+          // a field they cannot use anyway. Everything else is worth saying, and
+          // 429 especially: the probe budget is instance-wide, so an empty list
+          // with no explanation on the screen that just tripped it is the least
+          // helpful thing this field can do.
+          setModelsError(res.status === 403 ? null : await errorFrom(res, `Could not list models (HTTP ${res.status}).`))
           return
         }
         const body = (await res.json()) as {
@@ -447,6 +450,11 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           ? "Judge configuration reset — the server's own settings are back in force."
           : "Judge configuration reset — the server config has Keeper OFF, so the engine is now off.",
       )
+    } catch (e) {
+      // Without this the failure was an unhandled rejection and the operator saw
+      // nothing at all — the worst outcome for a button whose whole job is to put
+      // the instance back to a known state.
+      toast.error(e instanceof Error ? e.message : "Could not reset the judge configuration")
     } finally {
       setResetting(false)
     }
@@ -472,6 +480,15 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   }
 
   const failClosed = form.draft.enabled && (form.draft.endpoint.trim() === "" || form.draft.model.trim() === "")
+
+  // The budget is a number input, which the browser lets you EMPTY and lets you
+  // exceed min/max programmatically. Number("") is NaN and JSON.stringify writes
+  // NaN as null, so an emptied field would send judge_timeout_ms: null and the
+  // server would read it as "clear the override" — silently, on a save the
+  // operator thought was about something else.
+  const timeoutSec = Number(form.draft.timeoutSec)
+  const timeoutInvalid =
+    !Number.isFinite(timeoutSec) || !Number.isInteger(timeoutSec) || timeoutSec < 1 || timeoutSec > 120
 
   /**
    * A budget the last test says would actually hold, or null when the current one
@@ -568,6 +585,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
                   <button
                     key={sg.url}
                     type="button"
+                    aria-pressed={sg.url === form.draft.endpoint.trim()}
                     title={sg.label}
                     onClick={() => { form.set("endpoint", sg.url); setConnectResult(null) }}
                     className={cn(
@@ -694,6 +712,11 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           <span className="text-[11px] text-muted-foreground">seconds</span>
         </span>
       </SettingsRow>
+      {timeoutInvalid && (
+        <div role="status" className="px-4 py-2 text-[11px] text-destructive border-b border-border/40">
+          The time budget must be a whole number of seconds between 1 and 120.
+        </div>
+      )}
 
       {/* Step 3. Prove it, then turn it on. Test is here rather than in the card
           header because it belongs to this step: it is the thing you do before
@@ -790,7 +813,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           dirty={form.isDirty}
           status={form.status}
           error={form.error}
-          canSave={!failClosed}
+          canSave={!failClosed && !timeoutInvalid}
           onSave={handleSave}
           onCancel={form.reset}
         />

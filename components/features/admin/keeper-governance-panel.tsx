@@ -919,13 +919,18 @@ function GovernanceModelCard({
         const qs = new URLSearchParams({ provider: catalogueFor })
         if (workspaceId) qs.set("workspace_id", workspaceId)
         const res = await apiFetch(`/api/v1/models?${qs.toString()}`, { signal: controller.signal })
+        // Every write is guarded on the signal. Without it a superseded request
+        // — the provider was changed twice in a second — could land after the
+        // newer one and clear a catalogue that had just been filled correctly.
+        if (controller.signal.aborted) return
         if (!res.ok) { setCatalogue([]); return }
         const body = await res.json()
         if (controller.signal.aborted) return
         setCatalogue(((body?.models ?? []) as { id: string }[]).map((m) => m.id).slice(0, 10))
-      } catch {
-        // Silent: a missing picker degrades to the free-text field, which still
-        // works. An error banner here would bury the field it is about.
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return
+        // Otherwise silent: a missing picker degrades to the free-text field,
+        // which still works. An error banner here would bury the field it is about.
         setCatalogue([])
       }
     })()
