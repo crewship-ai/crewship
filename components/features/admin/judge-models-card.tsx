@@ -5,6 +5,7 @@ import { RefreshCw, ChevronsUpDown, Check, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { adminFetch } from "@/lib/admin-api"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -146,7 +147,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
     // five evaluators visibly configured and none of them touchable.
     if (!workspaceId) return
     try {
-      const res = await apiFetch(`/api/v1/admin/keeper/aux?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
+      const res = await adminFetch("/api/v1/admin/keeper/aux", workspaceId)
       if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setAux(Array.isArray(data?.slots) ? (data as AuxConfig) : null)
@@ -165,8 +166,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   const saveSlot = useCallback(async (slot: string, patch: Record<string, unknown>) => {
     setBusy(true)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, {
+      const res = await adminFetch(`/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}`, workspaceId, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -186,9 +186,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   const switchToLocalJudge = useCallback(async () => {
     setBusy(true)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/aux/use-judge?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
-        { method: "POST" })
+      const res = await adminFetch("/api/v1/admin/keeper/aux/use-judge", workspaceId, { method: "POST" })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`)
       setAux(body as AuxConfig)
@@ -206,9 +204,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   const resetAll = useCallback(async () => {
     setBusy(true)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/aux?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
-        { method: "DELETE" })
+      const res = await adminFetch("/api/v1/admin/keeper/aux", workspaceId, { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body = await res.json().catch(() => null)
       if (body) setAux(body as AuxConfig)
@@ -226,9 +222,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   const probeSlot = useCallback(async (slot: string) => {
     setProbing(slot)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}/probe?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
-        { method: "POST" })
+      const res = await adminFetch(`/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}/probe`, workspaceId, { method: "POST" })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
         setProbeResults((p) => ({ ...p, [slot]: { ok: false, detail: body?.error || `HTTP ${res.status}` } }))
@@ -604,7 +598,7 @@ function ModelPicker({
       setError(null)
       try {
         if (provider === "ollama") {
-          const res = await apiFetch("/api/v1/admin/keeper/judge/models", { signal: controller.signal })
+          const res = await adminFetch("/api/v1/admin/keeper/judge/models", workspaceId, { signal: controller.signal })
           const body = await res.json()
           if (controller.signal.aborted) return
           if (body?.error) { setError(body.error); setModels([]); return }

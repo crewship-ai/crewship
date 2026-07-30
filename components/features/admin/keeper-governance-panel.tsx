@@ -47,6 +47,7 @@ import { SettingsCard, SettingsRow } from "@/components/features/settings/shared
 import { useAbilities } from "@/hooks/use-abilities"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { apiFetch } from "@/lib/api-fetch"
+import { adminFetch } from "@/lib/admin-api"
 import { cn } from "@/lib/utils"
 
 interface GovernanceResponse {
@@ -297,8 +298,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
     setErr(null)
     try {
       const [govRes, membersRes] = await Promise.all([
-        apiFetch(
-          `/api/v1/admin/keeper/governance?workspace_id=${encodeURIComponent(workspaceId)}`,
+        adminFetch("/api/v1/admin/keeper/governance", workspaceId,
           { signal },
         ),
         apiFetch(
@@ -347,8 +347,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   // silently discard what someone typed into a security control.
   const put = useCallback<PutGovernance>(async (body) => {
     if (!workspaceId) throw new Error("No workspace selected")
-    const res = await apiFetch(
-      `/api/v1/admin/keeper/governance?workspace_id=${encodeURIComponent(workspaceId)}`,
+    const res = await adminFetch("/api/v1/admin/keeper/governance", workspaceId,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -588,8 +587,7 @@ function FindingsRoutingCard({
     if (testing) return
     setTesting(true)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/findings/test?workspace_id=${encodeURIComponent(workspaceId)}`,
+      const res = await adminFetch("/api/v1/admin/keeper/findings/test", workspaceId,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
       )
       if (!res.ok) {
@@ -938,7 +936,7 @@ function GovernanceModelCard({
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await apiFetch("/api/v1/admin/keeper/judge/test-hosted", {
+      const res = await adminFetch("/api/v1/admin/keeper/judge/test-hosted", workspaceId, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

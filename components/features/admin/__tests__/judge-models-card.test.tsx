@@ -371,10 +371,11 @@ describe("JudgeModelsCard — how much detail it shows by default", () => {
   it("sends workspace_id on the aux read, or the server refuses it", async () => {
     route(SAME)
     render(<JudgeModelsCard workspaceId="ws1" />)
-    await waitFor(() =>
-      expect(apiFetch).toHaveBeenCalledWith(
-        expect.stringContaining("/admin/keeper/aux?workspace_id=ws1"),
-      ),
-    )
+    // Any call, not the first: the card reads two endpoints and their order is
+    // not the property under test.
+    await waitFor(() => {
+      const targets = apiFetch.mock.calls.map((c) => String(c[0]))
+      expect(targets.some((t) => t.includes("/admin/keeper/aux?workspace_id=ws1"))).toBe(true)
+    })
   })
 })

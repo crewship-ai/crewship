@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import { apiFetch } from "@/lib/api-fetch"
+import { adminFetch } from "@/lib/admin-api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -195,10 +195,15 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   // without a judge is refused by the server, so a lone switch on a fresh
   // instance could only fail. One Save sends all three, which is the flow the
   // endpoint was built for — turn it on and say what decides, in one write.
+  // Optional chaining on every field, not just the newest one: a response that
+  // is missing a field — an older server, a proxy that mangled it, a partial
+  // error body — should render an unconfigured card, not throw and take the whole
+  // admin page down with it. A settings card is the wrong place to be brittle,
+  // because it is where somebody goes when something is already wrong.
   const form = useDirtyForm({
-    enabled: cfg?.enabled.value ?? false,
-    endpoint: cfg?.judge_endpoint_url.value ?? "",
-    model: cfg?.judge_model.value ?? "",
+    enabled: cfg?.enabled?.value ?? false,
+    endpoint: cfg?.judge_endpoint_url?.value ?? "",
+    model: cfg?.judge_model?.value ?? "",
     // Seconds in the field, milliseconds on the wire: nobody types 20000.
     timeoutSec: String(Math.round((cfg?.judge_timeout_ms?.value ?? 20000) / 1000)),
   })
@@ -206,8 +211,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!workspaceId) return
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      const res = await adminFetch("/api/v1/admin/keeper/config", workspaceId,
         { signal },
       )
       if (signal?.aborted) return
@@ -240,8 +244,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     const controller = new AbortController()
     void (async () => {
       try {
-        const res = await apiFetch(
-          `/api/v1/admin/keeper/judge/models?workspace_id=${encodeURIComponent(workspaceId)}`,
+        const res = await adminFetch("/api/v1/admin/keeper/judge/models", workspaceId,
           { signal: controller.signal },
         )
         if (!res.ok) return
@@ -257,8 +260,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   function handleSave() {
     if (!workspaceId) return
     void form.submit(async (draft) => {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      const res = await adminFetch("/api/v1/admin/keeper/config", workspaceId,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -300,8 +302,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     const controller = new AbortController()
     discoverTimer.current = setTimeout(async () => {
       try {
-        const res = await apiFetch(
-          `/api/v1/admin/keeper/judge/models?workspace_id=${encodeURIComponent(workspaceId)}&endpoint=${encodeURIComponent(endpoint)}`,
+        const res = await adminFetch(`/api/v1/admin/keeper/judge/models?endpoint=${encodeURIComponent(endpoint)}`, workspaceId,
           { signal: controller.signal },
         )
         if (!res.ok) {
@@ -342,8 +343,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     setConnecting(true)
     setConnectResult(null)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/judge/models?workspace_id=${encodeURIComponent(workspaceId)}&endpoint=${encodeURIComponent(endpoint)}`,
+      const res = await adminFetch(`/api/v1/admin/keeper/judge/models?endpoint=${encodeURIComponent(endpoint)}`, workspaceId,
       )
       if (!res.ok) {
         setConnectResult({ ok: false, detail: await errorFrom(res, `The check could not run (HTTP ${res.status})`) })
@@ -387,8 +387,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/judge/test?workspace_id=${encodeURIComponent(workspaceId)}`,
+      const res = await adminFetch("/api/v1/admin/keeper/judge/test", workspaceId,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -424,8 +423,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     if (!workspaceId || resetting) return
     setResetting(true)
     try {
-      const res = await apiFetch(
-        `/api/v1/admin/keeper/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      const res = await adminFetch("/api/v1/admin/keeper/config", workspaceId,
         { method: "DELETE" },
       )
       if (!res.ok) {
@@ -518,7 +516,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       <SettingsRow
         label={<StepLabel n={1}>Model server</StepLabel>}
         description={
-          <WithProvenance source={cfg.judge_endpoint_url.source}>
+          <WithProvenance source={cfg.judge_endpoint_url?.source ?? "default"}>
             {/* "this machine" was the wrong words in a browser. Read from a
                 laptop it means the laptop; the dial happens from the Crewship
                 SERVER, which is usually a different box entirely — and an
@@ -609,7 +607,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       <SettingsRow
         label={<StepLabel n={2}>Model</StepLabel>}
         description={
-          <WithProvenance source={cfg.judge_model.source}>
+          <WithProvenance source={cfg.judge_model?.source ?? "default"}>
             {models.length > 0
               ? "Pulled on that server. Pick one — or type a tag if you are about to pull it."
               : "Press Connect to list what that server has. Clear the field to inherit the server's model."}
@@ -705,7 +703,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       <SettingsRow
         label={<StepLabel n={3}>Turn it on</StepLabel>}
         description={
-          <WithProvenance source={cfg.enabled.source}>
+          <WithProvenance source={cfg.enabled?.source ?? "default"}>
             With Keeper on, SECRET credentials are withheld from agents and must be requested — so
             test the judge first. Applies to runs started after the change. A local model costs
             nothing per decision.
