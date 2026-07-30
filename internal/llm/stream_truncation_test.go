@@ -215,6 +215,47 @@ func TestAnthropicStream_ContextCanceled_StaysCancellation(t *testing.T) {
 	}
 }
 
+// TestAnthropicStream_ErrorEvent_SurfacesProviderReason checks that an
+// explicit Anthropic "error" event (e.g. overloaded_error) mid-stream
+// reports its own type/message, rather than falling through to the generic
+// "stream ended without a message_stop event" text once the connection
+// closes right after. The generic message would still be an error -- an
+// improvement over the pre-fix silent success -- but it would hide what the
+// provider actually said.
+func TestAnthropicStream_ErrorEvent_SurfacesProviderReason(t *testing.T) {
+	t.Parallel()
+	const sse = `event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}
+
+event: error
+data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
+
+	p := newTestAnthropic("k", srv)
+	_, err := p.Stream(context.Background(), Request{
+		Model:    "claude-3-5-haiku-20241022",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, func(StreamEvent) error { return nil })
+	if err == nil {
+		t.Fatal("expected an error from the error event")
+	}
+	if !strings.Contains(err.Error(), "overloaded_error") || !strings.Contains(err.Error(), "Overloaded") {
+		t.Errorf("error must surface the provider's own type/message, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "message_stop") {
+		t.Errorf("error event must not fall through to the generic truncation message, got: %v", err)
+	}
+}
+
 // --- OpenAI ---
 
 // TestOpenAIStream_TruncatedConnection_ReturnsError mirrors the Anthropic
@@ -338,6 +379,86 @@ func TestOpenAIStream_ContextCanceled_StaysCancellation(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("canceled stream must surface as context.Canceled, got: %v", err)
+	}
+}
+
+// TestOpenAIStream_DoneSentinelWithoutFinishReason_ReturnsSuccess covers a
+// real OpenAI-compatible shape that isn't hypothetical: the openai_compat
+// governance path (NewOpenAIWithClient, internal/api/gov_model_resolver.go)
+// dials arbitrary tenant-configured endpoints -- self-hosted vLLM,
+// llama.cpp server, LM Studio, TGI, LocalAI. Real OpenAI always sends
+// finish_reason on the last chunk before "[DONE]", but some of those
+// self-hosted backends send only the "[DONE]" sentinel and never populate
+// finish_reason on any chunk. "[DONE]" is itself a positive end-of-stream
+// signal per the Chat Completions SSE protocol (forEachSSEData already
+// breaks its scan on it) -- a stream that ends with it is complete, not
+// truncated, even with no finish_reason chunk. Getting this wrong is worse
+// than a bad error message: the synthesized error text contains "eof", which
+// executor_retry.go's transientErrorMarkers matches, so every one of these
+// backends would retry (and double-bill) every successful call.
+func TestOpenAIStream_DoneSentinelWithoutFinishReason_ReturnsSuccess(t *testing.T) {
+	t.Parallel()
+	const sse = `data: {"choices":[{"delta":{"content":"all"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":" done"},"finish_reason":null}]}
+
+data: [DONE]
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIWithBaseURL("k", srv.URL+"/v1/chat/completions")
+	resp, err := p.Stream(context.Background(), Request{
+		Model:    "gpt-4o-mini",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, func(StreamEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("a stream ending in [DONE] without finish_reason must succeed, got: %v", err)
+	}
+	if resp.Content != "all done" {
+		t.Errorf("content = %q, want %q", resp.Content, "all done")
+	}
+}
+
+// TestOpenAIStream_IncludeUsageTrailingChunk_DoesNotFalsePositive is the
+// converse check: OpenAI's stream_options.include_usage feature appends one
+// extra chunk AFTER the finish_reason chunk, carrying only usage and an empty
+// choices array (no delta, no finish_reason on that trailing chunk). That
+// trailing chunk must not itself need to look "terminal" -- the earlier
+// finish_reason chunk already satisfied that, and the empty choices array
+// must not trip any nil-dereference or false-truncation path.
+func TestOpenAIStream_IncludeUsageTrailingChunk_DoesNotFalsePositive(t *testing.T) {
+	t.Parallel()
+	const sse = `data: {"choices":[{"delta":{"content":"hi"}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":1}}
+
+data: [DONE]
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(sse))
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIWithBaseURL("k", srv.URL+"/v1/chat/completions")
+	resp, err := p.Stream(context.Background(), Request{
+		Model:    "gpt-4o-mini",
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, func(StreamEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("include_usage trailing chunk must not cause a false truncation error, got: %v", err)
+	}
+	if resp.Content != "hi" {
+		t.Errorf("content = %q, want %q", resp.Content, "hi")
+	}
+	if resp.InputToks != 3 || resp.OutputToks != 1 {
+		t.Errorf("usage not captured from trailing chunk: input=%d output=%d", resp.InputToks, resp.OutputToks)
 	}
 }
 

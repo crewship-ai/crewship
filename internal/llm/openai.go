@@ -421,9 +421,18 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	// chunk before "[DONE]". A connection can also close cleanly (plain
 	// io.EOF, scanner.Err() == nil) mid-generation, which otherwise looked
 	// identical to a normal completion; see the check after the scan loop.
+	//
+	// finish_reason isn't the only valid terminal signal, though: "[DONE]" on
+	// its own is a positive end-of-stream marker per the Chat Completions SSE
+	// protocol, and some OpenAI-compatible backends (self-hosted vLLM,
+	// llama.cpp, LM Studio, TGI, LocalAI -- reachable via the openai_compat
+	// governance path, NewOpenAIWithClient) send it without ever populating
+	// finish_reason on a chunk. sawDoneSentinel (forEachSSEData's return)
+	// covers that case so a compliant-but-terse backend isn't mistaken for a
+	// truncated one.
 	var sawFinishReason bool
 
-	fnErr, scanErr := forEachSSEData(r, 64*1024, 1024*1024, func(data string) (bool, error) {
+	sawDoneSentinel, fnErr, scanErr := forEachSSEData(r, 64*1024, 1024*1024, func(data string) (bool, error) {
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
@@ -516,16 +525,18 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	// The scan loop ended without an fnErr. If it also ended without a real
 	// scanner error, that normally means a clean io.EOF -- which is exactly
 	// what a legitimate finish looks like AND exactly what a mid-generation
-	// connection drop looks like. sawFinishReason is what tells them apart: a
-	// real completion always carries a finish_reason on its last chunk before
-	// OpenAI sends "[DONE]" and closes. Without this, a cut stream silently
+	// connection drop looks like. A real completion always carries EITHER a
+	// finish_reason on its last chunk OR the "[DONE]" sentinel (real OpenAI
+	// sends both; some OpenAI-compatible backends send only "[DONE]" without
+	// ever populating finish_reason) -- either one is proof the stream ended
+	// on purpose, not mid-flight. Without this, a cut stream silently
 	// returned nil error with truncated content as if it were a full
 	// response.
 	//
 	// A genuine scanErr (including context.Canceled from a caller-initiated
 	// cancellation) is left untouched here and returned as-is below, so
 	// cancellation semantics are unchanged.
-	if scanErr == nil && !sawFinishReason {
+	if scanErr == nil && !sawFinishReason && !sawDoneSentinel {
 		scanErr = fmt.Errorf("openai stream ended without a finish_reason (connection closed unexpectedly after %d bytes of content): %w", len(final.Content), io.ErrUnexpectedEOF)
 	}
 
