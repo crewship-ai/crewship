@@ -122,6 +122,16 @@ jobs:
       - name: test-harness lib (binary resolution + preflight)
         run: bash scripts/test-harness-lib-test.sh
 
+      # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
+      # every test called t.Skip, so a skip is indistinguishable from a pass
+      # in CI output — and nothing counted them, which made "skip it for now"
+      # free and invisible. This fails only when the count RISES above
+      # scripts/skip-budget.txt. Lives in the `shell` job because it is a
+      # 2-second grep and this is where the other script gates already run;
+      # no Go toolchain needed.
+      - name: Skip budget (t.Skip ratchet)
+        run: bash scripts/skip-budget.sh
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     needs: [merge-conflict-markers]
@@ -257,7 +267,64 @@ jobs:
         # rather than a single slow test. Job-level timeout-minutes:15
         # already gives the runner enough wall-clock; this aligns the
         # go test -timeout to match.
-        run: go test ./... -count=1 -timeout 15m
+        #
+        # -shuffle=on: randomise the execution order of tests and
+        # benchmarks within each package. This suite has ~206 time.Sleep
+        # calls in tests and a lot of shared on-disk SQLite fixtures, so
+        # order-dependence — test A leaving a row/env var/temp dir that
+        # test B silently relies on — is a live risk, and the fixed
+        # source order hides it forever. Shuffling costs no extra
+        # wall-clock: it reorders the same work rather than repeating it.
+        #
+        # go test prints the chosen seed to the log
+        # (`-test.shuffle N` per package). To reproduce a shuffle-only
+        # failure locally, copy that seed:
+        #   go test ./internal/<pkg> -count=1 -shuffle=<seed>
+        run: go test ./... -count=1 -shuffle=on -timeout 15m
+
+  # ── Go: race detector ──
+  #
+  # Deliberately a SEPARATE job rather than a -race flag bolted onto the `go`
+  # job above. Two reasons: the race build is 2-3x slower to compile and run,
+  # and folding it in would push the fast pass/fail signal every PR waits on
+  # from ~75s to several minutes; and when a race does fire you want to see
+  # "Go Race red, Go green" in the checks list, not one ambiguous red Go job
+  # that might be a compile error, a logic failure, or a race.
+  #
+  # Why this gate at all: Crewship is an orchestrator. Concurrent state is
+  # not incidental to it — the WS hub fans out to subscribers, the keeper
+  # dedups across goroutines behind a mutex, lease acquisition races a SQL
+  # UPDATE, and routines spawn detached background workers that outlive the
+  # request. The test suite calls t.Parallel() ~2434 times, so it already
+  # generates the concurrency a detector needs. Several test files even carry
+  # a "run manually under -race" comment — the discipline existed, but only
+  # as a habit, and habits do not block merges. Nothing in CI passed -race,
+  # so any race that landed stayed landed until it flaked in production.
+  go-race:
+    needs: [merge-conflict-markers]
+    name: Go Race
+    runs-on: ubuntu-latest
+    # 30 min: the non-race `go` job budgets 15 for ~75s of real work. Race
+    # instrumentation costs 2-3x on both compile and execution, and the
+    # detector's shadow-memory bookkeeping hits the SQLite-heavy
+    # internal/api package hardest. 30 keeps headroom over the 25m test
+    # timeout below so a hang reports as a Go panic with stacks rather than
+    # a bare GitHub "job cancelled".
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go test (race)
+        # No -shuffle here on purpose: the `go` job owns order-dependence
+        # detection. Keeping this job's ordering fixed means a race report
+        # is reproducible from the log without also having to replay a seed.
+        run: go test ./... -race -count=1 -timeout 25m
 
   # ── Go: cross-platform test matrix ──
   #
@@ -404,7 +471,7 @@ jobs:
     # would usually do, but we keep a small buffer for first-run
     # cache miss on the Go SDK download.
     timeout-minutes: 15
-    needs: [frontend, go]
+    needs: [frontend, go, go-race]
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
