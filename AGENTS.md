@@ -45,9 +45,10 @@ scripts/review-status.sh --retrigger --dry-run   # queued re-review, spaced by t
 ```
 
 Exit 3 = at least one PR is not reviewed. Same trap, other producers: a check
-that concluded `skipped` or `neutral` is green without having run, and CodeQL
-findings can live only in a run's annotations. Details and the re-trigger
-policy: [CONTRIBUTING.md → Wait for
+that concluded `skipped` or `neutral` is green without having run; CodeQL
+findings can live only in a run's annotations; and a re-trigger fired too early
+answers "✅ Action performed — Review finished." while submitting no review at
+all. Details and the re-trigger policy: [CONTRIBUTING.md → Wait for
 CodeRabbit](CONTRIBUTING.md#wait-for-coderabbit--and-check-that-it-actually-reviewed).
 
 ## Architecture map (`internal/`)

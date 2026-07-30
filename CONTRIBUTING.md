@@ -174,7 +174,14 @@ scripts/review-status.sh --retrigger             # run it (long-lived; backgroun
 ```
 
 Firing `@coderabbitai review` at every throttled PR at once just
-re-throttles all but the first.
+re-throttles all but the first. And read the answer carefully: a
+re-trigger fired while the limit is still in force comes back with
+
+> ✅ **Action performed** — Review finished.
+
+and nothing else. That reply acknowledges the *command*; no review was
+submitted, and CodeRabbit will not re-review a commit it has already
+seen. `review-status.sh` flags it rather than counting it.
 
 **The same failure shape, other producers.** `--checks` reports them on
 the PR's head commit:

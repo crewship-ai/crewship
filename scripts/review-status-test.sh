@@ -71,6 +71,19 @@ FAILED_BODY='> [!CAUTION]
 >
 > The pull request is closed.'
 
+# Verbatim from PR #1587, which is what this script shipped in: answering
+# `@coderabbitai review` while still rate-limited gets a ✅ and no review.
+ACK_BODY='<!-- This is an auto-generated reply by CodeRabbit -->
+<!-- CodeRabbit review command invocation: 27fed4a8 -->
+<details>
+<summary>✅ Action performed</summary>
+
+Review finished.
+
+> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits.
+
+</details>'
+
 # in() — build the classifier input. Keeps the tests readable; every field the
 # classifier looks at is named here.
 # in <now> <createdAt> <headSha> <statusState> <statusDesc> <commentsJSON> <reviewsJSON>
@@ -177,6 +190,27 @@ echo "== failure =="
 expect_eq "a CodeRabbit failure notice is its own state" "failed" \
   "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" failure "Review failed" \
       "$(cmt 2026-07-30T21:20:00Z "$FAILED_BODY")" "$NONE")")"
+
+echo '== "✅ Review finished." is not a review =='
+
+# Found by running this script on its own PR. A re-trigger fired while still
+# rate-limited comes back with a green tick and the words "Review finished",
+# and nothing else — no walkthrough, no submitted review, status back to
+# `Review rate limited`. Anyone reading the thread would call that reviewed.
+ACK_IN="$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+  "$(merge "$(cmt 2026-07-30T21:48:46Z "$THROTTLE_BODY")" \
+           "$(cmt 2026-07-30T21:52:53Z "$ACK_BODY")")" "$NONE")"
+expect_eq "an Action-performed reply does not make a PR reviewed" "throttled" \
+  "$(state_of "$ACK_IN")"
+expect_contains "…and the misleading tick is named" "$(notes_of "$ACK_IN")" \
+  "acknowledges the command, it is not a review"
+
+# The reverse must stay quiet: an ack that follows a genuine review is just
+# CodeRabbit confirming it re-ran, and warning there would be noise.
+expect_eq "an ack before a real review raises nothing" "" \
+  "$(notes_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
+      "$(cmt 2026-07-30T21:52:53Z "$ACK_BODY")" \
+      "$(rev 2026-07-30T21:55:00Z APPROVED "$REVIEW_BODY" "$SHA")")" | tr -d '-')"
 
 echo "== the check status is cross-examined, never trusted =="
 

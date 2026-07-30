@@ -124,6 +124,14 @@ CLASSIFY_JQ="$WAIT_JQ"'
 
   def isWalkthrough: test("summarize by coderabbit\\.ai"; "i");
 
+  # The most misleading artifact of the lot, found by running this script on
+  # its own PR: answering `@coderabbitai review` while still rate-limited
+  # gets back "✅ Action performed — Review finished." and no review at all.
+  # It is an acknowledgement of the command, not a review of the code.
+  def isAck:
+    test("auto-generated reply by CodeRabbit"; "i")
+    and (test("action performed"; "i") or test("review finished"; "i"));
+
   # `**Actionable comments posted: 1**`
   def actionable:
     ( [ scan("actionable comments posted:[^0-9]{0,4}([0-9]+)"; "i") ]
@@ -139,6 +147,7 @@ CLASSIFY_JQ="$WAIT_JQ"'
           kind: ( (.body // "")
                   | if isThrottle then "throttle"
                     elif isFailure then "failure"
+                    elif isAck then "ack"
                     elif isWalkthrough then "walkthrough"
                     else "other" end ),
           wait: ((.body // "") | waitMinutes)
@@ -156,6 +165,7 @@ CLASSIFY_JQ="$WAIT_JQ"'
   | ($ev | map(select(.kind == "throttle"))    | last) as $thr
   | ($ev | map(select(.kind == "failure"))     | last) as $fail
   | ($ev | map(select(.kind == "walkthrough")) | last) as $walk
+  | ($ev | map(select(.kind == "ack"))         | last) as $ack
   | (if $now == null or (($in.createdAt // "") | secs) == null then null
      else $now - (($in.createdAt // "") | secs) end) as $age
   | (($in.windowMin // 5) * 60) as $window
@@ -196,6 +206,14 @@ CLASSIFY_JQ="$WAIT_JQ"'
          else [] end)
       + (if $state == "absent" and $walk != null
          then ["a walkthrough was posted, a review never followed"] else [] end)
+      # Reading the thread, "✅ Action performed — Review finished." looks like
+      # the answer. It is not: it acknowledges the command, and CodeRabbit
+      # will not re-review a commit it has already seen, so a re-trigger fired
+      # too early gets this and nothing else.
+      + (if $state != "reviewed" and $ack != null
+              and (($rev == null) or ($ack.t > $rev.t))
+         then ["CodeRabbit replied «Review finished» but submitted no review — that reply acknowledges the command, it is not a review"]
+         else [] end)
       # Cross-check against the status the merge button shows. Disagreement in
       # either direction is worth printing: this script and that status line
       # read different evidence, and only one of them is evidence.
@@ -351,7 +369,7 @@ examine() { # <number>
     printf '%s  #%-5s %s\n' "$(badge "$state")" "$n" "$title"
     printf '             %s\n' "$headline"
     if [ -n "$notes" ]; then
-      printf '%s\n' "$notes" | tr '|' '\n' | sed 's/^ *//; /^$/d; s/^/             ⚠ /'
+      printf '%s\n' "$notes" | tr '|' '\n' | sed 's/^ *//; s/ *$//; /^$/d; s/^/             ⚠ /'
     fi
     [ "$SHOW_CHECKS" -eq 1 ] && report_checks "$sha"
     printf '\n'
