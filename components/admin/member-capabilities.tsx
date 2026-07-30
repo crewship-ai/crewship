@@ -126,6 +126,14 @@ export function useMemberCapabilities(workspaceId: string, enabled: boolean) {
  * x-position in every row, so scanning a column down the roster still works
  * without a table. `chat` renders in the muted treatment because it is
  * implied and can never be toggled.
+ *
+ * An OWNER's pips show that OWNER's *stored* set, exactly like everyone
+ * else's. Role is not a capability: `requireCapabilityOrForbid` gates on the
+ * membership row alone (internal/api/capabilities_check.go) and there is no
+ * OWNER bypass, so painting an OWNER as holding everything would claim
+ * `credentials:reveal` — which is deliberately in no bundle, not even the
+ * OWNER backfill (internal/api/capabilities.go, migration v109). The row is
+ * still immutable; being immutable is not the same as being full.
  */
 export function CapabilityPips({
   granted,
@@ -138,10 +146,10 @@ export function CapabilityPips({
 }) {
   const grantedSet = useMemo(() => new Set(granted), [granted])
   const on = ALL_CAPABILITIES.filter(
-    (c) => isOwner || c === Capability.Chat || grantedSet.has(c),
+    (c) => c === Capability.Chat || grantedSet.has(c),
   )
   const summary = isOwner
-    ? `${label}: all capabilities (OWNER)`
+    ? `${label}: ${on.join(", ")} (OWNER — immutable)`
     : `${label}: ${on.join(", ")}`
 
   return (
@@ -155,7 +163,7 @@ export function CapabilityPips({
     >
       {ALL_CAPABILITIES.map((cap) => {
         const isChat = cap === Capability.Chat
-        const active = isOwner || isChat || grantedSet.has(cap)
+        const active = isChat || grantedSet.has(cap)
         return (
           <span
             key={cap}
@@ -266,7 +274,9 @@ export function MemberCapabilityToggles({
     <div className="grid gap-x-5 gap-y-0.5 sm:grid-cols-2">
       {ALL_CAPABILITIES.map((cap) => {
         const isChat = cap === Capability.Chat
-        const isGranted = isOwner || isChat || grantedSet.has(cap)
+        // Same rule as the pips: the stored set is the truth for every row,
+        // OWNER included. `locked` still makes the OWNER row un-toggleable.
+        const isGranted = isChat || grantedSet.has(cap)
         const cellLocked = locked || isChat
         const meta = CAPABILITY_LABELS[cap]
         // `title` is unreliable for screen-reader and keyboard users;

@@ -155,6 +155,52 @@ describe("MembersSection — expanding a row", () => {
     ).toBeDisabled()
   })
 
+  it("shows an OWNER the capabilities they actually hold, not a full house", async () => {
+    // Role is not a capability. `requireCapabilityOrForbid` gates on the
+    // membership row with no OWNER bypass, and `credentials:reveal` is in NO
+    // bundle — not even the OWNER/ADMIN backfill (migration v109), because
+    // role must never be sufficient for handing out a plaintext secret.
+    // Painting the OWNER row as holding everything makes this screen — the
+    // one that answers "who can do what here?" — lie about the single
+    // highest-stakes grant, for the single highest-privilege role.
+    apiFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        members: [
+          // The v109 OWNER backfill verbatim: 7 of the 8, reveal withheld.
+          {
+            user_id: "u-owner",
+            role: "OWNER",
+            capabilities: [
+              "chat", "routine.create", "skill.create", "credential.create",
+              "credential.rotate", "issue.create", "memory.write",
+            ],
+          },
+        ],
+      }),
+    })
+    renderSection()
+
+    // Wait for the bulk read to land — before it does every row is chat-only.
+    const pips = await screen.findByLabelText(/Olive Owner: chat, routine.create/i)
+    expect(pips.getAttribute("aria-label")).not.toMatch(/all capabilities/i)
+    const reveal = pips.querySelector('[data-capability="credentials:reveal"]')
+    expect(reveal?.getAttribute("data-granted")).toBe("false")
+    // ...and the pips that ARE stored still read as granted.
+    expect(
+      pips.querySelector('[data-capability="memory.write"]')?.getAttribute("data-granted"),
+    ).toBe("true")
+
+    expand(/expand permissions for Olive Owner/i)
+    const toggle = screen.getByRole("switch", {
+      name: /OWNER capabilities are immutable: credentials:reveal/i,
+    })
+    expect(toggle.getAttribute("aria-checked")).toBe("false")
+    // Immutable is not the same as full — the row stays un-toggleable.
+    expect(toggle).toBeDisabled()
+  })
+
   it("summarises capabilities in the collapsed row so the list stays scannable", async () => {
     renderSection()
     // A pip per capability, in a fixed column, marked granted or not — this
