@@ -80,7 +80,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
   const nameById = new Map(agents.map((a) => [a.id, a.name]))
 
   return (
-    <div className="px-6 md:px-8 lg:px-12 py-12 max-w-[1180px] mx-auto w-full">
+    <div className="px-6 md:px-8 lg:px-12 py-12 detail-width">
       <div className="text-center mb-10">
         <h1 className="text-3xl font-semibold mb-2">Your fleet</h1>
         <p className="text-muted-foreground text-sm">

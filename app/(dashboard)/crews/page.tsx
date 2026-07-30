@@ -179,7 +179,11 @@ export default function CrewsPage() {
       missions={missions}
       workspaceId={workspaceId}
       loaded
-      onRefresh={() => fetchData()}
+      // Silent: this fires after a save, not on a workspace switch. The loud
+      // path clears crews/agents/missions before refetching, which is right
+      // when the whole workspace changed and wrong here — it blanked the list
+      // the open canvas was resolved from.
+      onRefresh={() => fetchData(true)}
     />
   )
 }

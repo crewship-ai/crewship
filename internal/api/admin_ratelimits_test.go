@@ -68,7 +68,8 @@ func TestAdminRateLimits_List_ReturnsRegistryWithDefaults(t *testing.T) {
 	if auth == nil {
 		t.Fatal("auth limiter missing from list")
 	}
-	if auth.Value != 10 || auth.Default != 10 || auth.Overridden {
+	wantAuth := ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin)
+	if auth.Value != wantAuth || auth.Default != wantAuth || auth.Overridden {
 		t.Errorf("auth limiter = %+v, want value/default 10, overridden=false", *auth)
 	}
 }
@@ -135,8 +136,8 @@ func TestAdminRateLimits_Reset_RevertsToDefault(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("Reset got %d, want 200", rr.Code)
 	}
-	if got := store.Value(ratelimitcfg.KeyHTTPAPIPerMin); got != 120 {
-		t.Errorf("after reset, value = %d, want default 120", got)
+	if got, want := store.Value(ratelimitcfg.KeyHTTPAPIPerMin), ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAPIPerMin); got != want {
+		t.Errorf("after reset, value = %d, want default %d", got, want)
 	}
 }
 
@@ -155,11 +156,12 @@ func TestRouter_HTTPRateLimitOverride_AppliesLive(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	// hammerAuth fires 12 credential-submitting POSTs from one IP (past the
-	// default 10/min auth bucket) and reports whether any 429'd.
-	hammerAuth := func(ip string) bool {
+	// hammerAuth fires n credential-submitting POSTs from one IP and reports
+	// whether any 429'd. Each call must use a FRESH IP — the bucket is per-IP
+	// and a reused address carries state from the previous phase.
+	hammerAuth := func(ip string, n int) bool {
 		saw429 := false
-		for i := 0; i < 12; i++ {
+		for i := 0; i < n; i++ {
 			req := httptest.NewRequest(http.MethodPost, "/api/auth/callback/credentials", nil)
 			req.RemoteAddr = ip
 			rr := httptest.NewRecorder()
@@ -171,24 +173,41 @@ func TestRouter_HTTPRateLimitOverride_AppliesLive(t *testing.T) {
 		return saw429
 	}
 
-	// Baseline: the shipped 10/min bucket trips within 12 requests.
-	if !hammerAuth("127.0.1.1:1") {
-		t.Fatal("baseline: default 10/min auth bucket should 429 within 12 requests")
+	// The subject here is "an override reaches the live limiter", in both
+	// directions. It used to prove that by leaning on the shipped default
+	// being tight (12 requests past a 10/min bucket) — which coupled a
+	// mechanism test to a product decision, and broke the moment the default
+	// was raised to something that does not throttle real users. Drive it
+	// from an explicit override instead: deterministic, and it holds whatever
+	// we ship.
+	if err := store.Set(context.Background(), ratelimitcfg.KeyHTTPAuthPerMin, 5, "test"); err != nil {
+		t.Fatalf("tighten: %v", err)
+	}
+	if !hammerAuth("127.0.1.1:1", 12) {
+		t.Fatal("a 5/min override must 429 within 12 requests — the override never reached the limiter")
 	}
 
-	// Raise the auth limit well above 12 — a fresh IP must no longer 429.
+	// Loosen: a fresh IP must no longer trip on the same traffic.
 	if err := store.Set(context.Background(), ratelimitcfg.KeyHTTPAuthPerMin, 1000, "test"); err != nil {
 		t.Fatalf("set override: %v", err)
 	}
-	if hammerAuth("127.0.1.2:1") {
+	if hammerAuth("127.0.1.2:1", 12) {
 		t.Error("after raising the auth limit to 1000/min, a fresh IP must not 429")
 	}
 
-	// Reset restores the tight bucket for yet another fresh IP.
+	// Reset restores the shipped default...
 	if err := store.Reset(context.Background(), ratelimitcfg.KeyHTTPAuthPerMin, "test"); err != nil {
 		t.Fatalf("reset override: %v", err)
 	}
-	if !hammerAuth("127.0.1.3:1") {
-		t.Error("after reset, the default tight bucket should 429 again")
+	if got, want := store.Value(ratelimitcfg.KeyHTTPAuthPerMin), ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin); got != want {
+		t.Errorf("after reset, value = %d, want default %d", got, want)
+	}
+	// ...and the limiter is still following the store, not stuck on the last
+	// override it happened to see.
+	if err := store.Set(context.Background(), ratelimitcfg.KeyHTTPAuthPerMin, 5, "test"); err != nil {
+		t.Fatalf("re-tighten: %v", err)
+	}
+	if !hammerAuth("127.0.1.3:1", 12) {
+		t.Error("the limiter stopped tracking the store after a reset")
 	}
 }

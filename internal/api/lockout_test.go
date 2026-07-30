@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -105,7 +106,8 @@ func TestLockout_LocksAfterThreshold(t *testing.T) {
 	seedLockoutUser(t, db, "victim@example.com", "correct")
 
 	now := time.Now()
-	for i := 0; i < LockoutThreshold-1; i++ {
+	threshold := ratelimitcfg.Int(ratelimitcfg.KeyLoginLockoutThresh)
+	for i := 0; i < threshold-1; i++ {
 		if _, _, err := checkAndLockoutOnFail(context.Background(), db,
 			"victim@example.com", "wrong", now); !errors.Is(err, ErrInvalidCredentials) {
 			t.Fatalf("attempt %d: want ErrInvalidCredentials, got %v", i, err)
@@ -119,8 +121,12 @@ func TestLockout_LocksAfterThreshold(t *testing.T) {
 	}
 
 	// Even with the CORRECT password, we stay locked for the duration.
+	// Probe inside the window rather than at a fixed one-minute offset —
+	// that offset silently became "just after expiry" the moment the
+	// configured duration changed.
+	lockDur := ratelimitcfg.Dur(ratelimitcfg.KeyLoginLockoutDurSec)
 	_, _, err = checkAndLockoutOnFail(context.Background(), db,
-		"victim@example.com", "correct", now.Add(1*time.Minute))
+		"victim@example.com", "correct", now.Add(lockDur/2))
 	if !errors.Is(err, ErrAccountLocked) {
 		t.Errorf("correct password during lock: got %v, want ErrAccountLocked", err)
 	}

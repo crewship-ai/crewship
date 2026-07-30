@@ -14,6 +14,7 @@ package api
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,6 +25,14 @@ import (
 // routeWithRateLimiting lets the request through to r.mux at all (any
 // non-429 status, typically 404) — it deliberately avoids depending on any
 // specific handler's auth/workspace wiring.
+// One more than the general bucket allows, computed from the registry: the
+// property under test is "this traffic is limited at all", not "limited at 120".
+var rlGeneralProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAPIPerMin) + 500
+
+// Same idea for the two narrower buckets.
+var rlAuthProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin) + 5
+var rlCredTestProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPCredTestPerMin) + 10
+
 const rlProbePath = "/api/v1/__ratelimit_cli_exemption_probe__"
 
 func TestRouteWithRateLimiting_ValidCLIToken_ExemptFromPerIPBucket(t *testing.T) {
@@ -39,10 +48,10 @@ func TestRouteWithRateLimiting_ValidCLIToken_ExemptFromPerIPBucket(t *testing.T)
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	// apiRateLimitedMux is 120/min (burst 120) per IP — 130 requests from a
+	// apiRateLimitedMux is the general per-IP bucket — rlGeneralProbes requests from a
 	// SINGLE IP proves the exemption bypasses the bucket entirely rather
 	// than just getting a bigger one.
-	for i := 0; i < 130; i++ {
+	for i := 0; i < rlGeneralProbes; i++ {
 		req := httptest.NewRequest(http.MethodGet, rlProbePath, nil)
 		req.Header.Set("Authorization", "Bearer "+plaintext)
 		req.RemoteAddr = "127.0.0.1:1"
@@ -62,7 +71,7 @@ func TestRouteWithRateLimiting_Unauthenticated_StillRateLimited(t *testing.T) {
 	}
 
 	saw429 := false
-	for i := 0; i < 130; i++ {
+	for i := 0; i < rlGeneralProbes; i++ {
 		req := httptest.NewRequest(http.MethodGet, rlProbePath, nil)
 		req.RemoteAddr = "127.0.0.2:1"
 		rr := httptest.NewRecorder()
@@ -91,7 +100,7 @@ func TestRouteWithRateLimiting_InvalidCLIToken_StillRateLimited(t *testing.T) {
 	fake := cliTokenStandardPrefix + "never-issued-0011223344"
 
 	saw429 := false
-	for i := 0; i < 130; i++ {
+	for i := 0; i < rlGeneralProbes; i++ {
 		req := httptest.NewRequest(http.MethodGet, rlProbePath, nil)
 		req.Header.Set("Authorization", "Bearer "+fake)
 		req.RemoteAddr = "127.0.0.3:1"
@@ -127,7 +136,7 @@ func TestRouteWithRateLimiting_AuthPath_ValidCLIToken_StillAuthRateLimited(t *te
 	}
 
 	saw429 := false
-	for i := 0; i < 15; i++ { // auth bucket is 10/min (burst 10)
+	for i := 0; i < rlAuthProbes; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 		req.Header.Set("Authorization", "Bearer "+plaintext)
 		req.RemoteAddr = "127.0.0.5:1"
@@ -265,7 +274,7 @@ func TestRouteWithRateLimiting_CredentialTestPath_ExemptionDoesNotApply(t *testi
 	}
 
 	saw429 := false
-	for i := 0; i < 70; i++ {
+	for i := 0; i < rlCredTestProbes; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/test", nil)
 		req.Header.Set("Authorization", "Bearer "+plaintext)
 		req.RemoteAddr = "127.0.0.4:1"

@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react"
 import { FileText } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { DetailCard } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 
 export interface SystemPromptEditorProps {
@@ -78,96 +81,67 @@ export function SystemPromptEditor({
   const charCount = (value ?? "").length
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          System prompt
-          {dirty && editing && <span className="h-2 w-2 rounded-full bg-warn" title="Unsaved changes" />}
-        </h2>
-        <span className="text-[10px] text-muted-foreground">
-          {charCount} chars{updatedHint ? ` · ${updatedHint}` : ""}
-        </span>
-      </div>
-
-      <div className="rounded-xl border border-white/8 bg-card">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <FileText className="h-3 w-3" />
-            <span>system_prompt.md</span>
-          </div>
-          {!readOnly && (
-            <div className="flex items-center gap-2">
-              {editing ? (
-                <>
-                  <button
-                    type="button"
-                    className="text-xs px-2.5 py-1 rounded text-muted-foreground hover:text-foreground"
-                    onClick={handleCancel}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(
-                      "text-xs px-3 py-1 rounded text-white",
-                      dirty && !saving
-                        ? "bg-success/80 hover:bg-success"
-                        : "bg-success/40 cursor-not-allowed",
-                    )}
-                    onClick={handleSave}
-                    disabled={!dirty || saving}
-                  >
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="text-xs px-2.5 py-1 rounded border border-white/10 hover:bg-white/5 text-foreground/80"
-                  onClick={() => setEditing(true)}
-                >
-                  Edit
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {editing ? (
-          <textarea
-            ref={taRef}
-            value={draft}
-            aria-label="System prompt"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-                e.preventDefault()
-                void handleSave()
-              } else if (e.key === "Escape") {
-                e.preventDefault()
-                handleCancel()
-              }
-            }}
-            spellCheck={false}
-            className="w-full px-4 py-3 text-xs leading-relaxed font-mono text-foreground bg-transparent outline-none resize-y min-h-[260px]"
-          />
+    <DetailCard
+      bare
+      icon={FileText}
+      title="System prompt"
+      subtitle="system_prompt.md"
+      tone={dirty && editing ? "warn" : "default"}
+      footer={`${charCount} chars${updatedHint ? ` · ${updatedHint}` : ""}`}
+      action={
+        readOnly ? null : editing ? (
+          <span className="flex items-center gap-1.5">
+            {dirty && <span className="h-1.5 w-1.5 rounded-full bg-warn" title="Unsaved changes" />}
+            <Button variant="ghost" size="xs" onClick={handleCancel} disabled={saving}>
+              Cancel
+            </Button>
+            <Button variant="soft" size="xs" onClick={handleSave} disabled={!dirty || saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </span>
         ) : (
-          <pre className="px-4 py-3 text-xs leading-relaxed text-foreground/85 font-mono whitespace-pre-wrap max-h-[260px] overflow-y-auto">
-            {value || (
-              <em className="text-muted-foreground not-italic">
-                empty — click Edit to write a system prompt
-              </em>
-            )}
-          </pre>
-        )}
+          <Button variant="outline" size="xs" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )
+      }
+    >
+      {editing ? (
+        <textarea
+          ref={taRef}
+          value={draft}
+          aria-label="System prompt"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+              e.preventDefault()
+              void handleSave()
+            } else if (e.key === "Escape") {
+              e.preventDefault()
+              handleCancel()
+            }
+          }}
+          spellCheck={false}
+          className={cn(
+            "type-row min-h-[260px] w-full resize-y bg-transparent px-4 py-3",
+            "font-mono leading-relaxed text-foreground outline-none",
+          )}
+        />
+      ) : (
+        <pre className="type-row max-h-[260px] overflow-y-auto px-4 py-3 font-mono leading-relaxed text-foreground/85 whitespace-pre-wrap">
+          {value || (
+            <em className="not-italic text-muted-foreground">
+              empty — click Edit to write a system prompt
+            </em>
+          )}
+        </pre>
+      )}
 
-        {error && (
-          <div className="px-4 py-2 border-t border-destructive/20 bg-destructive/5 text-xs text-destructive">
-            Save failed: {error}
-          </div>
-        )}
-      </div>
-    </div>
+      {error && (
+        <p className="type-meta border-t border-destructive/20 bg-destructive/5 px-4 py-2 text-destructive">
+          Save failed: {error}
+        </p>
+      )}
+    </DetailCard>
   )
 }

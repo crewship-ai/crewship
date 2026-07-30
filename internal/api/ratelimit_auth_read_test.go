@@ -29,7 +29,7 @@ func TestRouteWithRateLimiting_AuthReadGets_NotThrottledByLoginBucket(t *testing
 	// bucket but well under the 120/min API bucket. None may 429 — this is
 	// the exact "hammer refresh a few times" path that was logging users out.
 	for _, path := range []string{"/api/auth/session", "/api/auth/csrf"} {
-		for i := 0; i < 30; i++ {
+		for i := 0; i < 30; i++ { // comfortably inside every bucket — these must never 429
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.RemoteAddr = "127.0.0.20:1"
 			rr := httptest.NewRecorder()
@@ -53,7 +53,7 @@ func TestRouteWithRateLimiting_AuthCredentialPost_StillLoginBucketed(t *testing.
 	}
 
 	saw429 := false
-	for i := 0; i < 15; i++ { // auth bucket is 10/min (burst 10)
+	for i := 0; i < rlAuthProbes; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/callback/credentials", nil)
 		req.RemoteAddr = "127.0.0.21:1"
 		rr := httptest.NewRecorder()

@@ -90,6 +90,21 @@ export interface CrewsLayoutProps {
  * live inline in the canvas; chat moves to a dedicated /chat/[slug]
  * full-page route.
  */
+/**
+ * Identity of the canvas for AnimatePresence — keyed on what the USER selected,
+ * never on the entity currently resolved from the list.
+ *
+ * Those differ exactly when a fetch is in flight, and that gap is not
+ * theoretical: saving a field on the agent's Configuration tab refetched the
+ * lists, `agents` went empty for a beat, `agents.find(...)` returned null, and
+ * the key flipped to "empty" and back. React read that as a different element,
+ * destroyed the canvas and built a new one — which starts on Overview. The user
+ * saw a save "redirect" them. Nothing redirected; the screen was rebuilt.
+ */
+export function canvasKey(agentSlug: string | null, crewSlug: string | null) {
+  return agentSlug ?? crewSlug ?? "empty"
+}
+
 export function CrewsLayout({
   crews,
   agents,
@@ -290,7 +305,7 @@ export function CrewsLayout({
         <div className="overflow-y-auto min-h-0 min-w-0">
           <AnimatePresence mode="wait">
             <motion.div
-              key={selectedAgent?.slug ?? selectedCrew?.slug ?? "empty"}
+              key={canvasKey(selectedAgentSlug, selectedCrewSlug)}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
@@ -301,7 +316,10 @@ export function CrewsLayout({
                   workspaceId={workspaceId}
                   agentSlug={selectedAgent.slug}
                   crews={crews}
-                  onAgentChanged={onRefresh}
+                  onAgentChanged={(nextSlug) => {
+                    if (nextSlug && nextSlug !== selectedAgentSlug) selectAgent(nextSlug)
+                    onRefresh()
+                  }}
                   onSelectCrew={(slug) => selectCrew(slug)}
                   onOpenFiles={handleOpenFiles}
                 />

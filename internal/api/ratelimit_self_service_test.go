@@ -16,6 +16,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,7 +25,12 @@ import (
 // authBucketLimit is the strict per-IP budget (router.go NewRateLimiter(10)).
 // Firing comfortably more than that from one IP separates "strict bucket"
 // from "general bucket" without depending on the exact number.
-const authBucketProbes = 25
+// Enough probes to exhaust the auth bucket whatever it is set to, and still
+// far below the general bucket — so "hit 429" means "on the strict bucket" and
+// "survived" means "not on it". Derived from the registry rather than written
+// as a literal: these tests assert which bucket a route sits in, and that
+// property is independent of the numbers we ship.
+var authBucketProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin) + 5
 
 func hammer(t *testing.T, r *Router, method, path string) (got429 bool) {
 	t.Helper()

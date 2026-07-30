@@ -9,6 +9,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useParams: () => ({ identifier: "_" }),
   usePathname: () => (typeof window !== "undefined" ? window.location.pathname : "/"),
+  // The page reads ?from= to send the back arrow where the reader came from.
+  useSearchParams: () =>
+    new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""),
 }))
 
 vi.mock("@/hooks/use-workspace", () => ({
