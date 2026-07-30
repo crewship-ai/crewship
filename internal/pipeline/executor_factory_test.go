@@ -94,21 +94,22 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 	wpStore := NewSQLWaitpointStore(db)
 	t.Cleanup(wpStore.Close)
 	return ExecutorDeps{
-		Store:              NewStore(db),
-		Resolver:           NewResolver(db),
-		Runner:             runner,
-		Emitter:            &captureEmitter{},
-		DB:                 db,
-		Waitpoints:         wpStore,
-		WS:                 &captureWSBroadcaster{},
-		Runs:               NewRunRegistry(),
-		RunStore:           NewRunStore(db),
-		CodeRunner:         NewMultiCodeRunner(),
-		Signals:            NewSignalRegistry(),
-		ScriptRunner:       &fakeScriptRunner{},
-		RunVerdictProvider: &stubVerdictProviderForFactoryTest{},
-		RunVerdictModel:    "claude-haiku-4-5",
-		VerdictWG:          &sync.WaitGroup{},
+		Store:        NewStore(db),
+		Resolver:     NewResolver(db),
+		Runner:       runner,
+		Emitter:      &captureEmitter{},
+		DB:           db,
+		Waitpoints:   wpStore,
+		WS:           &captureWSBroadcaster{},
+		Runs:         NewRunRegistry(),
+		RunStore:     NewRunStore(db),
+		CodeRunner:   NewMultiCodeRunner(),
+		Signals:      NewSignalRegistry(),
+		ScriptRunner: &fakeScriptRunner{},
+		RunVerdict: func() (llm.Provider, string) {
+			return &stubVerdictProviderForFactoryTest{}, "claude-haiku-4-5"
+		},
+		VerdictWG: &sync.WaitGroup{},
 	}
 }
 
@@ -116,7 +117,8 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 // fullExecutorDeps can exercise the run-verdict wiring path in the
 // construction-parity test without a real LLM call ever happening —
 // the parity test only checks exec.runVerdict is non-nil, it never
-// invokes it.
+// invokes it. It is handed over behind a resolver, the shape the factory
+// takes now (#1556), so a long-lived executor never captures a provider.
 type stubVerdictProviderForFactoryTest struct{}
 
 func (s *stubVerdictProviderForFactoryTest) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {

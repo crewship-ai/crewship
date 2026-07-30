@@ -46,13 +46,14 @@ var AuxSlots = []string{
 	string(llm.SlotMemoryHealth),
 	string(llm.SlotNegative),
 	string(llm.SlotRunSummary),
-	auxSlotFallback,
+	SlotFallback,
 }
 
-// auxSlotFallback is the pseudo-slot llm.ResolveAux falls back to. It is not an
+// SlotFallback is the pseudo-slot llm.ResolveAux falls back to. It is not an
 // llm.Slot constant (nothing resolves to it directly), but it is overridable for
-// the same reason as the rest.
-const auxSlotFallback = "fallback"
+// the same reason as the rest — and exported because the evaluator wiring has to
+// name it to keep an override live (internal/server/keeper_aux_live.go).
+const SlotFallback = "fallback"
 
 // AuxLabels are the human-facing names, matching what the admin card and the
 // aux-status endpoint already call these paths.
@@ -62,36 +63,15 @@ var AuxLabels = map[string]string{
 	string(llm.SlotMemoryHealth): "Memory-health audit",
 	string(llm.SlotNegative):     "Failure → lessons extraction",
 	string(llm.SlotRunSummary):   "Run summary verdicts",
-	auxSlotFallback:              "Fallback (used when a slot is unset)",
+	SlotFallback:                 "Fallback (used when a slot is unset)",
 }
 
-// AppliesAt values. Which one a slot gets is not a detail: an operator who
-// changes a model and sees no change in behaviour will conclude the feature is
-// broken, so the surface has to say which of the two it is.
-const (
-	// AppliesImmediately — the evaluator picks the override up on its next
-	// evaluation, via the per-request gov-model seam.
-	AppliesImmediately = "immediately"
-	// AppliesOnRestart — the value is captured into an executor at boot, so the
-	// override takes effect the next time the server starts.
-	AppliesOnRestart = "restart"
-)
-
-// auxAppliesAt records when an override for each slot takes effect.
-//
-// The four Keeper Reviews evaluators are reached through a Gatekeeper, which
-// resolves its provider per request — so an override is live. The run-summary
-// verdict provider is built once and captured by value into every pipeline
-// executor at boot (cmd_start.go), and the fallback slot is only consulted
-// during that same boot-time resolution; overriding either needs a restart.
-var auxAppliesAt = map[string]string{
-	string(llm.SlotCurator):      AppliesImmediately,
-	string(llm.SlotBehavior):     AppliesImmediately,
-	string(llm.SlotMemoryHealth): AppliesImmediately,
-	string(llm.SlotNegative):     AppliesImmediately,
-	string(llm.SlotRunSummary):   AppliesOnRestart,
-	auxSlotFallback:              AppliesOnRestart,
-}
+// Every slot applies on the next evaluation. There used to be an applies_at
+// field here, and a map marking run_summary and fallback as taking effect only
+// after a server restart — their provider was built once and captured by value
+// into every pipeline executor at boot. Both now resolve from this store at use
+// time, the way the four Keeper Reviews slots always did (#1556), so the label
+// was deleted rather than kept describing a limitation that no longer exists.
 
 // KnownAuxSlot reports whether s is a slot this store will accept a write for.
 func KnownAuxSlot(s string) bool {
@@ -167,12 +147,10 @@ func (o AuxOverride) empty() bool {
 // from, so the console can render "inherited" versus "overridden here" with a
 // Reset that has a visible referent.
 type AuxEffective struct {
-	Slot  string `json:"slot"`
-	Label string `json:"label"`
-	// AppliesAt is AppliesImmediately or AppliesOnRestart — see auxAppliesAt.
-	AppliesAt string        `json:"applies_at"`
-	Provider  Field[string] `json:"provider"`
-	Model     Field[string] `json:"model"`
+	Slot     string        `json:"slot"`
+	Label    string        `json:"label"`
+	Provider Field[string] `json:"provider"`
+	Model    Field[string] `json:"model"`
 	// TimeoutMS is the per-call deadline in milliseconds — the unit the wire and
 	// the admin card use; a Go duration string is an operator-facing nicety the
 	// CLI applies on top.
@@ -335,7 +313,6 @@ func resolveAuxSlot(slot string, dflt, builtin llm.AuxiliaryModels, o AuxOverrid
 	eff := AuxEffective{
 		Slot:       slot,
 		Label:      AuxLabels[slot],
-		AppliesAt:  auxAppliesAt[slot],
 		Overridden: !o.empty(),
 		UpdatedAt:  o.UpdatedAt,
 		UpdatedBy:  o.UpdatedBy,
@@ -769,7 +746,7 @@ func auxTargetFor(cfg *llm.AuxiliaryModels, slot string) *llm.AuxModel {
 		return &cfg.Negative
 	case string(llm.SlotRunSummary):
 		return &cfg.RunSummary
-	case auxSlotFallback:
+	case SlotFallback:
 		return &cfg.Fallback
 	default:
 		return nil

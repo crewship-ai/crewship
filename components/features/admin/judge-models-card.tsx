@@ -73,7 +73,6 @@ interface AuxField<T> {
 interface AuxSlot {
   slot: string
   label: string
-  applies_at: string
   provider: AuxField<string>
   model: AuxField<string>
   timeout_ms: AuxField<number>
@@ -758,9 +757,6 @@ function SlotEditor({
         )}
         <span>{sourceNote(slot.model.source)}</span>
         {slot.timeout_ms.value > 0 && <span className="tabular-nums">{Math.round(slot.timeout_ms.value / 1000)}s</span>}
-        {/* Named per row: an operator who changes this one and sees no change in
-            behaviour would otherwise conclude the save silently failed. */}
-        {slot.applies_at === "restart" && <span className="text-warn">needs restart</span>}
         {slot.overridden && (
           <button
             type="button"

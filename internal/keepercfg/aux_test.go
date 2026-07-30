@@ -356,13 +356,6 @@ func TestAux_EverySlotIsAddressable(t *testing.T) {
 		if AuxLabels[slot] == "" {
 			t.Errorf("slot %s has no label", slot)
 		}
-		// A slot with no applies-at would let the console imply a live change
-		// where a restart is needed, which reads as a broken feature.
-		switch auxAppliesAt[slot] {
-		case AppliesImmediately, AppliesOnRestart:
-		default:
-			t.Errorf("slot %s has no applies-at (%q)", slot, auxAppliesAt[slot])
-		}
 	}
 	// llm.SlotKeeper is excluded on purpose — nothing resolves it, so offering it
 	// would be a knob wired to nothing (same reason /system/aux-status omits it).

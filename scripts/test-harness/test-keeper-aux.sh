@@ -105,10 +105,10 @@ done
 # The keeper slot is deliberately absent — nothing resolves it, so offering it
 # would be a knob wired to nothing.
 assert_eq "the unused keeper slot is not offered" "" "$(slot_source keeper model)"
-# An operator who changes run_summary and sees nothing happen would call the
-# feature broken; the row has to say a restart is needed.
-assert_eq "run_summary declares it needs a restart" "restart" "$(slot_json run_summary | jq -r '.applies_at')"
-assert_eq "$SLOT applies on the next evaluation"    "immediately" "$(slot_json "$SLOT" | jq -r '.applies_at')"
+# applies_at is gone (#1556): every slot resolves from the store at use time, so
+# no row may reintroduce a "needs a restart" caveat.
+assert_eq "no slot claims it needs a restart" "" \
+  "$(cs keeper aux list --format json 2>/dev/null | jq -r '[.slots[].applies_at] | map(select(. != null)) | join(",")')"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "2. an override takes effect and reads back as an instance value"

@@ -22,6 +22,14 @@ import (
 // 20260730205811_keeper_aux_credential.sql.
 func auxStoreFor(t *testing.T) *keepercfg.AuxStore {
 	t.Helper()
+	return auxStoreWith(t, llm.DefaultAuxiliaryModels())
+}
+
+// auxStoreWith is auxStoreFor over a chosen inherited layer, for the cases where
+// the shipped defaults (every slot on anthropic) would hide the property — a slot
+// that resolves through the fallback has to have no provider of its own.
+func auxStoreWith(t *testing.T, dflt llm.AuxiliaryModels) *keepercfg.AuxStore {
+	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -39,7 +47,7 @@ func auxStoreFor(t *testing.T) *keepercfg.AuxStore {
 			credential_id TEXT)`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	s := keepercfg.NewAuxStore(db, llm.DefaultAuxiliaryModels())
+	s := keepercfg.NewAuxStore(db, dflt)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -105,6 +113,53 @@ func TestAuxLiveResolver_OverrideAppliesWithoutRebuild(t *testing.T) {
 	p3, m3 := resolve(context.Background(), "ws-1")
 	if p3 == p || m3 != "qwen2.5:14b" {
 		t.Errorf("a changed override did not rebuild: model=%q same=%v", m3, p3 == p)
+	}
+}
+
+// The fallback slot is what llm.ResolveAux reaches when a slot itself is unset,
+// so an override there has to be live for the same reason the slot's own is
+// (#1556) — it used to be consulted only during boot-time resolution, which made
+// it the second of the two slots that needed a restart.
+func TestAuxLiveResolver_FallbackOverrideAppliesWithoutRestart(t *testing.T) {
+	// Behavior deliberately has no provider of its own — the shape in which
+	// llm.ResolveAux resolves the slot through Fallback.
+	store := auxStoreWith(t, llm.AuxiliaryModels{
+		Fallback: llm.AuxModel{Provider: "ollama", Model: "boot-fallback"},
+	})
+	resolve := newAuxLiveResolver("behavior", store, nil,
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+
+	// Nothing overridden yet: the evaluator keeps what it was built with.
+	if p, _ := resolve(context.Background(), "ws-1"); p != nil {
+		t.Fatal("resolved a provider before anything was overridden")
+	}
+
+	provider, model := "ollama", "llama3.1:8b"
+	if _, err := store.Apply(context.Background(), keepercfg.SlotFallback,
+		keepercfg.AuxPatch{Provider: &provider, Model: &model}, ""); err != nil {
+		t.Fatalf("apply fallback: %v", err)
+	}
+
+	p, m := resolve(context.Background(), "ws-1")
+	if p == nil || m != "llama3.1:8b" {
+		t.Errorf("got (%v, %q), want the fallback override in force on the next evaluation", p, m)
+	}
+}
+
+// A slot with a provider of its own never reaches the fallback, so an override
+// there must not quietly hijack it.
+func TestAuxLiveResolver_FallbackDoesNotOverrideAConfiguredSlot(t *testing.T) {
+	store := auxStoreFor(t) // shipped defaults: every slot on anthropic
+	provider, model := "ollama", "llama3.1:8b"
+	if _, err := store.Apply(context.Background(), keepercfg.SlotFallback,
+		keepercfg.AuxPatch{Provider: &provider, Model: &model}, ""); err != nil {
+		t.Fatalf("apply fallback: %v", err)
+	}
+
+	resolve := newAuxLiveResolver("behavior", store, nil,
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+	if p, m := resolve(context.Background(), "ws-1"); p != nil {
+		t.Errorf("the fallback override hijacked a configured slot (model %q)", m)
 	}
 }
 

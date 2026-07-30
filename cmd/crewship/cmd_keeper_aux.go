@@ -39,9 +39,7 @@ Each field either has an instance override or inherits the CREWSHIP_AUX_* value
 the server booted with, and 'aux list' shows which — "instance" means set here,
 "env" means inherited, "default" means the shipped value.
 
-The four evaluator slots apply on the next evaluation. run_summary and fallback
-are captured into the pipeline executors at boot, so those two need a restart —
-'aux list' marks them.
+Every slot applies on the next evaluation — no restart, for any of them.
 
 A hosted slot bills a key. By default that is the one in the server's own
 environment; 'aux set <slot> --credential <name>' points it at a stored vault
@@ -69,7 +67,6 @@ type keeperAuxIntField struct {
 type keeperAuxSlot struct {
 	Slot         string               `json:"slot"`
 	Label        string               `json:"label"`
-	AppliesAt    string               `json:"applies_at"`
 	Provider     keeperConfigStrField `json:"provider"`
 	Model        keeperConfigStrField `json:"model"`
 	TimeoutMS    keeperAuxIntField    `json:"timeout_ms"`
@@ -111,11 +108,6 @@ func printKeeperAuxConfig(cfg keeperAuxConfig) {
 		// every row, and every row is the default.
 		if s.CredentialID.Value != "" {
 			fmt.Printf("    Key:      %s %s\n", s.CredentialID.Value, sourceNote(s.CredentialID.Source))
-		}
-		// Named per row rather than once in a footnote: an operator who changes
-		// run_summary and sees no change concludes the write failed.
-		if s.AppliesAt == "restart" {
-			fmt.Printf("    %sApplies after a server restart%s\n", cli.Yellow, cli.Reset)
 		}
 		if s.Overridden && s.UpdatedAt != "" {
 			by := s.UpdatedBy

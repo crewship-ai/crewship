@@ -48,6 +48,23 @@ type Verdict struct {
 	Summary string  `json:"summary"` // 2-3 sentence recap
 }
 
+// Resolver hands back the provider and model to use for the NEXT
+// verdict. Call sites hold one of these rather than a resolved
+// (provider, model) pair (#1556): the run_summary aux slot and the
+// fallback behind it are runtime-settable, and a pair captured into a
+// handler or a pipeline executor at construction is a pair no override
+// can reach — which is exactly what made those two slots the only ones
+// that needed a server restart.
+//
+// Implementations are expected to cache: a Resolver is called once per
+// terminal run, and building an LLM client per call would put a fresh
+// connection (for Ollama, a possible cold model load) into every verdict.
+// internal/api's Router.RunVerdict is the production one.
+//
+// A nil provider means "verdict generation is off" — an unconfigured or
+// unbuildable slot — not an error.
+type Resolver func() (llm.Provider, string)
+
 // Emitter is the narrow write surface GenerateAndEmit needs — a single
 // Emit method, deliberately narrower than journal.Emitter (which also
 // requires Flush). Both journal.Emitter and pipeline.Emitter satisfy
@@ -89,11 +106,10 @@ const (
 // stamp onto the emitted entry — Type/Severity/ActorType/Summary/
 // Payload are overwritten here.
 //
-// provider/model are pre-resolved by the caller once at boot (mirror
-// internal/server's buildAuxGatekeeper: llm.ResolveAux(cfg,
-// llm.SlotRunSummary) + build the concrete llm.Provider), not
-// re-resolved on every run. A nil provider means the run_summary aux
-// slot has no buildable provider (e.g. no ANTHROPIC_API_KEY
+// provider/model are resolved by the caller through a Resolver just
+// before the call, so an operator's edit to the run_summary (or
+// fallback) aux slot is in force on the next verdict. A nil provider
+// means that slot has no buildable provider (e.g. no ANTHROPIC_API_KEY
 // configured) — that's a normal "feature is off" state, not an error,
 // so this no-ops silently.
 //

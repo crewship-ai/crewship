@@ -195,7 +195,7 @@ func TestBuildAuxWithCredential(t *testing.T) {
 	t.Run("a named credential is what the provider is built from", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "")
 		asked = nil
-		p, err := buildAuxWithCredential(ctx, model, "cred_live", vault, logger)
+		p, err := buildAuxWithCredential(ctx, model, "", "cred_live", vault, logger)
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -210,7 +210,7 @@ func TestBuildAuxWithCredential(t *testing.T) {
 	t.Run("no credential is the process-env path, untouched", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-env")
 		asked = nil
-		if _, err := buildAuxWithCredential(ctx, model, "", vault, logger); err != nil {
+		if _, err := buildAuxWithCredential(ctx, model, "", "", vault, logger); err != nil {
 			t.Fatalf("build: %v", err)
 		}
 		if len(asked) != 0 {
@@ -220,7 +220,7 @@ func TestBuildAuxWithCredential(t *testing.T) {
 
 	t.Run("a revoked credential degrades to the env key, it does not fail the build", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-from-the-env")
-		if p, err := buildAuxWithCredential(ctx, model, "cred_revoked", vault, logger); err != nil || p == nil {
+		if p, err := buildAuxWithCredential(ctx, model, "", "cred_revoked", vault, logger); err != nil || p == nil {
 			t.Errorf("a revoked credential took the run-summary verdict down: p=%v err=%v", p, err)
 		}
 	})

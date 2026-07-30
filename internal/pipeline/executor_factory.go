@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/runverdict"
 )
 
 // ExecutorDeps bundles every dependency a production Executor needs so
@@ -65,15 +65,18 @@ type ExecutorDeps struct {
 	// (it implements both AgentRunner and ScriptRunner).
 	ScriptRunner ScriptRunner
 
-	// RunVerdictProvider/RunVerdictModel back the post-run outcome
-	// verdict (#1403): a pre-resolved LLM provider + model, built once
-	// at boot from the run_summary aux slot (mirror
+	// RunVerdict backs the post-run outcome verdict (#1403): it is asked
+	// for the LLM provider + model once per terminating run (mirror
 	// internal/api/router_internal.go's wiring for ad-hoc agent runs —
-	// same feature_flags row gates both). nil provider (or nil DB) →
-	// no verdict hook installed, matching every other optional
-	// capability's degraded-mode contract.
-	RunVerdictProvider llm.Provider
-	RunVerdictModel    string
+	// same feature_flags row gates both).
+	//
+	// A resolver rather than a resolved provider (#1556): executors are
+	// long-lived — the cron scheduler's and the boot-resume one live for
+	// the whole process — so a provider captured here is a provider no
+	// aux-slot override could ever reach without a restart. nil resolver
+	// (or nil DB) → no verdict hook installed, matching every other
+	// optional capability's degraded-mode contract.
+	RunVerdict runverdict.Resolver
 
 	// VerdictWG, when set, is a shared WaitGroup the async verdict
 	// goroutines register on instead of the executor's own — so a
@@ -151,12 +154,11 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		exec = exec.WithSignalRegistry(d.Signals)
 	}
 	// Post-run outcome verdict (#1403) — needs both a DB (feature flag
-	// + journal entries) and a pre-resolved LLM provider (built once at
-	// boot from the run_summary aux slot). Either missing → the
-	// capability stays off, matching every other optional dependency's
-	// degraded-mode contract.
-	if d.DB != nil && d.RunVerdictProvider != nil {
-		exec = exec.WithRunVerdict(newRunVerdictHook(d.DB, exec.emitter, d.RunVerdictProvider, d.RunVerdictModel, slog.Default()))
+	// + journal entries) and a way to reach the run_summary aux slot's
+	// provider. Either missing → the capability stays off, matching every
+	// other optional dependency's degraded-mode contract.
+	if d.DB != nil && d.RunVerdict != nil {
+		exec = exec.WithRunVerdict(newRunVerdictHook(d.DB, exec.emitter, d.RunVerdict, slog.Default()))
 	}
 	if d.VerdictWG != nil {
 		exec = exec.WithSharedVerdictWaitGroup(d.VerdictWG)

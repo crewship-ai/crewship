@@ -945,19 +945,26 @@ the one they could not make.
 They are settable at runtime now, per slot, from **Admin → Keeper → Judge
 models** or the CLI. OWNER/ADMIN only.
 
-| Slot | What it evaluates | A change applies |
-|------|-------------------|------------------|
-| `curator` | skill review + memory consolidation | next evaluation |
-| `behavior` | tool-call behaviour monitor | next evaluation |
-| `memory_health` | memory-health audit | next evaluation |
-| `negative` | failure → lessons extraction | next evaluation |
-| `run_summary` | run summary verdicts | **after a restart** |
-| `fallback` | used when a slot itself is unset | **after a restart** |
+| Slot | What it evaluates |
+|------|-------------------|
+| `curator` | skill review + memory consolidation |
+| `behavior` | tool-call behaviour monitor |
+| `memory_health` | memory-health audit |
+| `negative` | failure → lessons extraction |
+| `run_summary` | run summary verdicts |
+| `fallback` | used when a slot itself is unset |
 
-The four evaluator slots resolve their provider per request, so a change is live.
-`run_summary` is built once and handed to every pipeline executor at boot, and
-`fallback` is only consulted during that same boot-time resolution — those two
-need a restart, and both the card and `aux list` say so on the row.
+Every slot resolves its provider from the instance configuration at the moment it
+is used, so a change is in force on the next evaluation — no restart, for any of
+them. The client behind a slot is still built once per distinct provider/model,
+so leaving a slot alone costs nothing extra.
+
+<Note>
+  `run_summary` and `fallback` used to be the exception: their provider was built
+  once at boot and copied into every routine executor, so an override there took
+  effect only after a restart, and the card and `aux list` marked those two rows.
+  Both apply live now, and the marking is gone with the limitation.
+</Note>
 
 ```bash
 crewship keeper aux list                                   # every slot + where its model comes from

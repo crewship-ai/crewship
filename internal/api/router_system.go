@@ -80,7 +80,9 @@ func (r *Router) registerSystemRoutes() {
 	// AuxModels() so test/dev builds that didn't wire
 	// WithAuxiliaryModels still see the MVP defaults rather than
 	// 5 empty rows.
-	auxStatus := NewAuxStatusHandler(r.AuxModels(), r.keeperConfig, r.logger).
+	// r.AuxModels (the method, not its result) so a runtime override is read
+	// per request rather than captured at registration (#1556).
+	auxStatus := NewAuxStatusHandler(r.AuxModels, r.keeperConfig, r.logger).
 		// So a slot pinned to a vault key is not reported as a missing env var
 		// (#1554).
 		WithCredentials(r.keeperAuxSettings, NewAuxCredentialLookup(r.db))

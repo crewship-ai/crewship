@@ -56,7 +56,7 @@ func rowByID(rows []auxSubsystemRow, id string) (auxSubsystemRow, bool) {
 }
 
 func TestAuxStatus_DropsTheSlotNothingConsumes(t *testing.T) {
-	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels(), nil, newTestLogger())
+	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels, nil, newTestLogger())
 	out := auxStatusBody(t, h)
 
 	// Listing it invited an operator to configure a slot that changes
@@ -73,7 +73,7 @@ func TestAuxStatus_DropsTheSlotNothingConsumes(t *testing.T) {
 
 func TestAuxStatus_ReportsTheRealCredentialJudge(t *testing.T) {
 	keeper := &config.KeeperConfig{Enabled: true, OllamaURL: "http://127.0.0.1:11434", Model: "qwen2.5:7b"}
-	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels(), keeper, newTestLogger())
+	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels, keeper, newTestLogger())
 	out := auxStatusBody(t, h)
 
 	row, found := rowByID(out.Subsystems, "access_gatekeeper")
@@ -89,7 +89,7 @@ func TestAuxStatus_ReportsTheRealCredentialJudge(t *testing.T) {
 
 func TestAuxStatus_SaysWhenTheAccessJudgeIsSwitchedOff(t *testing.T) {
 	keeper := &config.KeeperConfig{Enabled: false, OllamaURL: "http://127.0.0.1:11434", Model: "qwen2.5:7b"}
-	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels(), keeper, newTestLogger())
+	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels, keeper, newTestLogger())
 	out := auxStatusBody(t, h)
 
 	row, found := rowByID(out.Subsystems, "access_gatekeeper")
@@ -113,7 +113,7 @@ func TestAuxStatus_FlagsASlotWhoseProviderCannotBeBuilt(t *testing.T) {
 		Curator:  llm.AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5"},
 		Fallback: llm.AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5"},
 	}
-	h := NewAuxStatusHandler(cfg, nil, newTestLogger())
+	h := NewAuxStatusHandler(auxStatic(cfg), nil, newTestLogger())
 	out := auxStatusBody(t, h)
 
 	row, found := rowByID(out.Subsystems, "curator")
@@ -134,7 +134,7 @@ func TestAuxStatus_HealthyWhenTheProviderBuilds(t *testing.T) {
 		Curator:  llm.AuxModel{Provider: "ollama", Model: "qwen2.5:7b"},
 		Fallback: llm.AuxModel{Provider: "ollama", Model: "qwen2.5:7b"},
 	}
-	h := NewAuxStatusHandler(cfg, nil, newTestLogger())
+	h := NewAuxStatusHandler(auxStatic(cfg), nil, newTestLogger())
 	out := auxStatusBody(t, h)
 
 	row, _ := rowByID(out.Subsystems, "curator")
@@ -146,8 +146,30 @@ func TestAuxStatus_HealthyWhenTheProviderBuilds(t *testing.T) {
 	}
 }
 
+// The aux config is runtime-settable, so this diagnostic has to be read per
+// request (#1556). A snapshot taken at route registration would have told an
+// operator the model they just changed away from — while the admin card two
+// panels up showed the new one.
+func TestAuxStatus_ReadsTheConfigInForcePerRequest(t *testing.T) {
+	cfg := llm.AuxiliaryModels{
+		Curator:  llm.AuxModel{Provider: "ollama", Model: "boot-model"},
+		Fallback: llm.AuxModel{Provider: "ollama", Model: "boot-model"},
+	}
+	h := NewAuxStatusHandler(func() llm.AuxiliaryModels { return cfg }, nil, newTestLogger())
+
+	if row, _ := rowByID(auxStatusBody(t, h).Subsystems, "curator"); row.Model != "boot-model" {
+		t.Fatalf("model = %q, want boot-model", row.Model)
+	}
+
+	cfg.Curator.Model = "live-model"
+
+	if row, _ := rowByID(auxStatusBody(t, h).Subsystems, "curator"); row.Model != "live-model" {
+		t.Errorf("model = %q, want live-model — the status surface captured a snapshot", row.Model)
+	}
+}
+
 func TestAuxStatus_StillRequiresAuth(t *testing.T) {
-	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels(), nil, newTestLogger())
+	h := NewAuxStatusHandler(llm.DefaultAuxiliaryModels, nil, newTestLogger())
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/aux-status?workspace_id=ws1", nil)
 	rr := httptest.NewRecorder()
 	h.Status(rr, req)

@@ -592,11 +592,13 @@ var startCmd = &cobra.Command{
 			srv.APIRouter().PipelinesHandler.SetSaveTokenSecret([]byte(cfg.Auth.InternalToken))
 			logger.Info("pipeline save_token signing enabled (HMAC-SHA256 over internal token)")
 
-			// Post-run outcome verdict (#1403) — same lazily-built
-			// provider every pipeline.NewWiredExecutor call site below
-			// shares via Router.RunVerdictProvider (also used by
-			// internal_runs.go's ad-hoc agent-run verdict wiring).
-			srv.APIRouter().PipelinesHandler.SetRunVerdict(srv.APIRouter().RunVerdictProvider(), srv.APIRouter().RunVerdictModel())
+			// Post-run outcome verdict (#1403) — the same resolver every
+			// pipeline.NewWiredExecutor call site below shares via
+			// Router.RunVerdict (also used by internal_runs.go's ad-hoc
+			// agent-run verdict wiring). Handing over the method rather
+			// than a resolved provider is what keeps a run_summary
+			// override from needing a restart (#1556).
+			srv.APIRouter().PipelinesHandler.SetRunVerdict(srv.APIRouter().RunVerdict)
 
 			// Wire the production CodeRunner for type:code steps. The
 			// MultiCodeRunner dispatches by runtime to pure-Go, deterministic,
@@ -764,20 +766,19 @@ var startCmd = &cobra.Command{
 			if wpStore != nil && runStore != nil {
 				if ph := srv.APIRouter().PipelinesHandler; ph.Runner() != nil {
 					timeoutResumeExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
-						Store:              pipeline.NewStore(deps.DB),
-						Resolver:           pipeline.NewResolver(deps.DB),
-						Runner:             ph.Runner(),
-						Emitter:            ph.Emitter(),
-						DB:                 deps.DB,
-						Waitpoints:         pipelineWaitpoints,
-						WS:                 pipelineWS,
-						Runs:               runRegistry,
-						RunStore:           runStore,
-						CodeRunner:         codeRunner,
-						ScriptRunner:       ph.ScriptRunner(),
-						Signals:            signalRegistry,
-						RunVerdictProvider: srv.APIRouter().RunVerdictProvider(),
-						RunVerdictModel:    srv.APIRouter().RunVerdictModel(),
+						Store:        pipeline.NewStore(deps.DB),
+						Resolver:     pipeline.NewResolver(deps.DB),
+						Runner:       ph.Runner(),
+						Emitter:      ph.Emitter(),
+						DB:           deps.DB,
+						Waitpoints:   pipelineWaitpoints,
+						WS:           pipelineWS,
+						Runs:         runRegistry,
+						RunStore:     runStore,
+						CodeRunner:   codeRunner,
+						ScriptRunner: ph.ScriptRunner(),
+						Signals:      signalRegistry,
+						RunVerdict:   srv.APIRouter().RunVerdict,
 						// Share the pipeline handler's verdict WaitGroup so
 						// this boot executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -835,20 +836,19 @@ var startCmd = &cobra.Command{
 					// signals, idempotency), not just the subset the old
 					// hand-rolled construction happened to include.
 					resumeExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
-						Store:              pipeline.NewStore(deps.DB),
-						Resolver:           pipeline.NewResolver(deps.DB),
-						Runner:             ph.Runner(),
-						Emitter:            ph.Emitter(),
-						DB:                 deps.DB,
-						Waitpoints:         pipelineWaitpoints,
-						WS:                 pipelineWS,
-						Runs:               runRegistry,
-						RunStore:           runStore,
-						CodeRunner:         codeRunner,
-						ScriptRunner:       ph.ScriptRunner(),
-						Signals:            signalRegistry,
-						RunVerdictProvider: srv.APIRouter().RunVerdictProvider(),
-						RunVerdictModel:    srv.APIRouter().RunVerdictModel(),
+						Store:        pipeline.NewStore(deps.DB),
+						Resolver:     pipeline.NewResolver(deps.DB),
+						Runner:       ph.Runner(),
+						Emitter:      ph.Emitter(),
+						DB:           deps.DB,
+						Waitpoints:   pipelineWaitpoints,
+						WS:           pipelineWS,
+						Runs:         runRegistry,
+						RunStore:     runStore,
+						CodeRunner:   codeRunner,
+						ScriptRunner: ph.ScriptRunner(),
+						Signals:      signalRegistry,
+						RunVerdict:   srv.APIRouter().RunVerdict,
 						// Share the pipeline handler's verdict WaitGroup so
 						// this resume executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -925,20 +925,19 @@ var startCmd = &cobra.Command{
 				//     code-step / overridden / wait:event routines behave
 				//     exactly like HTTP-driven ones.
 				schedExec := pipeline.NewWiredExecutor(pipeline.ExecutorDeps{
-					Store:              schedPipelineStore,
-					Resolver:           pipeline.NewResolver(deps.DB),
-					Runner:             ph.Runner(),
-					Emitter:            ph.Emitter(),
-					DB:                 deps.DB,
-					Waitpoints:         pipelineWaitpoints,
-					WS:                 pipelineWS,
-					Runs:               runRegistry,
-					RunStore:           runStore,
-					CodeRunner:         codeRunner,
-					ScriptRunner:       ph.ScriptRunner(),
-					Signals:            signalRegistry,
-					RunVerdictProvider: srv.APIRouter().RunVerdictProvider(),
-					RunVerdictModel:    srv.APIRouter().RunVerdictModel(),
+					Store:        schedPipelineStore,
+					Resolver:     pipeline.NewResolver(deps.DB),
+					Runner:       ph.Runner(),
+					Emitter:      ph.Emitter(),
+					DB:           deps.DB,
+					Waitpoints:   pipelineWaitpoints,
+					WS:           pipelineWS,
+					Runs:         runRegistry,
+					RunStore:     runStore,
+					CodeRunner:   codeRunner,
+					ScriptRunner: ph.ScriptRunner(),
+					Signals:      signalRegistry,
+					RunVerdict:   srv.APIRouter().RunVerdict,
 					// Share the pipeline handler's verdict WaitGroup so this
 					// scheduler executor's async verdicts drain at shutdown.
 					VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),

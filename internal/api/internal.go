@@ -15,10 +15,10 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/journal"
-	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runverdict"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -247,14 +247,14 @@ type InternalHandler struct {
 	// route (~52 routes share this one *InternalHandler instance, see
 	// registerInternalRoutes's single `internalAuth := internal.requireInternal`).
 	allowAnyWarnOnce sync.Once
-	// runVerdictProvider/runVerdictModel back the post-run outcome
-	// verdict (#1403): pre-resolved once at boot (mirrors
-	// buildAuxGatekeeper's provider selection) rather than re-resolved
-	// per run. nil provider disables verdict generation (e.g. the
-	// run_summary aux slot has no buildable provider). Wired via
-	// SetRunVerdict from router_internal.go.
-	runVerdictProvider llm.Provider
-	runVerdictModel    string
+	// runVerdict resolves the post-run outcome verdict's provider+model
+	// (#1403) at the moment a run terminates, not at boot — the
+	// run_summary aux slot is runtime-settable and a captured provider
+	// would need a restart to change (#1556). nil means no verdict
+	// wiring at all; a nil provider FROM the resolver means the slot has
+	// no buildable provider. Wired via SetRunVerdict from
+	// router_internal.go.
+	runVerdict runverdict.Resolver
 	// verdictWG tracks the async generateRunVerdict goroutines spawned
 	// by UpdateRun so tests can wait for them instead of sleeping (same
 	// idiom as reconcileWG above).
@@ -308,14 +308,14 @@ func (h *InternalHandler) SetPolicyResolver(r *policy.Resolver) {
 	h.policyResolver = r
 }
 
-// SetRunVerdict wires the pre-resolved LLM provider + model used to
-// generate a post-run outcome verdict (#1403) from UpdateRun. A nil
-// provider disables verdict generation entirely (the run_summary aux
-// slot had no buildable provider at boot) — UpdateRun no-ops the
-// verdict step in that case rather than erroring.
-func (h *InternalHandler) SetRunVerdict(p llm.Provider, model string) {
-	h.runVerdictProvider = p
-	h.runVerdictModel = model
+// SetRunVerdict wires the resolver UpdateRun asks for the LLM provider +
+// model to generate a post-run outcome verdict (#1403). It is called per
+// terminating run rather than stored as a value, so an operator's change
+// to the run_summary aux slot is in force on the next verdict (#1556).
+// A nil resolver — or a resolver returning a nil provider — disables
+// verdict generation rather than erroring.
+func (h *InternalHandler) SetRunVerdict(resolve runverdict.Resolver) {
+	h.runVerdict = resolve
 }
 
 // DrainVerdicts blocks until every in-flight post-run verdict goroutine

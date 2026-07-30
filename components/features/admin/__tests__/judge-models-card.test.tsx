@@ -89,22 +89,21 @@ describe("BackgroundChecksCard", () => {
 
 // The card stopped being read-only because what read-only left was five paid
 // evaluators an operator could see and not change. These pin the edit half:
-// that a row becomes editable, that a save reaches the slot endpoint, and that
-// a restart-scoped slot says so.
+// that a row becomes editable, and that a save reaches the slot endpoint.
 describe("JudgeModelsCard — editing the evaluator models", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   const AUX = {
     slots: [
       {
-        slot: "curator", label: "Skill review + memory consolidation", applies_at: "immediately",
+        slot: "curator", label: "Skill review + memory consolidation",
         provider: { value: "anthropic", source: "default", editable: true },
         model: { value: "claude-haiku-4-5", source: "default", editable: true },
         timeout_ms: { value: 30000, source: "default", editable: true },
         overridden: false,
       },
       {
-        slot: "run_summary", label: "Run summary verdicts", applies_at: "restart",
+        slot: "run_summary", label: "Run summary verdicts",
         provider: { value: "ollama", source: "instance", editable: true },
         model: { value: "qwen2.5:7b", source: "instance", editable: true },
         timeout_ms: { value: 15000, source: "default", editable: true },
@@ -152,13 +151,14 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
     expect(screen.getByTestId("keeper-aux-model-curator")).toBeTruthy()
   })
 
-  it("says which override needs a restart, per row", async () => {
+  it("never tells an operator a slot needs a restart", async () => {
     routed()
     render(<JudgeModelsCard workspaceId="ws1" />)
     await openDetail()
-    // run_summary is captured into the pipeline executors at boot; without this
-    // an operator changes it, sees nothing happen, and calls it broken.
-    expect(await screen.findByText(/needs restart/i)).toBeTruthy()
+    // Every slot resolves from the store at use time now (#1556) — run_summary
+    // and the fallback included — so a restart caveat on any row would be a lie.
+    await screen.findByTestId("keeper-aux-model-run_summary")
+    expect(screen.queryByText(/needs restart/i)).toBeNull()
   })
 
   it("shows where each model came from so reset has a visible referent", async () => {
@@ -236,7 +236,7 @@ describe("JudgeModelsCard — probing an evaluator", () => {
 
   const AUX_ONE = {
     slots: [{
-      slot: "curator", label: "Skill review + memory consolidation", applies_at: "immediately",
+      slot: "curator", label: "Skill review + memory consolidation",
       provider: { value: "anthropic", source: "default", editable: true },
       model: { value: "claude-haiku-4-5", source: "default", editable: true },
       timeout_ms: { value: 30000, source: "default", editable: true },
@@ -413,7 +413,7 @@ describe("JudgeModelsCard — how much detail it shows by default", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
 
   const SAME = ["curator", "behavior", "memory_health", "negative", "run_summary"].map((slot) => ({
-    slot, label: slot, applies_at: "immediately",
+    slot, label: slot,
     provider: { value: "anthropic", source: "default", editable: true },
     model: { value: "claude-haiku-4-5", source: "default", editable: true },
     timeout_ms: { value: 30000, source: "default", editable: true },
