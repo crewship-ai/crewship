@@ -12,6 +12,24 @@ sidecar proxy. Orchestration is **queue + trigger** based (cron schedulers,
 webhooks, an autonomous assignment queue, durable pipeline waitpoints), not
 infinite loops.
 
+## Before you touch an issue: claim it
+
+Ten sessions work this repo at once and all push as the same GitHub account, so
+the assignee field cannot distinguish "another session has this" from "that's
+me". #1481 duplicated #1471's fix and both sides lost the work.
+
+```bash
+scripts/claim-issue.sh <issue>          # checks for a live claim, then claims
+scripts/claim-issue.sh <issue> --check  # read-only: who holds it, which PRs touch it
+scripts/claim-issue.sh --list           # every open claim in the repo
+scripts/claim-issue.sh <issue> --release "why you stopped"
+```
+
+Claim **before the first commit**, release in the same thread when you stop —
+including when you failed, so the next session starts from your evidence. It
+exits 3 without posting if someone else holds it. Full convention and failure
+modes: [CONTRIBUTING.md → Claiming an issue](CONTRIBUTING.md#claiming-an-issue-before-you-work-it).
+
 ## Build, run, test
 
 ```bash
@@ -84,6 +102,8 @@ startup, tracked in `_migrations`. **Prisma is for TypeScript types only — nev
 - Never change the GCM byte layout in `internal/encryption/` — breaks all stored creds.
 - Never change sidecar UID (1002) or agent UID (1001) — it's a security boundary.
 - Never discard WIP — `git stash` before switching branches, never `git checkout .`.
+- Never start an issue without checking it for a live claim — the assignee is not
+  a lock when every session is the same account.
 - Never commit secrets (`.env.local`, real keys).
 
 ## When unsure
