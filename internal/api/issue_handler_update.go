@@ -175,7 +175,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("status", newStatus)
 
-		if newStatus == "DONE" || newStatus == "CANCELLED" {
+		if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
 			now := time.Now().UTC().Format(time.RFC3339)
 			ub.Set("completed_at", now)
 		}
