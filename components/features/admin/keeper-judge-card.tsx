@@ -158,7 +158,7 @@ function StageRow({ stage }: { stage: JudgeStage }) {
       ? "text-muted-foreground/60"
       : "text-destructive"
   return (
-    <div className="flex items-start gap-2 text-[11px]">
+    <div className="flex items-start gap-2 text-xs">
       <span className={cn("font-mono shrink-0 w-3", tone)} aria-hidden="true">{mark}</span>
       <span className="text-foreground/80 shrink-0 w-[9.5rem]">{stage.label}</span>
       <span className={cn("min-w-0 flex-1", stage.ok ? "text-muted-foreground" : tone)}>
@@ -466,7 +466,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     return (
       <SettingsCard title="Credential access judge" description="Which model decides credential access, instance-wide.">
         <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-[11px] text-destructive/90">{err}</span>
+          <span className="text-xs text-destructive/90">{err}</span>
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => { setErr(null); void load() }}>
             Retry
           </Button>
@@ -579,7 +579,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               daemon can see. Nothing is dialled until Connect. */}
           {canEdit && suggestions.length > 0 && (
             <span className="flex flex-col items-end gap-1" data-testid="keeper-judge-suggestions">
-              <span className="text-[10px] text-muted-foreground/70">or try</span>
+              <span className="text-xs text-muted-foreground/70">or try</span>
               <span className="flex flex-wrap justify-end gap-1 max-w-[21rem]">
                 {suggestions.map((sg) => (
                   <button
@@ -604,7 +604,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           {connectResult && (
             <span
               className={cn(
-                "text-[10px] max-w-[21rem] text-right leading-snug",
+                "text-xs max-w-[21rem] text-right leading-snug",
                 connectResult.ok ? "text-success" : "text-destructive",
               )}
               data-testid="keeper-judge-connect-result"
@@ -671,12 +671,12 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               the typed value visible, because clearing it would hide the mistake
               rather than name it. */}
           {models.length > 0 && form.draft.model.trim() !== "" && !models.includes(form.draft.model.trim()) && (
-            <span className="text-[11px] text-warn max-w-[21rem] text-right leading-snug" data-testid="keeper-judge-model-missing">
+            <span className="text-xs text-warn max-w-[21rem] text-right leading-snug" data-testid="keeper-judge-model-missing">
               <span className="font-mono">{form.draft.model.trim()}</span> is not on that server — pull it there, or pick one from the list.
             </span>
           )}
           {models.length === 0 && modelsError && (
-            <span className="text-[10px] text-muted-foreground/70 max-w-[21rem] text-right leading-snug">
+            <span className="text-xs text-muted-foreground/70 max-w-[21rem] text-right leading-snug">
               {modelsError}
             </span>
           )}
@@ -709,11 +709,11 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
             aria-label="Judge time budget in seconds"
             data-testid="keeper-judge-timeout"
           />
-          <span className="text-[11px] text-muted-foreground">seconds</span>
+          <span className="text-xs text-muted-foreground">seconds</span>
         </span>
       </SettingsRow>
       {timeoutInvalid && (
-        <div role="status" className="px-4 py-2 text-[11px] text-destructive border-b border-border/40">
+        <div role="status" className="px-4 py-2 text-xs text-destructive border-b border-border/40">
           The time budget must be a whole number of seconds between 1 and 120.
         </div>
       )}
@@ -758,7 +758,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
 
       {/* Provider/wire is not a step — it is a fact about what the instance judge
           speaks, and it moves out of the flow into a footnote. */}
-      <div className="px-4 py-2 border-t border-border/40 text-[10px] text-muted-foreground/70">
+      <div className="px-4 py-2 border-t border-border/40 text-xs text-muted-foreground/70">
         Speaks the native Ollama API (<span className="font-mono" data-testid="keeper-judge-wire">
           {cfg.judge_provider.value || "—"}{cfg.judge_wire.value ? ` / ${cfg.judge_wire.value}` : ""}
         </span>). An OpenAI-compatible or Anthropic judge is configured per workspace as the
@@ -775,7 +775,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           )}
           data-testid="keeper-judge-test-result"
         >
-          <div className={cn("text-[11px] font-medium", testResult.ok ? "text-success" : "text-destructive")}>
+          <div className={cn("text-xs font-medium", testResult.ok ? "text-success" : "text-destructive")}>
             {testResult.ok
               ? `This judge works — it returned a real verdict (${testResult.decision}).`
               : "This judge is not usable yet."}
@@ -792,7 +792,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
             <button
               type="button"
               onClick={() => form.set("timeoutSec", String(suggestedBudgetSec))}
-              className="text-[11px] underline decoration-dotted text-foreground/80 hover:text-foreground"
+              className="text-xs underline decoration-dotted text-foreground/80 hover:text-foreground"
               data-testid="keeper-judge-apply-budget"
             >
               Set the budget to {suggestedBudgetSec}s and save
@@ -802,7 +802,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       )}
 
       {failClosed && (
-        <div role="status" className="px-4 py-2 text-[11px] text-destructive border-t border-destructive/20 bg-destructive/[0.05]">
+        <div role="status" className="px-4 py-2 text-xs text-destructive border-t border-destructive/20 bg-destructive/[0.05]">
           Keeper is fail-closed: with the engine on and no endpoint or model, every credential
           request is denied. Fill both in before saving.
         </div>

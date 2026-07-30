@@ -336,7 +336,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
               consequence. What an operator needs is what will HAPPEN, in words
               they can act on. */}
           {unusable > 0 && (
-            <div role="status" className="px-4 py-2 text-[11px] text-destructive border-b border-border/40 bg-destructive/[0.05]">
+            <div role="status" className="px-4 py-2 text-xs text-destructive border-b border-border/40 bg-destructive/[0.05]">
               {unusable === 1 ? "One check cannot run" : `${unusable} checks cannot run`} right now. Anything that
               needs {unusable === 1 ? "it" : "them"} is refused rather than allowed — Keeper never guesses.
             </div>
@@ -386,7 +386,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                   probeResult={probeResults[r.id]}
                 />
               ) : (
-                <span className="text-[11px] text-muted-foreground font-mono tabular-nums text-right">
+                <span className="text-xs text-muted-foreground font-mono tabular-nums text-right">
                   {r.provider || "—"}
                   {r.model ? ` / ${r.model}` : ""}
                   {r.timeout_ms ? ` · ${Math.round(r.timeout_ms / 1000)}s` : ""}
@@ -415,7 +415,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
             >
               <span className="flex items-center gap-2">
                 {uniformModel && !expanded && (
-                  <span className="font-mono text-[11px] text-muted-foreground">
+                  <span className="font-mono text-xs text-muted-foreground">
                     all {allSlots.length} on {uniformModel}
                   </span>
                 )}
@@ -526,12 +526,12 @@ function SlotEditor({
             void onSave(slot.slot, { provider: next, model: slot.model.value })
           }}
         >
-          <SelectTrigger size="sm" className="h-7 w-[7.5rem] text-[11px]" aria-label={`${slot.label} provider`}>
+          <SelectTrigger size="sm" className="h-7 w-[7.5rem] text-xs" aria-label={`${slot.label} provider`}>
             <SelectValue placeholder="provider" />
           </SelectTrigger>
           <SelectContent>
             {providers.map((p) => (
-              <SelectItem key={p} value={p} className="text-[11px]">{p}</SelectItem>
+              <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -546,7 +546,7 @@ function SlotEditor({
         >
           <SelectTrigger
             size="sm"
-            className="h-7 min-w-[11rem] text-[11px] font-mono"
+            className="h-7 min-w-[11rem] text-xs font-mono"
             aria-label={`${slot.label} model`}
             data-testid={`keeper-aux-model-${slot.slot}`}
           >
@@ -554,7 +554,7 @@ function SlotEditor({
           </SelectTrigger>
           <SelectContent>
             {catalogue.map((m) => (
-              <SelectItem key={m} value={m} className="text-[11px] font-mono">{m}</SelectItem>
+              <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -564,17 +564,17 @@ function SlotEditor({
           sweep fails, so it is said here — and the value is spelled out, because
           the dropdown cannot show a selection that is not in its list. */}
       {slot.model.value !== "" && catalogue.length > 0 && !catalogue.includes(slot.model.value) && (
-        <span className="max-w-[22rem] text-right text-[11px] leading-snug text-warn">
+        <span className="max-w-[22rem] text-right text-xs leading-snug text-warn">
           <span className="font-mono">{slot.model.value}</span> is not offered by {slot.provider.value} — pick one from the list.
         </span>
       )}
       {catalogueError && (
-        <span className="max-w-[22rem] text-right text-[11px] leading-snug text-muted-foreground">
+        <span className="max-w-[22rem] text-right text-xs leading-snug text-muted-foreground">
           {catalogueError}
         </span>
       )}
 
-      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {/* One real evaluation, on request. Explicitly a button rather than
             something the page does on load: probing five hosted evaluators to
             render a status card would bill the operator for looking. */}
@@ -608,7 +608,7 @@ function SlotEditor({
         <span
           role="status"
           className={cn(
-            "max-w-[22rem] text-right text-[10px] leading-snug",
+            "max-w-[22rem] text-right text-xs leading-snug",
             probeResult.ok ? "text-success" : "text-destructive",
           )}
         >
