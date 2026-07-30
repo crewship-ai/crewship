@@ -505,6 +505,36 @@ jobs:
   # -race cost is dominated by a fixed-cost KDF rather than fixture setup
   # doesn't get faster with more retries the way the #1547 packages did.
   #
+  # ── #1553: the estimate was still short, and the fix is a shard ──
+  #
+  # #1553 fixed the races that had internal/api and cmd/crewship excluded and
+  # put both back in. The first run with them in produced REAL numbers for
+  # every package that matters here (job 90981983760), which is what the
+  # 3.1-3.6x extrapolation above was standing in for:
+  #
+  #   package             local -race    CI -race     ratio
+  #   internal/backup         193.1s      726.9s      3.76x   ok
+  #   cmd/crewship            325.3s     1102.8s      3.39x   ok, 8% headroom
+  #   internal/api            519.4s     >1200s        n/a    KILLED at -timeout
+  #
+  # internal/api hit the 20m per-binary timeout. At the 3.4-3.8x band those
+  # two rows establish, it needs 29-33 minutes; at a deliberately pessimistic
+  # 4x, 35. There is no tuning lever hiding in it either — only 502 of its
+  # 5263 tests call t.Parallel(), so it is ~90% serial and a wider -parallel
+  # buys nothing on a 4-vCPU runner. It is simply a very large package.
+  #
+  # So it gets its own job (go-race-api) with its own budget, running in
+  # parallel with this one — the same shape #1548 used to split go-api out of
+  # go. It is NOT excluded: race-testing it in a shard covers it exactly as
+  # well, it just stops one outlier package from setting the timeout for the
+  # other 106. The two lists below are deliberately separate files so that
+  # distinction is structural rather than a comment someone can skim past.
+  #
+  # cmd/crewship stays here, but -timeout goes 20m → 30m. At 1102.8s it
+  # cleared the old cap by 97 seconds, which is not headroom, it is luck; the
+  # next PR that adds tests to that package would have turned this gate red
+  # for a reason that has nothing to do with a race.
+  #
   # ── The 1 exclusion ──
   #
   # internal/database is excluded STRUCTURALLY, not temporarily. It is the
@@ -520,8 +550,16 @@ jobs:
   # Not a fit for a per-PR gate; a dedicated long-budget job would be a
   # separate, deliberate follow-up, not a default inclusion here.
   #
-  # internal/api and cmd/crewship WERE excluded here for real data races.
-  # Both are fixed and both are back in the gate:
+  # ── The 1 shard ──
+  #
+  # internal/api is race-tested by the go-race-api job below, not here, for
+  # the runtime reason above and for NO other reason. It is covered. Do not
+  # read its absence from this job as "that package has known races" — it
+  # had two, they were fixed in #1553, and internal/cli/client_concurrency_
+  # test.go plus the joins in mcp_registry_cov_test.go hold them fixed.
+  #
+  # internal/api and cmd/crewship WERE excluded from race coverage entirely,
+  # for real data races. Both are fixed and both are covered again:
   #   internal/api — test-only, two root causes. Tests swapped the package
   #     global mcpRegistryURL and restored it from t.Cleanup while the
   #     detached goroutine MCPRegistryHandler.Sync spawns was still reading
@@ -537,9 +575,10 @@ jobs:
   #     messenger. Fixed by moving the memo behind a shared, mutex-guarded
   #     wsResolveState. Regression test: internal/cli/client_concurrency_test.go.
   #
-  # A deny-list rots silently if unchecked — a renamed or removed package
-  # would just vanish from its effect. The step below fails if the entry
-  # stops resolving against `go list ./...`.
+  # Either list rots silently if unchecked — a renamed or removed package
+  # would just vanish from its effect, and in the shard's case would take its
+  # coverage with it while both jobs stayed green. The step below fails if
+  # any entry in either list stops resolving against `go list ./...`.
   go-race:
     needs: [merge-conflict-markers]
     name: Go Race
@@ -551,12 +590,15 @@ jobs:
     #
     # Same invariant as the `go` job: cap MUST exceed overhead + the
     # `go test -timeout` below, so Go's goroutine-dumping panic wins the
-    # race against GitHub's opaque cancel. -timeout is 20m (see the job
-    # comment for why internal/backup needs that much on THIS runner, not
-    # the local box); overhead here is ~70-80s of checkout + setup-go +
-    # race-compiling the dependency graph (measured on this PR's own CI
-    # run). 30m leaves comfortable daylight over 20m + overhead.
-    timeout-minutes: 30
+    # race against GitHub's opaque cancel. -timeout is 30m; overhead is
+    # ~2.5 min of checkout + setup-go + race-compiling the dependency graph
+    # (measured on job 90981983760: script start 19:33:23, first binary
+    # under way by ~19:36). 40m clears 30m + overhead with room.
+    #
+    # Slowest binary here is cmd/crewship at 1102.8s on the runner, so the
+    # job itself lands around 20-22 min; the 30m -timeout is headroom for
+    # that one package, not an expectation.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -572,37 +614,105 @@ jobs:
         # is reproducible from the log without also having to replay a seed.
         run: |
           set -euo pipefail
-          # The 1 exclusion, justified in the job comment above. A stale
-          # entry (renamed/removed package) fails loudly rather than
-          # silently covering less than this comment claims.
+          # Two lists, two different meanings — kept as separate files so
+          # nobody has to infer the difference from a comment:
+          #
+          #   race-deny.txt  → NOT race-tested anywhere. Needs the
+          #                    structural justification in the job comment.
+          #   race-shard.txt → race-tested, by the go-race-api job. Covered,
+          #                    just not from this binary's timeout budget.
+          #
+          # A stale entry in either (renamed/removed package) fails loudly
+          # rather than silently covering less than the comment claims.
           denyfile="${RUNNER_TEMP:-/tmp}/race-deny.txt"
           cat > "$denyfile" <<'DENY'
           github.com/crewship-ai/crewship/internal/database
           DENY
-          ndeny="$(grep -c . "$denyfile")"
+          shardfile="${RUNNER_TEMP:-/tmp}/race-shard.txt"
+          cat > "$shardfile" <<'SHARD'
+          github.com/crewship-ai/crewship/internal/api
+          SHARD
+          nheld="$(cat "$denyfile" "$shardfile" | grep -c .)"
           total="$(go list ./... | grep -c .)"
-          pkgs="$(go list ./... | grep -Fxv -f "$denyfile")"
+          pkgs="$(go list ./... | grep -Fxv -f "$denyfile" | grep -Fxv -f "$shardfile")"
           n="$(printf '%s\n' "$pkgs" | grep -c .)"
-          # The entry must remove exactly one real package. If it doesn't,
-          # either it is stale (a rename silently re-includes a known-bad
-          # package) or `go list` collapsed (which would otherwise look
-          # like a truncated-but-green run — the uncounted-t.Skip failure
-          # mode again).
-          if [ "$((total - n))" -ne "$ndeny" ]; then
-            echo "::error::race deny-list removed $((total - n)) packages but has $ndeny entries. An entry is stale — reconcile it against 'go list ./...'."
-            cat "$denyfile"
+          # Every entry must remove exactly one real package. If the count
+          # doesn't balance, either an entry is stale (a rename silently
+          # re-includes a known-bad package, or silently drops a sharded one
+          # from BOTH jobs) or `go list` collapsed — which would otherwise
+          # look like a truncated-but-green run, the uncounted-t.Skip
+          # failure mode again.
+          if [ "$((total - n))" -ne "$nheld" ]; then
+            echo "::error::race lists hold back $((total - n)) packages but have $nheld entries. One is stale — reconcile against 'go list ./...'."
+            cat "$denyfile" "$shardfile"
             exit 1
           fi
-          echo "Race-testing $n of $total packages ($ndeny excluded, see job comment)."
-          # -timeout 20m per test binary. Was 10m; this job's own first CI
-          # run timed out with internal/backup still running (see the job
-          # comment for the local-vs-CI measurement behind this number).
-          # Every other package finishes in well under a minute, so 20m is
-          # generosity for one package's KDF cost, not a general bump — it
-          # only ever bounds a hang, and a hang here should produce Go's
-          # goroutine dump rather than a GitHub cancel.
+          echo "Race-testing $n of $total packages (1 excluded, 1 sharded to go-race-api; see job comment)."
+          # -timeout 30m per test binary. Was 20m, which cmd/crewship
+          # cleared by only 97 seconds (1102.8s on the runner) — that is
+          # luck, not headroom. Every other package here finishes in well
+          # under two minutes, so this is generosity for one package, not a
+          # general bump. It only ever bounds a hang, and a hang here should
+          # produce Go's goroutine dump rather than a GitHub cancel.
           # shellcheck disable=SC2086
-          go test $pkgs -race -count=1 -timeout 20m
+          go test $pkgs -race -count=1 -timeout 30m
+
+  # ── Go race: the internal/api shard ──
+  #
+  # Same gate, one package, its own budget. internal/api is ~90% serial
+  # (502 t.Parallel calls across 5263 tests) and simply large: 519.4s local
+  # under -race, which at the 3.4-3.8x local→runner ratio the rest of the
+  # suite exhibits means 29-33 minutes here. Sharing go-race's per-binary
+  # timeout meant either that job carried a 45m cap for everyone or
+  # internal/api died at 20m — it died at 20m (job 90981983760).
+  #
+  # Splitting it out is the shape #1548 used for go-api, and it costs
+  # nothing in wall clock: this runs in parallel with go-race, so the PR's
+  # critical path is max(the two), not the sum.
+  #
+  # This job existing is what lets internal/api stay OFF the deny-list.
+  # If it is ever deleted, internal/api loses race coverage silently —
+  # go-race's list guard will not catch that, because from its side the
+  # package is legitimately held back either way.
+  go-race-api:
+    needs: [merge-conflict-markers]
+    name: Go Race (internal/api)
+    runs-on: ubuntu-latest
+    # BLOCKING, same as go-race. Same cap invariant too: 55m > 45m
+    # -timeout + ~3 min overhead, so Go's goroutine dump wins over
+    # GitHub's opaque cancel.
+    #
+    # 45m against a 29-33m projection is deliberately loose for a first
+    # run — the projection is an extrapolation, and this package running
+    # alone on all 4 vCPUs instead of contending with three other binaries
+    # may well beat it. Tighten both numbers once a green run reports the
+    # real one, the same way #1552 tightened -timeout off a real number
+    # rather than a guess.
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go test (race, internal/api)
+        # No -shuffle, for the same reason as go-race: go-shuffle owns
+        # order-dependence, and a fixed order keeps a race report
+        # reproducible from the log without replaying a seed.
+        run: |
+          set -euo pipefail
+          pkg=github.com/crewship-ai/crewship/internal/api
+          # The shard is only coverage if the package it names still
+          # exists. A rename would otherwise leave this job green and
+          # testing nothing, while go-race keeps holding the old path back.
+          if ! go list ./... | grep -Fxq "$pkg"; then
+            echo "::error::$pkg does not resolve against 'go list ./...'. This shard is testing nothing — reconcile it and go-race's race-shard.txt together."
+            exit 1
+          fi
+          go test "$pkg" -race -count=1 -timeout 45m
 
   # ── Go: cross-platform test matrix ──
   #
@@ -750,10 +860,11 @@ jobs:
     # cache miss on the Go SDK download.
     timeout-minutes: 15
     # go-api is gone — internal/api now runs inside `go` again (see that
-    # job's comment). go-race is listed because it is blocking (no
-    # continue-on-error); go-shuffle is deliberately NOT listed — it is
-    # still advisory while its two known findings are fixed elsewhere.
-    needs: [frontend, go, go-race]
+    # job's comment). go-race and go-race-api are listed because they are
+    # blocking (no continue-on-error); go-shuffle is deliberately NOT
+    # listed — it is still advisory while its two known findings are fixed
+    # elsewhere.
+    needs: [frontend, go, go-race, go-race-api]
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
