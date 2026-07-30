@@ -110,7 +110,8 @@ func (r *Router) registerAdminRoutes() {
 	// Keeper model stack: the five aux slots behind the watchdog and the Reviews
 	// sweeps. They bill per token where the judge does not, so this is where the
 	// cost decision gets made — including pointing them all at the local judge.
-	keeperAux := NewAdminKeeperAuxHandler(r.keeperAuxSettings, r.keeperSettings, r.Journal(), r.logger)
+	keeperAux := NewAdminKeeperAuxHandler(r.keeperAuxSettings, r.keeperSettings, r.Journal(), r.logger).
+		WithProbe(keeperJudge.ProbeModel)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
 	r.authedMut("PUT", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Put)
 	r.authedMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Reset)
@@ -118,6 +119,10 @@ func (r *Router) registerAdminRoutes() {
 	// which is exactly what AuxStore.Reset("") means.
 	r.authedMut("DELETE", "/api/v1/admin/keeper/aux", roleManage, keeperAux.Reset)
 	r.authedMut("POST", "/api/v1/admin/keeper/aux/use-judge", roleManage, keeperAux.UseJudge)
+	// One real evaluation against a slot's model, on request. The card's default
+	// stays "not probed" — rendering a status page must not spend money — but an
+	// operator who asks explicitly should be able to find out.
+	r.authedMut("POST", "/api/v1/admin/keeper/aux/{slot}/probe", roleManage, keeperAux.Probe)
 
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.

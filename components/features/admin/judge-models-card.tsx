@@ -116,6 +116,12 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // card to exactly what it was before: status only, nothing to press.
   const [aux, setAux] = useState<AuxConfig | null>(null)
   const [busy, setBusy] = useState(false)
+  // Per-slot probe results. The card's default is still "not probed" — rendering
+  // a status page must not call a paid API — but "is this evaluator actually
+  // usable" was a question with no answer until a sweep ran and failed, which is
+  // the worst moment to find out.
+  const [probing, setProbing] = useState<string | null>(null)
+  const [probeResults, setProbeResults] = useState<Record<string, { ok: boolean; detail: string }>>({})
 
   const load = useCallback(async () => {
     if (!workspaceId) return
@@ -205,6 +211,34 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
       setBusy(false)
     }
   }, [load])
+
+  const probeSlot = useCallback(async (slot: string) => {
+    setProbing(slot)
+    try {
+      const res = await apiFetch(`/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}/probe`, { method: "POST" })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setProbeResults((p) => ({ ...p, [slot]: { ok: false, detail: body?.error || `HTTP ${res.status}` } }))
+        return
+      }
+      // The last stage carries the most specific answer — a verdict that arrived
+      // too slowly is a different failure from one that never arrived, and the
+      // budget stage is the one that says which.
+      const stages = (body?.stages ?? []) as { ok: boolean; detail: string }[]
+      const worst = stages.find((st) => !st.ok) ?? stages[stages.length - 1]
+      setProbeResults((p) => ({
+        ...p,
+        [slot]: { ok: Boolean(body?.ok), detail: worst?.detail ?? "no answer" },
+      }))
+    } catch (e) {
+      setProbeResults((p) => ({
+        ...p,
+        [slot]: { ok: false, detail: e instanceof Error ? e.message : "Network error" },
+      }))
+    } finally {
+      setProbing(null)
+    }
+  }, [])
 
   const unusable = (rows ?? []).filter((r) => !isUsable(r)).length
   const auxBySlot = new Map((aux?.slots ?? []).map((s) => [s.slot, s]))
@@ -304,6 +338,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                   workspaceId={workspaceId}
                   busy={busy}
                   onSave={saveSlot}
+                  onProbe={probeSlot}
+                  probing={probing === r.id}
+                  probeResult={probeResults[r.id]}
                 />
               ) : (
                 <span className="text-[11px] text-muted-foreground font-mono tabular-nums text-right">
@@ -322,6 +359,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                 workspaceId={workspaceId}
                 busy={busy}
                 onSave={saveSlot}
+                onProbe={probeSlot}
+                probing={probing === s.slot}
+                probeResult={probeResults[s.slot]}
               />
             </SettingsRow>
           ))}
@@ -341,13 +381,16 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
  * here degrades an evaluator silently.
  */
 function SlotEditor({
-  slot, providers, workspaceId, busy, onSave,
+  slot, providers, workspaceId, busy, onSave, onProbe, probing, probeResult,
 }: {
   slot: AuxSlot
   providers: string[]
   workspaceId: string | null
   busy: boolean
   onSave: (slot: string, patch: Record<string, unknown>) => Promise<void>
+  onProbe: (slot: string) => Promise<void>
+  probing: boolean
+  probeResult?: { ok: boolean; detail: string }
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
 
@@ -392,6 +435,18 @@ function SlotEditor({
       </div>
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        {/* One real evaluation, on request. Explicitly a button rather than
+            something the page does on load: probing five hosted evaluators to
+            render a status card would bill the operator for looking. */}
+        <button
+          type="button"
+          disabled={busy || probing || !slot.model.value}
+          onClick={() => void onProbe(slot.slot)}
+          className="underline decoration-dotted hover:text-foreground disabled:opacity-50"
+          data-testid={`keeper-aux-probe-${slot.slot}`}
+        >
+          {probing ? "testing…" : "test"}
+        </button>
         <span>{sourceNote(slot.model.source)}</span>
         {slot.timeout_ms.value > 0 && <span className="tabular-nums">{Math.round(slot.timeout_ms.value / 1000)}s</span>}
         {/* Named per row: an operator who changes this one and sees no change in
@@ -408,6 +463,18 @@ function SlotEditor({
           </button>
         )}
       </div>
+
+      {probeResult && (
+        <span
+          role="status"
+          className={cn(
+            "max-w-[22rem] text-right text-[10px] leading-snug",
+            probeResult.ok ? "text-success" : "text-destructive",
+          )}
+        >
+          {probeResult.detail}
+        </span>
+      )}
 
       <ModelPicker
         open={pickerOpen}

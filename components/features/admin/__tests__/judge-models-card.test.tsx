@@ -238,3 +238,71 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
     expect(screen.queryByLabelText(/provider/i)).toBeNull()
   })
 })
+
+// Probing an evaluator on request.
+//
+// The card reported "not probed — Crewship does not call a paid API to render a
+// status page" against every evaluator. That default is right and it was also a
+// dead end: an operator could see five configured judges and had no way to learn
+// whether any of them worked until a sweep ran and failed, which is the worst
+// moment to find out.
+describe("JudgeModelsCard — probing an evaluator", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  const AUX_ONE = {
+    slots: [{
+      slot: "curator", label: "Skill review + memory consolidation", applies_at: "immediately",
+      provider: { value: "anthropic", source: "default", editable: true },
+      model: { value: "claude-haiku-4-5", source: "default", editable: true },
+      timeout_ms: { value: 30000, source: "default", editable: true },
+      overridden: false,
+    }],
+    providers: ["anthropic", "openai", "ollama"],
+    judge_provider: "ollama",
+    judge_model: "qwen2.5:7b",
+    any_overridden: false,
+  }
+
+  function routeWithProbe(probeBody: unknown, probeOk = true) {
+    apiFetch.mockImplementation((url: string) => {
+      if (String(url).includes("aux-status")) return Promise.resolve(ok({ subsystems: [HEALTHY] }))
+      if (String(url).includes("/probe")) {
+        return Promise.resolve(probeOk ? ok(probeBody) : { ok: false, status: 502, json: async () => probeBody })
+      }
+      if (String(url).includes("/admin/keeper/aux")) return Promise.resolve(ok(AUX_ONE))
+      return Promise.resolve(ok({ models: [] }))
+    })
+  }
+
+  it("calls the slot's probe route and reports the verdict", async () => {
+    routeWithProbe({ ok: true, stages: [{ ok: true, detail: "verdict: ALLOW" }, { ok: true, detail: "1.2s of a 20s budget — comfortable headroom" }] })
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    fireEvent.click(await screen.findByTestId("keeper-aux-probe-curator"))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/admin/keeper/aux/curator/probe",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    )
+    // The LAST stage is the most specific good news; a passing probe should say
+    // more than "ok".
+    expect(await screen.findByText(/comfortable headroom/i)).toBeTruthy()
+  })
+
+  it("shows the first failing stage, not a generic failure", async () => {
+    routeWithProbe({
+      ok: false,
+      stages: [
+        { ok: true, detail: "verdict: ALLOW" },
+        { ok: false, detail: "31.4s, and the budget is 20s — this judge would DENY every credential request." },
+      ],
+    })
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    fireEvent.click(await screen.findByTestId("keeper-aux-probe-curator"))
+    // Which stage failed is the whole diagnostic: "answered but too slowly" and
+    // "never answered" send an operator to different fixes.
+    expect(await screen.findByText(/would DENY every credential request/i)).toBeTruthy()
+  })
+})

@@ -467,6 +467,46 @@ false. (Setting `KEEPER_OLLAMA_URL` in the environment *does* auto-enable it at
 boot unless `KEEPER_ENABLED=false` is also set — that is the one path that
 switches it on without anybody clicking.)
 
+### Pointing it at an Ollama anywhere on your network
+
+The judge is dialled **by the Crewship server**, not by your browser. That one
+sentence resolves the question this field is asked most often — *"how can it be
+`localhost` when the server runs on a VM and my Ollama runs on my laptop?"* It
+cannot, and it never did: `localhost:11434` means Ollama on the **server**.
+
+The card offers the addresses it can work out for you as one-click fills:
+
+- `localhost:11434` — Ollama on the Crewship server itself
+- `<your address>:11434` — **the machine you are browsing from**, which the daemon
+  can see from the connection and you cannot look up
+
+For a laptop or any other LAN box, two things have to be true:
+
+```bash
+# on the machine running Ollama
+export OLLAMA_HOST=192.168.1.20:11434   # a specific LAN address, never 0.0.0.0
+ollama serve
+```
+
+<Warning>
+  Bind to the **specific** LAN address, not `0.0.0.0`. Ollama has no
+  authentication: anything that can reach the port can use the models and read the
+  prompts, and a credential-access judge's prompts contain the agent's stated
+  intent and conversation context.
+</Warning>
+
+Then paste the address and press **Connect**. That does one `GET /api/tags`
+through the SSRF fence and hands back the models that server actually has, as a
+live inventory — no typing tags from memory, and a single available model is
+selected for you. The same inventory feeds every other model picker in the app
+(`GET /api/v1/models?provider=OLLAMA`), and it follows the judge endpoint rather
+than the URL the process booted with, so repointing the judge repoints discovery
+with it.
+
+Private and loopback addresses are reachable regardless of
+`CREWSHIP_ALLOW_PRIVATE_ENDPOINTS` — a model server on your own LAN is the point.
+Cloud metadata, link-local, multicast and the unspecified address stay blocked.
+
 ### The time budget (and why the judge test checks it)
 
 Keeper is fail-closed, so a judge that answers **too slowly** denies every
@@ -831,6 +871,19 @@ or the shipped default (`anthropic` / `claude-haiku-4-5`) when that is unset.
 default`, so you can tell whether a reset would change anything. An override that
 cannot be built — `anthropic` with no `ANTHROPIC_API_KEY` — leaves that slot on
 its previous provider and logs the reason, rather than taking the evaluator down.
+
+### Testing an evaluator without waiting for a sweep
+
+The Judge models card reports **not probed** against each evaluator, because
+rendering a status page must not call a paid API. That default is right and it
+used to be a dead end: five configured judges and no way to learn whether any of
+them worked until a sweep ran and failed.
+
+Each row now has a **test** link. It runs one real evaluation against that slot's
+resolved model and reports the same stages the judge check uses — a verdict, and
+whether it arrived inside the credential path's budget — so a local and a hosted
+evaluator are held to the same bar. It costs one call, on a button you pressed,
+and it shares the instance-wide probe rate limit with the judge check.
 
 ## Audit Trail
 

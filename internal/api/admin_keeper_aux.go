@@ -26,6 +26,16 @@ type AdminKeeperAuxHandler struct {
 	judge   *keepercfg.Store
 	journal journal.Emitter
 	logger  *slog.Logger
+	// probe runs one real evaluation against a provider/model, delegated to the
+	// judge handler so the rate limit, the budget comparison and the stage
+	// vocabulary have exactly one implementation. nil → the probe route 503s.
+	probe func(w http.ResponseWriter, r *http.Request, provider, model string)
+}
+
+// WithProbe wires the shared judge probe. See AdminKeeperAuxHandler.probe.
+func (h *AdminKeeperAuxHandler) WithProbe(fn func(http.ResponseWriter, *http.Request, string, string)) *AdminKeeperAuxHandler {
+	h.probe = fn
+	return h
 }
 
 // NewAdminKeeperAuxHandler wires the handler. judge is the instance judge store,
@@ -279,4 +289,44 @@ func (h *AdminKeeperAuxHandler) audit(r *http.Request, actor, summary string, ef
 	}); err != nil {
 		h.logger.Warn("keeper aux config: journal emit failed", "error", err)
 	}
+}
+
+// Probe runs one real evaluation on a slot's resolved model.
+// POST /api/v1/admin/keeper/aux/{slot}/probe
+//
+// The Judge models card said "not probed — Crewship does not call a paid API to
+// render a status page" against every evaluator, which is the right default and a
+// dead end: the operator can see that five judges are configured and has no way to
+// learn whether any of them works until a sweep runs and fails. The default stays
+// (no page render spends money); this is the explicit ask, one slot at a time, on
+// a button the operator pressed.
+//
+// It reuses the judge check's stages so a local and a hosted evaluator are held to
+// the same bar, and the same instance-wide probe bucket, because it spends both a
+// dial and — for a hosted slot — the operator's money.
+func (h *AdminKeeperAuxHandler) Probe(w http.ResponseWriter, r *http.Request) {
+	if !h.guard(w, r) {
+		return
+	}
+	if h.probe == nil {
+		replyError(w, http.StatusServiceUnavailable, "The judge probe is not available on this server")
+		return
+	}
+	slot := strings.TrimSpace(r.PathValue("slot"))
+	if !keepercfg.KnownAuxSlot(slot) {
+		replyError(w, http.StatusBadRequest, "Unknown evaluator slot "+slot)
+		return
+	}
+
+	eff := h.store.EffectiveSlot(slot)
+	provider, model := eff.Provider.Value, eff.Model.Value
+	if provider == "" || model == "" {
+		replyError(w, http.StatusBadRequest, "This slot has no provider or model configured")
+		return
+	}
+
+	// Delegated whole: the judge handler owns the probe budget, the rate limit and
+	// the stage vocabulary, and a second implementation of "does this model
+	// answer" is a second thing to keep true.
+	h.probe(w, r, provider, model)
 }

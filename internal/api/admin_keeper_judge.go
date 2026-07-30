@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -409,6 +410,10 @@ func parseSmokeVerdict(content string) (string, bool) {
 type judgeModelsResponse struct {
 	Endpoint string   `json:"endpoint"`
 	Models   []string `json:"models"`
+	// Suggestions are candidate addresses to try — see judgeSuggestions. Sent
+	// with every answer, not just failures: the useful moment to learn that your
+	// own laptop is reachable is before you have typed anything.
+	Suggestions []judgeSuggestion `json:"suggestions,omitempty"`
 	// Error is set instead of an HTTP error status: the picker asks on every
 	// keystroke-settled edit, and a 500 in the console for "your Ollama is not
 	// running yet" is noise. The UI renders this next to the field.
@@ -434,7 +439,8 @@ func (h *AdminKeeperJudgeHandler) Models(w http.ResponseWriter, r *http.Request)
 	}
 	root, err := judgeRoot(endpointArg)
 	if err != nil {
-		writeJSON(w, http.StatusOK, judgeModelsResponse{Endpoint: endpointArg, Error: err.Error()})
+		writeJSON(w, http.StatusOK, judgeModelsResponse{
+			Endpoint: endpointArg, Error: err.Error(), Suggestions: judgeSuggestions(r)})
 		return
 	}
 
@@ -442,14 +448,16 @@ func (h *AdminKeeperJudgeHandler) Models(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	models, err := llm.NewOllamaWithClient(root, "", httpsafe.TrustedEndpointClient(15*time.Second)).ListModels(ctx)
 	if err != nil {
-		writeJSON(w, http.StatusOK, judgeModelsResponse{Endpoint: root, Error: judgeReachHint(root, err)})
+		writeJSON(w, http.StatusOK, judgeModelsResponse{
+			Endpoint: root, Error: judgeReachHint(root, err), Suggestions: judgeSuggestions(r)})
 		return
 	}
 	names := make([]string, 0, len(models))
 	for _, m := range models {
 		names = append(names, m.ID)
 	}
-	writeJSON(w, http.StatusOK, judgeModelsResponse{Endpoint: root, Models: names})
+	writeJSON(w, http.StatusOK, judgeModelsResponse{
+		Endpoint: root, Models: names, Suggestions: judgeSuggestions(r)})
 }
 
 // hostedJudgeTestRequest is a not-yet-saved hosted judge configuration.
@@ -619,4 +627,169 @@ func (h *AdminKeeperJudgeHandler) budgetStage(latencyMS int64) judgeStage {
 			took.Round(time.Millisecond), budget, suggestBudget(took))
 	}
 	return st
+}
+
+// judgeSuggestion is a candidate model-server address the console can offer as a
+// one-click fill.
+type judgeSuggestion struct {
+	URL   string `json:"url"`
+	Label string `json:"label"`
+}
+
+// judgeSuggestions proposes where an Ollama might be, so "point it at a model
+// server" is a choice rather than a guess.
+//
+// The question this answers is the one that has now been asked out loud: "how can
+// it be localhost when the server runs on Proxmox and my Ollama runs on my Mac?"
+// It cannot — and the operator has no way to know the address to type, because
+// the machine that dials is not the machine they are sitting at. The daemon
+// already knows both: its own loopback, and the address the browser connected
+// FROM, which on a LAN is exactly the laptop running Ollama.
+//
+// Trust: a suggestion is never dialled on its own — the operator clicks it, then
+// clicks Connect, which goes through the SSRF fence and the probe rate limit like
+// any other address. RemoteAddr is used directly; an X-Forwarded-For hop is only
+// taken when it parses as a PRIVATE address, because that is both the only case
+// where the suggestion could be right and the only case where a spoofed header
+// buys nothing (the fence permits private ranges regardless).
+func judgeSuggestions(r *http.Request) []judgeSuggestion {
+	out := []judgeSuggestion{
+		{URL: "http://localhost:11434", Label: "Ollama on the Crewship server itself"},
+	}
+
+	client := clientAddrForSuggestion(r)
+	if client != "" && client != "127.0.0.1" && client != "::1" {
+		host := client
+		if strings.Contains(host, ":") { // IPv6 literal
+			host = "[" + host + "]"
+		}
+		out = append(out, judgeSuggestion{
+			URL:   "http://" + host + ":11434",
+			Label: "Ollama on the machine you are browsing from",
+		})
+	}
+	return out
+}
+
+// clientAddrForSuggestion returns the browser's apparent address, preferring a
+// private X-Forwarded-For hop when the direct peer is a loopback proxy.
+func clientAddrForSuggestion(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer := net.ParseIP(strings.TrimSpace(host))
+
+	// Behind a same-box reverse proxy the peer is loopback and tells us nothing;
+	// the forwarded hop is the only place the real LAN address appears. Only a
+	// private one is taken — see the trust note on judgeSuggestions.
+	if peer == nil || peer.IsLoopback() {
+		for _, h := range r.Header.Values("X-Forwarded-For") {
+			for _, p := range strings.Split(h, ",") {
+				if ip := net.ParseIP(strings.TrimSpace(p)); ip != nil && ip.IsPrivate() {
+					return ip.String()
+				}
+			}
+		}
+	}
+	if peer == nil {
+		return ""
+	}
+	return peer.String()
+}
+
+// ProbeModel runs the verdict + budget stages against an arbitrary
+// provider/model, without saving anything. It is the shared implementation
+// behind the per-evaluator probe on the Judge models card.
+//
+// Exported as a method value rather than a route: the aux handler owns "which
+// slot", this owns "does a model answer, and fast enough" — and having one
+// implementation of the second is what keeps a local and a hosted evaluator held
+// to the same bar.
+func (h *AdminKeeperJudgeHandler) ProbeModel(w http.ResponseWriter, r *http.Request, provider, model string) {
+	if !h.allowProbe() {
+		replyError(w, http.StatusTooManyRequests,
+			"Too many judge probes — each one calls a model, so they are rate limited instance-wide. Try again in a moment.")
+		return
+	}
+
+	out := judgeTestResponse{Model: model}
+	var prov llm.Provider
+
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case keepercfg.ProviderOllama:
+		// The instance judge's endpoint, because that is what an "ollama"
+		// evaluator slot resolves to at request time (keeper_aux_live.go).
+		endpoint := ""
+		if h.store != nil {
+			endpoint = h.store.Effective().EndpointURL.Value
+		}
+		root, err := judgeRoot(endpoint)
+		if err != nil {
+			writeJSON(w, http.StatusOK, judgeTestResponse{Model: model, Stages: []judgeStage{{
+				Name: "key", Label: "Provider resolves", Detail: "no usable judge endpoint: " + err.Error(),
+			}}})
+			return
+		}
+		out.Endpoint = root
+		prov = llm.NewOllamaWithClient(root, model, httpsafe.TrustedEndpointClient(judgeProbeTimeout))
+	default:
+		if h.gov == nil {
+			replyError(w, http.StatusServiceUnavailable, "Hosted-provider probing is not available on this server")
+			return
+		}
+		p, resolved, err := h.gov.BuildCandidate(r.Context(), WorkspaceIDFromContext(r.Context()), provider, model, "")
+		if err != nil || resolved.Degraded {
+			// The degrade is the §4.4 contract working, not a crash — but reporting
+			// it as anything other than a failure would tell the operator this
+			// evaluator answers when the local judge is what would actually run.
+			detail := "this configuration would not be used — " + resolved.DegradeReason
+			if err != nil {
+				detail = err.Error()
+			}
+			writeJSON(w, http.StatusOK, judgeTestResponse{Model: model, Stages: []judgeStage{{
+				Name: "key", Label: "Provider resolves", Detail: detail,
+			}}})
+			return
+		}
+		prov = p
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), judgeProbeTimeout)
+	defer cancel()
+	zero := 0.0
+	started := time.Now()
+	answer, err := prov.Complete(ctx, llm.Request{
+		Model:     model,
+		System:    "You are a security gatekeeper. Reply with ONLY compact JSON: {\"decision\":\"ALLOW|DENY|ESCALATE\",\"reason\":\"...\",\"risk\":1-10}. No prose, no code fence.",
+		Messages:  []llm.Message{{Role: "user", Content: "Agent 'ci-bot' asks for credential 'npm-publish-token' (level L1). Intent: \"publish the release tarball to npm as part of the tagged build\". Decide."}},
+		MaxTokens: 200,
+		// A security verdict must be reproducible; an audit trail of sampled
+		// decisions is not defensible.
+		Temperature: &zero,
+	})
+	st := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
+	switch {
+	case err != nil:
+		st.Detail = "the model did not answer: " + err.Error()
+	default:
+		decision, ok := parseSmokeVerdict(answer.Content)
+		if !ok {
+			st.Detail = "the model answered, but not with a verdict — this evaluator would fail closed on every run."
+			break
+		}
+		st.OK = true
+		out.Decision = decision
+		st.Detail = "verdict: " + decision
+	}
+	out.Stages = append(out.Stages, st)
+	out.OK = st.OK
+	if st.OK {
+		budget := h.budgetStage(st.LatencyMS)
+		out.Stages = append(out.Stages, budget)
+		out.OK = out.OK && budget.OK
+	}
+
+	h.logger.Info("keeper: evaluator probe", "provider", provider, "model", model, "ok", out.OK)
+	writeJSON(w, http.StatusOK, out)
 }

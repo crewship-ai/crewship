@@ -179,6 +179,11 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   // Discovery + verification state. Kept out of the draft: they are questions
   // about an address, not values to save.
   const [models, setModels] = useState<string[]>([])
+  // Candidate addresses from the server — its own loopback, and the address the
+  // browser connected FROM. The second one is the answer to "my Ollama runs on my
+  // Mac, how would I know what to type": the daemon can see it, the operator
+  // cannot.
+  const [suggestions, setSuggestions] = useState<{ url: string; label: string }[]>([])
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<JudgeTestResult | null>(null)
@@ -226,6 +231,28 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     void load(controller.signal)
     return () => controller.abort()
   }, [load])
+
+  // Suggestions on mount, not only after a failed dial: the moment an empty
+  // endpoint field is least useful is before anything has been typed, and that is
+  // exactly when "your own machine is at 192.168.1.20" is worth the most.
+  useEffect(() => {
+    if (!workspaceId) return
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/v1/admin/keeper/judge/models?workspace_id=${encodeURIComponent(workspaceId)}`,
+          { signal: controller.signal },
+        )
+        if (!res.ok) return
+        const body = (await res.json()) as { suggestions?: { url: string; label: string }[] }
+        if (!controller.signal.aborted && body.suggestions) setSuggestions(body.suggestions)
+      } catch {
+        // A missing suggestion list is a missing convenience, not an error.
+      }
+    })()
+    return () => controller.abort()
+  }, [workspaceId])
 
   function handleSave() {
     if (!workspaceId) return
@@ -284,7 +311,10 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           setModelsError(null)
           return
         }
-        const body = (await res.json()) as { models?: string[]; error?: string }
+        const body = (await res.json()) as {
+          models?: string[]; error?: string; suggestions?: { url: string; label: string }[]
+        }
+        if (body.suggestions) setSuggestions(body.suggestions)
         setModels(body.models ?? [])
         setModelsError(body.error ?? null)
       } catch (e) {
@@ -319,7 +349,10 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
         setConnectResult({ ok: false, detail: await errorFrom(res, `The check could not run (HTTP ${res.status})`) })
         return
       }
-      const body = (await res.json()) as { models?: string[]; error?: string }
+      const body = (await res.json()) as {
+        models?: string[]; error?: string; suggestions?: { url: string; label: string }[]
+      }
+      if (body.suggestions) setSuggestions(body.suggestions)
       if (body.error) {
         setModels([])
         setModelsError(body.error)
@@ -508,6 +541,33 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               </Button>
             )}
           </span>
+          {/* Where an Ollama might be, as one-click fills. The second entry is the
+              address the browser connected FROM — i.e. this laptop — which is the
+              thing an operator running Ollama locally cannot look up but the
+              daemon can see. Nothing is dialled until Connect. */}
+          {canEdit && suggestions.length > 0 && (
+            <span className="flex flex-col items-end gap-1" data-testid="keeper-judge-suggestions">
+              <span className="text-[10px] text-muted-foreground/70">or try</span>
+              <span className="flex flex-wrap justify-end gap-1 max-w-[21rem]">
+                {suggestions.map((sg) => (
+                  <button
+                    key={sg.url}
+                    type="button"
+                    title={sg.label}
+                    onClick={() => { form.set("endpoint", sg.url); setConnectResult(null) }}
+                    className={cn(
+                      "h-[19px] rounded border px-1.5 font-mono text-[10px] transition-colors",
+                      sg.url === form.draft.endpoint.trim()
+                        ? "border-primary/50 bg-primary/[0.12] text-primary/90"
+                        : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground",
+                    )}
+                  >
+                    {sg.url.replace(/^https?:\/\//, "")}
+                  </button>
+                ))}
+              </span>
+            </span>
+          )}
           {connectResult && (
             <span
               className={cn(

@@ -33,6 +33,21 @@ type ModelsHandler struct {
 	// configured OLLAMA ENDPOINT_URL (#988). Field so tests inject a fake
 	// without a real dial; the default is defaultWorkspaceOllamaLister.
 	workspaceOllamaLister func(baseURL string) (llm.ModelLister, bool)
+
+	// judgeEndpoint resolves the CURRENT instance judge endpoint. Without it,
+	// OLLAMA discovery fell back to the URL the process booted with — so an
+	// operator who repointed the judge at a LAN box still got the old server's
+	// model list in every picker, which is a silent way to offer models that do
+	// not exist where the request will actually go. nil → boot value only.
+	judgeEndpoint func() string
+}
+
+// WithJudgeEndpoint wires the runtime instance judge endpoint as the OLLAMA
+// discovery target, so "what models are available" follows the judge instead of
+// the value captured at startup.
+func (h *ModelsHandler) WithJudgeEndpoint(fn func() string) *ModelsHandler {
+	h.judgeEndpoint = fn
+	return h
 }
 
 // modelsListResponse is the GET /api/v1/models payload.
@@ -100,14 +115,36 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	models, source := h.resolveModels(r.Context(), wsID, provider)
+	// `endpoint` inventories an address the caller has typed but not saved —
+	// "paste it, see what it has" — instead of only ever answering about a
+	// configuration that is already committed. OLLAMA only; anywhere else the
+	// provider is identified by its credential and a URL would be meaningless.
+	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
+	if endpoint != "" && provider != "OLLAMA" {
+		writeProblem(w, r, http.StatusBadRequest,
+			"the endpoint parameter only applies to OLLAMA — other providers are identified by their credential")
+		return
+	}
+	if endpoint != "" {
+		normalised, err := judgeRoot(endpoint)
+		if err != nil {
+			writeProblem(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
+		endpoint = normalised
+	}
+
+	models, source := h.resolveModels(r.Context(), wsID, provider, endpoint)
 
 	// OLLAMA has no curated fallback. An empty live result with no curated
 	// backstop is a real failure state worth surfacing distinctly so callers
 	// don't silently treat "daemon unreachable" as "no models installed".
-	if provider == "OLLAMA" && source == "curated" && len(models) == 0 {
-		writeProblem(w, r, http.StatusBadGateway,
-			"could not reach the Ollama daemon to list models")
+	if provider == "OLLAMA" && (source == "unreachable" || (source == "curated" && len(models) == 0)) {
+		msg := "could not reach the Ollama daemon to list models"
+		if endpoint != "" {
+			msg = "could not reach " + endpoint + " — is Ollama running there, and is it listening on more than loopback? (OLLAMA_HOST)"
+		}
+		writeProblem(w, r, http.StatusBadGateway, msg)
 		return
 	}
 
@@ -123,7 +160,13 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 // The returned slice is always non-nil (CuratedModels may yield an empty set,
 // e.g. for OLLAMA — the caller distinguishes that case), so the response
 // always serializes "models" as a JSON array rather than null.
-func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string) ([]llm.ModelInfo, string) {
+// resolveModels lists a provider's models, live where possible.
+//
+// endpointOverride is an explicit address the caller wants inventoried — how a
+// picker offers "type an address, see what it has" without saving anything
+// first. OLLAMA only: every other provider is identified by its credential, not
+// by a URL the caller supplies.
+func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider, endpointOverride string) ([]llm.ModelInfo, string) {
 	apiKey, err := h.activeCredential(ctx, wsID, provider)
 	// OLLAMA needs no credential; everything else does to list live.
 	if err != nil && provider != "OLLAMA" {
@@ -139,6 +182,25 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 	// blocks a tenant endpoint resolving internal/metadata unless the instance
 	// cap is on). Fail-open: a blocked or unreachable workspace endpoint falls
 	// through to the server-global path / curated, never rejecting an edit.
+	// An explicit address wins over everything: the caller is asking about THAT
+	// endpoint, and answering about a different one would be worse than an error.
+	// Same SSRF-guarded lister as a stored tenant endpoint — a caller-supplied
+	// address is exactly the shape that needs the fence.
+	if provider == "OLLAMA" && endpointOverride != "" && h.workspaceOllamaLister != nil {
+		if wl, ok := h.workspaceOllamaLister(endpointOverride); ok {
+			if live, err := wl.ListModels(ctx); err == nil {
+				return live, "live"
+			} else {
+				h.logger.Warn("models: explicit OLLAMA endpoint discovery failed",
+					"endpoint", endpointOverride, "error", err)
+				// Deliberately NOT falling through to another endpoint: the caller
+				// asked about this one, and a list from somewhere else would read
+				// as "your address works".
+				return []llm.ModelInfo{}, "unreachable"
+			}
+		}
+	}
+
 	if provider == "OLLAMA" && h.workspaceOllamaLister != nil {
 		if ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, wsID, nil); ep.BaseURL != "" {
 			if wl, ok := h.workspaceOllamaLister(ep.BaseURL); ok {
@@ -152,7 +214,15 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 		}
 	}
 
-	lister, ok := h.buildLister(provider, apiKey, h.ollamaURL)
+	// The judge's CURRENT endpoint before the boot-time one, so discovery follows
+	// a runtime repoint.
+	ollamaURL := h.ollamaURL
+	if provider == "OLLAMA" && h.judgeEndpoint != nil {
+		if live := strings.TrimSpace(h.judgeEndpoint()); live != "" {
+			ollamaURL = live
+		}
+	}
+	lister, ok := h.buildLister(provider, apiKey, ollamaURL)
 	if !ok {
 		return curatedOrEmpty(provider), "curated"
 	}
@@ -206,7 +276,7 @@ func (h *ModelsHandler) providerModelIDs(ctx context.Context, wsID, provider str
 	if !supportedModelProviders[provider] {
 		return nil, false
 	}
-	models, _ := h.resolveModels(ctx, wsID, provider)
+	models, _ := h.resolveModels(ctx, wsID, provider, "")
 	if len(models) == 0 {
 		return nil, false
 	}
