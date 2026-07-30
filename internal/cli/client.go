@@ -59,15 +59,28 @@ type Client struct {
 // behaviour NewRequest's comment already describes as intended: a clone must
 // not throw the resolution away and re-run the preflight.
 //
-// mu guards the whole resolve, not just the two field writes. Commands like
-// `crewship diff` and `crewship me` fan out over a single client, and every
-// request funnels through resolveWorkspaceID; guarding only the assignment
-// would leave each of those goroutines firing its own GET /api/v1/workspaces
-// preflight. Holding the lock across the round-trip collapses them into one.
+// Collapsing the fan-out matters as much as the safety. Commands like
+// `crewship diff` and `crewship me` fan out over a single client and every
+// request funnels through resolveWorkspaceID, so guarding only the field
+// writes would leave each goroutine firing its own GET /api/v1/workspaces
+// preflight. That is what inflight is for: one caller runs it, the rest wait
+// on the channel — no lock is held while the request is in the air.
 type wsResolveState struct {
 	mu sync.Mutex
 	// resolved is the resolved CUID, cached after the first lookup.
 	resolved string
+	// inflight is non-nil while one goroutine is running the preflight, and
+	// is closed when it finishes. Waiters park on it instead of on mu, so the
+	// mutex only ever guards the bookkeeping — never the round-trip.
+	//
+	// Holding mu across the HTTP call would collapse the fan-out to one
+	// preflight too, and that was the first shape of this fix. It trades the
+	// race for something worse: one slow /workspaces call blocks every other
+	// caller on the client, and a caller whose context is already cancelled
+	// cannot leave, because you cannot select on a mutex. The TUI shares one
+	// client across a tea.Batch that re-arms every 5s for the whole session,
+	// so that would have been a frozen UI rather than a rare bad read.
+	inflight chan struct{}
 	// notFound caches a definitive slug-resolution miss so repeated
 	// requests neither re-run the /workspaces preflight nor silently fall
 	// back to the raw slug (the pre-fix behavior that let a typo'd
@@ -332,41 +345,81 @@ func (c *Client) resolveWorkspaceID(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	st := c.wsState()
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	if st.resolved != "" {
-		return st.resolved, nil
-	}
-	if st.notFound != nil {
-		return "", st.notFound
-	}
-	// If it already looks like a CUID (starts with 'c', length >= 20), use directly
-	if looksLikeCUID(c.WorkspaceID) {
-		st.resolved = c.WorkspaceID
-		return c.WorkspaceID, nil
-	}
-	// Cross-process disk cache: skips the /workspaces preflight round-trip
-	// that every slug-configured invocation otherwise pays (see slugcache.go).
-	if id := lookupSlugCache(c.BaseURL, c.WorkspaceID); id != "" {
-		st.resolved = id
-		return id, nil
-	}
-	// Resolve slug to ID by calling workspaces list (without workspace_id param)
-	id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
-	if err != nil {
-		var nf *WorkspaceNotFoundError
-		if errors.As(err, &nf) {
-			st.notFound = nf
+	for {
+		st.mu.Lock()
+		if st.resolved != "" {
+			id := st.resolved
+			st.mu.Unlock()
+			return id, nil
+		}
+		if st.notFound != nil {
+			nf := st.notFound
+			st.mu.Unlock()
 			return "", nf
 		}
-		// Preflight itself failed — fall back to using the slug directly.
-		// Deliberately not memoised: a transient failure must not pin the
-		// client to the raw slug for the rest of the process.
-		return c.WorkspaceID, nil
+		// If it already looks like a CUID (starts with 'c', length >= 20), use directly
+		if looksLikeCUID(c.WorkspaceID) {
+			st.resolved = c.WorkspaceID
+			st.mu.Unlock()
+			return c.WorkspaceID, nil
+		}
+		// Cross-process disk cache: skips the /workspaces preflight round-trip
+		// that every slug-configured invocation otherwise pays (see slugcache.go).
+		// Local file read, so it stays under the lock — it is the network call
+		// that must not.
+		if id := lookupSlugCache(c.BaseURL, c.WorkspaceID); id != "" {
+			st.resolved = id
+			st.mu.Unlock()
+			return id, nil
+		}
+		if ch := st.inflight; ch != nil {
+			// Someone else is already paying for the preflight. Wait for their
+			// answer rather than issuing a second one, but stay cancellable.
+			st.mu.Unlock()
+			select {
+			case <-ch:
+				// Re-read the memo: they may have resolved it, recorded a
+				// definitive miss, or failed transiently without memoising —
+				// in which case this iteration takes over as the resolver.
+				continue
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		ch := make(chan struct{})
+		st.inflight = ch
+		st.mu.Unlock()
+
+		id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
+
+		st.mu.Lock()
+		st.inflight = nil
+		var nf *WorkspaceNotFoundError
+		switch {
+		case err == nil:
+			st.resolved = id
+		case errors.As(err, &nf):
+			st.notFound = nf
+		}
+		st.mu.Unlock()
+		// Released only after the result is visible, so a waiter that wakes on
+		// it never re-reads a memo that is still empty and needlessly re-runs
+		// the preflight.
+		close(ch)
+
+		switch {
+		case err == nil:
+			storeSlugCache(c.BaseURL, c.WorkspaceID, id)
+			return id, nil
+		case nf != nil:
+			return "", nf
+		default:
+			// Preflight itself failed — fall back to using the slug directly.
+			// Deliberately not memoised: a transient failure must not pin the
+			// client to the raw slug for the rest of the process.
+			return c.WorkspaceID, nil
+		}
 	}
-	st.resolved = id
-	storeSlugCache(c.BaseURL, c.WorkspaceID, id)
-	return id, nil
 }
 
 // wsState returns the shared resolution memo. NewClient always installs one;
