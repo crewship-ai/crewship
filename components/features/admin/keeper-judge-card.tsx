@@ -22,7 +22,7 @@
 // the whole reason provenance is on the wire. "Disabled" and "somebody turned
 // this off here" look identical without it.
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -102,6 +102,50 @@ async function errorFrom(res: Response, fallback: string): Promise<string> {
   }
 }
 
+/** One step of the three-stage check (internal/api/admin_keeper_judge.go). */
+interface JudgeStage {
+  name: string
+  label: string
+  ok: boolean
+  skipped?: boolean
+  detail: string
+  latency_ms?: number
+}
+
+interface JudgeTestResult {
+  ok: boolean
+  endpoint: string
+  model?: string
+  stages: JudgeStage[]
+  models?: string[]
+  decision?: string
+}
+
+/**
+ * StageRow renders one stage. Three states, not two: a skipped stage is not a
+ * failed one, and telling them apart is what stops an operator chasing the wrong
+ * problem — "no verdict" reads as a broken model until you notice the endpoint
+ * never answered.
+ */
+function StageRow({ stage }: { stage: JudgeStage }) {
+  const mark = stage.ok ? "✓" : stage.skipped ? "–" : "✗"
+  const tone = stage.ok
+    ? "text-success"
+    : stage.skipped
+      ? "text-muted-foreground/60"
+      : "text-destructive"
+  return (
+    <div className="flex items-start gap-2 text-[11px]">
+      <span className={cn("font-mono shrink-0 w-3", tone)} aria-hidden="true">{mark}</span>
+      <span className="text-foreground/80 shrink-0 w-[9.5rem]">{stage.label}</span>
+      <span className={cn("min-w-0 flex-1", stage.ok ? "text-muted-foreground" : tone)}>
+        {stage.detail}
+        {stage.latency_ms ? <span className="text-muted-foreground/60"> · {stage.latency_ms}ms</span> : null}
+      </span>
+    </div>
+  )
+}
+
 export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | undefined }) {
   // The PUT is roleManage (OWNER/ADMIN) server-side, which is exactly who gets
   // "manage" on Workspace from CASL. The server stays authoritative; a
@@ -112,6 +156,12 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   const [cfg, setCfg] = useState<KeeperConfigResponse | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
+  // Discovery + verification state. Kept out of the draft: they are questions
+  // about an address, not values to save.
+  const [models, setModels] = useState<string[]>([])
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<JudgeTestResult | null>(null)
 
   // Engine, endpoint and model share ONE draft on purpose, even though a switch
   // would normally commit on the spot. Keeper is fail-closed: enabling it
@@ -181,6 +231,89 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     })
   }
 
+  // Ask the endpoint what it serves, so the model is something you pick rather
+  // than something you type from memory (and typo into a fail-closed DENY).
+  // Debounced against the draft, because it fires while somebody is typing a URL.
+  const discoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const draftEndpoint = form.draft.endpoint
+  useEffect(() => {
+    if (!workspaceId) return
+    const endpoint = draftEndpoint.trim()
+    if (endpoint === "") {
+      setModels([])
+      setModelsError(null)
+      return
+    }
+    if (discoverTimer.current) clearTimeout(discoverTimer.current)
+    const controller = new AbortController()
+    discoverTimer.current = setTimeout(async () => {
+      try {
+        const res = await apiFetch(
+          `/api/v1/admin/keeper/judge/models?workspace_id=${encodeURIComponent(workspaceId)}&endpoint=${encodeURIComponent(endpoint)}`,
+          { signal: controller.signal },
+        )
+        if (!res.ok) {
+          // A 403 here means the caller cannot manage; silence beats a scary
+          // banner on a field they cannot use anyway.
+          setModels([])
+          setModelsError(null)
+          return
+        }
+        const body = (await res.json()) as { models?: string[]; error?: string }
+        setModels(body.models ?? [])
+        setModelsError(body.error ?? null)
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return
+        setModels([])
+        setModelsError(null)
+      }
+    }, 600)
+    return () => {
+      controller.abort()
+      if (discoverTimer.current) clearTimeout(discoverTimer.current)
+    }
+  }, [workspaceId, draftEndpoint])
+
+  // Test the DRAFT, not the saved row: finding a working combination before
+  // committing it is the whole point of a test button.
+  async function handleTest() {
+    if (!workspaceId || testing) return
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/judge/test?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            judge_endpoint_url: form.draft.endpoint.trim(),
+            judge_model: form.draft.model.trim(),
+          }),
+        },
+      )
+      if (!res.ok) {
+        toast.error(await errorFrom(res, `The check could not run (HTTP ${res.status})`))
+        return
+      }
+      const body = (await res.json()) as JudgeTestResult
+      setTestResult(body)
+      // The test round trip already listed the endpoint's models; adopt them so
+      // a failed stage 2 can offer the right answer immediately.
+      if (body.models?.length) {
+        setModels(body.models)
+        setModelsError(null)
+      }
+      if (body.ok) {
+        toast.success("The judge works — this endpoint and model return real verdicts.")
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "The check could not run")
+    } finally {
+      setTesting(false)
+    }
+  }
+
   async function handleReset() {
     if (!workspaceId || resetting) return
     setResetting(true)
@@ -230,17 +363,31 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       title="Credential access judge"
       description="Which model decides credential access, and whether Keeper runs at all. Instance-wide; a workspace governance model overrides it per request. Changes apply to the next credential request — no restart."
       actions={
-        canEdit && cfg.overridden ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5 text-xs"
-            onClick={() => { void handleReset() }}
-            disabled={resetting}
-            data-testid="keeper-judge-reset"
-          >
-            {resetting ? "Resetting…" : "Reset to inherited"}
-          </Button>
+        canEdit ? (
+          <>
+            <Button
+              variant="soft"
+              size="sm"
+              className="h-7 px-2.5 text-xs"
+              onClick={() => { void handleTest() }}
+              disabled={testing}
+              data-testid="keeper-judge-test"
+            >
+              {testing ? "Testing…" : "Test"}
+            </Button>
+            {cfg.overridden && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={() => { void handleReset() }}
+                disabled={resetting}
+                data-testid="keeper-judge-reset"
+              >
+                {resetting ? "Resetting…" : "Reset to inherited"}
+              </Button>
+            )}
+          </>
         ) : undefined
       }
     >
@@ -291,16 +438,46 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           </WithProvenance>
         }
       >
-        <Input
-          type="text"
-          value={form.draft.model}
-          onChange={(e) => form.set("model", e.target.value)}
-          disabled={!canEdit}
-          placeholder="qwen2.5:7b"
-          className="h-8 w-[240px] text-xs font-mono"
-          aria-label="Judge model"
-          data-testid="keeper-judge-model"
-        />
+        <span className="flex flex-col items-end gap-1.5">
+          <Input
+            type="text"
+            value={form.draft.model}
+            onChange={(e) => form.set("model", e.target.value)}
+            disabled={!canEdit}
+            placeholder="qwen2.5:7b"
+            className="h-8 w-[240px] text-xs font-mono"
+            aria-label="Judge model"
+            data-testid="keeper-judge-model"
+          />
+          {/* Discovered from the endpoint, one click to use. A model name is
+              something to pick, not something to type from memory — a typo here
+              is a fail-closed DENY on every credential request. */}
+          {models.length > 0 && (
+            <span className="flex flex-wrap justify-end gap-1 max-w-[19rem]" data-testid="keeper-judge-models">
+              {models.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => form.set("model", m)}
+                  disabled={!canEdit}
+                  className={cn(
+                    "px-1.5 h-[18px] rounded border text-[10px] font-mono transition-colors",
+                    m === form.draft.model
+                      ? "border-primary/40 bg-primary/[0.08] text-primary/90"
+                      : "border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {m}
+                </button>
+              ))}
+            </span>
+          )}
+          {models.length === 0 && modelsError && (
+            <span className="text-[10px] text-muted-foreground/70 max-w-[19rem] text-right leading-snug">
+              {modelsError}
+            </span>
+          )}
+        </span>
       </SettingsRow>
 
       <SettingsRow
@@ -313,6 +490,27 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           {cfg.judge_wire.value ? ` / ${cfg.judge_wire.value}` : ""}
         </span>
       </SettingsRow>
+
+      {testResult && (
+        <div
+          className={cn(
+            "px-4 py-3 border-t space-y-1.5",
+            testResult.ok
+              ? "border-success/25 bg-success/[0.04]"
+              : "border-destructive/25 bg-destructive/[0.04]",
+          )}
+          data-testid="keeper-judge-test-result"
+        >
+          <div className={cn("text-[11px] font-medium", testResult.ok ? "text-success" : "text-destructive")}>
+            {testResult.ok
+              ? `This judge works — it returned a real verdict (${testResult.decision}).`
+              : "This judge is not usable yet."}
+          </div>
+          {testResult.stages.map((st) => (
+            <StageRow key={st.name} stage={st} />
+          ))}
+        </div>
+      )}
 
       {failClosed && (
         <div role="status" className="px-4 py-2 text-[11px] text-destructive border-t border-destructive/20 bg-destructive/[0.05]">

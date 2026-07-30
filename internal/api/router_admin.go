@@ -91,6 +91,15 @@ func (r *Router) registerAdminRoutes() {
 	r.authedMut("PUT", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Put)
 	r.authedMut("DELETE", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Reset)
 
+	// Judge verification + model discovery. The pair that makes configuring a
+	// local judge a one-minute job: paste an address, see what it serves, prove
+	// it can actually return a verdict. OWNER/ADMIN on both — they dial an
+	// address the caller can supply, which is a write-class capability even
+	// though one of them only returns a model list.
+	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger)
+	r.authedMut("POST", "/api/v1/admin/keeper/judge/test", roleManage, keeperJudge.Test)
+	r.authedMut("GET", "/api/v1/admin/keeper/judge/models", roleManage, keeperJudge.Models)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())

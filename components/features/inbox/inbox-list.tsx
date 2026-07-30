@@ -14,6 +14,7 @@ import {
   CircleDot,
   Clock,
   Cog,
+  Shield,
   Eye,
   EyeOff,
   Inbox as InboxIcon,
@@ -244,6 +245,25 @@ const SENDER_ICONS = {
   system: Cog,
 } as const
 
+// A few system senders are recognisable enough to deserve their own mark rather
+// than the generic cog. Keeper is the one that matters: it is the security
+// gatekeeper, its notices are the ones you want to spot in a full inbox at a
+// glance, and it wears a shield everywhere else in the product (the admin nav,
+// the decision sheet, the journal). A cog made it look like a settings change.
+//
+// Keyed on sender_id, which the backend sets to a stable slug — sender_name is
+// display text and could be localised or renamed.
+const SENDER_ID_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  keeper: Shield,
+}
+
+// Senders with a fixed identity skip the name-hashed palette: Keeper looking
+// like a different colour in a different workspace is the opposite of
+// recognisable.
+const SENDER_ID_COLORS: Record<string, string> = {
+  keeper: "bg-emerald-500/20 text-emerald-300",
+}
+
 const AVATAR_COLORS = [
   "bg-blue-500/20 text-blue-300",
   "bg-violet-500/20 text-violet-300",
@@ -277,7 +297,9 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
       />
     )
   }
+  const senderID = (item.sender_id ?? "").toLowerCase()
   const Icon =
+    SENDER_ID_ICONS[senderID] ||
     (item.sender_type && SENDER_ICONS[item.sender_type as keyof typeof SENDER_ICONS]) ||
     metaFor(item.kind).icon
   const seed = item.sender_name || item.sender_id || item.kind
@@ -285,7 +307,7 @@ function SenderAvatar({ item, className }: { item: InboxItem; className?: string
     <span
       className={cn(
         "grid shrink-0 place-items-center rounded-md",
-        avatarColor(seed),
+        SENDER_ID_COLORS[senderID] ?? avatarColor(seed),
         className ?? "h-6 w-6",
       )}
       aria-hidden

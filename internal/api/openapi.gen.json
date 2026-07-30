@@ -664,6 +664,55 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/judge/models": {
+      "get": {
+        "operationId": "get_api_v1_admin_keeper_judge_models",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/keeper/judge/test": {
+      "post": {
+        "operationId": "post_api_v1_admin_keeper_judge_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/keeper/requests": {
       "get": {
         "operationId": "get_api_v1_admin_keeper_requests",

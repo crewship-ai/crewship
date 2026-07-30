@@ -59,10 +59,22 @@ function config(over: {
   }
 }
 
-/** Models the endpoint: a PUT applies its fields and returns the whole config. */
-function mockRoutes(initial: ReturnType<typeof config>) {
+/**
+ * Models the endpoints: a PUT applies its fields and returns the whole config,
+ * and the judge check/discovery answer from `judge` (overridable per test).
+ */
+function mockRoutes(
+  initial: ReturnType<typeof config>,
+  judge: { models?: string[]; test?: unknown; modelsError?: string } = {},
+) {
   let current = initial
   apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes("/admin/keeper/judge/models")) {
+      return jsonResponse({ endpoint: "http://x", models: judge.models ?? [], error: judge.modelsError })
+    }
+    if (url.includes("/admin/keeper/judge/test")) {
+      return jsonResponse(judge.test ?? { ok: false, endpoint: "http://x", stages: [] })
+    }
     if (!url.includes("/admin/keeper/config")) throw new Error(`unexpected fetch: ${url}`)
     if (init?.method === "PUT") {
       const body = JSON.parse(String(init.body)) as {
@@ -227,6 +239,93 @@ describe("KeeperJudgeCard", () => {
     expect(await screen.findByText(/keeper configuration is not available/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
     expect(screen.queryByTestId("keeper-judge-endpoint")).not.toBeInTheDocument()
+  })
+
+  // The flow the user asked for, end to end: paste an address, press Test, be
+  // told in words whether it works.
+  it("runs the three-stage check and reports each stage", async () => {
+    mockRoutes(config({ endpoint: ["http://127.0.0.1:11434", "env"], model: ["qwen2.5:7b", "env"] }), {
+      test: {
+        ok: true,
+        endpoint: "http://127.0.0.1:11434",
+        model: "qwen2.5:7b",
+        decision: "ALLOW",
+        models: ["qwen2.5:7b", "llama3:8b"],
+        stages: [
+          { name: "reach", label: "Reach the endpoint", ok: true, detail: "answering · 2 models available", latency_ms: 12 },
+          { name: "model", label: "Model is available", ok: true, detail: "qwen2.5:7b is pulled and ready" },
+          { name: "verdict", label: "Returns a verdict", ok: true, detail: "verdict: ALLOW", latency_ms: 900 },
+        ],
+      },
+    })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.click(await screen.findByTestId("keeper-judge-test"))
+
+    const result = await screen.findByTestId("keeper-judge-test-result")
+    expect(result).toHaveTextContent(/this judge works/i)
+    expect(result).toHaveTextContent(/answering · 2 models available/i)
+    expect(result).toHaveTextContent(/is pulled and ready/i)
+    expect(result).toHaveTextContent(/verdict: ALLOW/i)
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  // A failed check must say WHICH stage failed and leave the skipped ones
+  // visibly skipped — "no verdict" reads as a broken model until you notice the
+  // endpoint never answered.
+  it("distinguishes a failed stage from the stages it skipped", async () => {
+    mockRoutes(config({ endpoint: ["http://127.0.0.1:1", "instance"], model: ["qwen2.5:7b", "instance"], overridden: true }), {
+      test: {
+        ok: false,
+        endpoint: "http://127.0.0.1:1",
+        model: "qwen2.5:7b",
+        stages: [
+          { name: "reach", label: "Reach the endpoint", ok: false, detail: "nothing is listening there" },
+          { name: "model", label: "Model is available", ok: false, skipped: true, detail: "not checked — the endpoint did not answer" },
+          { name: "verdict", label: "Returns a verdict", ok: false, skipped: true, detail: "not checked — the endpoint did not answer" },
+        ],
+      },
+    })
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    fireEvent.click(await screen.findByTestId("keeper-judge-test"))
+
+    const result = await screen.findByTestId("keeper-judge-test-result")
+    expect(result).toHaveTextContent(/not usable yet/i)
+    expect(result).toHaveTextContent(/nothing is listening there/i)
+    expect(result).toHaveTextContent(/not checked/i)
+    // Not a success, so no green toast.
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+
+  // The models the endpoint actually serves, one click to use — the thing that
+  // removes "type the model name from memory" from the setup.
+  it("offers the endpoint's own models and fills the field on click", async () => {
+    mockRoutes(
+      config({ endpoint: ["http://127.0.0.1:11434", "env"] }),
+      { models: ["qwen2.5:7b", "llama3:8b"] },
+    )
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+    await screen.findByTestId("keeper-judge-endpoint")
+
+    // Discovery is debounced against the endpoint draft.
+    const chips = await screen.findByTestId("keeper-judge-models", {}, { timeout: 3000 })
+    expect(chips).toHaveTextContent("qwen2.5:7b")
+    expect(chips).toHaveTextContent("llama3:8b")
+
+    fireEvent.click(screen.getByRole("button", { name: "llama3:8b" }))
+    expect(screen.getByTestId("keeper-judge-model")).toHaveValue("llama3:8b")
+    // Picking a model is an edit, so the card offers to save it.
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeInTheDocument()
+  })
+
+  it("offers no Test button to a non-manager", async () => {
+    canManage = false
+    mockRoutes(config({ endpoint: ["http://127.0.0.1:11434", "env"], model: ["qwen2.5:7b", "env"] }))
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    await screen.findByTestId("keeper-judge-endpoint")
+    expect(screen.queryByTestId("keeper-judge-test")).not.toBeInTheDocument()
   })
 
   it("renders nothing without a workspace", () => {

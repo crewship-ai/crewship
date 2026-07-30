@@ -315,6 +315,40 @@ Turning Keeper on or off also changes how SECRET credentials reach agents
 started after the change — a container already running keeps the environment it
 was handed.
 
+### The one-minute setup
+
+1. **Point it at Ollama.** Enter the endpoint in Admin → Keeper → Credential
+   access judge. The models that endpoint serves appear under the model field as
+   you type — click one instead of typing it.
+2. **Press Test.** Three stages, each naming its own fix:
+
+   | Stage | Passes when | Typical failure |
+   |---|---|---|
+   | Reach the endpoint | something answers there | wrong address, or Ollama bound to loopback on another machine |
+   | Model is available | the model is pulled | `ollama pull qwen2.5:7b` was never run |
+   | Returns a verdict | the model answers with a real decision | the model is too small, or answers in prose |
+
+3. **Turn the engine on and Save.** All three commit in one write, because
+   Keeper is fail-closed and enabling it without a working judge would deny every
+   credential request.
+
+The same three stages from the CLI:
+
+```bash
+crewship keeper judge models --endpoint http://192.168.1.222:11434
+crewship keeper judge test   --endpoint http://192.168.1.222:11434 --model qwen2.5:7b
+crewship keeper config set    --endpoint http://192.168.1.222:11434 --model qwen2.5:7b --enabled on
+```
+
+`judge test` and `judge models` accept `--endpoint` / `--model` so you can find a
+working combination **before** saving it. `judge test` exits non-zero when any
+stage fails, so it works in a script.
+
+Stage 3 is the one a ping cannot give you. A 0.5B model passes stages 1 and 2 and
+still cannot produce a verdict — in production that model denies every credential
+request, and the reason looks like a security decision rather than a
+configuration error.
+
 ### Where to run Ollama, and which address to use
 
 The judge dials from the **Crewship daemon**, not from inside a crew container.
