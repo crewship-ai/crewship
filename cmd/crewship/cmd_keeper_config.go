@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -63,12 +64,19 @@ type keeperConfigStrField struct {
 	Editable bool   `json:"editable"`
 }
 
+type keeperConfigIntField struct {
+	Value    int64  `json:"value"`
+	Source   string `json:"source"`
+	Editable bool   `json:"editable"`
+}
+
 type keeperInstanceConfig struct {
 	Enabled     keeperConfigBoolField `json:"enabled"`
 	Provider    keeperConfigStrField  `json:"judge_provider"`
 	EndpointURL keeperConfigStrField  `json:"judge_endpoint_url"`
 	Wire        keeperConfigStrField  `json:"judge_wire"`
 	Model       keeperConfigStrField  `json:"judge_model"`
+	TimeoutMS   keeperConfigIntField  `json:"judge_timeout_ms"`
 
 	Overridden      bool   `json:"overridden"`
 	UpdatedAt       string `json:"updated_at"`
@@ -95,6 +103,11 @@ func printKeeperInstanceConfig(cfg keeperInstanceConfig) {
 	fmt.Printf("  Endpoint:   %s %s\n", orUnset(cfg.EndpointURL.Value), sourceNote(cfg.EndpointURL.Source))
 	fmt.Printf("  Model:      %s %s\n", orUnset(cfg.Model.Value), sourceNote(cfg.Model.Source))
 	fmt.Printf("  Provider:   %s (%s wire) %s\n", orUnset(cfg.Provider.Value), orUnset(cfg.Wire.Value), sourceNote(cfg.Provider.Source))
+	// Printed next to the model because it is a property OF the model choice: a
+	// bigger judge needs a bigger budget, and a judge slower than the budget
+	// denies every credential request while still reporting as reachable.
+	fmt.Printf("  Budget:     %s per decision %s\n",
+		formatAuxTimeout(cfg.TimeoutMS.Value), sourceNote(cfg.TimeoutMS.Source))
 	if cfg.Overridden && cfg.UpdatedAt != "" {
 		by := cfg.UpdatedBy
 		if by == "" {
@@ -158,6 +171,7 @@ var (
 	flagKeeperCfgEnabled  string
 	flagKeeperCfgEndpoint string
 	flagKeeperCfgModel    string
+	flagKeeperCfgTimeout  string
 )
 
 var keeperConfigSetCmd = &cobra.Command{
@@ -175,6 +189,10 @@ clobber each other.
                              move the episodic embedder or the chat summarizer.
   --model <name>             the judge model, e.g. qwen2.5:7b. Pass "" to inherit
                              KEEPER_MODEL.
+  --judge-timeout <dur>      how long one credential decision may take, e.g. 40s.
+                             A judge slower than this DENIES every request (it is
+                             fail-closed), so raise it if you move to a bigger
+                             model. Pass "" for the built-in default.
 
 Examples:
   crewship keeper config set --endpoint http://192.168.1.40:11434 --model qwen2.5:7b --enabled on
@@ -207,8 +225,23 @@ Examples:
 		if cmd.Flags().Changed("model") {
 			body["judge_model"] = strings.TrimSpace(flagKeeperCfgModel)
 		}
+		if cmd.Flags().Changed("judge-timeout") {
+			raw := strings.TrimSpace(flagKeeperCfgTimeout)
+			if raw == "" {
+				body["judge_timeout_ms"] = 0 // clear → the built-in default
+			} else {
+				d, err := time.ParseDuration(raw)
+				if err != nil {
+					return fmt.Errorf("invalid --judge-timeout %q: use a duration like 40s or 90s", raw)
+				}
+				if d <= 0 {
+					return fmt.Errorf(`invalid --judge-timeout %q: must be positive (pass "" for the default)`, raw)
+				}
+				body["judge_timeout_ms"] = d.Milliseconds()
+			}
+		}
 		if len(body) == 0 {
-			return fmt.Errorf("nothing to change — pass --enabled, --endpoint and/or --model (see 'crewship keeper config set --help')")
+			return fmt.Errorf("nothing to change — pass --enabled, --endpoint, --model and/or --judge-timeout (see 'crewship keeper config set --help')")
 		}
 
 		client, err := requireAuthAndWorkspace()
@@ -258,6 +291,8 @@ func init() {
 	keeperConfigSetCmd.Flags().StringVar(&flagKeeperCfgEnabled, "enabled", "", "whether the Keeper engine runs: on, off, or inherit")
 	keeperConfigSetCmd.Flags().StringVar(&flagKeeperCfgEndpoint, "endpoint", "", `judge endpoint URL, e.g. http://192.168.1.40:11434 ("" to inherit)`)
 	keeperConfigSetCmd.Flags().StringVar(&flagKeeperCfgModel, "model", "", `judge model, e.g. qwen2.5:7b ("" to inherit)`)
+	keeperConfigSetCmd.Flags().StringVar(&flagKeeperCfgTimeout, "judge-timeout", "",
+		`how long one credential decision may take, e.g. 40s ("" for the default)`)
 
 	keeperConfigCmd.AddCommand(keeperConfigGetCmd)
 	keeperConfigCmd.AddCommand(keeperConfigSetCmd)

@@ -40,6 +40,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
@@ -115,6 +116,24 @@ type Defaults struct {
 	Model       string
 }
 
+// Judge-timeout bounds and built-in default.
+//
+// The gatekeeper used to cap its model call at a hardcoded 5s. That is fine for a
+// 3B classifier and wrong for anything larger: a 7B judge on ordinary hardware
+// takes ~12s, so every credential request failed closed with "Keeper LLM
+// unavailable: context deadline exceeded" — while `keeper judge test`, measuring
+// with its own longer budget, reported that the judge worked.
+//
+// 20s as the built-in, because both outcomes block the requesting agent but only
+// one of them blocks it with a WRONG answer: a false DENY on a legitimate request
+// teaches an operator that Keeper is broken. The call stays bounded, which is what
+// the original 5s was actually for.
+const (
+	DefaultJudgeTimeout = 20 * time.Second
+	MinJudgeTimeout     = 1 * time.Second
+	MaxJudgeTimeout     = 120 * time.Second
+)
+
 // TriBool is the wire form of the `enabled` override. Three states, not two:
 // "the operator has not touched this" must stay distinguishable from "the
 // operator turned it off", or honouring KEEPER_ENABLED becomes impossible to
@@ -157,6 +176,10 @@ type Effective struct {
 	EndpointURL Field[string] `json:"judge_endpoint_url"`
 	Wire        Field[string] `json:"judge_wire"`
 	Model       Field[string] `json:"judge_model"`
+	// TimeoutMS is how long one credential decision may take, in milliseconds.
+	// Settable because only the operator knows what their model returns in on
+	// their hardware — see DefaultJudgeTimeout.
+	TimeoutMS Field[int64] `json:"judge_timeout_ms"`
 
 	// Overridden is true when any field is set at instance level — the one bit
 	// a "Reset all" control needs to know whether it would do anything.
@@ -180,6 +203,7 @@ func (e Effective) JudgeFingerprint() string {
 		e.EndpointURL.Value,
 		e.Wire.Value,
 		e.Model.Value,
+		strconv.FormatInt(e.TimeoutMS.Value, 10),
 	} {
 		b.WriteString(strconv.Itoa(len(part)))
 		b.WriteByte(':')
@@ -203,12 +227,14 @@ type settings struct {
 	endpointURL string
 	wire        string
 	model       string
+	timeoutMS   *int64
 	updatedAt   string
 	updatedBy   string
 }
 
 func (s settings) empty() bool {
-	return s.enabled == nil && s.provider == "" && s.endpointURL == "" && s.wire == "" && s.model == ""
+	return s.enabled == nil && s.provider == "" && s.endpointURL == "" && s.wire == "" &&
+		s.model == "" && s.timeoutMS == nil
 }
 
 // Patch is a partial update. A nil field is left alone; a non-nil field is
@@ -221,11 +247,15 @@ type Patch struct {
 	EndpointURL *string
 	Wire        *string
 	Model       *string
+	// TimeoutMS: a pointer to 0 CLEARS the override so the field inherits again,
+	// the same convention the aux patch uses.
+	TimeoutMS *int64
 }
 
 // empty reports whether the patch would change nothing.
 func (p Patch) empty() bool {
-	return p.Enabled == nil && p.Provider == nil && p.EndpointURL == nil && p.Wire == nil && p.Model == nil
+	return p.Enabled == nil && p.Provider == nil && p.EndpointURL == nil && p.Wire == nil &&
+		p.Model == nil && p.TimeoutMS == nil
 }
 
 // Store is the DB-backed instance override, cached in memory. Reads happen on
@@ -259,14 +289,16 @@ func (s *Store) Load(ctx context.Context) error {
 	}
 	var (
 		enabled                          sql.NullInt64
+		timeoutMS                        sql.NullInt64
 		provider, endpointURL, wire, mdl string
 		updatedAt                        string
 		updatedBy                        sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model, updated_at, updated_by
+		SELECT enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
+		       judge_timeout_ms, updated_at, updated_by
 		  FROM keeper_runtime_settings WHERE id = ?`, singletonID).
-		Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &updatedAt, &updatedBy)
+		Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &timeoutMS, &updatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		s.mu.Lock()
 		s.cur = settings{}
@@ -288,6 +320,10 @@ func (s *Store) Load(ctx context.Context) error {
 	if enabled.Valid {
 		v := enabled.Int64 != 0
 		next.enabled = &v
+	}
+	if timeoutMS.Valid {
+		v := timeoutMS.Int64
+		next.timeoutMS = &v
 	}
 	s.mu.Lock()
 	s.cur = next
@@ -350,6 +386,13 @@ func resolve(cur settings, dflt Defaults) Effective {
 	eff.Wire = pick(cur.wire, "", WireOllama)
 	eff.EndpointURL = pick(cur.endpointURL, dflt.EndpointURL, "")
 	eff.Model = pick(cur.model, dflt.Model, "")
+	// No env layer for the timeout: it was a compile-time constant before this
+	// field existed, so "unset" means the built-in and there is nothing in between.
+	if cur.timeoutMS != nil {
+		eff.TimeoutMS = Field[int64]{Value: *cur.timeoutMS, Source: SourceInstance}
+	} else {
+		eff.TimeoutMS = Field[int64]{Value: DefaultJudgeTimeout.Milliseconds(), Source: SourceDefault}
+	}
 	return eff
 }
 
@@ -405,6 +448,14 @@ func (s *Store) Apply(ctx context.Context, p Patch, actor string) (Effective, er
 	if p.Model != nil {
 		next.model = strings.TrimSpace(*p.Model)
 	}
+	if p.TimeoutMS != nil {
+		if *p.TimeoutMS == 0 {
+			next.timeoutMS = nil // clear → the built-in default
+		} else {
+			v := *p.TimeoutMS
+			next.timeoutMS = &v
+		}
+	}
 
 	if err := validate(next, s.dflt); err != nil {
 		s.mu.Unlock()
@@ -457,19 +508,26 @@ func (s *Store) persist(ctx context.Context, next settings, actor string) error 
 			enabled = 0
 		}
 	}
+	var timeout any
+	if next.timeoutMS != nil {
+		timeout = *next.timeoutMS
+	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO keeper_runtime_settings
-			(id, enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model, updated_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			(id, enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
+			 judge_timeout_ms, updated_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		ON CONFLICT(id) DO UPDATE SET
 			enabled            = excluded.enabled,
 			judge_provider     = excluded.judge_provider,
 			judge_endpoint_url = excluded.judge_endpoint_url,
 			judge_wire         = excluded.judge_wire,
 			judge_model        = excluded.judge_model,
+			judge_timeout_ms   = excluded.judge_timeout_ms,
 			updated_by         = excluded.updated_by,
 			updated_at         = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-		singletonID, enabled, next.provider, next.endpointURL, next.wire, next.model, nullIfEmpty(actor))
+		singletonID, enabled, next.provider, next.endpointURL, next.wire, next.model,
+		timeout, nullIfEmpty(actor))
 	if err != nil {
 		return fmt.Errorf("keepercfg: persist settings: %w", err)
 	}
@@ -557,6 +615,14 @@ func validate(next settings, dflt Defaults) error {
 	}
 	if err := validateModel(next.model); err != nil {
 		return err
+	}
+	if next.timeoutMS != nil {
+		d := time.Duration(*next.timeoutMS) * time.Millisecond
+		if d < MinJudgeTimeout || d > MaxJudgeTimeout {
+			return newValidation(fmt.Sprintf(
+				"the judge timeout must be between %s and %s (clear it to use the %s default)",
+				MinJudgeTimeout, MaxJudgeTimeout, DefaultJudgeTimeout))
+		}
 	}
 
 	// Fail-closed guard: with Keeper on and no judge, every credential request

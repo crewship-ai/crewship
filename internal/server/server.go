@@ -709,7 +709,12 @@ func (s *Server) mountAPIRouter(
 		// resolver is built above so the aux evaluators share it.
 		return gatekeeper.New(wrapped, eff.Model.Value, logger,
 			gatekeeper.WithWatchSpecResolver(watchSpecResolver(deps.DB, logger)),
-			gatekeeper.WithGovModelResolver(govResolver.Resolve)), nil
+			gatekeeper.WithGovModelResolver(govResolver.Resolve),
+			// The operator's budget, not a constant. A judge slower than the
+			// constant made every credential request a fail-closed DENY while the
+			// judge test reported that it worked; the fingerprint includes the
+			// timeout, so changing it rebuilds on the next evaluation.
+			gatekeeper.WithCallTimeout(time.Duration(eff.TimeoutMS.Value)*time.Millisecond)), nil
 	})
 	opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 	opts = append(opts, goapi.WithGovModelStatus(govResolver))

@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 // Credential tiers, at the decision boundary.
@@ -223,3 +225,70 @@ func TestTier_ExecuteAtL4AlsoEscalates(t *testing.T) {
 		t.Errorf("decision = %s, want ESCALATE for an L4 execute", resp.Decision)
 	}
 }
+
+// The budget the gatekeeper enforces.
+//
+// It used to be a compile-time constant, and the comment beside it pointed at a
+// SetLLMTimeout function that did not exist. On dev1 a correctly configured 7B
+// judge took ~12s against that 5s constant, so every credential request came back
+// DENY — with a reason that read like a security verdict rather than "your model
+// needs longer".
+func TestTier_CallTimeoutIsTheOperatorsSetting(t *testing.T) {
+	// A provider that outlives a tiny budget. The gatekeeper's own ctx deadline is
+	// what must fire, so the provider simply waits for the context.
+	slow := &blockingProvider{}
+	g := gatekeeper.New(slow, "test-model", newTestLogger(),
+		gatekeeper.WithCallTimeout(50*time.Millisecond))
+
+	resp, err := g.Evaluate(context.Background(), tierReq(keeper.SecurityLevelL2, goodIntent))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Decision != string(keeper.DecisionDeny) {
+		t.Errorf("decision = %s, want DENY — a timeout must fail closed", resp.Decision)
+	}
+	// The budget that was exceeded, and the way to change it. "context deadline
+	// exceeded" alone sent the last configuration session looking for a broken
+	// endpoint.
+	if !strings.Contains(resp.Reason, "50ms") {
+		t.Errorf("reason %q does not name the budget", resp.Reason)
+	}
+	if !strings.Contains(resp.Reason, "--judge-timeout") {
+		t.Errorf("reason %q does not name the setting that fixes it", resp.Reason)
+	}
+	// Structured, so the audit evaluators' fail-soft widening survives a reword.
+	if !resp.InfraFailure {
+		t.Error("a timeout DENY is not marked as an infrastructure failure")
+	}
+}
+
+// A zero or negative budget must not disable the bound — an unbounded model call
+// is the failure audit M4 added the timeout for.
+func TestTier_ZeroCallTimeoutKeepsTheFallbackBound(t *testing.T) {
+	g := gatekeeper.New(&mockProvider{content: `{"decision":"ALLOW","reason":"ok","risk":2}`},
+		"test-model", newTestLogger(), gatekeeper.WithCallTimeout(0))
+	// Nothing to assert about duration here without waiting 20s; what matters is
+	// that the option did not clear the bound and the evaluation still works.
+	resp, err := g.Evaluate(context.Background(), tierReq(keeper.SecurityLevelL2, goodIntent))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Decision != string(keeper.DecisionAllow) {
+		t.Errorf("decision = %s, want ALLOW", resp.Decision)
+	}
+}
+
+// blockingProvider waits for the caller's context, so the gatekeeper's own
+// deadline is what ends the call.
+type blockingProvider struct{}
+
+func (blockingProvider) Complete(ctx context.Context, _ llm.Request) (*llm.Response, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (p blockingProvider) Stream(ctx context.Context, req llm.Request, _ func(llm.StreamEvent) error) (*llm.Response, error) {
+	return p.Complete(ctx, req)
+}
+
+func (blockingProvider) Name() string { return "blocking" }

@@ -12,19 +12,20 @@ import (
 // keeperJudgeCmd drives the two endpoints that make configuring a local judge a
 // one-minute job instead of a guessing game:
 //
-//	POST /api/v1/admin/keeper/judge/test    — three stages
+//	POST /api/v1/admin/keeper/judge/test    — four stages
 //	GET  /api/v1/admin/keeper/judge/models  — what that endpoint serves
 //
 // Keeper is fail-closed, so every way of being misconfigured arrives as the same
-// DENY on every credential request. The three stages separate the three causes an
-// operator can act on: nothing is listening, the model is not pulled, or the model
-// cannot produce a verdict.
+// DENY on every credential request. The stages separate the causes an operator can
+// act on: nothing is listening, the model is not pulled, the model cannot produce a
+// verdict, or it produces one too slowly for the credential path to wait.
 var keeperJudgeCmd = &cobra.Command{
 	Use:   "judge",
 	Short: "Verify the credential-access judge and list the models it can use",
 	Long: `Check the Keeper judge (requires OWNER or ADMIN).
 
   judge test    reach the endpoint → is the model pulled → does it return a verdict
+                → does it answer inside the budget
   judge models  list the models the configured endpoint actually serves
 
 Both accept --endpoint / --model to check values you have not saved yet, so you
@@ -68,13 +69,19 @@ var (
 
 var keeperJudgeTestCmd = &cobra.Command{
 	Use:   "test",
-	Short: "Run the three-stage judge check (requires OWNER or ADMIN)",
-	Long: `Reach the endpoint, confirm the model is pulled, and make the model return a
-real verdict on a miniature gatekeeper prompt.
+	Short: "Run the four-stage judge check (requires OWNER or ADMIN)",
+	Long: `Reach the endpoint, confirm the model is pulled, make the model return a real
+verdict on a miniature gatekeeper prompt, and check it did so inside the budget the
+credential path allows.
 
 Stage 3 is the one a ping cannot give you: a model that answers in prose, or one
 too small to follow the format, passes the first two stages and then denies every
 credential request in production.
+
+Stage 4 is the one this check itself used to get wrong. It measured with its own
+generous timeout, so a judge that answered in 12s against a 5s credential budget
+showed three green ticks and then denied everything. Now the measured latency is
+compared with the configured budget ('keeper config set --judge-timeout').
 
 Exits non-zero when any stage fails, so it works in a script or a cron.`,
 	Args: cobra.NoArgs,

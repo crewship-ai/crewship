@@ -467,6 +467,50 @@ false. (Setting `KEEPER_OLLAMA_URL` in the environment *does* auto-enable it at
 boot unless `KEEPER_ENABLED=false` is also set — that is the one path that
 switches it on without anybody clicking.)
 
+### The time budget (and why the judge test checks it)
+
+Keeper is fail-closed, so a judge that answers **too slowly** denies every
+credential request. The budget used to be a hardcoded 5 seconds, which is fine for
+a 3B classifier and wrong for anything bigger: a 7B judge on ordinary hardware
+takes ~12s, so a correctly configured instance denied everything — while
+`crewship keeper judge test`, measuring with its own generous timeout, showed three
+green ticks and said "the judge works".
+
+Both halves are fixed. The budget is a setting:
+
+```bash
+crewship keeper config set --judge-timeout 40s     # 1s–120s, default 20s
+crewship keeper config set --judge-timeout ""      # back to the default
+```
+
+and the judge check has a fourth stage that compares what it just measured with
+the budget the credential path will actually allow:
+
+```
+✓ Answers inside the budget   8.1s of a 20s budget — comfortable headroom
+✗ Answers inside the budget   31.4s, and the budget is 20s — this judge would DENY
+                              every credential request. Raise the budget
+                              (`crewship keeper config set --judge-timeout 65s`)
+                              or pick a smaller model.
+```
+
+Stage 4 counts toward the overall result, because a judge that cannot answer in
+time does not work however well it reasons. The budget is also part of the judge's
+wiring fingerprint, so changing it rebuilds the judge on the next evaluation — no
+restart.
+
+<Note>
+  The measurement is one warm call. The first request after an idle period pays for
+  a cold model load and will be slower, which is why stage 4 says "it fits, but only
+  just" rather than passing silently when the margin is thin.
+</Note>
+
+If a request does hit the budget, the DENY says so and names the fix rather than
+reporting `context deadline exceeded`:
+
+> Keeper judge did not answer within 20s — deny by default. If the model is simply
+> slow, raise the budget: `crewship keeper config set --judge-timeout 40s`
+
 ### Confirming a finding reaches you
 
 Keeper writes to the inbox when it escalates, and on a DENY at or above the

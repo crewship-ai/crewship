@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -23,6 +24,7 @@ CREATE TABLE keeper_runtime_settings (
     judge_endpoint_url TEXT NOT NULL DEFAULT '',
     judge_wire         TEXT NOT NULL DEFAULT '',
     judge_model        TEXT NOT NULL DEFAULT '',
+    judge_timeout_ms   INTEGER CHECK (judge_timeout_ms IS NULL OR (judge_timeout_ms >= 1000 AND judge_timeout_ms <= 120000)),
     updated_by         TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -545,5 +547,89 @@ func TestNilStore(t *testing.T) {
 	}
 	if _, err := s.Apply(context.Background(), Patch{Model: strp("x")}, "u"); err == nil {
 		t.Error("nil store accepted a write")
+	}
+}
+
+// The judge budget. Found by configuring a 7B judge on dev1 by hand: the
+// gatekeeper capped its model call at a hardcoded 5s, the model needed ~12s, and
+// every credential request failed closed while `keeper judge test` reported that
+// the judge worked. A constant cannot know what an operator's hardware returns in.
+func TestTimeout_DefaultsToTheBuiltInAndIsSettable(t *testing.T) {
+	s := newTestStore(t, Defaults{Enabled: false, EndpointURL: "http://127.0.0.1:11434", Model: "m"})
+	ctx := context.Background()
+
+	eff := s.Effective()
+	if eff.TimeoutMS.Value != DefaultJudgeTimeout.Milliseconds() {
+		t.Errorf("default = %dms, want %s", eff.TimeoutMS.Value, DefaultJudgeTimeout)
+	}
+	if eff.TimeoutMS.Source != SourceDefault {
+		t.Errorf("source = %s, want default", eff.TimeoutMS.Source)
+	}
+
+	forty := int64(40000)
+	eff, err := s.Apply(ctx, Patch{TimeoutMS: &forty}, "")
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if eff.TimeoutMS.Value != 40000 || eff.TimeoutMS.Source != SourceInstance {
+		t.Errorf("after set = %dms/%s", eff.TimeoutMS.Value, eff.TimeoutMS.Source)
+	}
+
+	// 0 clears back to the built-in, like every other field's empty value.
+	zero := int64(0)
+	eff, err = s.Apply(ctx, Patch{TimeoutMS: &zero}, "")
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if eff.TimeoutMS.Value != DefaultJudgeTimeout.Milliseconds() || eff.TimeoutMS.Source != SourceDefault {
+		t.Errorf("after clear = %dms/%s, want the built-in back", eff.TimeoutMS.Value, eff.TimeoutMS.Source)
+	}
+}
+
+// The budget is part of the judge's wiring, so changing it has to rebuild the
+// judge — otherwise the setting saves, reads back correctly, and the live
+// gatekeeper keeps enforcing the old number.
+func TestTimeout_IsPartOfTheJudgeFingerprint(t *testing.T) {
+	base := Effective{
+		Enabled:     Field[bool]{Value: true},
+		EndpointURL: Field[string]{Value: "http://127.0.0.1:11434"},
+		Model:       Field[string]{Value: "qwen2.5:7b"},
+		TimeoutMS:   Field[int64]{Value: 20000},
+	}
+	slower := base
+	slower.TimeoutMS = Field[int64]{Value: 45000}
+
+	if base.JudgeFingerprint() == slower.JudgeFingerprint() {
+		t.Error("changing the budget did not change the fingerprint — the live judge would keep the old one")
+	}
+}
+
+func TestTimeout_Rejects(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ms   int64
+	}{
+		{"below the floor", 500},
+		{"above the ceiling", int64((5 * time.Minute).Milliseconds())},
+		{"negative", -1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t, Defaults{EndpointURL: "http://127.0.0.1:11434", Model: "m"})
+			ms := tc.ms
+			_, err := s.Apply(context.Background(), Patch{TimeoutMS: &ms}, "")
+			if err == nil {
+				t.Fatal("accepted an out-of-range budget")
+			}
+			if !IsValidation(err) {
+				t.Errorf("IsValidation = false for %v", err)
+			}
+			if !strings.Contains(err.Error(), "judge timeout") {
+				t.Errorf("message %q does not name the field", err.Error())
+			}
+			// And the rejection leaves the built-in in force rather than a partial write.
+			if got := s.Effective().TimeoutMS.Value; got != DefaultJudgeTimeout.Milliseconds() {
+				t.Errorf("a rejected budget changed the effective value to %dms", got)
+			}
+		})
 	}
 }

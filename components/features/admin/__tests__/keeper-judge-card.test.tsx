@@ -54,6 +54,7 @@ function config(over: {
     judge_endpoint_url: { value: endpoint, source: endpointSrc, editable: true },
     judge_wire: { value: "ollama", source: "default", editable: false },
     judge_model: { value: model, source: modelSrc, editable: true },
+  judge_timeout_ms: { value: 20000, source: "default", editable: true },
     overridden: over.overridden ?? false,
     judge_configured: endpoint !== "" && model !== "",
   }
@@ -153,6 +154,9 @@ describe("KeeperJudgeCard", () => {
       // Trimmed — a pasted URL routinely carries whitespace.
       judge_endpoint_url: "http://192.168.1.40:11434",
       judge_model: "qwen2.5:7b",
+      // One write carries the budget too: it is a property of the model choice,
+      // and a judge slower than it denies every request.
+      judge_timeout_ms: 20000,
     })
     expect(await screen.findByText(/^saved$/i)).toBeInTheDocument()
   })
@@ -163,7 +167,10 @@ describe("KeeperJudgeCard", () => {
 
     fireEvent.click(await screen.findByTestId("keeper-judge-enabled"))
 
-    expect(screen.getByText(/fail-closed/i)).toBeInTheDocument()
+    // Scoped to the switch's own row: the budget field's help text also says
+    // "fail-closed", which is correct there and would otherwise make this match
+    // two elements.
+    expect(screen.getByText(/every credential\s+request is denied/i)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled()
     expect(putBodies()).toHaveLength(0)
   })

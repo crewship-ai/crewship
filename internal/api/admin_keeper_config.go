@@ -53,6 +53,10 @@ type keeperConfigResponse struct {
 	EndpointURL keeperConfigField[string] `json:"judge_endpoint_url"`
 	Wire        keeperConfigField[string] `json:"judge_wire"`
 	Model       keeperConfigField[string] `json:"judge_model"`
+	// TimeoutMS is how long one credential decision may take. Editable because a
+	// judge slower than the budget denies every request while reporting as healthy
+	// — the operator is the only one who knows what their model returns in.
+	TimeoutMS keeperConfigField[int64] `json:"judge_timeout_ms"`
 
 	// Overridden is whether anything is set at instance level at all — what a
 	// "Reset to inherited" control needs to know before offering itself.
@@ -72,6 +76,7 @@ func keeperConfigPayload(eff keepercfg.Effective) keeperConfigResponse {
 		EndpointURL: keeperConfigField[string]{Value: redactEndpointUserinfo(eff.EndpointURL.Value), Source: string(eff.EndpointURL.Source), Editable: true},
 		Wire:        keeperConfigField[string]{Value: eff.Wire.Value, Source: string(eff.Wire.Source)},
 		Model:       keeperConfigField[string]{Value: eff.Model.Value, Source: string(eff.Model.Source), Editable: true},
+		TimeoutMS:   keeperConfigField[int64]{Value: eff.TimeoutMS.Value, Source: string(eff.TimeoutMS.Source), Editable: true},
 
 		Overridden:      eff.Overridden,
 		UpdatedAt:       eff.UpdatedAt,
@@ -122,6 +127,8 @@ type keeperConfigRequest struct {
 	EndpointURL *string         `json:"judge_endpoint_url"`
 	Wire        *string         `json:"judge_wire"`
 	Model       *string         `json:"judge_model"`
+	// TimeoutMS: 0 clears the override and returns to the built-in default.
+	TimeoutMS *int64 `json:"judge_timeout_ms"`
 }
 
 // Put applies a partial update. PUT /api/v1/admin/keeper/config
@@ -145,6 +152,7 @@ func (h *AdminKeeperConfigHandler) Put(w http.ResponseWriter, r *http.Request) {
 		EndpointURL: body.EndpointURL,
 		Wire:        body.Wire,
 		Model:       body.Model,
+		TimeoutMS:   body.TimeoutMS,
 	}
 	if len(body.Enabled) > 0 {
 		tri, ok := triFromJSON(body.Enabled)

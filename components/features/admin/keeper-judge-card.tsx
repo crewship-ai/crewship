@@ -51,6 +51,9 @@ interface KeeperConfigResponse {
   judge_endpoint_url: ConfigField<string>
   judge_wire: ConfigField<string>
   judge_model: ConfigField<string>
+  /** Optional: a server older than the budget setting does not send it, and the
+   *  card must not crash on that — it renders the built-in default instead. */
+  judge_timeout_ms?: ConfigField<number>
   overridden: boolean
   updated_at?: string
   updated_by?: string
@@ -191,6 +194,8 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
     enabled: cfg?.enabled.value ?? false,
     endpoint: cfg?.judge_endpoint_url.value ?? "",
     model: cfg?.judge_model.value ?? "",
+    // Seconds in the field, milliseconds on the wire: nobody types 20000.
+    timeoutSec: String(Math.round((cfg?.judge_timeout_ms?.value ?? 20000) / 1000)),
   })
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -237,6 +242,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
             enabled: draft.enabled,
             judge_endpoint_url: draft.endpoint.trim(),
             judge_model: draft.model.trim(),
+            judge_timeout_ms: Math.round(Number(draft.timeoutSec) * 1000),
           }),
         },
       )
@@ -567,6 +573,36 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
               {modelsError}
             </span>
           )}
+        </span>
+      </SettingsRow>
+
+      {/* The budget belongs to the model, so it sits under it. A judge slower than
+          this DENIES every credential request — the failure that showed three
+          green ticks on dev1 and refused everything, because the budget was a 5s
+          constant and a 7B model needs ~12s. */}
+      <SettingsRow
+        label="Time budget"
+        description={
+          <WithProvenance source={cfg.judge_timeout_ms?.source ?? "default"}>
+            How long one credential decision may take. Keeper is fail-closed, so a judge that
+            answers slower than this denies the request. Bigger model → bigger budget; Test
+            measures against this number.
+          </WithProvenance>
+        }
+      >
+        <span className="flex items-center gap-1.5">
+          <Input
+            type="number"
+            min={1}
+            max={120}
+            value={form.draft.timeoutSec}
+            onChange={(e) => form.set("timeoutSec", e.target.value)}
+            disabled={!canEdit}
+            className="h-8 w-[80px] text-xs font-mono"
+            aria-label="Judge time budget in seconds"
+            data-testid="keeper-judge-timeout"
+          />
+          <span className="text-[11px] text-muted-foreground">seconds</span>
         </span>
       </SettingsRow>
 

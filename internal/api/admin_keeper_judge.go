@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -279,7 +280,66 @@ func (h *AdminKeeperJudgeHandler) run(ctx context.Context, root, model string) j
 	}
 	out.Stages = append(out.Stages, stage3)
 	out.OK = stage3.OK
+
+	// ── Stage 4: it answers inside the budget the credential path allows ──
+	//
+	// The stage this check was missing, and the reason it lied. Stages 1–3 measure
+	// with the PROBE's timeout, which is generous on purpose. The credential path
+	// uses the operator's judge budget, and a judge slower than that budget DENIES
+	// every request — fail-closed. On dev1 a correctly configured 7B judge took
+	// ~12s against a 5s budget: three green ticks, "the judge works", and every
+	// credential request refused with what looked like a security verdict.
+	//
+	// So the last stage compares what we just measured against what production
+	// will allow, and it is not cosmetic: OK is ANDed with it, because a judge that
+	// cannot answer in time does not work, however well it reasons.
+	if stage3.OK {
+		budget := keepercfg.DefaultJudgeTimeout
+		if h.store != nil {
+			if ms := h.store.Effective().TimeoutMS.Value; ms > 0 {
+				budget = time.Duration(ms) * time.Millisecond
+			}
+		}
+		took := time.Duration(stage3.LatencyMS) * time.Millisecond
+		stage4 := judgeStage{
+			Name: "budget", Label: "Answers inside the budget",
+			LatencyMS: stage3.LatencyMS,
+		}
+		switch {
+		case took <= budget/2:
+			stage4.OK = true
+			stage4.Detail = fmt.Sprintf("%s of a %s budget — comfortable headroom", took.Round(time.Millisecond), budget)
+		case took <= budget:
+			stage4.OK = true
+			// Passing with little room is worth saying: the first request after an
+			// idle hour pays for a cold model load and will be slower than this.
+			stage4.Detail = fmt.Sprintf(
+				"%s of a %s budget — it fits, but only just. A cold model load is slower than this, so consider raising the budget.",
+				took.Round(time.Millisecond), budget)
+		default:
+			stage4.Detail = fmt.Sprintf(
+				"%s, and the budget is %s — this judge would DENY every credential request. Raise the budget (`crewship keeper config set --judge-timeout %s`) or pick a smaller model.",
+				took.Round(time.Millisecond), budget, suggestBudget(took))
+		}
+		out.Stages = append(out.Stages, stage4)
+		out.OK = out.OK && stage4.OK
+	}
 	return out
+}
+
+// suggestBudget rounds a measured latency up to a round number with headroom, for
+// the copy-pasteable command in the stage-4 failure. Doubling rather than adding a
+// few seconds: the measurement is one warm call, and the first request after an
+// idle period pays for a cold model load.
+func suggestBudget(took time.Duration) time.Duration {
+	want := took * 2
+	if want < 10*time.Second {
+		want = 10 * time.Second
+	}
+	if want > keepercfg.MaxJudgeTimeout {
+		want = keepercfg.MaxJudgeTimeout
+	}
+	return want.Round(5 * time.Second)
 }
 
 func skipped(name, label, detail string) judgeStage {
