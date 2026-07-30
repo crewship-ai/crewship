@@ -47,7 +47,9 @@ fi
 field()  { printf '%s' "$ORIG_JSON" | jq -r ".${1}.value  // empty"; }
 source_of() { printf '%s' "$ORIG_JSON" | jq -r ".${1}.source // empty"; }
 
-ORIG_ENABLED="$(field enabled)"
+# NOT via field(): jq's `//` treats `false` as absent, so a disabled engine would
+# read back as an empty string and the state line would say "enabled=".
+ORIG_ENABLED="$(printf '%s' "$ORIG_JSON" | jq -r '.enabled.value')"
 ORIG_ENABLED_SRC="$(source_of enabled)"
 ORIG_MODEL="$(field judge_model)"
 ORIG_MODEL_SRC="$(source_of judge_model)"
