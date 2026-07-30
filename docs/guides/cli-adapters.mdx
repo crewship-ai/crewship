@@ -202,6 +202,48 @@ This narrowly permits RFC1918/loopback for that crew's agents. **Cloud-metadata 
 
 **Which models actually work:** we ship a curated shortlist — Qwen3 Coder 30B (A3B; runs on a single 24 GB GPU at 4-bit) and Devstral Small 24B (built for agent workflows). This is deliberate: below roughly this tier, community reports and upstream issues (`anomalyco/opencode#1034`, `#4428`) show local models "think about" tool calls but emit them as text instead of executing — the agent looks alive but nothing happens. Generic chat models under ~14B will frustrate you; frontier cloud models remain meaningfully stronger for hard tasks. Expect local models to handle routine, well-scoped work.
 
+## In-band failures: when exit 0 still means the run failed
+
+Every supported CLI can end a turn with a refusal, an internal error, or an exhausted quota **and still exit 0**, saying so only inside its own event stream. Crewship treats that as a failed run: the run is recorded as `error` (journal `run.failed`), `RunAgent` returns an error, and the chat shows the CLI's own message instead of an empty assistant bubble.
+
+<Warning>
+  This is a change in observable behaviour introduced with the in-band gate. Runs that previously showed as **completed** — an agent that refused the task, hit its usage limit, or crashed inside the CLI while exiting 0 — now show as **failed**. That is the point: a mission or routine step must not continue on an empty answer, and the run must not be billed as a success. If your success-rate metric drops after upgrading, it is reporting failures that were always happening.
+</Warning>
+
+Only two signals count as **run-level**:
+
+| Adapter | Run-level failure signal | Shape |
+|---|---|---|
+| `CLAUDE_CODE` | `result` event with `is_error: true` | `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"…"}` |
+| `CURSOR_CLI` | `result` event with `is_error: true` | `{"type":"result","subtype":"error","is_error":true,"result":"…"}` |
+| `FACTORY_DROID` | `result` event with `is_error: true` (snake_case), or an `error` event | `{"type":"result","is_error":true,…}` / `{"type":"error","error":"…"}` |
+| `CODEX_CLI` | `turn.failed` envelope, or an `error` event | `{"type":"turn.failed","error":"…"}` |
+| `GEMINI_CLI` | `result` event with `status:"error"` (or a non-empty `error`), or an `error` event at `severity != "warning"` | `{"type":"result","status":"error",…}` |
+| `OPENCODE` | `error` event **only** — its `step_finish` result envelopes never report an error | `{"type":"error","error":{"name":"…","data":{"message":"…"}}}` |
+
+A Gemini `error` event with `severity: "warning"` is a soft block / advisory, not a failure; the parser demotes it to a `system` event and the run stays successful.
+
+### What does *not* fail a run
+
+A failed **tool call** is normal agent work and keeps the run `completed`. A grep that matched nothing, a build that failed and then got fixed, a 404 from a fetch — the agent sees the failure and works around it, and reddening the run for those would mark nearly every real run as failed. So none of these are run-level:
+
+- `is_error` on a Claude Code `tool_result` content block
+- `isError` on a Factory Droid `tool_result` event
+- `status: "error"` on a Gemini `tool_result` or on an OpenCode `tool_use` part state
+- a non-zero `exit_code` on a Codex `command_execution` item
+
+Tool failures still surface: the tool result carries `is_error` in its journal metadata and the run trace marks that sub-span errored.
+
+### Ordering
+
+The check is **sticky**, not last-one-wins: once a CLI has reported a failed turn, a later successful envelope does not clear it. Adapters emit several terminal envelopes per run (Droid emits both `completion` and `result`, OpenCode one `step_finish` per step, Codex one `turn.completed` per turn) and their ordering is not guaranteed across CLI versions.
+
+### Where to look when a run fails this way
+
+- The chat / API error message quotes the CLI's own text (truncated at 300 characters).
+- The journal `exec.command` end entry is raised to severity `warn` and carries `in_band_error: true` alongside `exit_code: 0` — that pair is the fingerprint of an in-band failure.
+- The full terminal event, with usage and cost, is in the `result` event's journal metadata.
+
 ## Adapters that are deliberately NOT supported
 
 `BuildCLICommand` only ships adapters for CLI agents that meet four criteria. CLI agents that don't meet all four are skipped today. Adding a new adapter is a one-line change once the upstream surface stabilises; open a GitHub issue to discuss before opening a PR.
