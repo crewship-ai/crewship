@@ -34,6 +34,10 @@ func newTestStore(t *testing.T, dflt Defaults) *Store {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	// A bare :memory: DSN gives every pooled connection its OWN empty database,
+	// so an Apply → Load sequence can land on a connection where the table does
+	// not exist. One connection keeps the schema and the rows in the same place.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	if _, err := db.Exec(tableDDL); err != nil {
 		t.Fatalf("create table: %v", err)

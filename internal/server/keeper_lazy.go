@@ -2,12 +2,9 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
@@ -116,48 +113,21 @@ func (l *lazyGatekeeper) evaluator(eff keepercfg.Effective) (gatekeeper.Evaluato
 //
 // The endpoint is operator-authored server configuration — the same trust class
 // as KEEPER_OLLAMA_URL, which has always dialled unfenced because it is
-// typically loopback or a LAN box. So RFC1918, loopback and ULA stay reachable
-// here regardless of CREWSHIP_ALLOW_PRIVATE_ENDPOINTS: a judge that cannot reach
-// the operator's own Ollama is the failure this whole change exists to fix, and
-// a network policy presenting as a DENY on every credential request is the worst
-// possible way to express it.
+// typically loopback or a LAN box. httpsafe.TrustedEndpointClient encodes
+// exactly that: private ranges stay reachable, the hard tier (cloud metadata,
+// link-local, multicast) does not. It matters more now than it did: the value is
+// settable at runtime by an OWNER/ADMIN rather than only by whoever controls the
+// process environment, and a verdict's reason string is surfaced to the
+// requesting agent — so an unfenced dial would make it a reflection channel for
+// whatever a metadata endpoint returned.
 //
-// The hard tier still applies. Now that the value is settable at runtime by an
-// OWNER/ADMIN rather than only by whoever controls the process environment, the
-// judge's answer — including the reason string, which is surfaced to the
-// requesting agent — could otherwise carry whatever a cloud metadata endpoint
-// returned. IsHardBlockedIP keeps 169.254.0.0/16 and its IPv6 forms, multicast
-// and the unspecified address unreachable, which is the same two-tier shape
-// crew endpoints already use.
+// The status probe of this same URL (internal/api/keeper_status.go) shares the
+// constructor. Two copies of one trust decision is how they drift.
 //
-// Keep-alives are deliberately left ON (unlike the tenant-endpoint client in
-// internal/api): the gatekeeper sits in the credential path, and paying a fresh
-// TCP handshake per verdict would show up as latency on every agent that asks
-// for a secret.
+// 120s covers a cold model load: the gatekeeper sits in the credential path and
+// the first request after an idle hour pays for the weights.
 func keeperJudgeHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 120 * time.Second,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout: 10 * time.Second,
-				Control: func(_, address string, _ syscall.RawConn) error {
-					host, _, err := net.SplitHostPort(address)
-					if err != nil {
-						return err
-					}
-					ip := httpsafe.ParseIPStripZone(host)
-					if ip == nil {
-						return nil
-					}
-					if httpsafe.IsHardBlockedIP(ip) {
-						return fmt.Errorf("keeper judge endpoint resolves to a blocked address (%s)", ip)
-					}
-					return nil
-				},
-			}).DialContext,
-		},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
+	return httpsafe.TrustedEndpointClient(120 * time.Second)
 }
 
 // deniedResponse is the fail-closed verdict shape both keeper handlers expect.

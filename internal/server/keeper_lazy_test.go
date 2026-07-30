@@ -2,14 +2,12 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
-	_ "modernc.org/sqlite"
 )
 
 // The lazy gatekeeper is what turns `keeper.enabled` from a boot-time fact into
@@ -17,31 +15,12 @@ import (
 // evaluating with a judge built from stale configuration, and rebuilding a
 // judge for a change that did not affect its wiring.
 
-const lazyTestDDL = `
-CREATE TABLE users (id TEXT PRIMARY KEY);
-CREATE TABLE keeper_runtime_settings (
-    id                 TEXT PRIMARY KEY CHECK (id = 'singleton'),
-    enabled            INTEGER CHECK (enabled IN (0, 1)),
-    judge_provider     TEXT NOT NULL DEFAULT '',
-    judge_endpoint_url TEXT NOT NULL DEFAULT '',
-    judge_wire         TEXT NOT NULL DEFAULT '',
-    judge_model        TEXT NOT NULL DEFAULT '',
-    updated_by         TEXT REFERENCES users(id) ON DELETE SET NULL,
-    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-);`
-
 func newLazyTestStore(t *testing.T, dflt keepercfg.Defaults) *keepercfg.Store {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec(lazyTestDDL); err != nil {
-		t.Fatalf("create table: %v", err)
-	}
-	s := keepercfg.New(db, dflt)
+	// The real migrated schema rather than a hand-copied CREATE TABLE: a column
+	// added to the migration would otherwise leave a stale copy here that keeps
+	// passing.
+	s := keepercfg.New(openTestDB(t), dflt)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatalf("load: %v", err)
 	}

@@ -634,13 +634,18 @@ func (s *Server) mountAPIRouter(
 		EndpointURL: cfg.Keeper.OllamaURL,
 		Model:       cfg.Keeper.Model,
 	})
-	if err := keeperSettings.Load(context.Background()); err != nil {
+	// Budgeted like the bootstrap probe further down: a wedged SQLite must not
+	// block boot on a load this code has already decided is non-fatal.
+	keeperLoadCtx, keeperLoadCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	keeperLoadErr := keeperSettings.Load(keeperLoadCtx)
+	keeperLoadCancel()
+	if keeperLoadErr != nil {
 		// Non-fatal (New has no error return, and refusing to boot over one
 		// unreadable row is worse), but loud and specific: the instance is now
 		// running on env values, so an override an operator is relying on —
 		// including one that turned Keeper ON — is not in force.
 		logger.Error("keeper runtime settings failed to load; running on KEEPER_* env values only, any instance override is NOT in force",
-			"error", err)
+			"error", keeperLoadErr)
 	}
 	opts = append(opts, goapi.WithKeeperSettings(keeperSettings))
 

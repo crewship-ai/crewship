@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
-	"github.com/spf13/cobra"
 )
 
 // keeperConfigCmd drives GET/PUT/DELETE /api/v1/admin/keeper/config — the

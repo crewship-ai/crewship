@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
 )
@@ -167,6 +168,15 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 // probeOllama checks if the Ollama server is reachable.
+//
+// The URL used to come from the process environment only. With the runtime
+// settings store wired it is whatever an OWNER/ADMIN last PUT to
+// /admin/keeper/config, which turns this into a dial of an API-supplied address
+// — so it goes through the same fence as the judge itself
+// (httpsafe.TrustedEndpointClient): private and loopback stay reachable because
+// that is where operators run Ollama, the hard tier does not, and redirects are
+// not followed. Only a boolean escapes to the caller, but a read path is exactly
+// where a weaker trust decision goes unnoticed.
 func probeOllama(ctx context.Context, ollamaURL string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -175,7 +185,7 @@ func probeOllama(ctx context.Context, ollamaURL string) bool {
 	if err != nil {
 		return false
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpsafe.TrustedEndpointClient(3 * time.Second).Do(req)
 	if err != nil {
 		return false
 	}

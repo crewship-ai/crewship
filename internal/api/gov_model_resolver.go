@@ -100,11 +100,19 @@ func (r *GovModelResolver) defaults() governance.OllamaDefault {
 	if r.dfltFn == nil {
 		return r.dflt
 	}
+	// Per field, not all-or-nothing: an instance that overrode the endpoint but
+	// has no KEEPER_MODEL would otherwise discard the endpoint too and degrade to
+	// the boot-time URL — the "verdicts going to a host the operator moved away
+	// from" case this indirection exists to close.
+	out := r.dflt
 	url, model := r.dfltFn()
-	if url == "" || model == "" {
-		return r.dflt
+	if url != "" {
+		out.URL = url
 	}
-	return governance.OllamaDefault{URL: url, Model: model}
+	if model != "" {
+		out.Model = model
+	}
+	return out
 }
 
 // Resolve implements gatekeeper.GovModelResolver.

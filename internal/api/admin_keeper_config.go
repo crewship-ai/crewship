@@ -216,8 +216,14 @@ func triFromJSON(raw json.RawMessage) (keepercfg.TriBool, bool) {
 // quieted instance this is still a line an incident review needs, and the value
 // being changed is the one that decides credential access.
 func (h *AdminKeeperConfigHandler) audit(r *http.Request, actor, summary string, eff keepercfg.Effective) {
+	// Redacted here as well as in the journal payload below: an endpoint written
+	// through this handler can never carry credentials (the store refuses), but
+	// KEEPER_OLLAMA_URL is not validated by us and an inherited value may well
+	// hold a proxy token — which would otherwise land in cleartext logs on every
+	// config change.
 	h.logger.Warn("keeper instance judge configuration changed via admin API",
-		"actor", actor, "enabled", eff.Enabled.Value, "endpoint", eff.EndpointURL.Value,
+		"actor", actor, "enabled", eff.Enabled.Value,
+		"endpoint", redactEndpointUserinfo(eff.EndpointURL.Value),
 		"model", eff.Model.Value, "overridden", eff.Overridden)
 	if h.journal == nil {
 		return
