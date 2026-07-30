@@ -33,6 +33,7 @@ import { useFileEditor } from "./hooks/use-file-editor"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { ScopeSection } from "./files/scope-section"
 import { TriggersTab } from "./right-panel-tabs/triggers-tab"
+import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
 import { TeamTab } from "./right-panel-tabs/team-tab"
 
@@ -46,9 +47,13 @@ const FileEditor = dynamic(
   { ssr: false, loading: () => <div className="flex items-center justify-center h-full"><Spinner className="h-5 w-5 text-muted-foreground" /></div> },
 )
 
+// The Triggers tab is the chat-side surface of the same webhook capability the
+// agent Configuration tab gates behind AGENT_EXTERNAL_TRIGGERS. Gating one and
+// not the other does not hide a feature — it just moves where you find it, and
+// this tab is the half that hands out a live signing secret.
 const RIGHT_PANEL_TABS = [
   { id: "files", label: "Files", icon: FileText },
-  { id: "triggers", label: "Triggers", icon: Zap },
+  ...(AGENT_EXTERNAL_TRIGGERS ? [{ id: "triggers", label: "Triggers", icon: Zap }] : []),
   { id: "team", label: "Team", icon: Users },
   { id: "context", label: "Context", icon: Bookmark },
 ] as const
@@ -251,7 +256,10 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
           </div>
         )}
 
-        {activeTab === "triggers" && (
+        {/* Checked here as well as in the tab list: initialTab comes from the
+            caller, so hiding the button alone still leaves the surface one
+            deep link away. */}
+        {AGENT_EXTERNAL_TRIGGERS && activeTab === "triggers" && (
           <TriggersTab agentId={agentId} workspaceId={workspaceId} />
         )}
 

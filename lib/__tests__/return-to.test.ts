@@ -35,7 +35,23 @@ describe("return-to", () => {
     "javascript:alert(1)",
     "evil.example",
     " /crews",                      // leading space would defeat startsWith
+    // Backslash is an authority separator in the WHATWG URL parser every
+    // browser implements, so these start with "/" and not "//" — passing any
+    // prefix-based check — and still resolve to http://evil.example/.
+    "/\\evil.example",
+    "/\\\\evil.example",
+    "/\\/evil.example",
+    "\\/evil.example",
   ])("refuses to send the user to %s", (hostile) => {
     expect(parseReturnTo(hostile, "Riley")).toBeNull()
+  })
+
+  // The escaped forms are NOT an escape: %5C stays a literal path character,
+  // so these are ordinary in-app paths and must keep working.
+  it("keeps genuinely in-app paths, including odd ones", () => {
+    expect(parseReturnTo("/crews", "Crews")?.href).toBe("/crews")
+    expect(parseReturnTo("/issues/OPS-4?tab=activity#note", "Issue")?.href)
+      .toBe("/issues/OPS-4?tab=activity#note")
+    expect(parseReturnTo("/%5Cevil.example", "Odd")?.href).toBe("/%5Cevil.example")
   })
 })
