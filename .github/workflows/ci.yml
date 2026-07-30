@@ -476,14 +476,33 @@ jobs:
   #   internal/auth/sessions      29-33s    (was ~1500s per the original PR)
   #
   # With the multiplier gone, `go test ./... -race` was re-tried in full —
-  # 105 of 108 packages, the 3 exclusions below — and it PASSES, 0 races, in
-  # 322s wall clock measured under heavy contention (load average 5.9 → 12.1;
-  # another agent's -shuffle run was sharing the box at the time). The floor
-  # package is internal/backup at 240.4s; every other package finishes in
-  # under a minute. A dedicated 4-vCPU CI runner with no other load should be
-  # at least as fast. So the polarity flips: a short, justified deny-list is
-  # now affordable, and it closes the allow-list's real weakness — a new
-  # package silently getting NO race coverage.
+  # 105 of 108 packages, the 3 exclusions below — and it PASSES, 0 races,
+  # locally in 322s wall clock under heavy contention. So the polarity
+  # flips: a short, justified deny-list is now affordable, and it closes the
+  # allow-list's real weakness — a new package silently getting NO coverage.
+  #
+  # ⚠ THE LOCAL NUMBER WAS WRONG FOR internal/backup, and CI is what caught
+  # it. This job's own first run on this PR timed out at -timeout 10m with
+  # internal/backup still running (goroutine dump: TestBackupRestore_
+  # MemoryBlobsRoundTrip, deep in age.Encrypt → scrypt.Key), against a local
+  # measurement of 240.4s. Two packages measured on both sides bracket the
+  # gap: internal/server 51.0s local → 183.7s on CI (3.6x); internal/
+  # auth/sessions 23.4s local → 73.3s on CI (3.1x). backup is disproportionate
+  # even by that ratio, because it is not mutex/goroutine-bound like those
+  # two — the passphrase path runs scrypt (age.NewScryptRecipient, N=2^18,
+  # a ~256MiB working set by design), and -race's shadow-memory check on a
+  # memory-hard, cache-hostile KDF is a worse tax than on typical code. At
+  # 3.1-3.6x, backup should need roughly 600-660s of CI wall clock — right at
+  # the 10m boundary it hit — but that ratio is calibrated on different code
+  # shapes, so treat it as a floor, not a promise.
+  #
+  # -timeout bumped to 20m (below) on that estimate: roughly 2x the
+  # extrapolated need, not a guess pulled from nowhere, but still provisional
+  # until a CI run actually clears it. If 20m is not enough either, the next
+  # step is a 4th deny-list entry for internal/backup with whatever real
+  # number that run reports — not a further bump, since a package whose
+  # -race cost is dominated by a fixed-cost KDF rather than fixture setup
+  # doesn't get faster with more retries the way the #1547 packages did.
   #
   # ── The 3 exclusions ──
   #
@@ -501,19 +520,26 @@ jobs:
   # separate, deliberate follow-up, not a default inclusion here.
   #
   # internal/api and cmd/crewship are excluded because they fail with REAL
-  # data races, not slowness or flakiness. Both are the exact two packages
-  # `go-shuffle` below already excludes for pre-existing shared-mutable-state
-  # bugs (defaultCapabilityCache in internal/api; package-level CLI globals
-  # in cmd/crewship). Measured here: internal/api races on writes inside
-  # TestCovMRSyncAcceptedThenCooldown / TestCovMTBRegistrySyncAcceptedThenCooldown
-  # / TestRecurringIssueCreate_NextRunIsUTC; cmd/crewship races on reads in
-  # internal/cli.(*Client).resolveWorkspaceID from a *Client shared across
-  # parallel tests (7 separate warnings). Same root-cause class go-shuffle
-  # found, now confirmed as literal data races rather than order-dependence.
-  # A parallel PR is fixing both (per-test capability-cache reset; per-test
-  # CLI client instead of a shared global) — do not add either package here
-  # until that lands, or this gate goes red on the next PR that touches
-  # either file. Lift this exclusion in the same PR that lifts go-shuffle's.
+  # data races, not slowness or flakiness. #1551 (merged) fixed both packages'
+  # ORDER-DEPENDENCE — defaultCapabilityCache and the CLI's package-level
+  # globals now reset per test, which is why `go-shuffle` below runs both with
+  # an empty skip list. That is a different bug class from what -race catches
+  # here: two tests can reset shared state correctly between runs and still
+  # race each other when they execute CONCURRENTLY under t.Parallel(). RE-
+  # VERIFIED on this branch, after rebasing onto #1551 — both races are still
+  # present, unchanged:
+  #   internal/api: writes race inside TestCovMRSyncAcceptedThenCooldown
+  #     (mcp_registry_cov_test.go:370), TestCovMTBRegistrySyncAcceptedThenCooldown
+  #     (mcp_tool_bindings_cov_test.go:645), and TestRecurringIssueCreate_NextRunIsUTC
+  #     (recurring_issue_hardening_test.go:101).
+  #   cmd/crewship: reads race in internal/cli.(*Client) (client.go:307,315,
+  #     called from resolveWorkspaceID) from a *Client instance shared across
+  #     parallel tests — 7 separate warnings across two runs.
+  # A parallel PR is fixing both (test-only: t.Cleanup writes to package-level
+  # variables in the two internal/api cov-test files above; a per-test client
+  # instead of a shared one in cmd/crewship). Do not add either package here
+  # until that lands, or this gate goes red on the next PR that touches either
+  # file. Lift this exclusion in that PR, not here.
   #
   # A deny-list still rots silently if unchecked — a renamed or removed
   # package would just vanish from its effect. The step below fails if any
@@ -529,11 +555,12 @@ jobs:
     #
     # Same invariant as the `go` job: cap MUST exceed overhead + the
     # `go test -timeout` below, so Go's goroutine-dumping panic wins the
-    # race against GitHub's opaque cancel. Measured floor package
-    # (internal/backup) is ~240s under -race; -timeout 10m per binary is
-    # ~2.5x that, and the 20m job cap leaves wide headroom over the ~5-6m
-    # full-suite wall clock measured above.
-    timeout-minutes: 20
+    # race against GitHub's opaque cancel. -timeout is 20m (see the job
+    # comment for why internal/backup needs that much on THIS runner, not
+    # the local box); overhead here is ~70-80s of checkout + setup-go +
+    # race-compiling the dependency graph (measured on this PR's own CI
+    # run). 30m leaves comfortable daylight over 20m + overhead.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -573,12 +600,15 @@ jobs:
             exit 1
           fi
           echo "Race-testing $n of $total packages ($ndeny excluded, see job comment)."
-          # -timeout 10m per test binary: the measured floor (internal/backup,
-          # ~240s) is ~2.5x inside it. The generosity is free — it only ever
-          # bounds a hang, and a hang here should produce Go's goroutine dump
-          # rather than a GitHub cancel.
+          # -timeout 20m per test binary. Was 10m; this job's own first CI
+          # run timed out with internal/backup still running (see the job
+          # comment for the local-vs-CI measurement behind this number).
+          # Every other package finishes in well under a minute, so 20m is
+          # generosity for one package's KDF cost, not a general bump — it
+          # only ever bounds a hang, and a hang here should produce Go's
+          # goroutine dump rather than a GitHub cancel.
           # shellcheck disable=SC2086
-          go test $pkgs -race -count=1 -timeout 10m
+          go test $pkgs -race -count=1 -timeout 20m
 
   # ── Go: cross-platform test matrix ──
   #

@@ -329,6 +329,12 @@ func TestGateAsyncReturnsPending(t *testing.T) {
 
 func TestGateSyncPolls(t *testing.T) {
 	db := openTestDB(t)
+	// :memory: SQLite is per-connection; with the goroutine below racing
+	// Gate's own polling loop on the same *sql.DB, the pool can spin up a
+	// second connection that never saw the schema (see the identical fix
+	// in start_timeout_sweeper_test.go and gate_cov_test.go). Pin to one
+	// connection so both sides share the same in-memory database.
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	ev := NewEvaluatorWithDefaults()
