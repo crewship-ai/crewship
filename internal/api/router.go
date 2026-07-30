@@ -598,6 +598,14 @@ var credTestStoredPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/test$`
 // settings writes and belong on the general bucket.
 var credRevealPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/reveal$`)
 
+// changePasswordPath is POST /api/v1/users/me/password — the one route
+// outside /api/v1/auth/ that verifies a caller-supplied CURRENT password
+// and answers differently when it is wrong (#1513). It lives under
+// /api/v1/users/ for URL reasons, not security ones, so it has to be named
+// here rather than caught by the prefix. Matched as an exact path so the
+// other /users/me/* routes (profile, avatar) stay on the general bucket.
+const changePasswordPath = "/api/v1/users/me/password"
+
 // isSelfServiceAuthPath reports whether path is an authenticated caller
 // listing or revoking their OWN sessions / CLI tokens, as opposed to the
 // credential-guessing surface (login, bootstrap, minting) the strict
@@ -662,8 +670,15 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	// Stricter rate limiting for auth endpoints
-	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
+	// Stricter rate limiting for auth endpoints — plus the password change,
+	// which is a credential-verification surface wearing a /users/me/ URL.
+	// It has to be matched HERE, above the general branch: that branch
+	// exempts authenticated CLI tokens from the per-IP bucket entirely
+	// (#1333), and the attacker this limiter is for is holding exactly such
+	// a credential. Changing your own password ten times a minute is not a
+	// workflow, so nobody legitimate notices.
+	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") ||
+		path == "/api/v1/bootstrap" || path == changePasswordPath {
 		r.authRateLimitedMux.ServeHTTP(w, req)
 		return
 	}
