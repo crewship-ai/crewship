@@ -429,6 +429,19 @@ func markProposalDecided(ctx context.Context, db *sql.DB, proposalID, status, us
 // on first write, divider between runs, trailing newline. The lock
 // path mirrors the canonical path with .lock suffix so concurrent
 // approvers serialise.
+//
+// Durability: this is an append, not a whole-file rewrite, so it does
+// not go through the temp+rename durable-write helper — that would
+// mean reading the whole canonical file back in on every approval
+// just to rewrite it, real cost on a file the diff endpoint already
+// treats as growing up to proposalDiffMaxBytes (8MiB). Instead we
+// fsync the file itself before closing, matching the convention
+// appendRules already uses in consolidator.go: the write is durable
+// once this returns, but it is not atomic the way a rename-based
+// replace is — a reader racing the crash could in principle observe a
+// torn tail. The FileLock above serialises writers so that torn-tail
+// window can only be hit by an actual crash, not a concurrent second
+// appender.
 func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir canonical: %w", err)
@@ -450,6 +463,14 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	defer f.Close()
 	if _, err := f.WriteString(block); err != nil {
 		return fmt.Errorf("write canonical: %w", err)
+	}
+	// fsync before close so an approved rule is durably on disk before
+	// this function reports success — without this a crash right
+	// after "approved" leaves the write sitting in the page cache
+	// only, and the operator's approval silently evaporates on
+	// restart.
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync canonical: %w", err)
 	}
 	return nil
 }
