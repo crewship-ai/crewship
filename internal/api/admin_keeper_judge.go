@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/llm/endpoint"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"golang.org/x/time/rate"
 )
 
 // AdminKeeperJudgeHandler is the two things that turn "paste a URL and hope"
@@ -42,10 +45,40 @@ import (
 type AdminKeeperJudgeHandler struct {
 	store  *keepercfg.Store
 	logger *slog.Logger
+
+	// probes bounds how often either route may dial. Both take an address from
+	// the caller, so this is the difference between a configuration tool and a
+	// network scanner with an admin login. Instance-wide (not per IP): the
+	// capability being rationed is the daemon's outbound dial, not a client's
+	// share of it. The rate is read from the ratelimitcfg registry on every call
+	// so an operator override applies without a restart.
+	probeMu sync.Mutex
+	probes  *rate.Limiter
 }
 
 func NewAdminKeeperJudgeHandler(store *keepercfg.Store, logger *slog.Logger) *AdminKeeperJudgeHandler {
-	return &AdminKeeperJudgeHandler{store: store, logger: logger}
+	perMin := ratelimitcfg.Int(ratelimitcfg.KeyKeeperJudgeProbe)
+	return &AdminKeeperJudgeHandler{
+		store:  store,
+		logger: logger,
+		probes: rate.NewLimiter(rate.Limit(float64(perMin)/60.0), perMin),
+	}
+}
+
+// allowProbe consumes one token, retuning the bucket from the registry first so
+// a live override is honoured. Returns false when the caller should get a 429.
+func (h *AdminKeeperJudgeHandler) allowProbe() bool {
+	perMin := ratelimitcfg.Int(ratelimitcfg.KeyKeeperJudgeProbe)
+	h.probeMu.Lock()
+	if h.probes == nil {
+		h.probes = rate.NewLimiter(rate.Limit(float64(perMin)/60.0), perMin)
+	} else {
+		h.probes.SetLimit(rate.Limit(float64(perMin) / 60.0))
+		h.probes.SetBurst(perMin)
+	}
+	limiter := h.probes
+	h.probeMu.Unlock()
+	return limiter.Allow()
 }
 
 // judgeProbeTimeout bounds one stage. Generous enough for a cold model load on a
@@ -53,54 +86,39 @@ func NewAdminKeeperJudgeHandler(store *keepercfg.Store, logger *slog.Logger) *Ad
 // tight enough that a wedged endpoint does not hold an admin request open.
 const judgeProbeTimeout = 60 * time.Second
 
-// judgeRoot reduces whatever an operator pasted to the Ollama root the native
-// API hangs off.
+// judgeRoot reduces whatever an operator pasted to the root the native Ollama
+// API hangs off, via the canonical normalizer (#1528). Every paste shape —
+// `:11434`, a trailing slash, `/v1`, `/v1/chat/completions`, `/api/chat` — lands
+// on the same Root, and a reverse-proxy mount prefix is preserved.
 //
-// Interim: internal/llm/endpoint (#1528) is the wire-format-aware version of
-// this and handles the full matrix (four wires, mount prefixes, preserved query,
-// userinfo rejection). The instance judge speaks native Ollama only, so the
-// subset here is the four shapes people actually paste. When that package lands,
-// delete this and call endpoint.Normalize — the accepted shapes are deliberately
-// the same, so the swap is mechanical.
+// This is what makes "test green, production DENY" unreachable through the
+// endpoint field: the URL this checks and the URL the judge dials are derived by
+// the same function.
+//
+// It also refuses a container-only hostname up front. That value is not a typo —
+// host.docker.internal is CORRECT for the agent path, which shares this
+// credential — but the judge dials from the daemon, where it resolves to nothing.
+// Saying so beats waiting out a DNS timeout and reporting "unreachable".
 func judgeRoot(raw string) (string, error) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return "", errNoJudgeEndpoint
-	}
-	u, err := url.Parse(s)
+	ep, err := endpoint.Normalize(raw)
 	if err != nil {
-		return "", errBadJudgeEndpoint
-	}
-	switch strings.ToLower(u.Scheme) {
-	case "http", "https":
-	default:
-		return "", errBadJudgeEndpoint
-	}
-	if u.Host == "" {
-		return "", errBadJudgeEndpoint
-	}
-	// Strip the API path an operator may have copied from a curl example or
-	// from our own cli-adapters docs (which document the /v1 form for agents).
-	p := strings.TrimRight(u.Path, "/")
-	for _, suffix := range []string{"/v1/chat/completions", "/v1/completions", "/api/chat", "/api/generate", "/api/tags", "/v1"} {
-		if strings.HasSuffix(p, suffix) {
-			p = strings.TrimSuffix(p, suffix)
-			break
+		if strings.TrimSpace(raw) == "" {
+			return "", errNoJudgeEndpoint
 		}
+		return "", &judgeEndpointError{err.Error()}
 	}
-	u.Path = strings.TrimRight(p, "/")
-	u.RawQuery, u.Fragment, u.User = "", "", nil
-	return u.String(), nil
+	if ep.IsContainerOnlyHost() {
+		return "", &judgeEndpointError{
+			ep.Root.Hostname() + " only resolves inside containers, and the judge dials from the host — use localhost or the machine's LAN address"}
+	}
+	return ep.String(), nil
 }
 
 type judgeEndpointError struct{ msg string }
 
 func (e *judgeEndpointError) Error() string { return e.msg }
 
-var (
-	errNoJudgeEndpoint  = &judgeEndpointError{"no judge endpoint is configured — set one first"}
-	errBadJudgeEndpoint = &judgeEndpointError{"the judge endpoint is not a usable http(s) URL — try http://localhost:11434"}
-)
+var errNoJudgeEndpoint = &judgeEndpointError{"no judge endpoint is configured — set one first"}
 
 // judgeStage is one step of the three-stage check.
 type judgeStage struct {
@@ -135,6 +153,11 @@ type judgeTestRequest struct {
 func (h *AdminKeeperJudgeHandler) Test(w http.ResponseWriter, r *http.Request) {
 	if !canRole(RoleFromContext(r.Context()), "manage") {
 		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	if !h.allowProbe() {
+		replyError(w, http.StatusTooManyRequests,
+			"Too many judge probes — these dial an address you supply, so they are rate limited instance-wide. Try again in a moment.")
 		return
 	}
 	var body judgeTestRequest
@@ -352,13 +375,18 @@ func (h *AdminKeeperJudgeHandler) Models(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
-	if endpoint == "" && h.store != nil {
-		endpoint = h.store.Effective().EndpointURL.Value
+	if !h.allowProbe() {
+		replyError(w, http.StatusTooManyRequests,
+			"Too many judge probes — these dial an address you supply, so they are rate limited instance-wide. Try again in a moment.")
+		return
 	}
-	root, err := judgeRoot(endpoint)
+	endpointArg := strings.TrimSpace(r.URL.Query().Get("endpoint"))
+	if endpointArg == "" && h.store != nil {
+		endpointArg = h.store.Effective().EndpointURL.Value
+	}
+	root, err := judgeRoot(endpointArg)
 	if err != nil {
-		writeJSON(w, http.StatusOK, judgeModelsResponse{Endpoint: endpoint, Error: err.Error()})
+		writeJSON(w, http.StatusOK, judgeModelsResponse{Endpoint: endpointArg, Error: err.Error()})
 		return
 	}
 

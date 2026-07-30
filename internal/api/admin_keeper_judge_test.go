@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 )
 
 // A fake Ollama, because the point of the three-stage check is what it says when
@@ -203,7 +205,7 @@ func TestJudgeTest_ContainerHostnameGetsItsOwnMessage(t *testing.T) {
 
 	reach := stageByName(t, resp, "reach")
 	if reach.OK {
-		t.Skip("host.docker.internal resolves on this machine — the message path is not exercised")
+		t.Fatalf("a container-only hostname must be refused before it is dialled: %+v", reach)
 	}
 	if !strings.Contains(reach.Detail, "only resolves inside containers") {
 		t.Errorf("detail does not explain the vantage point: %q", reach.Detail)
@@ -221,6 +223,52 @@ func TestJudgeTest_NoEndpointConfigured(t *testing.T) {
 	}
 	if !strings.Contains(resp.Stages[0].Detail, "no judge endpoint") {
 		t.Errorf("detail = %q", resp.Stages[0].Detail)
+	}
+}
+
+// The bucket is what keeps a configuration tool from doubling as a network
+// scanner, so it has to actually bite — and say why when it does.
+func TestJudgeTest_ProbesAreRateLimited(t *testing.T) {
+	h := NewAdminKeeperJudgeHandler(nil, newTestLogger())
+	perMin := ratelimitcfg.Int(ratelimitcfg.KeyKeeperJudgeProbe)
+
+	// Drain the burst. Every call here fails at stage 1 (nothing configured),
+	// which is fine: the limiter is consumed before any of that.
+	for i := 0; i < perMin; i++ {
+		rr := httptest.NewRecorder()
+		h.Test(rr, judgeReq(t, `{}`))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("probe %d got %d, want 200", i+1, rr.Code)
+		}
+	}
+	rr := httptest.NewRecorder()
+	h.Test(rr, judgeReq(t, `{}`))
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("probe %d got %d, want 429", perMin+1, rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "rate limited") {
+		t.Errorf("the refusal does not explain itself: %s", rr.Body.String())
+	}
+}
+
+// Discovery shares the bucket: two routes, one outbound-dial capability.
+func TestJudgeModels_SharesTheProbeBudget(t *testing.T) {
+	h := NewAdminKeeperJudgeHandler(nil, newTestLogger())
+	perMin := ratelimitcfg.Int(ratelimitcfg.KeyKeeperJudgeProbe)
+
+	for i := 0; i < perMin; i++ {
+		rr := httptest.NewRecorder()
+		h.Test(rr, judgeReq(t, `{}`))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("probe %d got %d", i+1, rr.Code)
+		}
+	}
+	req := httptest.NewRequest("GET", "/api/v1/admin/keeper/judge/models", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxRole, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Models(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("discovery got %d after the test budget was spent, want 429", rr.Code)
 	}
 }
 
@@ -306,6 +354,11 @@ func TestJudgeRoot(t *testing.T) {
 		// would send every request to the proxy's root.
 		{"http://gw.example.com/ollama", "http://gw.example.com/ollama"},
 		{"http://gw.example.com/ollama/v1", "http://gw.example.com/ollama"},
+		// Scheme-less is what somebody copies out of `ollama serve`. The
+		// canonical normalizer assumes http rather than refusing it — https
+		// would simply fail to connect against a local daemon.
+		{"localhost:11434", "http://localhost:11434"},
+		{"192.168.1.222:11434", "http://192.168.1.222:11434"},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
 			got, err := judgeRoot(tc.in)
@@ -320,7 +373,7 @@ func TestJudgeRoot(t *testing.T) {
 }
 
 func TestJudgeRoot_Rejects(t *testing.T) {
-	for _, in := range []string{"", "   ", "localhost:11434", "ftp://host:11434", "http://", "not a url"} {
+	for _, in := range []string{"", "   ", "ftp://host:11434", "http://", "http://u:p@host:11434"} {
 		if _, err := judgeRoot(in); err == nil {
 			t.Errorf("accepted %q", in)
 		}
