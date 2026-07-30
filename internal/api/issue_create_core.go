@@ -47,14 +47,38 @@ type issueSpec struct {
 var (
 	errIssueCrewNotFound = errors.New("crew not found")
 	errIssueNoLeadAgent  = errors.New("crew has no LEAD agent")
+	// errIssueAssigneeTypeInvalid / errIssueAssigneeNotInWorkspace mirror the
+	// wording issue_handler_create.go / issue_handler_update.go already use for
+	// the same check, so a caller's err.Error() reads identically to the
+	// user-facing HTTP surface regardless of which write path it came from.
+	errIssueAssigneeTypeInvalid    = errors.New("assignee_type must be 'user' or 'agent' when assignee_id is set")
+	errIssueAssigneeNotInWorkspace = errors.New("assignee_id does not exist in this workspace")
 )
 
 // insertIssueTx creates an issue within tx: resolves the crew's issue prefix,
-// allocates the atomic per-crew number, finds the LEAD agent, inserts the
-// mission row, and links labels. Returns the new id and human identifier
-// (e.g. "ENG-42"). The caller owns tx begin/commit and maps the sentinel
-// errors. Priority defaults to "none" and AuthoredVia to "agent_tool_call" when
-// empty.
+// allocates the atomic per-crew number, finds the LEAD agent, validates the
+// assignee against the workspace, inserts the mission row, and links labels.
+// Returns the new id and human identifier (e.g. "ENG-42"). The caller owns tx
+// begin/commit and maps the sentinel errors. Priority defaults to "none" and
+// AuthoredVia to "agent_tool_call" when empty.
+//
+// Assignee validation lives HERE rather than in each caller because this is
+// the actual chokepoint: every issue insert — agent-tool-call creates
+// (InternalIssueHandler.Create) and recurring-issue fires
+// (RecurringIssueDispatcher) — flows through this one function. Putting the
+// check anywhere else would mean a THIRD caller of insertIssueTx could forget
+// it exactly the way InternalIssueHandler.Create did (discovered by
+// assignee_write_invariant_test.go, not by review — see that file's history).
+//
+// The recurring dispatcher's assignee_id is already validated once, when the
+// recurring_issues row is created or updated (recurring_issue_handler.go), so
+// this re-checks it on every fire rather than trusting the stored row forever
+// — cheap (one indexed lookup), and it fails closed instead of silently
+// carrying forward an assignee who was removed from the workspace between
+// firings. fireOne already treats any insertIssueTx error as "skip this
+// occurrence, advance next_run, log loudly" (recurring_issue_dispatcher.go),
+// so a newly-invalid assignee degrades to a skipped fire, not a crash or a
+// silently-created issue with a foreign assignee.
 func insertIssueTx(ctx context.Context, tx *sql.Tx, logger *slog.Logger, s issueSpec) (id, identifier string, err error) {
 	priority := s.Priority
 	if priority == "" {
@@ -106,6 +130,23 @@ func insertIssueTx(ctx context.Context, tx *sql.Tx, logger *slog.Logger, s issue
 			return "", "", errIssueNoLeadAgent
 		}
 		return "", "", err
+	}
+
+	if s.AssigneeID != nil && *s.AssigneeID != "" {
+		assigneeType := ""
+		if s.AssigneeType != nil {
+			assigneeType = *s.AssigneeType
+		}
+		if assigneeType != "user" && assigneeType != "agent" {
+			return "", "", errIssueAssigneeTypeInvalid
+		}
+		ok, vErr := validateAssigneeWorkspace(ctx, tx, assigneeType, *s.AssigneeID, s.WorkspaceID)
+		if vErr != nil {
+			return "", "", vErr
+		}
+		if !ok {
+			return "", "", errIssueAssigneeNotInWorkspace
+		}
 	}
 
 	id = generateCUID()
