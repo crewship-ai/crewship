@@ -43,6 +43,7 @@ Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them 
 | **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
 | **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
 | **Pre-migration snapshot** | An automatic safety net distinct from the manual bundle system. Whenever `crewship start` detects pending migrations, `database.SnapshotBeforeMigrate` writes a `VACUUM INTO` copy of the live SQLite database to `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` before any DDL runs. Last 10 snapshots are retained per database; opt out with `CREWSHIP_SKIP_MIGRATION_BACKUP=1`. **Not a substitute** for proper backups — it's the binary upgrade safety net, not a disaster-recovery primitive. |
+| **Memory-version blobs** | Workspace-scope bundles carry the `memory_versions` audit-trail rows (agent/crew/workspace/pins/learned tiers) — but a row is only a pointer. The actual content lives in a content-addressed blob store at `{MemoryRoot}/versions/<sha[:2]>/<sha>`. The bundle collects the blob for every row it dumps into a `memory-blobs/` section inside the SAME AGE-sealed payload as the DB dump, and restore writes them back to the target's blob root **and rewrites each row's `payload_ref`** to the target's path (it's an absolute path baked in at write time, not portable across instances as-is). A row whose blob is already missing on disk at backup time is skipped, not fatal — reported via `manifest.contents.memory_blobs_missing`. |
 
 ## Usage
 
@@ -81,6 +82,11 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 - **Encryption:** AGE passphrase (default) or AGE X25519 recipient. `--no-encrypt` produces a plaintext payload for test / CI use.
 - **Default location:** `~/.crewship/backups/` on the server, mode `0700`.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
+
+Inside `payload.age`, workspace-scope bundles carry two distinct notions of "memory" — don't confuse them:
+
+- **Per-crew agent memory** (`memory/<slug>` section) — the running agent's own markdown under the container's `/output` mount. Collected by the docker phase per crew.
+- **Workspace-tier memory-version blobs** (`memory-blobs/<sha[:2]>/<sha>` section) — the content-addressed audit trail behind `memory_versions` rows (consolidation output, HITL-approved proposals, pin snapshots). Collected once per workspace scope from `{MemoryRoot}/versions`, keyed by the sha256 the DB dump's `memory_versions` rows reference. Restore rewrites `payload_ref` to the target's blob root — see the **Memory-version blobs** row under [Key concepts](#key-concepts) above.
 
 ## Create a workspace backup
 
@@ -529,7 +535,7 @@ A non-TTY second invocation will block waiting for stdin. Either pass `--passphr
 </Accordion>
 
 <Accordion title="Bundles include workspace bind-mount files">
-User code in `/workspace`, agent memory markdown, anything mounted into the agent container — all included in the bundle. AGE encryption is the only defence; treat a `.tar.zst` like any other backup of source code and credentials.
+User code in `/workspace`, agent memory markdown, anything mounted into the agent container — all included in the bundle. Workspace-scope bundles also carry the content-addressed memory-version blob store (`{MemoryRoot}/versions`) behind `memory_versions` rows — see [Memory-version blobs](#key-concepts). AGE encryption is the only defence; treat a `.tar.zst` like any other backup of source code and credentials.
 </Accordion>
 
 <Accordion title="/secrets is the only directory NEVER included">
@@ -540,7 +546,7 @@ This is load-bearing — agents pull credentials from `/secrets` at runtime via 
 ## Security notes
 
 - The `/secrets` mount is **never** included in a bundle.
-- The workspace bind mount (user code) and memory markdown files are included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
+- The workspace bind mount (user code), per-crew agent memory markdown, and the workspace-tier memory-version blob store (`memory_versions` content, workspace scope only) are all included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
 - Every `backup.*` event writes to `audit_log` with user, role, scope, sealed-payload SHA-256, and size. Dry-run restores write `backup.restore.dry_run` so auditors can tell rehearsals from real cutover.
 
 ## Automatic pre-migration snapshots

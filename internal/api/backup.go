@@ -52,6 +52,15 @@ type BackupHandler struct {
 	// the unified Crew Journal alongside operational events. nil maps
 	// to noopEmitter via the SetJournal setter below.
 	journal journal.Emitter
+	// memoryBlobRoot is the content-addressed memory-version blob
+	// directory ({MemoryRoot}/versions) — the SAME path
+	// r.memoryVersionsBlobRoot already resolves for the memory-versions
+	// content-drilldown endpoint. Wired by SetMemoryBlobRoot so
+	// CreateBackup can collect memory_versions blobs into the bundle
+	// and RestoreBackup can land them back + rewrite payload_ref.
+	// Empty disables both (matches the rest of the memory subsystem's
+	// "empty BlobRoot disables versioning" convention).
+	memoryBlobRoot string
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -80,6 +89,16 @@ func (h *BackupHandler) SetJournal(j journal.Emitter) {
 // containers that don't exist with that name on the current instance.
 func (h *BackupHandler) SetCrewContainerName(fn func(id, slug string) string) {
 	h.crewContainerName = fn
+}
+
+// SetMemoryBlobRoot wires the content-addressed memory-version blob
+// directory so Create/Restore can carry memory_versions blobs through
+// the bundle instead of silently leaving them behind (see
+// internal/backup/memoryblobs.go). Router wires this from the same
+// r.memoryVersionsBlobRoot the memory-versions content-drilldown
+// endpoint already uses.
+func (h *BackupHandler) SetMemoryBlobRoot(root string) {
+	h.memoryBlobRoot = root
 }
 
 // createRequest is the JSON body of POST /api/v1/admin/backups.
@@ -243,6 +262,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		NoEncrypt:         req.NoEncrypt,
 		CrewContainerName: h.resolveCrewContainerName(),
 		DockerOps:         ops,
+		BlobRoot:          h.memoryBlobRoot,
 	})
 	if err != nil {
 		h.logger.Warn("backup create failed", "error", err, "workspace", workspaceID, "user", user.ID)
@@ -403,6 +423,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		Actor:        backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		DockerOps:    ops,
 		ContainerFor: h.resolveCrewContainerName(),
+		BlobRoot:     h.memoryBlobRoot,
 	})
 	if err != nil {
 		h.logger.Warn("backup restore failed", "error", err, "path", req.Path, "user", user.ID)

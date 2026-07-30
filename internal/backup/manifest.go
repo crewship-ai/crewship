@@ -132,6 +132,22 @@ type Contents struct {
 	CredstoreIncluded      bool `json:"credstore_included,omitempty" yaml:"credstore_included,omitempty"`
 	AuthKeysIncluded       bool `json:"auth_keys_included,omitempty" yaml:"auth_keys_included,omitempty"`
 	InstanceConfigIncluded bool `json:"instance_config_included,omitempty" yaml:"instance_config_included,omitempty"`
+
+	// MemoryBlobsIncluded is the count of content-addressed memory-
+	// version blobs collected into the bundle from this scope's
+	// memory_versions rows. Zero when BlobRoot wasn't configured on
+	// the source instance, or the scope's DB dump doesn't carry
+	// memory_versions rows at all (crew-scope bundles never do — see
+	// DumpCrew).
+	MemoryBlobsIncluded int `json:"memory_blobs_included,omitempty" yaml:"memory_blobs_included,omitempty"`
+	// MemoryBlobsMissing is the count of memory_versions rows whose
+	// sha256 did not resolve to a blob on disk at backup time — e.g.
+	// a row surviving a retention sweep that pruned the blob but not
+	// the audit row, or (the bug this field exists to catch) a prior
+	// restore that landed memory_versions rows without their blobs.
+	// Bundle creation does not fail on this; it's surfaced so an
+	// operator can investigate via `crewship memory versions`.
+	MemoryBlobsMissing int `json:"memory_blobs_missing,omitempty" yaml:"memory_blobs_missing,omitempty"`
 }
 
 // WorkspaceSummary carries workspace-level identity fields.
