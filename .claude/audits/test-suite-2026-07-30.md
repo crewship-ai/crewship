@@ -468,3 +468,111 @@ už neplatí. Zapisuju je, aby se neopakovaly v dalším review.
 | "Notify `crew:` nemá datový model" | **Implementováno** (`runner_notify.go:445-511`), a nejednoznačný adresát **degraduje viditelně** (warning + marker), nezahodí se tiše. Formulaci v příštím review změnit z "selže/zahodí" na "degraduje viditelně". |
 | "Keeper internal surface: statický token jediná pojistka (HIGH)" | **Částečně zastaralé.** Existuje network/origin gate + trusted-proxy XFF resolver s fail-closed chováním (`internal.go:392-470`), dobře testovaný. Podmíněné na správnou konfiguraci `CREWSHIP_INTERNAL_TRUSTED_PROXIES` v `infra-crewship` — **to z tohoto repa ověřit nelze**. Co skutečně chybí: mTLS, nonce/replay ochrana, a build-time enumerace plochy (T2). |
 | "Scope enforcement není pinnutý (9 test souborů z 2012)" | **Špatný odhad, korigován mutací.** M1 i M3 zabity. Grep je hypotéza, mutace důkaz. |
+
+---
+
+## 11. Co implementace změnila na tomhle auditu
+
+Doplněno po první vlně oprav (PR #1531-#1543). Zapisuju to, protože dvě věci
+z předchozích sekcí se ukázaly nepřesné a jedna rada byla přímo špatná.
+
+### Rada, která byla špatná: „zapnout těch 144 e2e testů"
+
+§9 Fáze 0 bod 3 doporučoval pustit `full-integration`, `crews-real-workflow`,
+`edge-cases` a `crew-privilege-controls` v nightly. Když se celá sada pustila
+proti **zdravé seedované instanci**, prošlo **24 z 78**. Aplikace byla v
+pořádku — rozpadly se specy:
+
+- `/crews` přišlo o filtry `Status:`/`Role:` → `crews-redesign` 5/11
+- crew explorer se přesunul z `aside` do `main` → `crew-privilege-controls`
+  **0/6**, `crew-provisioning` 0/1
+- katalog konektorů zmizel za `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` →
+  `connectors` 3/10
+- `a11y.spec.ts` hlásí **živé** WCAG chyby, které si jeho vlastní hlavička
+  eviduje jako opravené
+- `visual.spec.ts`: všechny baseliny jsou `*-chromium-darwin.png`, takže na
+  Linuxu padnou jako „snapshot missing", ne jako diff — a 3 z 5 ploch jsou na
+  smazaných routách
+
+Zapnout to natvrdo by byl šum, který někdo do týdne vypne. Správný tvar
+(shipnutý v #1540): hard gate na tom, co bylo **viděno zelené**, zbytek do
+`drift` bucketu, který reportuje a neshazuje, plus `coverage-guard`, který
+selže, když spec není ani v jednom bucketu. Následující krok je udělat z
+driftu **ratchet** — vzít per-spec počty z prvního reálného nightly a shodit,
+když kterýkoli stoupne. Tím se ~140 mrtvých testů stane ochrannými hned, bez
+přepisování.
+
+Poučení obecněji: „test existuje" a „test dnes prochází" jsou dvě různé věci a
+tenhle audit je na začátku nerozlišoval.
+
+### Nález, který byl větší, než §4 D2 tvrdila
+
+D2 popisovala nevalidovaný `assignee_id` ve dvou write path. Skutečný počet je
+**sedm**: `issue_handler_create.go`, `issue_handler_update.go`,
+`issue_handler_bulk.go`, `recurring_issue_handler.go`, `triage_handler.go`,
+`issues_internal.go` (`InternalIssueHandler.Create`) a
+`issue_handler_workflow.go` (`Review` → `request_changes`).
+
+Poslední dvě našel **až ten invariant**, který je má hlídat — ne review. To je
+nejlepší dostupný argument pro to, proč se invarianty píšou.
+
+Ta poslední je navíc horší než ostatních šest:
+```sql
+SELECT id FROM agents WHERE slug = ? AND deleted_at IS NULL LIMIT 1
+```
+Bere **slug** z těla requestu, bez workspace i bez crew filtru. Slugy jsou
+uhádnutelné (`alex`, `reviewer`), na rozdíl od CUID. A `LIMIT 1` nad
+neunikátním slugem znamená, že když mají dva workspacy agenta se stejným
+slugem, **legitimní** reassign ve workspace A může tiše trefit agenta z
+workspace B — nedeterministické cross-tenant přiřazení bez jakéhokoli útoku.
+
+Root cause celé třídy: `assignee_id` je **polymorfní** (podle `assignee_type`
+míří do `users` nebo do `agents`), takže na něj nejde dát FK. Ve stejné
+`CREATE TABLE` má `crew_id TEXT REFERENCES crews(id)` FK, `assignee_id TEXT`
+ne. Databáze to principiálně zachytit nemůže, takže jediná pojistka je
+aplikační validace — a v sedmi místech nebyla. Dlouhodobě správně je
+`assignee_user_id` + `assignee_agent_id`, obojí s FK, ať to vynucuje DB.
+To je ale migrace, tedy samostatné rozhodnutí (patří k §8).
+
+### Chyba, kterou jsem udělal ve vlastním invariantu
+
+Read-route invariant (#1533) v první verzi spojoval fixní čtyřřádkové okno.
+Registrace v `router_*.go` jsou po jedné na řádku, takže okno přetékalo do
+**další** routy — a protože ta obvykle `wsCtx` má, ungated routa se čítala
+jako gated. Naměřeno: **76 z 219** rout. Odebrání `wsCtx` z `GET /api/v1/crews`
+prošlo zeleně.
+
+Nezávisle na tom narazil na tu samou chybu #1531 ve svém lookaheadu a napsal
+to; teprve pak jsem si ověřil svůj. Obojí je opravené tak, že se okno zastaví
+na začátku další registrace.
+
+Poučení, které patří do každého budoucího source-guard testu v tomhle repu:
+**vždycky ověř tři případy, ne jeden** — že umí zčervenat, že **ne**dělá
+falešný pozitiv na legitimním víceřádkovém zápisu, a že count guard chytí
+vacuous pass. U dvou nezávisle napsaných invariantů se objevila ta samá chyba,
+takže to není náhoda, ale vzor.
+
+### Co ještě implementace našla nad rámec §4
+
+- **`internal/llm`: uříznutý SSE stream se hlásil jako úspěch u všech tří**
+  providerů (`anthropic.go`, `openai.go`, a `ollama.go`, kde se navíc ztrácí i
+  obsah, který už dorazil, protože `final.Content` se plní jen uvnitř
+  `if chunk.Done`). `bufio.Scanner` hlásí čisté `io.EOF` jako `Err() == nil`,
+  což je nerozeznatelné od normálního konce. Ověřeno probem, že zrušený
+  kontext naopak dá `Err() = context.Canceled`, takže obojí lze rozlišit.
+- **`payload_ref` je absolutní cesta** zapečená při zápisu
+  (`internal/memory/versions.go:109`, ukládá `filepath.Join(BlobRoot, sha[:2], sha)`).
+  Backup byl tedy rozbitý dvakrát — i zkopírování blobů by cross-host
+  selhalo. Sha už layout určuje, takže ta cesta je redundantní; správně je
+  relativní, ale to je migrace.
+- **Další osiřelé stavy**: kromě `DUPLICATE` v issues je nedosažitelný i
+  `DONE` v `ValidMissionTransitions` a `BLOCKED` v `ValidTaskTransitions`.
+  `BLOCKED` je z nich nejzajímavější — task, který nelze označit za
+  zablokovaný, je reálná produktová mezera.
+- **Existující test asertoval bug jako správné chování.**
+  `TestStatusPathFrom_UnreachableTarget` pinoval nedosažitelnost `DUPLICATE`.
+  To je přesně to, proti čemu je pravidlo „failing test first" — test
+  připnutý na špatné chování pak brání opravě.
+- **`isTransientRunnerError` napájí i `retry_on` CEL predikáty**
+  (`executor_retry_cel.go:130`), takže jeho chování je viditelné v autorování
+  rutin, ne jen interní.
