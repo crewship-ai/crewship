@@ -576,3 +576,40 @@ takže to není náhoda, ale vzor.
 - **`isTransientRunnerError` napájí i `retry_on` CEL predikáty**
   (`executor_retry_cel.go:130`), takže jeho chování je viditelné v autorování
   rutin, ne jen interní.
+
+### Korekce: sidecar credential listing nebyl otevřený fail-open
+
+§2 uváděl credentials jako nejlépe otestovanou vrstvu a zároveň nesl nález o
+`GET /api/v1/internal/credentials` — že volající bez `crew_id` dostane
+workspace-wide listing a jen se zaloguje warning. Ten nález pocházel z
+**komentáře v kódu** (#1031), a ten komentář byl zastaralý, ne kód.
+
+Ověřeno:
+- `internal/orchestrator/exec_sidecar.go:49` — každý crew run dostane
+  **crew-bound** token (`DeriveCrewToken`); `wsv1` jen když `crewID == ""`.
+- `internal/api/internal_credentials.go:184-187` — handler bere `crew_id` z
+  query, ale **přepíše ho** hodnotou z tokenu, když je token crew-bound.
+- `internal/api/internal.go:474-528` — middleware 403ne nesouhlasící
+  `?crew_id` / `?workspace_id`.
+
+Crew volající tedy nemůže workspace-wide listing získat ani vynecháním
+parametru, ani jeho podvržením. Uzavření dojezdělo dřív; **chyběl jen důkaz** —
+existující testy nastavovaly `ctxInternalTokenCrew` ručně, takže by zůstaly
+zelené, kdyby se `sidecarIPCToken` vrátil na workspace-bound token nebo kdyby
+middleware přestal crew do kontextu vkládat. To je přesně ta třída díry, kterou
+tenhle audit hledal, jen na opačné straně: guarantee platila a testy ji
+nepinovaly.
+
+**A jedna věc, kterou by naivní „hardening" rozbil.** Zbylá větev (crew-less
+`wsv1` volající dostane workspace-wide listing) tam být musí:
+`internal/sidecar/credstore_reap.go` reconciluje sidecarový `CredStore` proti
+tomuhle listingu, takže 200 s prázdným tělem by nechalo `keep` prázdné a
+`CredStore.Reap` by zahodil **všechny** provider keys, se kterými kontejner
+nabootoval. Utáhnout to „pro bezpečnost" znamená výpadek běžících crews.
+Správný tvar, pokud se to má zavřít, je nechat `sidecarIPCToken` **fail-closed**
+při `crewID == ""` (odmítnout token vydat), ne vyprázdnit listing — tím se
+zachová fail-toward-availability chování reaperu.
+
+Poučení, které patří k §10: nález odvozený z komentáře je hypotéza, ne fakt.
+Komentáře stárnou nezávisle na kódu, a tenhle stárnul směrem k pesimismu, což
+je vzácné a zákeřné — vypadá to jako přiznaná díra, takže se to nekontroluje.
