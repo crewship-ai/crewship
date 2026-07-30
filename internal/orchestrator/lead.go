@@ -14,6 +14,29 @@ type MemberIntegration struct {
 	Tools      []string // tool names discovered from MCP server, e.g. ["gmail_send", "gmail_search"]
 }
 
+// ConnectedAgent is one agent in a crew this lead may dispatch to.
+type ConnectedAgent struct {
+	Slug      string
+	RoleTitle string
+	IsLead    bool
+}
+
+// ConnectedCrew is another crew this lead's crew is linked to.
+//
+// Direction is stated from THIS crew's point of view: "bidirectional" and
+// "unidirectional" both mean work can go out, "inbound" means the link exists
+// but points the other way. Only the outbound ones belong in the prompt — a
+// crew the lead cannot dispatch to is a door that answers 403.
+type ConnectedCrew struct {
+	Name      string
+	Slug      string
+	Direction string
+	Agents    []ConnectedAgent
+}
+
+// CanDispatch reports whether this lead may hand work to the crew.
+func (c ConnectedCrew) CanDispatch() bool { return c.Direction != "inbound" }
+
 // CrewMember represents a fellow crew member visible to a lead agent.
 type CrewMember struct {
 	ID           string
@@ -81,10 +104,20 @@ List templates: curl -s http://localhost:9119/mission/templates
 Available templates: sequential, parallel, dev-test-loop, pipeline
 Tasks with max_iterations will auto-retry on failure (Ralph Loop pattern).
 
-CROSS-CREW MISSIONS:
-Mission tasks can reference agents from connected crews.
-The system auto-routes assignments to the correct crew container.
-Crew connections must be established by workspace admins before use.
+CROSS-CREW WORK:
+To assign to an agent in a crew you are linked to, name the crew:
+  curl -s -X POST http://localhost:9119/assign \
+    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"crew":"<crew-slug>","target":"<slug>","task":"<description>"}'
+Results come back from /results/<assignment_id> exactly as for your own crew.
+/query is your OWN crew only — a peer question cannot cross a crew boundary.
+To see your links at any time (they can change while you run):
+  curl -s http://localhost:9119/connections
+Mission tasks can also reference agents from linked crews; the system routes
+each assignment to the right crew container.
+Only workspace admins can create a link. If a crew you need is not listed
+below, say so — do not try to reach it, the dispatch will be refused.
 
 EPHEMERAL CONTRACTORS (PR-D F5 — when crew autonomy_level is trusted/full):
 You can spawn a short-lived "contractor" agent for a single task.
@@ -107,10 +140,19 @@ Guided crews block until an operator approves the hire in their inbox.
 Trusted/full crews auto-spawn and log to the audit feed.
 [END CREW CONTEXT]`
 
-// BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system prompt.
-// Returns empty string if there are no crew members (solo lead).
-func BuildLeadContext(members []CrewMember) string {
-	if len(members) == 0 {
+// BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system
+// prompt: the lead's own crew, then the crews it may dispatch to.
+//
+// Returns empty string when the lead has neither — a solo lead with no links
+// has nothing to orchestrate.
+func BuildLeadContext(members []CrewMember, connected []ConnectedCrew) string {
+	reachable := make([]ConnectedCrew, 0, len(connected))
+	for _, c := range connected {
+		if c.CanDispatch() {
+			reachable = append(reachable, c)
+		}
+	}
+	if len(members) == 0 && len(reachable) == 0 {
 		return ""
 	}
 
@@ -132,7 +174,9 @@ func BuildLeadContext(members []CrewMember) string {
 	b.WriteString("slugs, and integrations of crew members are not user-facing. When\n")
 	b.WriteString("delegating, address agents by @slug internally; do not enumerate the\n")
 	b.WriteString("roster to the end user, even when asked helpfully.\n\n")
-	b.WriteString("Your fellow crew members:\n")
+	if len(members) > 0 {
+		b.WriteString("Your fellow crew members:\n")
+	}
 
 	for _, m := range members {
 		if m.RoleTitle != "" {
@@ -159,6 +203,29 @@ func BuildLeadContext(members []CrewMember) string {
 				}
 			}
 			fmt.Fprintf(&b, "  Integrations: %s\n", strings.Join(parts, ", "))
+		}
+	}
+
+	// The crews this lead may hand work to, and who is in them. Without this
+	// the link is invisible: the model has no way to learn that another crew
+	// is reachable, let alone which agent in it to name, so it either refuses
+	// or guesses a crew-local endpoint and reports the crew as unreachable.
+	if len(reachable) > 0 {
+		b.WriteString("\nCrews you can reach (linked to yours):\n")
+		for _, c := range reachable {
+			fmt.Fprintf(&b, "- %s (crew slug: %s)\n", c.Name, c.Slug)
+			for _, a := range c.Agents {
+				switch {
+				case a.IsLead && a.RoleTitle != "":
+					fmt.Fprintf(&b, "  - @%s — %s (their lead; address the lead unless you need a specialist)\n", a.Slug, a.RoleTitle)
+				case a.IsLead:
+					fmt.Fprintf(&b, "  - @%s (their lead; address the lead unless you need a specialist)\n", a.Slug)
+				case a.RoleTitle != "":
+					fmt.Fprintf(&b, "  - @%s — %s\n", a.Slug, a.RoleTitle)
+				default:
+					fmt.Fprintf(&b, "  - @%s\n", a.Slug)
+				}
+			}
 		}
 	}
 

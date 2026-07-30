@@ -340,6 +340,42 @@ var workspaceMemberCmd = &cobra.Command{
 	Short:   "Manage workspace members",
 }
 
+// workspaceMemberRow is one row of GET /workspaces/{id}/members.
+//
+// The server nests the person under `user` (memberResponse in
+// internal/api/workspaces_membership.go). This used to be read as a flat
+// `email`, so the EMAIL and NAME columns printed empty and
+// `crewship audit --user <email>` could never resolve anyone — the very
+// convenience that flag exists for. The flat fields stay as a fallback:
+// reading one shape should not mean refusing the other.
+type workspaceMemberRow struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	Email     string `json:"email"`
+	FullName  string `json:"full_name"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
+	User      *struct {
+		ID       string `json:"id"`
+		Email    string `json:"email"`
+		FullName string `json:"full_name"`
+	} `json:"user,omitempty"`
+}
+
+func (m workspaceMemberRow) email() string {
+	if m.User != nil && m.User.Email != "" {
+		return m.User.Email
+	}
+	return m.Email
+}
+
+func (m workspaceMemberRow) fullName() string {
+	if m.User != nil && m.User.FullName != "" {
+		return m.User.FullName
+	}
+	return m.FullName
+}
+
 var workspaceMemberListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List workspace members",
@@ -361,14 +397,7 @@ var workspaceMemberListCmd = &cobra.Command{
 			return err
 		}
 
-		var members []struct {
-			ID        string `json:"id"`
-			UserID    string `json:"user_id"`
-			Email     string `json:"email"`
-			FullName  string `json:"full_name"`
-			Role      string `json:"role"`
-			CreatedAt string `json:"created_at"`
-		}
+		var members []workspaceMemberRow
 		if err := cli.ReadJSON(resp, &members); err != nil {
 			return err
 		}
@@ -381,7 +410,7 @@ var workspaceMemberListCmd = &cobra.Command{
 		headers := []string{"MEMBER ID", "USER ID", "EMAIL", "NAME", "ROLE", "JOINED"}
 		var rows [][]string
 		for _, m := range members {
-			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
+			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.email(), m.fullName(), m.Role, m.CreatedAt})
 		}
 		return f.Auto(members, headers, rows)
 	},

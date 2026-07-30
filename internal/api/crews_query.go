@@ -169,6 +169,13 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"DELETE FROM crew_members WHERE crew_id = ?", crewID); err != nil {
 		h.logger.Warn("cascade delete crew_members", "crew_id", crewID, "error", err)
 	}
+	// Links to or from this crew mean nothing once it is gone — no dispatch,
+	// message or mission can cross them again. Left behind they outnumber the
+	// live ones within a few reseeds and bury the real graph.
+	if _, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM crew_connections WHERE from_crew_id = ? OR to_crew_id = ?", crewID, crewID); err != nil {
+		h.logger.Warn("cascade delete crew_connections", "crew_id", crewID, "error", err)
+	}
 
 	_, err = h.db.ExecContext(r.Context(),
 		"UPDATE crews SET deleted_at = ? WHERE id = ?",
@@ -177,6 +184,8 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "soft delete crew", err)
 		return
 	}
+
+	auditFromRequest(r, h.db, "crew.delete", "CREW", crewID, nil)
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 

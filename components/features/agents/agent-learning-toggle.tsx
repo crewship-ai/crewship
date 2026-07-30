@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
+import { cn } from "@/lib/utils"
 
 // PR-G F4.1 UX — per-agent self-learning toggle.
 //
@@ -37,9 +38,16 @@ export interface AgentLearningToggleProps {
   agentId: string
   workspaceId: string
   canEdit?: boolean
+  /**
+   * Drop the card chrome — the caller already supplies one. Without this the
+   * component nests a bordered card inside a bordered card, which reads as a
+   * mistake rather than a hierarchy.
+   */
+  bare?: boolean
 }
 
-export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLearningToggleProps) {
+export function AgentLearningToggle({ agentId, workspaceId, canEdit , bare = false }: AgentLearningToggleProps) {
+  const SHELL = bare ? "p-4" : "rounded-xl border border-white/8 bg-card p-4"
   // Mirrors the CrewPolicyControls pattern: if caller passes canEdit
   // explicitly we honor it (lets admin overlays override), otherwise
   // derive from CASL abilities. Self-learning is ADMIN+ on the server
@@ -142,28 +150,43 @@ export function AgentLearningToggle({ agentId, workspaceId, canEdit }: AgentLear
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
+      <div className={cn(SHELL, "flex items-center gap-2 text-sm text-muted-foreground")}>
         <Spinner className="h-3.5 w-3.5" /> Loading…
       </div>
     )
   }
   if (err) {
-    return <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{err}</div>
+    return (
+      <div className={cn(bare ? "p-4" : "rounded-xl border border-destructive/30 bg-destructive/5 p-4", "text-sm text-destructive")}>
+        {err}
+      </div>
+    )
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-card p-4 space-y-3">
+    <div className={cn(SHELL, "space-y-3")}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2.5">
           <Sparkles className={target ? "h-4 w-4 text-success mt-0.5" : "h-4 w-4 text-muted-foreground mt-0.5"} />
           <div>
-            <div className="text-sm font-medium">Self-improving mode</div>
-            <div className="text-xs text-muted-foreground mt-0.5 max-w-xl">
-              When ON, keeper evaluator ALLOW decisions auto-apply (recommended skills flip
-              to active, captured lessons land in <code className="text-[10px]">lessons.md</code>).
-              When OFF, every proposal queues a blocking inbox item for operator approval.
-              DENY + ESCALATE always gate through inbox regardless. Still subordinate to
-              this crew&rsquo;s autonomy level.
+            <div className="type-row font-medium">Self-improving mode</div>
+            <div className="type-meta mt-1 max-w-xl leading-relaxed text-muted-foreground">
+              {/* Says what the flag actually gates. Its only two readers are
+                  keeper_phase2.go (the lesson) and agent_persona.go (the
+                  persona). The previous wording also promised that skills
+                  "flip to active", which no code path does. */}
+              This does not decide whether the agent learns — it decides <b className="font-medium text-foreground">who
+              signs off</b> when it wants to edit its own notes: a lesson captured from a run
+              (<code className="font-mono">lessons.md</code>) or a change to how it describes itself
+              (<code className="font-mono">PERSONA.md</code>).
+              <span className="mt-1 block">
+                <b className="font-medium text-foreground">On</b> — the change is written straight away.{" "}
+                <b className="font-medium text-foreground">Off</b> — it waits for you as a blocking inbox item.
+              </span>
+              <span className="mt-1 block">
+                Anything the evaluator denies or escalates comes to you either way, and this can only
+                tighten the crew&rsquo;s autonomy level, never loosen it.
+              </span>
             </div>
           </div>
         </div>

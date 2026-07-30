@@ -176,10 +176,16 @@ func TestOpenAIListModels(t *testing.T) {
 	}
 }
 
-// TestOpenAIListModels_PreservesQueryAndPath pins the net/url-based models
-// endpoint derivation: an Azure/proxy base URL with a query string and a
-// versioned path must rewrite only the trailing chat/completions segment to
-// /models while keeping the path prefix and the query (e.g. api-version).
+// TestOpenAIListModels_PreservesQueryAndPath pins the models endpoint
+// derivation for an Azure/proxy base URL: the path prefix and the query (e.g.
+// api-version) survive, and the trailing chat/completions segment becomes
+// /models.
+//
+// The deployment segment does NOT survive. Azure's classic layout addresses
+// one deployment for completions, but the model list belongs to the resource
+// and answers at ".../openai/models" — this test used to assert
+// ".../deployments/x/models", a route Azure does not serve, so discovery 404'd
+// against an endpoint whose completions worked.
 func TestOpenAIListModels_PreservesQueryAndPath(t *testing.T) {
 	var gotPath, gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -194,8 +200,8 @@ func TestOpenAIListModels_PreservesQueryAndPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListModels: %v", err)
 	}
-	if gotPath != "/openai/deployments/x/models" {
-		t.Errorf("path = %q, want /openai/deployments/x/models", gotPath)
+	if gotPath != "/openai/models" {
+		t.Errorf("path = %q, want /openai/models", gotPath)
 	}
 	if gotQuery != "2024-02-01" {
 		t.Errorf("api-version query not preserved: %q", gotQuery)

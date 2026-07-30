@@ -21,6 +21,7 @@ export {
   GRADIENT_PALETTES,
   getGradientPalette,
   getCrewDotColor,
+  crewColorHex,
   // Icon search / categories.
   CREW_ICON_CATEGORIES,
   searchCrewIcons,

@@ -145,6 +145,7 @@ CREATE TABLE audit_logs (
 | `date_from` | `string` | | ISO 8601 start date |
 | `date_to` | `string` | | ISO 8601 end date |
 | `search` | `string` | | Free-text match against the acting user's email / full name (joined from the `users` table) |
+| `source` | `string` | `workspace` | Which trail to read: `workspace`, `crews`, `credentials`, `keeper` |
 
 ### Response
 
@@ -175,7 +176,37 @@ CREATE TABLE audit_logs (
 }
 ```
 
-The response includes `user_email` and `user_name` joined from the users table for convenience.
+The response includes `user_email` and `user_name` joined from the users table, and `entity_name` —
+the display name of whatever the row touched, resolved per `entity_type` because `entity_id` is
+polymorphic. It is `null` when the target has no name to give (a backup path, a hard-deleted row), in
+which case the id is all there is.
+
+`entity_name` is deliberately **not** filtered on `deleted_at`: "who deleted Riley" is a question asked
+after Riley is gone, and that is the one place the log has to keep speaking.
+
+### Sources
+
+A workspace keeps four audit trails, in four tables, on purpose — the keeper ledger is append-only and
+merging it into a general log would cost exactly the guarantee it exists for. Only the **reading** is
+unified: each source is projected onto the response shape above.
+
+| `source` | Table | Answers |
+|---|---|---|
+| `workspace` (default) | `audit_logs` | Settings, people, crews, credentials, agents, backups |
+| `crews` | `crew_audit_log` | Cross-crew dispatch, messages, shared files |
+| `credentials` | `credential_audit` | Which secret was used, revealed or rotated |
+| `keeper` | `keeper_request_events` | Every gatekeeper decision, append-only |
+
+`action`, `entity_type`, `entity_id`, `user_id` and `search` apply to the `workspace` source only —
+the other trails index by their own shape, and a filter the server would silently ignore is worse
+than one that is not offered. `page`, `limit` and the date range mean the same thing everywhere.
+
+From the CLI:
+
+```bash
+crewship audit --source keeper --lines 100
+crewship audit --source credentials --since 24h
+```
 
 ### Pagination
 

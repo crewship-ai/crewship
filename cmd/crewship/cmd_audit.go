@@ -29,6 +29,7 @@ var auditCmd = &cobra.Command{
 
 Filters mirror the server-side /api/v1/audit query params:
   --action          Domain verb (agent.run, workspace.create, …)
+  --source          Which trail: workspace (default) · crews · credentials · keeper
   --entity-type     Entity kind (AGENT, BACKUP, CREDENTIAL, …)
   --entity-id       Narrow to a specific entity row
   --user            User ID (or a member's email, resolved for you) who performed the action
@@ -40,6 +41,7 @@ Examples:
   crewship audit
   crewship audit --action agent.run --lines 100
   crewship audit --entity-type CREDENTIAL --since 24h
+  crewship audit --source keeper --lines 100
   crewship audit --search rotate --until 2026-05-01T00:00:00Z
   crewship audit --user u_abc123 --page 2`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,8 +63,12 @@ Examples:
 		until, _ := cmd.Flags().GetString("until")
 		search, _ := cmd.Flags().GetString("search")
 		page, _ := cmd.Flags().GetInt("page")
+		source, _ := cmd.Flags().GetString("source")
 
 		q := url.Values{}
+		if source != "" {
+			q.Set("source", source)
+		}
 		q.Set("limit", fmt.Sprintf("%d", lines))
 		if page > 0 {
 			q.Set("page", fmt.Sprintf("%d", page))
@@ -125,6 +131,10 @@ Examples:
 				Action     string  `json:"action" yaml:"action"`
 				EntityType string  `json:"entity_type" yaml:"entity_type"`
 				EntityID   *string `json:"entity_id" yaml:"entity_id"`
+				// EntityName is what the row touched, resolved server-side.
+				// Without it the table prints an id fragment, which does not
+				// distinguish deleting Riley from deleting Sam.
+				EntityName *string `json:"entity_name" yaml:"entity_name"`
 				UserEmail  *string `json:"user_email" yaml:"user_email"`
 				CreatedAt  string  `json:"created_at" yaml:"created_at"`
 			} `json:"data" yaml:"data"`
@@ -134,22 +144,26 @@ Examples:
 		}
 
 		f := newFormatter()
-		headers := []string{"TIME", "ACTION", "ENTITY", "ENTITY_ID", "USER"}
+		headers := []string{"TIME", "ACTION", "ENTITY", "NAME", "USER"}
 		var rows [][]string
 		for _, a := range result.Data {
 			ts := a.CreatedAt
 			if t, err := time.Parse(time.RFC3339Nano, a.CreatedAt); err == nil {
 				ts = t.Format("2006-01-02 15:04:05")
 			}
-			entityID := "-"
-			if a.EntityID != nil {
-				entityID = truncateEntityID(*a.EntityID, 32)
+			// Prefer the name; fall back to the id when the target has none
+			// (a backup path, a hard-deleted row).
+			entity := "-"
+			if a.EntityName != nil && strings.TrimSpace(*a.EntityName) != "" {
+				entity = *a.EntityName
+			} else if a.EntityID != nil {
+				entity = truncateEntityID(*a.EntityID, 32)
 			}
 			user := "-"
 			if a.UserEmail != nil {
 				user = *a.UserEmail
 			}
-			rows = append(rows, []string{ts, a.Action, a.EntityType, entityID, user})
+			rows = append(rows, []string{ts, a.Action, a.EntityType, entity, user})
 		}
 		return f.Auto(result.Data, headers, rows)
 	},
@@ -201,15 +215,14 @@ func findWorkspaceMemberUserIDByEmail(client *cli.Client, workspaceID, email str
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var members []struct {
-		UserID string `json:"user_id"`
-		Email  string `json:"email"`
-	}
+	// workspaceMemberRow reads the nested `user` the server actually sends,
+	// with the flat fields as a fallback — see its doc comment.
+	var members []workspaceMemberRow
 	if err := cli.ReadJSON(resp, &members); err != nil {
 		return "", err
 	}
 	for _, m := range members {
-		if strings.EqualFold(m.Email, email) {
+		if strings.EqualFold(m.email(), email) {
 			return m.UserID, nil
 		}
 	}
@@ -243,6 +256,10 @@ func init() {
 	// Filter flags map 1:1 to /api/v1/audit query params. Names match the
 	// admin UI's filter chips so a user clicking through the dashboard can
 	// reproduce the same view from the CLI by reading the URL bar.
+	// A workspace keeps four audit trails and they answer different
+	// questions; the server projects each onto one row shape so this is a
+	// switch rather than four commands.
+	auditCmd.Flags().String("source", "", "Which trail to read: workspace (default), crews, credentials, keeper")
 	auditCmd.Flags().String("action", "", "Filter by action (domain verb, e.g. agent.run, workspace.create)")
 	auditCmd.Flags().String("entity-type", "", "Filter by entity type (AGENT, BACKUP, CREDENTIAL, …)")
 	auditCmd.Flags().String("entity-id", "", "Filter by entity ID")

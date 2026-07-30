@@ -29,8 +29,11 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	type stats struct {
 		Workspaces int `json:"workspaces"`
 		Users      int `json:"users"`
-		Agents     int `json:"agents"`
-		Running    int `json:"running"`
+		// Crews is what the licence caps first (max_crews), so the admin
+		// overview reads it against that ceiling rather than as a bare count.
+		Crews   int `json:"crews"`
+		Agents  int `json:"agents"`
+		Running int `json:"running"`
 	}
 
 	// Scope stats to the current workspace to prevent cross-workspace data leakage
@@ -43,6 +46,7 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	}{
 		{"SELECT 1", nil, &s.Workspaces}, // always 1 (the current workspace)
 		{"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?", []any{wsID}, &s.Users},
+		{"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", []any{wsID}, &s.Crews},
 		{"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", []any{wsID}, &s.Agents},
 		// Running = traces with run.started but no terminal entry yet.
 		// The NOT EXISTS subquery is workspace-scoped so a terminal

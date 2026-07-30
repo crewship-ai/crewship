@@ -33,7 +33,13 @@ interface MemoryConfig {
   raw_config?: string | null
 }
 
-export function MemoryConfigCard() {
+export function MemoryConfigCard({ workspaceId }: {
+  /** The workspace this card reads within. The admin API is workspace-scoped
+ *  by middleware: an unscoped request is refused with 400 before the handler
+ *  runs, which is what rendered these cards as "Could not load (HTTP 400)".
+ *  Null while it resolves — asking anyway just produces that error. */
+  workspaceId: string | null
+}) {
   const { role } = useAbilities()
   const canEdit = role === "OWNER" || role === "ADMIN"
 
@@ -44,10 +50,13 @@ export function MemoryConfigCard() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    if (!workspaceId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch("/api/v1/admin/memory/config")
+      const res = await apiFetch(
+        `/api/v1/admin/memory/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      )
       if (!res.ok) {
         setError(
           res.status === 403
@@ -64,7 +73,7 @@ export function MemoryConfigCard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => { void load() }, [load])
 
@@ -79,7 +88,8 @@ export function MemoryConfigCard() {
       // PATCH with only the one key: the server merges into the stored document
       // and preserves settings this UI doesn't model, so a newer knob can't be
       // clobbered by an older client saving a whole document back.
-      const res = await apiFetch("/api/v1/admin/memory/config", {
+      const res = await apiFetch(
+        `/api/v1/admin/memory/config?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ versions_retention_days: parsed }),
@@ -102,12 +112,17 @@ export function MemoryConfigCard() {
     } finally {
       setSaving(false)
     }
-  }, [parsed, valid])
+    // workspaceId is read in the request URL above, so it belongs here. This
+    // card stays mounted across a workspace switch, and two workspaces sitting
+    // on the same default value leave `days` (and therefore parsed/valid)
+    // unchanged — so without this the callback keeps the PREVIOUS workspace
+    // closed over and Save writes to the wrong one, with a success toast.
+  }, [parsed, valid, workspaceId])
 
   return (
     <SettingsCard
-      title="Memory configuration"
-      description="Retention window for memory_versions rows, used by the per-workspace retention sweep."
+      title="Memory version history"
+      description="How long this instance keeps the edit history of agent memory. It does not affect what an agent remembers."
       actions={
         <Button
           variant="outline"
@@ -131,7 +146,7 @@ export function MemoryConfigCard() {
           <div className="flex items-end gap-2 flex-wrap">
             <div className="space-y-1">
               <Label htmlFor="mem-retention-days" className="text-xs">
-                Versions retention (days)
+                Keep history for (days)
               </Label>
               <Input
                 id="mem-retention-days"
@@ -167,10 +182,22 @@ export function MemoryConfigCard() {
               : `Set explicitly for this workspace.`}
           </p>
 
-          <p className="text-[11px] text-muted-foreground">
-            Changes are journalled as <code className="font-mono">memory.config_updated</code>, so a
-            compliance audit can trace when retention policy changed and who changed it. Rows already
-            older than the new window become eligible for deletion on the sweep&apos;s next pass.
+          {/* The name "memory" made this read as "how long agents remember".
+              It is not: what an agent remembers lives in its own files and is
+              never touched here. This trims the VERSION TRAIL of those files —
+              the record of what each write changed, which is what makes a
+              memory edit recoverable and auditable. */}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            This is housekeeping for the instance, not a memory policy. An agent&apos;s memory lives in
+            its own files and is kept for as long as the agent exists; what expires here is the trail
+            of past versions of those files — what you would use to see what a write changed, or to
+            roll one back.
+          </p>
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            The trim runs shortly after this instance starts and then daily at 03:00 UTC. The three
+            most recent versions of every file always survive, whatever the window says. Changes to
+            this setting are journalled as <code className="font-mono">memory.config_updated</code>,
+            so an audit can trace when the policy changed and who changed it.
           </p>
 
           {!canEdit && (

@@ -4,6 +4,7 @@ import {
   getCrewIconDef,
   GRADIENT_PALETTES,
   getGradientPalette,
+  crewColorHex,
   getCrewDotColor,
   CREW_ICON_CATEGORIES,
   searchCrewIcons,
@@ -191,5 +192,33 @@ describe("searchCrewIcons", () => {
     for (const name of got) {
       expect(validNames.has(name), `category icon ${name} not in registry`).toBe(true)
     }
+  })
+})
+
+// Crews store their colour as whatever the picker produced: some rows carry a
+// palette id ("blue"), most carry a raw hex ("#EF4444"). getGradientPalette
+// only ever looked up the id registry, so every hex missed and fell back to
+// GRADIENT_PALETTES[0] — on a seeded instance three of four crews rendered the
+// same blue as each other while their stored colours were red, green and blue.
+describe("crewColorHex", () => {
+  it("passes a hex through, normalised", () => {
+    expect(crewColorHex("#EF4444")).toBe("#EF4444")
+    expect(crewColorHex("EF4444")).toBe("#EF4444")
+    expect(crewColorHex("#ef4444")).toBe("#ef4444")
+  })
+
+  it("returns null for a palette id, so the class-based path still wins", () => {
+    expect(crewColorHex("blue")).toBeNull()
+    expect(crewColorHex("emerald")).toBeNull()
+  })
+
+  it("returns null for nothing, and for junk that is not a colour", () => {
+    expect(crewColorHex(null)).toBeNull()
+    expect(crewColorHex(undefined)).toBeNull()
+    expect(crewColorHex("")).toBeNull()
+    expect(crewColorHex("#12")).toBeNull()
+    expect(crewColorHex("not-a-colour")).toBeNull()
+    // Not a hex triple: must not be coerced into one.
+    expect(crewColorHex("#EF44444")).toBeNull()
   })
 })

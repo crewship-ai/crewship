@@ -82,10 +82,15 @@ const sections: NavSection[] = [
       // the crew one already had, hiding `allow_private_endpoints` from anyone
       // who edited egress from here.
       //
-      // Cross-crew links are a roleCreate mutation with nothing useful to read
-      // underneath for a MEMBER. Named "Crew links" and not "Connections":
-      // Integrations owns that word for the things Crewship is hooked up to.
-      { key: "connections", label: "Crew links", icon: Link2, visibleTo: isManagerTier },
+      // Ungated since the rewrite: this used to be a bare create form, which
+      // is nothing to look at without the rights to submit it. It is now the
+      // link GRAPH — which crews may hand work to which — and that is exactly
+      // what a MEMBER debugging "why can my agent not reach that crew" needs
+      // to read. The controls inside go read-only below MANAGER, matching the
+      // rule at the top of this file. Named "Crew links" and not
+      // "Connections": Integrations owns that word for the services this
+      // instance is wired into.
+      { key: "connections", label: "Crew links", icon: Link2 },
       // The roster is readable by every role; the invite/role controls inside
       // are gated separately.
       { key: "members", label: "Members", icon: Users },

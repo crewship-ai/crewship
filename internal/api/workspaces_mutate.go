@@ -203,7 +203,8 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.RunRetentionDays != nil {
 		ub.Set("run_retention_days", *req.RunRetentionDays)
 	}
-	if !ub.Empty() {
+	persisted := !ub.Empty()
+	if persisted {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 			replyInternalError(w, h.logger, "update workspace", err)
@@ -228,6 +229,38 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.fillNestedCount()
+
+	// Which settings moved. allow_privileged_credentials gets called out by
+	// name because it is the one that removes the fail-closed boundary between
+	// privileged crews and stored secrets — if a single row in this log ever
+	// matters, it is that one.
+	changed := make([]string, 0, 4)
+	if req.Name != nil {
+		changed = append(changed, "name")
+	}
+	if req.Slug != nil {
+		changed = append(changed, "slug")
+	}
+	if req.PreferredLanguage != nil {
+		changed = append(changed, "preferred_language")
+	}
+	if req.RunRetentionDays != nil {
+		changed = append(changed, "run_retention_days")
+	}
+	meta := map[string]interface{}{"fields": changed}
+	if req.AllowPrivilegedCredentials != nil {
+		changed = append(changed, "allow_privileged_credentials")
+		meta["fields"] = changed
+		meta["allow_privileged_credentials"] = *req.AllowPrivilegedCredentials
+	}
+	// Only a PATCH that actually persisted something is an event. A `{}`
+	// body (or one carrying nothing but ignored fields) skips the update
+	// above, and recording it anyway fills the trail with settings changes
+	// that never happened — which is exactly the trail an operator later
+	// reads to find out when a setting moved.
+	if persisted {
+		auditFromRequest(r, h.db, "workspace.update", "WORKSPACE", workspaceID, meta)
+	}
 
 	writeJSON(w, http.StatusOK, ws)
 }

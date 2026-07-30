@@ -66,7 +66,7 @@ func (r *Router) registerAdminRoutes() {
 	// visible, so an admin can answer "are we storing secrets in plaintext? is
 	// signup open? is the limiter off?" without shell access to the box.
 	// Booleans only; no secret value is ever serialized.
-	posture := NewSecurityPostureHandler(r.allowSignup, r.googleClientID != "" && r.googleSecret != "")
+	posture := NewSecurityPostureHandler(r.allowSignup, r.googleClientID != "" && r.googleSecret != "", r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/security-posture", posture.Get)
 
 	// Runtime rate-limiter tuning (#1505 follow-up). Read ADMIN+, write

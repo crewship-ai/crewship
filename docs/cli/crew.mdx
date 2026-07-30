@@ -238,7 +238,13 @@ crewship crew member remove <crew-slug-or-id> <member-id>
 
 ## Crew Connections
 
-Crew connections enable cross-crew task dispatch between two crews.
+Crew connections ("crew links" in the UI) are what let one crew hand work to another: with a link, a
+lead can assign to an agent in the other crew (`/assign` with a `crew` field), crews can message each
+other and share files. Without one, every attempt is refused.
+
+`--direction unidirectional` means work flows from the FIRST crew to the second only. Re-running
+`connect` on a pair that is already linked updates that link rather than creating a second one; naming
+the pair the other way round makes it bidirectional.
 
 ### `crewship crew connect`
 

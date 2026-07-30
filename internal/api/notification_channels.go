@@ -36,7 +36,7 @@ func NewNotifyChannelHandler(db *sql.DB, mail mailer.Mailer, logger *slog.Logger
 	return &NotifyChannelHandler{
 		db:         db,
 		store:      store,
-		dispatcher: notify.NewDispatcher(store, mail, logger, db),
+		dispatcher: newGatedDispatcher(store, mail, logger, db),
 		mail:       mail,
 		logger:     logger,
 	}

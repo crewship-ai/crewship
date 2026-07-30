@@ -77,11 +77,13 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Load the target's current role (scoped to this workspace).
-	var currentRole string
+	// Load the target's current role (scoped to this workspace). The user id
+	// comes along for the audit row: a membership id names nobody, a user id
+	// resolves to an email.
+	var currentRole, memberUserID string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE id = ? AND workspace_id = ?",
-		memberID, workspaceID).Scan(&currentRole)
+		"SELECT role, user_id FROM workspace_members WHERE id = ? AND workspace_id = ?",
+		memberID, workspaceID).Scan(&currentRole, &memberUserID)
 	if err == sql.ErrNoRows {
 		writeProblem(w, r, http.StatusNotFound, "Member not found")
 		return
@@ -140,6 +142,15 @@ func (h *WorkspaceHandler) UpdateMemberRole(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, r, http.StatusConflict, "Cannot demote the last owner of the workspace")
 		return
 	}
+
+	// Keyed on the user, not the membership row: the audit name resolver
+	// turns a user id into an email, which is who the reader is looking for.
+	auditedUser := memberUserID
+	if auditedUser == "" {
+		auditedUser = memberID
+	}
+	auditFromRequest(r, h.db, "member.role_change", "WorkspaceMember", auditedUser,
+		map[string]interface{}{"from": currentRole, "to": req.Role, "member_id": memberID})
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":    "updated",

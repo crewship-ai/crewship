@@ -20,6 +20,7 @@ Requires an authenticated session (`requireAuth`) and a selected workspace (`req
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
+| `--source <trail>` | `workspace` | Which trail to read: `workspace` (settings, people, crews, credentials), `crews` (cross-crew dispatch and messages), `credentials` (secret use), `keeper` (gatekeeper decisions, append-only). The filters below apply to `workspace` only. |
 | `--action <verb>` | `""` | Domain verb (`agent.run`, `workspace.create`, `credential.rotate`, …). |
 | `--entity-type <kind>` | `""` | Entity kind (`AGENT`, `BACKUP`, `CREDENTIAL`, `CREW`, `USER`, …). |
 | `--entity-id <id>` | `""` | Narrow to a specific entity row (e.g. an agent ID). |

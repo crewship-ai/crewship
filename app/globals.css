@@ -294,6 +294,22 @@
   --tracking-wider: calc(var(--tracking-normal) + 0.05em);
   --tracking-widest: calc(var(--tracking-normal) + 0.1em);
 
+  /* ── Container sizes above the stock @7xl ──
+     Detail screens size themselves from their PANE, not the window: the
+     sidebar collapses, the list pane takes a slice, and a drawer can open.
+     At a 1920px window this canvas actually gets 1487px, so a viewport
+     breakpoint of 1920 would have dealt six columns into room for four.
+     `@container` + these sizes ask the only question that matters — how wide
+     is the thing the cards are actually sitting in.
+
+     Register the sizes as NAMES. Tailwind v4 emits arbitrary variants ahead
+     of the named scale, so `min-[1920px]:grid-cols-6` lost to `xl:grid-cols-4`
+     at equal specificity and silently did nothing — no error, just the old
+     layout. Named sizes sort by value with the rest of the scale. */
+  --container-8xl: 90rem;    /* 1440px */
+  --container-9xl: 100rem;   /* 1600px */
+  --container-10xl: 108rem;  /* 1728px */
+
   /* ── Typography scale → Tailwind text-* utilities ── */
   --text-micro: var(--typo-micro);
   --text-micro--line-height: var(--typo-micro-lh);
@@ -325,6 +341,106 @@ body {
 }
 
 @layer utilities {
+  /* ── Type roles ──────────────────────────────────────────────────
+     Named by the JOB the text does, not by its size. Every detail
+     surface picks a role; nobody picks a pixel value. Changing the
+     product's density is then this block, not 395 files.
+
+     The values are lifted verbatim from the routine detail screen —
+     the one surface that was designed as a whole rather than grown —
+     so adopting a role is a visual no-op there and a correction
+     everywhere else.
+
+       .type-title    24px  page heading
+       .type-row      14px  list rows, field values, prose
+       .type-section  13px  UPPERCASE card + section headers, labels
+       .type-meta     12px  timestamps, ids, stat captions, badges
+
+     Weight, tracking and casing ride along, because "12px" was never
+     the rule — "12px semibold uppercase wide-tracked muted" was, and
+     leaving three of those four to memory is how the surfaces drifted.
+
+     Bumped twice on 2026-07-29, 22/13/11/10 → 24/14/12/11 → 26/15/13/12.
+     The roles were lifted verbatim from the routine screen, which had been
+     designed tight; at that size a whole page of them read as fine print
+     rather than as dense, and the first step was still short. 15px rows with
+     12px metadata is comfortable reading, not a compromise — the density this
+     product wants comes from how much fits in a card, not from how small the
+     letters are.
+
+     This is the whole reason the roles exist: four values here, and every
+     detail surface in the product moves together. */
+  .type-title {
+    font-size: 1.5rem;
+    line-height: 2rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  .type-row {
+    font-size: 0.875rem;
+    line-height: 1.3rem;
+  }
+  .type-section {
+    font-size: 0.8125rem;
+    line-height: 1.2rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .type-meta {
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+  }
+  /* ── The navigation register ──
+     A second, quieter pair of sizes for the rails — the crews explorer, and
+     any nav list that follows it. Not an exception to the roles above: a
+     NAMED role, for a genuinely different reading task.
+
+     A detail card is read; a rail is scanned. In a card the text is the
+     content, so it carries the content sizes. In a rail the text is a label
+     on a target you are aiming at — you already know which agent you want,
+     and the portrait finds it faster than the name does. Sized down so the
+     row belongs to the face rather than competing with it.
+
+       .type-nav      13px  crew and agent names in a rail
+       .type-nav-sub  11px  the role line, counts, status words
+
+     Written here rather than typed into crews-explorer.tsx on purpose. The
+     moment a surface spells out text-[0.8125rem] for itself, it has left the
+     system, and the next surface copies the number instead of the reason —
+     which is how 12 different ways to write "small text" happened. */
+  .type-nav {
+    font-size: 0.8125rem;
+    line-height: 1.15rem;
+  }
+  .type-nav-sub {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+  }
+
+  /* Hairline: 211 uses of border-white/10 and 53 of border-white/8 existed
+     because the divider inside a card had no name — only the card's own
+     border did. Now it has one. */
+  .border-hairline { border-color: color-mix(in oklch, var(--border) 40%, transparent); }
+
+  /* The detail pane.
+     There is no width cap here, and that is the point. The dashboard — the
+     screen in this app that handles a wide monitor best — has never had one:
+     it fills the pane and lets each band of tiles decide its own column count
+     (grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 for the KPI row, lg:grid-cols-3
+     for the chart bands). Measured at a 2560 window it uses 2451px.
+
+     I had capped this at 1180 and then stepped the cap 1440/1780/2160, which
+     was just a slower way of leaving a gutter. A cap is the wrong tool: it
+     bounds the CONTAINER when the thing that actually needs bounding is a
+     column of text or a form row. So the pane fills, and the grids inside are
+     width-driven — a card can't get silly because the track has a max, not
+     because the page does. */
+  .detail-width {
+    width: 100%;
+    margin-inline: auto;
+  }
+
   .scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;

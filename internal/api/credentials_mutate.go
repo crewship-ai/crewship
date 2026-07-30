@@ -477,6 +477,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// a normal credential with null provenance until the next list
 	// refresh — at which point the SELECT picked them up from the
 	// row that had been carrying them all along.
+	// Name, kind and reach — never the value, and never anything derived from
+	// it. This row is read by every MANAGER in the workspace; the secret is
+	// read by a much shorter list.
+	auditFromRequest(r, h.db, "credential.create", "CREDENTIAL", credID, map[string]interface{}{
+		"name": req.Name, "type": req.Type, "scope": req.Scope,
+	})
+
 	actorTypeResp := &actorType
 	writeJSON(w, http.StatusCreated, credentialResponse{
 		ID:                    credID,

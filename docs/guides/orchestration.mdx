@@ -418,9 +418,34 @@ The `parseHandoff` function extracts this structure from agent output. Both `sum
 
 The confidence value (`low`, `medium`, `high`) feeds into the approval gate. When parsed as a float (via escalation config), it determines whether the task auto-approves or requires human review.
 
-## Cross-Crew Missions
+## Cross-Crew Work
 
-Mission tasks can reference agents from connected crews. The system auto-routes assignments to the correct crew container. Crew connections must be established by workspace admins before use.
+Crews are isolated by default. A **crew link** (Settings → Crew links, or `crewship crew connect`) is
+what lets one hand work to another; it is created by a workspace admin and enforced server-side on
+every dispatch, message and shared-file access.
+
+A lead assigns across a link by naming the crew:
+
+```bash
+curl -s -X POST http://localhost:9119/assign \
+  -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"crew":"ops","target":"morgan","task":"page the on-call"}'
+```
+
+Omit `crew` for your own crew. Results come back from `/results/{assignment_id}` either way, and
+`curl -s http://localhost:9119/connections` lists the links as they stand right now.
+
+A lead's system prompt already names the crews it can reach and who is in them, so it does not have to
+discover them. Peer queries (`/query`) are crew-local by design and cannot cross a link.
+
+Mission tasks can likewise reference agents in linked crews; the system routes each assignment to the
+right crew container.
+
+<Warning>
+  A one-way link points one way. If Ops → Engineering is `unidirectional`, Ops may dispatch into
+  Engineering and **not** the reverse — the reverse attempt is refused with "crews are not connected".
+</Warning>
 
 <Note>
   Crew-to-crew handoff with critique exchange (e.g. backend crew hands a draft to a testing crew for review) is on the v0.2 roadmap.

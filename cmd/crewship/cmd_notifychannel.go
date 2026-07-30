@@ -339,25 +339,29 @@ func notifyProviderToggle(enabled bool) func(*cobra.Command, []string) error {
 				return
 			}
 			fmt.Printf("%s disabled — new channels on it are refused.\n", body.Provider)
-			fmt.Println("Channels that already exist keep delivering; this is a create-time gate, not a kill switch.")
+			fmt.Println("Nothing more leaves through this provider — existing channels included.")
 		})
 	}
 }
 
 var notifyChannelProvidersEnableCmd = &cobra.Command{
 	Use:   "enable <provider>",
-	Short: "Allow new channels to be created on a provider (ADMIN+)",
+	Short: "Allow delivery through a provider again (ADMIN+)",
 	Args:  cobra.ExactArgs(1),
 	RunE:  notifyProviderToggle(true),
 }
 
 var notifyChannelProvidersDisableCmd = &cobra.Command{
 	Use:   "disable <provider>",
-	Short: "Refuse new channels on a provider (ADMIN+); existing ones keep delivering",
+	Short: "Stop all delivery through a provider (ADMIN+)",
 	Long: `Disable a provider instance-wide.
 
-This is a CREATE-time gate: channels that already exist on the provider keep
-delivering. To stop an existing channel, disable or remove that channel.`,
+This is the kill switch. Nothing more leaves through the provider — every
+channel already using it stops delivering, and new ones are refused. It is the
+switch to reach for when something is going somewhere it should not.
+
+Delivery fails closed while disabled: a send returns an error naming the
+provider rather than silently dropping the message.`,
 	Args: cobra.ExactArgs(1),
 	RunE: notifyProviderToggle(false),
 }

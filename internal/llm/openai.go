@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/llm/endpoint"
 )
 
 const openaiAPIURL = "https://api.openai.com/v1/chat/completions"
@@ -18,14 +21,85 @@ const openaiAPIURL = "https://api.openai.com/v1/chat/completions"
 type OpenAI struct {
 	apiKey  string
 	baseURL string
-	client  *http.Client
+	// ep is baseURL reduced to its mount root. Callers historically had to pass
+	// the full ".../v1/chat/completions" because the value was used verbatim as
+	// the POST target — so an ENDPOINT_URL credential stored in the ".../v1"
+	// shape our own docs recommend 404'd. Normalizing lets any shape work.
+	ep endpoint.Endpoint
+	// epErr is why normalization failed, kept so a base that is not a URL at all
+	// surfaces as a parse error rather than as a confusing request-construction
+	// failure further down. A base rejected on policy (embedded credentials, an
+	// odd scheme) is NOT an error here: it may be a deployment that worked, so it
+	// falls through to the raw value.
+	epErr  error
+	client *http.Client
+}
+
+// baseURLError returns a parse error when the configured base is not a URL at
+// all. Policy rejections return nil — the raw value is attempted instead.
+func (o *OpenAI) baseURLError() error {
+	if o.epErr != nil && errors.Is(o.epErr, endpoint.ErrParse) {
+		return fmt.Errorf("parse base url: %w", o.epErr)
+	}
+	return nil
+}
+
+// newOpenAIEndpoint normalizes a base URL onto the chat wire. A parse failure
+// leaves the endpoint zero, and the URL builders fall back to the raw value, so
+// normalization can only repair a base — never reject one that used to work.
+func newOpenAIEndpoint(baseURL string) (endpoint.Endpoint, error) {
+	ep, err := endpoint.Normalize(baseURL)
+	return ep.WithWire(endpoint.WireOpenAIChat), err
+}
+
+// chatURL is the completion target.
+func (o *OpenAI) chatURL() string {
+	if o.ep.Root == nil {
+		return o.baseURL
+	}
+	return o.ep.ChatURL()
+}
+
+// modelsURL is the discovery target. The mount prefix and any query string
+// (Azure addresses by ?api-version=) survive normalization, which is what the
+// previous hand-rolled suffix rewrite was protecting.
+//
+// The fallback has to DERIVE the models path, not hand back the raw base: the
+// raw base is the chat target, so returning it verbatim would make ListModels
+// query /chat/completions and parse whatever came back as a model list. That
+// path is reachable — a base rejected on policy (embedded credentials, an odd
+// scheme) deliberately keeps working via the raw value — so it is the same
+// suffix rewrite this package replaced, kept for exactly those deployments.
+// Ollama's tagsURL fallback does the equivalent.
+func (o *OpenAI) modelsURL() string {
+	if o.ep.Root == nil {
+		return rawModelsURL(o.baseURL)
+	}
+	return o.ep.ModelsURL()
+}
+
+// rawModelsURL is the pre-normalization derivation: rewrite a trailing
+// "/chat/completions" to "/models". Going through net/url preserves the query
+// (Azure's ?api-version=), which a suffix trim on the whole string mangles. An
+// unparseable base has nothing to rewrite, so it is returned as-is and fails at
+// request time the way it always did.
+func rawModelsURL(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/chat/completions") + "/models"
+	return u.String()
 }
 
 // NewOpenAI creates a provider that calls the OpenAI Chat Completions API.
 func NewOpenAI(apiKey string) *OpenAI {
+	ep, err := newOpenAIEndpoint(openaiAPIURL)
 	return &OpenAI{
 		apiKey:  apiKey,
 		baseURL: openaiAPIURL,
+		ep:      ep,
+		epErr:   err,
 		client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
@@ -33,9 +107,12 @@ func NewOpenAI(apiKey string) *OpenAI {
 // NewOpenAIWithBaseURL creates an OpenAI-compatible provider with a custom base URL.
 // Useful for Azure OpenAI, local proxies, or other OpenAI-compatible APIs.
 func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
+	ep, err := newOpenAIEndpoint(baseURL)
 	return &OpenAI{
 		apiKey:  apiKey,
 		baseURL: baseURL,
+		ep:      ep,
+		epErr:   err,
 		client:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
@@ -52,9 +129,12 @@ func NewOpenAIWithClient(apiKey, baseURL string, client *http.Client) *OpenAI {
 	if client == nil {
 		client = &http.Client{Timeout: 120 * time.Second}
 	}
+	ep, err := newOpenAIEndpoint(baseURL)
 	return &OpenAI{
 		apiKey:  apiKey,
 		baseURL: baseURL,
+		ep:      ep,
+		epErr:   err,
 		client:  client,
 	}
 }
@@ -63,23 +143,17 @@ func NewOpenAIWithClient(apiKey, baseURL string, client *http.Client) *OpenAI {
 func (o *OpenAI) Name() string { return "openai" }
 
 // ListModels implements ModelLister against the OpenAI-compatible
-// GET {base}/v1/models. baseURL is the chat-completions endpoint
-// (".../v1/chat/completions"); we derive the models endpoint by trimming the
-// "/chat/completions" suffix and appending "/models", which keeps the version
-// segment intact for Azure / proxy deployments that customise it.
+// GET {root}/v1/models. baseURL may be given in any shape — a bare root,
+// ".../v1", or the full ".../v1/chat/completions" — because it is reduced to a
+// mount root at construction and the models path is appended from there.
 func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	// Parse the base URL and rewrite only the trailing "/chat/completions"
-	// path segment to "/models". Going through net/url (instead of a raw
-	// string TrimSuffix) preserves scheme, host, and — critically for Azure
-	// / proxy deployments — the query string (e.g. ?api-version=...) and any
-	// trailing slash, which a suffix trim on the full URL would mangle.
-	u, err := url.Parse(o.baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse base url: %w", err)
+	if err := o.baseURLError(); err != nil {
+		return nil, err
 	}
-	u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/chat/completions") + "/models"
-	modelsURL := u.String()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	// The models path, the mount prefix and any query string (Azure addresses
+	// by ?api-version=) all come from the normalized endpoint, so this no longer
+	// has to hand-rewrite a suffix off the raw base.
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, o.modelsURL(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -169,7 +243,13 @@ func (o *OpenAI) doWithRetry(ctx context.Context, body []byte) (*http.Response, 
 }
 
 func (o *OpenAI) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL, bytes.NewReader(body))
+	// Wrapped as a request-build failure because that is what it is from the
+	// retry loop's point of view — it must not retry a base URL that will never
+	// parse.
+	if err := o.baseURLError(); err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.chatURL(), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

@@ -185,6 +185,7 @@ export function CrewsExplorer({
                     as="div"
                     selected={isSelected}
                     aria-label={crew.name}
+                    className="group/crew"
                     onSelect={() => {
                       onCrewSelect(crew.id)
                       if (!expanded) toggleCrew(crew.id)
@@ -198,34 +199,68 @@ export function CrewsExplorer({
                       onClick={(e) => { e.stopPropagation(); toggleCrew(crew.id) }}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleCrew(crew.id) } }}
                     >
+                      {/* Visible on hover, on focus, and while collapsed.
+                          It is nearly redundant — clicking the row selects and
+                          expands — but it is the ONLY way to collapse with a
+                          mouse, so it cannot simply go. Quiet at rest, there
+                          when reached for. */}
                       <ChevronRight
                         className={cn(
-                          "h-3 w-3 text-muted-foreground-soft transition-transform",
-                          expanded && "rotate-90",
+                          "h-3 w-3 text-muted-foreground-soft transition-all",
+                          expanded
+                            ? "rotate-90 opacity-0 group-hover/crew:opacity-100 group-focus-within/crew:opacity-100"
+                            : "opacity-100",
                         )}
                       />
                     </span>
                     <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
-                    <span className="text-[12px] font-medium truncate flex-1">{crew.name}</span>
-                    <span className="text-[10px] text-muted-foreground-soft tabular-nums shrink-0">
+                    <span className="type-nav font-semibold truncate flex-1">{crew.name}</span>
+                    <span className="type-nav-sub text-muted-foreground-soft tabular-nums shrink-0">
                       {crewAgents.length}
                     </span>
-                    {/* Mini status dots */}
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {Array.from({ length: dots.running }).map((_, i) => (
-                        <span key={`r${i}`} className="h-1.5 w-1.5 rounded-full bg-success" />
-                      ))}
-                      {Array.from({ length: dots.error }).map((_, i) => (
-                        <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-destructive" />
-                      ))}
-                      {Array.from({ length: Math.min(dots.idle, 3) }).map((_, i) => (
-                        <span key={`i${i}`} className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
-                      ))}
+                    {/* One dot per STATE, not one per agent.
+                        It used to draw a dot for every agent — a crew of 35
+                        drew 35 dots, and idle was capped at 3 while running and
+                        error were not, so the row grew with the roster and the
+                        count beside it became unreadable.
+                        The count already says how many. What it cannot say is
+                        that something is running or broken, which is the only
+                        reason to glance at a collapsed crew at all — so that
+                        keeps a mark, once, and idle gets none: idle is the
+                        normal state and needs no ink. */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {dots.error > 0 && (
+                        <span
+                          className="type-meta inline-flex items-center gap-1 text-destructive"
+                          title={`${dots.error} in error`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+                          {dots.error > 1 && <span className="tabular-nums">{dots.error}</span>}
+                        </span>
+                      )}
+                      {dots.running > 0 && (
+                        <span
+                          className="type-meta inline-flex items-center gap-1 text-success"
+                          title={`${dots.running} running`}
+                        >
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
+                          {dots.running > 1 && <span className="tabular-nums">{dots.running}</span>}
+                        </span>
+                      )}
                     </div>
                   </SidebarRow>
 
-                  {/* Agent rows */}
-                  {expanded && crewAgents.map((agent) => {
+                  {/* Agent rows, hung off a guide line.
+                      They were already indented by 24px, and 24px of empty
+                      space says nothing — the eye read two rounded blocks
+                      side by side, not a parent and its children. The rule
+                      runs under the crew's own chevron, so the nesting is
+                      stated rather than implied, and a selected agent's
+                      highlight now starts to the RIGHT of it instead of
+                      competing with the crew's row for the same left edge. */}
+                  {expanded && (
+                  <div className="relative ml-[1.1rem] border-l border-border/70 pl-1">
+                  {crewAgents.map((agent) => {
                     const ghost = isGhost(agent)
                     const badge = STATUS_BADGE[effectiveStatus(agent)] || STATUS_BADGE.IDLE
                     const isAgentSelected = selectedAgentId === agent.id
@@ -233,7 +268,6 @@ export function CrewsExplorer({
                       <SidebarRow
                         key={agent.id}
                         as="div"
-                        indent
                         selected={isAgentSelected}
                         aria-label={agent.name}
                         onSelect={() => onAgentSelect(agent.id)}
@@ -246,13 +280,23 @@ export function CrewsExplorer({
                           style={agent.avatar_style || agent.crew?.avatar_style}
                           agentId={agent.id}
                           avatarUrl={agent.avatar_url}
-                          className="h-5 w-5 rounded-full shrink-0"
+                          className="h-8 w-8 rounded-lg shrink-0"
                         />
+                        {/* The role line only on the row you are on.
+                            Measured: the two text lines were 38px against a
+                            29px portrait, so the TEXT set the row height and
+                            the face — the thing you actually scan by — was the
+                            smaller half. Dropping the second line for every
+                            other row lets the portrait grow and the row shrink
+                            at the same time, and the role is still there the
+                            moment you need it to confirm. */}
                         <div className="flex-1 min-w-0">
-                          <span className="text-[11px] font-medium truncate block">{agent.name}</span>
-                          <span className="text-[10px] text-muted-foreground truncate block">
-                            {agent.role_title || agent.agent_role}
-                          </span>
+                          <span className="type-nav font-medium truncate block">{agent.name}</span>
+                          {isAgentSelected && (
+                            <span className="type-nav-sub text-muted-foreground truncate block">
+                              {agent.role_title || agent.agent_role}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {agent.ephemeral && !ghost && (
@@ -264,11 +308,13 @@ export function CrewsExplorer({
                               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
                             </span>
                           )}
-                          <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                          <span className={cn("type-nav-sub", badge.className)}>{badge.label}</span>
                         </div>
                       </SidebarRow>
                     )
                   })}
+                  </div>
+                  )}
                 </div>
               )
             })}
@@ -276,7 +322,7 @@ export function CrewsExplorer({
             {/* Unassigned */}
             {unassigned.length > 0 && (
               <div className="mt-2 pt-2 border-t border-border">
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
+                <div className="type-nav-sub px-2 py-1 font-semibold uppercase tracking-wider text-muted-foreground-soft">
                   Unassigned
                 </div>
                 {unassigned.map((agent) => {
@@ -299,11 +345,11 @@ export function CrewsExplorer({
                         style={agent.avatar_style}
                         agentId={agent.id}
                         avatarUrl={agent.avatar_url}
-                        className="h-5 w-5 rounded-full shrink-0"
+                        className="h-8 w-8 rounded-lg shrink-0"
                       />
                       <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-medium truncate block">{agent.name}</span>
-                        <span className="text-[10px] text-muted-foreground truncate block">
+                        <span className="type-nav font-medium truncate block">{agent.name}</span>
+                        <span className="type-nav-sub text-muted-foreground truncate block">
                           {agent.role_title || agent.agent_role}
                         </span>
                       </div>
@@ -311,7 +357,7 @@ export function CrewsExplorer({
                         {agent.ephemeral && !ghost && (
                           <Clock className="h-2.5 w-2.5 text-notice/80" aria-label="Ephemeral hire" />
                         )}
-                        <span className={cn("text-[10px]", badge.className)}>{badge.label}</span>
+                        <span className={cn("type-nav-sub", badge.className)}>{badge.label}</span>
                       </div>
                     </SidebarRow>
                   )

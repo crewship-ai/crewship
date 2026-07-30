@@ -77,6 +77,7 @@ func (info ChatInfo) ToAgentRunRequest(o AgentRunOverrides) orchestrator.AgentRu
 		MaxTurns:              o.MaxTurns,
 		MemoryEnabled:         info.MemoryEnabled,
 		CrewMembers:           info.CrewMembers,
+		ConnectedCrews:        info.ConnectedCrews,
 		NetworkMode:           info.NetworkMode,
 		AllowedDomains:        info.AllowedDomains,
 		AllowPrivateEndpoints: info.AllowPrivateEndpoints,

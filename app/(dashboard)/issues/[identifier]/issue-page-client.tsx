@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+
+import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
+import { parseReturnTo } from "@/lib/return-to"
 import {
   ArrowLeft,
   Check,
@@ -65,6 +68,15 @@ const ISSUE_PATH_RE = /^\/issues\/([^/]+)\/?$/
 
 export function IssuePageClient() {
   const router = useRouter()
+
+  // An issue is almost always opened FROM somewhere — an agent's Issues cell,
+  // a routine, the board. The origin rides in the URL so back returns there,
+  // and survives a refresh or a pasted link, which router.back() would not.
+  // parseReturnTo rejects anything that is not an in-app path.
+  const [fromParam] = useShallowSearchParam("from")
+  const [fromLabelParam] = useShallowSearchParam("fromLabel")
+  const origin = parseReturnTo(fromParam, fromLabelParam)
+  const back = () => router.push(origin?.href ?? "/issues")
   const identifier = useUrlSegment(ISSUE_PATH_RE)
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { data: session } = useSession()
@@ -393,9 +405,9 @@ export function IssuePageClient() {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-4">
         <p className="text-muted-foreground">{error ?? "Issue not found"}</p>
-        <Button variant="outline" onClick={() => router.push("/issues")}>
+        <Button variant="outline" onClick={back}>
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Orchestration
+          {origin ? `Back to ${origin.label}` : "Back to Orchestration"}
         </Button>
       </div>
     )
@@ -418,18 +430,15 @@ export function IssuePageClient() {
           variant="ghost"
           size="icon"
           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          onClick={() => router.push("/issues")}
-          aria-label="Back to issues"
+          onClick={back}
+          aria-label={origin ? `Back to ${origin.label}` : "Back to issues"}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
         <nav className="flex items-center gap-1 text-body text-muted-foreground min-w-0">
-          <button
-            className="hover:text-foreground transition-colors"
-            onClick={() => router.push("/issues")}
-          >
-            Orchestration
+          <button className="hover:text-foreground transition-colors" onClick={back}>
+            {origin?.label ?? "Orchestration"}
           </button>
           <ChevronRight className="h-3 w-3 shrink-0" />
           <span className="text-foreground font-medium truncate">

@@ -37,7 +37,7 @@ describe("<SecurityPostureCard> — #1379", () => {
         warnings: [{ key: "plaintext_secrets_allowed", severity: "high", message: "credentials unencrypted at rest" }],
       }),
     )
-    render(<SecurityPostureCard />)
+    render(<SecurityPostureCard workspaceId="ws-1" />)
 
     // The point of the card is the glance — "true" would read as fine.
     expect(await screen.findByText("ALLOWED (insecure)")).toBeInTheDocument()
@@ -50,7 +50,7 @@ describe("<SecurityPostureCard> — #1379", () => {
     apiFetch.mockResolvedValue(
       jsonResponse({ ...base, rate_limit_disabled: true, rate_limit_effectively_disabled: false }),
     )
-    render(<SecurityPostureCard />)
+    render(<SecurityPostureCard workspaceId="ws-1" />)
     // Collapsing these would invent an exposure that the prod guard prevents.
     expect(await screen.findByText(/IGNORED in production/)).toBeInTheDocument()
     expect(screen.queryByText("DISABLED")).toBeNull()
@@ -60,25 +60,25 @@ describe("<SecurityPostureCard> — #1379", () => {
     apiFetch.mockResolvedValue(
       jsonResponse({ ...base, environment: "dev", rate_limit_disabled: true, rate_limit_effectively_disabled: true }),
     )
-    render(<SecurityPostureCard />)
+    render(<SecurityPostureCard workspaceId="ws-1" />)
     expect(await screen.findByText("DISABLED")).toBeInTheDocument()
   })
 
   it("gives an explicit all-clear rather than an empty area", async () => {
     apiFetch.mockResolvedValue(jsonResponse(base))
-    render(<SecurityPostureCard />)
+    render(<SecurityPostureCard workspaceId="ws-1" />)
     expect(await screen.findByText(/stands out/i)).toBeInTheDocument()
   })
 
   it("labels an unset environment", async () => {
     apiFetch.mockResolvedValue(jsonResponse({ ...base, environment: "" }))
-    render(<SecurityPostureCard />)
+    render(<SecurityPostureCard workspaceId="ws-1" />)
     expect(await screen.findByText("(unset)")).toBeInTheDocument()
   })
 
   it("explains a 403 instead of showing an empty card", async () => {
     apiFetch.mockResolvedValue(jsonResponse({}, 403))
-    render(<SecurityPostureCard />)
+    render(<SecurityPostureCard workspaceId="ws-1" />)
     await waitFor(() => expect(screen.getByText(/requires an admin role/i)).toBeInTheDocument())
   })
 })

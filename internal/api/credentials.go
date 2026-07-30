@@ -487,6 +487,8 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	h.reconcileRevokedCredential(rctx, credID, workspaceID)
 
+	auditFromRequest(r, h.db, "credential.delete", "CREDENTIAL", credID, nil)
+
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 

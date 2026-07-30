@@ -25,18 +25,24 @@ import (
 const (
 	// LockoutThreshold is the number of consecutive failed signin
 	// attempts before the account is locked. NIST SP 800-63B suggests
-	// "no fewer than 100" for online attacks at 1-per-min throughput,
-	// but our per-IP limit is 10/min so an attacker can already manage
-	// at most ~14k/day per IP. 10 is a tight balance: enough room for
-	// honest fat-fingering, low enough to materially impede single-IP
-	// dictionary attacks. Tunable via env in production.
-	LockoutThreshold = 10
+	// "no fewer than 100" for online attacks at 1-per-min throughput.
+	// 50 leaves room for a person who genuinely cannot remember which
+	// password they used, while still ending a single-IP dictionary run
+	// long before it gets anywhere — the per-IP auth bucket is throttling
+	// the attempt rate underneath this anyway.
+	//
+	// This is the FALLBACK used when no ratelimitcfg store is installed;
+	// the live value is ratelimitcfg.KeyLoginLockoutThresh and must match,
+	// or a store-less path quietly enforces a different rule.
+	LockoutThreshold = 50
 
-	// LockoutDuration is how long an account stays locked after
-	// hitting the threshold. Short enough that a legitimate user
-	// who fat-fingered themselves into a lock can recover by
-	// waiting; long enough that an attacker hitting the lock 10×
-	// in a row has spent an hour, not an afternoon.
+	// LockoutDuration is how long an account stays locked after hitting
+	// the threshold. Left at five minutes deliberately while the other
+	// limits were loosened: this one only bites AFTER 50 consecutive wrong
+	// passwords, so an honest user essentially never meets it, whereas
+	// shortening it would hand a dictionary run five times the windows.
+	// The room for human error belongs in the threshold, not here.
+	// Fallback for ratelimitcfg.KeyLoginLockoutDurSec — keep in step.
 	LockoutDuration = 5 * time.Minute
 )
 

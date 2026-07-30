@@ -16,6 +16,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -263,7 +264,7 @@ func TestEnqueueForCrew_AlreadyRunningFastPath(t *testing.T) {
 
 func TestEnqueueForCrew_RateLimited(t *testing.T) {
 	h, wsID, crewID := covProvRig(t, &covCommitClient{}, `{"image":"ubuntu:22.04"}`)
-	h.rateLimiter.running[wsID] = maxConcurrentProvisionsPerWorkspace
+	h.rateLimiter.running[wsID] = ratelimitcfg.Int(ratelimitcfg.KeyProvMaxConcurrentWS)
 	_, err := h.EnqueueForCrew(context.Background(), crewID, wsID)
 	if !errors.Is(err, ErrRateLimited) {
 		t.Errorf("err = %v, want ErrRateLimited", err)
@@ -338,7 +339,7 @@ func TestProvisionTrigger_StatusMapping(t *testing.T) {
 	})
 	t.Run("rate limited 429", func(t *testing.T) {
 		h2, wsID2, crewID2 := covProvRig(t, &covCommitClient{}, `{"image":"ubuntu:22.04"}`)
-		h2.rateLimiter.running[wsID2] = maxConcurrentProvisionsPerWorkspace
+		h2.rateLimiter.running[wsID2] = ratelimitcfg.Int(ratelimitcfg.KeyProvMaxConcurrentWS)
 		req := httptest.NewRequest("POST", "/x", nil)
 		req.SetPathValue("crewId", crewID2)
 		req = withWorkspaceUser(req, userID, wsID2, "OWNER")

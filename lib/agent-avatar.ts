@@ -20,14 +20,34 @@ export const DEFAULT_AVATAR_STYLE = "bottts-neutral"
  */
 const STYLE_LOADERS: Record<string, () => Promise<{ default?: unknown } & object>> = {
   adventurer: () => import("@dicebear/adventurer"),
-  "fun-emoji": () => import("@dicebear/fun-emoji"),
-  "pixel-art": () => import("@dicebear/pixel-art"),
-  micah: () => import("@dicebear/micah"),
-  notionists: () => import("@dicebear/notionists"),
-  thumbs: () => import("@dicebear/thumbs"),
-  lorelei: () => import("@dicebear/lorelei"),
-  "big-smile": () => import("@dicebear/big-smile"),
+  "adventurer-neutral": () => import("@dicebear/adventurer-neutral"),
   avataaars: () => import("@dicebear/avataaars"),
+  "avataaars-neutral": () => import("@dicebear/avataaars-neutral"),
+  "big-ears": () => import("@dicebear/big-ears"),
+  "big-ears-neutral": () => import("@dicebear/big-ears-neutral"),
+  "big-smile": () => import("@dicebear/big-smile"),
+  bottts: () => import("@dicebear/bottts"),
+  croodles: () => import("@dicebear/croodles"),
+  "croodles-neutral": () => import("@dicebear/croodles-neutral"),
+  dylan: () => import("@dicebear/dylan"),
+  "fun-emoji": () => import("@dicebear/fun-emoji"),
+  lorelei: () => import("@dicebear/lorelei"),
+  "lorelei-neutral": () => import("@dicebear/lorelei-neutral"),
+  micah: () => import("@dicebear/micah"),
+  miniavs: () => import("@dicebear/miniavs"),
+  notionists: () => import("@dicebear/notionists"),
+  "notionists-neutral": () => import("@dicebear/notionists-neutral"),
+  "open-peeps": () => import("@dicebear/open-peeps"),
+  personas: () => import("@dicebear/personas"),
+  "pixel-art": () => import("@dicebear/pixel-art"),
+  "pixel-art-neutral": () => import("@dicebear/pixel-art-neutral"),
+  thumbs: () => import("@dicebear/thumbs"),
+  "toon-head": () => import("@dicebear/toon-head"),
+}
+
+/** Slugs that have a lazy loader. The default is resident, so it has none. */
+export function loadableStyleSlugs(): string[] {
+  return Object.keys(STYLE_LOADERS)
 }
 
 /**
@@ -36,16 +56,35 @@ const STYLE_LOADERS: Record<string, () => Promise<{ default?: unknown } & object
  * can enumerate keys/labels without forcing every collection to load.
  */
 export const AVATAR_STYLES: Record<string, { label: string }> = {
-  "bottts-neutral": { label: "Robots" },
+  // Labels are DiceBear's own names, not ours. "Robots" for bottts-neutral was
+  // a local invention, and it stopped matching the moment the sibling collection
+  // bottts arrived — two robot styles, one of them called Robots. Anyone
+  // comparing this list against dicebear.com now finds the same words.
+  "bottts-neutral": { label: "Bottts Neutral" },
+  bottts: { label: "Bottts" },
   adventurer: { label: "Adventurer" },
-  "fun-emoji": { label: "Fun Emoji" },
-  "pixel-art": { label: "Pixel Art" },
-  micah: { label: "Micah" },
-  notionists: { label: "Notionists" },
-  thumbs: { label: "Thumbs" },
-  lorelei: { label: "Lorelei" },
-  "big-smile": { label: "Big Smile" },
+  "adventurer-neutral": { label: "Adventurer Neutral" },
   avataaars: { label: "Avataaars" },
+  "avataaars-neutral": { label: "Avataaars Neutral" },
+  "big-ears": { label: "Big Ears" },
+  "big-ears-neutral": { label: "Big Ears Neutral" },
+  "big-smile": { label: "Big Smile" },
+  croodles: { label: "Croodles" },
+  "croodles-neutral": { label: "Croodles Neutral" },
+  dylan: { label: "Dylan" },
+  "fun-emoji": { label: "Fun Emoji" },
+  lorelei: { label: "Lorelei" },
+  "lorelei-neutral": { label: "Lorelei Neutral" },
+  micah: { label: "Micah" },
+  miniavs: { label: "Miniavs" },
+  notionists: { label: "Notionists" },
+  "notionists-neutral": { label: "Notionists Neutral" },
+  "open-peeps": { label: "Open Peeps" },
+  personas: { label: "Personas" },
+  "pixel-art": { label: "Pixel Art" },
+  "pixel-art-neutral": { label: "Pixel Art Neutral" },
+  thumbs: { label: "Thumbs" },
+  "toon-head": { label: "Toon Head" },
 }
 
 // Styles whose implementation is resident. The default is loaded from

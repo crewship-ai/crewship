@@ -54,9 +54,12 @@ type ProvisionJob struct {
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
 // sweepers and CacheList. Exists as an interface so tests can swap in a fake
 
+// Fallbacks for ratelimitcfg.KeyProvMaxConcurrentWS / KeyProvMaxStartsPerMin,
+// used when no store is installed. Keep them in step with the registry — a
+// mismatch means a store-less path enforces a limit nobody configured.
 const (
-	maxConcurrentProvisionsPerWorkspace = 8
-	maxProvisionStartsPerMinute         = 20
+	maxConcurrentProvisionsPerWorkspace = 32
+	maxProvisionStartsPerMinute         = 120
 )
 
 // provisionRateLimiter tracks in-flight provisions per workspace and caps the
