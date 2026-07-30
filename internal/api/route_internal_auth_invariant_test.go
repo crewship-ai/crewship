@@ -34,8 +34,20 @@ import (
 // router source (single line; multi-line registrations put the verb+pattern
 // on the first line — same convention mutationVerbLine documents in
 // route_authz_invariant_test.go, and for the same reason: that's the line we
-// can reliably key the auth-wrapper check on).
+// can reliably key the match on).
 var internalRouteLine = regexp.MustCompile(`r\.mux\.(Handle|HandleFunc)\("((?:GET|POST|PUT|PATCH|DELETE) [^"]*/api/v1/internal/[^"]*)"`)
+
+// internalRouteWrapperLookahead is how many lines after the registration line
+// are joined before looking for the internalAuth( wrapper. The verb+pattern
+// has to be on the registration's first line (see internalRouteLine), but a
+// legitimate registration can still wrap its handler argument onto the next
+// line or two — a long adapter chain, a comment forcing a break, whatever.
+// Checking only the first line would call that shape "ungated" and fail the
+// build for no reason, and a false-red build-gate gets "fixed" by weakening
+// the test, which is worse than not having it. Matches the sibling read-scope
+// invariant's readRouteWrapperLookahead in route_read_scope_invariant_test.go
+// so the two invariants in this package behave the same way.
+const internalRouteWrapperLookahead = 4
 
 // internalRouteMatch is one /api/v1/internal/* registration found in the
 // router source.
@@ -43,8 +55,8 @@ type internalRouteMatch struct {
 	file    string
 	line    int
 	route   string // "METHOD /api/v1/internal/...", captured from the source
-	gated   bool   // line carries the internalAuth( wrapper
-	rawLine string
+	gated   bool   // registration's lookahead window carries the internalAuth( wrapper
+	rawLine string // single line, for the error message
 }
 
 // findInternalRoutes scans every non-test router_*.go file for
@@ -76,16 +88,34 @@ func findInternalRoutes(t *testing.T) []internalRouteMatch {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		for i, line := range strings.Split(string(src), "\n") {
+		lines := strings.Split(string(src), "\n")
+		for i, line := range lines {
 			m := internalRouteLine.FindStringSubmatch(line)
 			if m == nil {
 				continue
 			}
+			end := i + internalRouteWrapperLookahead
+			if end > len(lines) {
+				end = len(lines)
+			}
+			// Router files register routes one-per-line, densely. Don't let
+			// the window cross into the START of the next registration:
+			// router_internal.go is packed tightly enough that "the next
+			// route is gated" would otherwise get read as "this route is
+			// gated," turning a genuinely dropped wrapper into a false PASS
+			// instead of the FAIL it must be.
+			for j := i + 1; j < end; j++ {
+				if internalRouteLine.MatchString(lines[j]) {
+					end = j
+					break
+				}
+			}
+			tail := strings.Join(lines[i:end], " ")
 			matches = append(matches, internalRouteMatch{
 				file:    f,
 				line:    i + 1,
 				route:   m[2],
-				gated:   strings.Contains(line, "internalAuth("),
+				gated:   strings.Contains(tail, "internalAuth("),
 				rawLine: line,
 			})
 		}
