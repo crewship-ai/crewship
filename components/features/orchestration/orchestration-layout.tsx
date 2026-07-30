@@ -59,7 +59,7 @@ import { CreateIssueModal } from "@/components/features/orchestration/create-iss
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 
 import { apiFetch } from "@/lib/api-fetch"
-import { setTaskStatus } from "@/components/features/orchestration/task-actions"
+import { runTaskAction } from "@/components/features/orchestration/task-actions"
 import { useAppStore } from "@/lib/store"
 import type { BreadcrumbItem } from "@/lib/store"
 import { ActivityTab } from "@/components/features/crews/bottom-panel/activity-tab"
@@ -477,18 +477,11 @@ export function OrchestrationLayout({
   }, [])
 
   const handleTaskAction = useCallback(async (action: "edit" | "retry" | "skip", taskId: string, missionId: string) => {
-    // "edit" — detail panel is already visible, nothing to write.
-    if (action === "edit") return
-    const mission = missions.find(m => m.id === missionId)
-    if (!mission?.crew_id) return
-
-    const landed = await setTaskStatus(action, {
-      crewId: mission.crew_id,
-      missionId,
-      taskId,
-      workspaceId,
-    })
-    if (landed) onRefresh()
+    // Resolving the crew, deciding that "edit" writes nothing and mapping the
+    // action onto a status all live in task-actions, where a test can reach
+    // them: this component is 1000 lines of layout that no unit test renders,
+    // so anything decided here would be decided unwatched.
+    if (await runTaskAction(action, taskId, missionId, { missions, workspaceId })) onRefresh()
   }, [missions, workspaceId, onRefresh])
 
   const handleDrawerTabClick = useCallback((tab: DrawerTab) => {

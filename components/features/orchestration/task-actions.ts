@@ -71,3 +71,48 @@ export async function setTaskStatus(action: TaskStatusAction, ref: TaskRef): Pro
   toast.success(spec.claimed)
   return true
 }
+
+/** The subset of a mission runTaskAction needs to find the owning crew. */
+export interface TaskActionMission {
+  id: string
+  crew_id?: string | null
+}
+
+export interface TaskActionScope {
+  missions: TaskActionMission[]
+  workspaceId: string
+}
+
+/**
+ * runTaskAction is what the orchestration detail panel's task buttons call.
+ * It resolves the mission the task belongs to, decides which actions write
+ * anything at all, and reports whether the caller has something new to
+ * refetch.
+ *
+ * It lives here rather than in the layout on purpose: the layout is a
+ * thousand lines of JSX that no unit test renders, so a mis-wire there —
+ * "Retry" sending SKIPPED, a refresh fired after a refused write — would
+ * never go red. Here it does.
+ */
+export async function runTaskAction(
+  action: "edit" | TaskStatusAction,
+  taskId: string,
+  missionId: string,
+  scope: TaskActionScope,
+): Promise<boolean> {
+  // "edit" only reveals a panel that is already on screen. Nothing is
+  // written, so there is nothing to confirm and nothing to refetch.
+  if (action === "edit") return false
+
+  const mission = scope.missions.find((m) => m.id === missionId)
+  // Without the owning crew there is no URL to PATCH. Say nothing rather
+  // than guess a crew id into someone else's mission.
+  if (!mission?.crew_id) return false
+
+  return setTaskStatus(action, {
+    crewId: mission.crew_id,
+    missionId,
+    taskId,
+    workspaceId: scope.workspaceId,
+  })
+}
