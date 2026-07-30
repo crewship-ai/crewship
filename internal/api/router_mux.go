@@ -134,6 +134,22 @@ func (m *routeMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.mux.ServeHTTP(w, r)
 }
 
+// Handler forwards http.ServeMux.Handler: it reports which pattern a request
+// WOULD reach, without running the handler.
+//
+// Forwarded rather than reached through m.mux because two callers depend on
+// it and they depend on the same subtlety. ServeMux returns an EMPTY pattern
+// for both of its own answers — not-found and method-not-allowed — and a
+// non-empty one only when a registered handler would actually receive the
+// request. sealMethodGuards uses that to find the holes; the internal-surface
+// fence (#1501, router_internal_fence.go) uses it to collapse every rejection
+// under /api/v1/internal/ into one indistinguishable 404. Replacing
+// Router.mux with this wrapper would otherwise take the method away from the
+// fence and break the build.
+func (m *routeMux) Handler(r *http.Request) (http.Handler, string) {
+	return m.mux.Handler(r)
+}
+
 // Routes returns the registered route table as path -> sorted methods.
 // A path registered without a method reports the single entry "*".
 func (m *routeMux) Routes() map[string][]string {
@@ -235,7 +251,7 @@ func (m *routeMux) sealMethodGuards() {
 			if err != nil {
 				continue
 			}
-			_, captured := m.mux.Handler(req)
+			_, captured := m.Handler(req)
 			if captured == "" {
 				continue // ServeMux already answers 405 here.
 			}
