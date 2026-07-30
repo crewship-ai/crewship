@@ -116,6 +116,11 @@ var inboxListCmd = &cobra.Command{
 				Payload        map[string]interface{} `json:"payload" yaml:"payload"`
 				CreatedAt      string                 `json:"created_at" yaml:"created_at"`
 				ResolvedAction string                 `json:"resolved_action" yaml:"resolved_action"`
+				// See the note on the `get` struct below: the API sends these,
+				// the CLI used to drop them.
+				TargetRole string `json:"target_role,omitempty" yaml:"target_role,omitempty"`
+				ResolvedBy string `json:"resolved_by_user_id,omitempty" yaml:"resolved_by_user_id,omitempty"`
+				ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
 			} `json:"rows" yaml:"rows"`
 			Count       int `json:"count" yaml:"count"`
 			UnreadCount int `json:"unread_count" yaml:"unread_count"`
@@ -269,6 +274,14 @@ Examples:
 			ResolvedAction string                 `json:"resolved_action" yaml:"resolved_action"`
 			CreatedAt      string                 `json:"created_at" yaml:"created_at"`
 			Payload        map[string]interface{} `json:"payload" yaml:"payload"`
+			// The API has always sent these three; the CLI dropped them, so an
+			// operator (or an agent) driving through the CLI could not see who a
+			// row was addressed to, who closed it, or when. Addressing is the
+			// difference between "someone else may take this" and "only I can",
+			// and it is what the target-role/decider contract is checked against.
+			TargetRole string `json:"target_role,omitempty" yaml:"target_role,omitempty"`
+			ResolvedBy string `json:"resolved_by_user_id,omitempty" yaml:"resolved_by_user_id,omitempty"`
+			ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &item); err != nil {
 			return err
