@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -334,4 +335,101 @@ func TestBackupCreate_MemoryVersionMissingBlobIsSkippedNotFatal(t *testing.T) {
 		t.Errorf("db/dump.json memory_versions rows = %v; expected a row with sha256=%s "+
 			"(the row itself must still ride the bundle even though its blob is missing)", rows, rec.Sha256)
 	}
+}
+
+// TestRestoreMemoryBlobFile_DurableWriteSequence pins that
+// restoreMemoryBlobFile's write path is crash-durable: fsync the
+// tempfile's content before Close, atomic rename over the destination,
+// then fsync the parent directory so the rename's directory-entry
+// update is itself durable. Without all three, a crash mid-restore
+// across thousands of blobs can leave some content un-flushed while
+// their memory_versions rows already point at them on disk — exactly
+// the class of bug this PR fixes, just reintroduced via a different
+// code path (the restore write itself, not a missing collection step).
+//
+// This is a source-guard, not a fault-injection test — mirrors the
+// style of internal/consolidate's
+// TestNoRawFileWritesOutsideDurableHelper (added by the parallel
+// durable-write-primitives fix): it reads the literal
+// restoreMemoryBlobFile function body out of memoryblobs.go and
+// asserts the durability shape is present in source, rather than
+// trying to simulate an actual process crash — proving fsync actually
+// reaches stable storage on a given kernel/filesystem is out of reach
+// for a unit test regardless of style.
+//
+// internal/memory's WriteFileDurable (write-temp + fsync +
+// atomic-rename + fsync-parent-dir) is the shared primitive this same
+// sequence should eventually delegate to once it grows a streaming
+// variant — see restoreMemoryBlobFile's doc comment for why this PR
+// keeps its own inline copy for now (WriteFileDurable takes []byte;
+// this call site streams a blob straight from the bundle's tar reader
+// and must not buffer the whole thing in memory just to reuse it).
+func TestRestoreMemoryBlobFile_DurableWriteSequence(t *testing.T) {
+	src, err := os.ReadFile("memoryblobs.go")
+	if err != nil {
+		t.Fatalf("read memoryblobs.go: %v", err)
+	}
+	lines := strings.Split(string(src), "\n")
+
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "func restoreMemoryBlobFile(") {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		t.Fatal("func restoreMemoryBlobFile not found in memoryblobs.go — did it get renamed?")
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "func ") {
+			end = i
+			break
+		}
+	}
+	body := strings.Join(lines[start:end], "\n")
+
+	renameIdx := indexOfSubstring(lines[start:end], "os.Rename(")
+	if renameIdx == -1 {
+		t.Fatalf("restoreMemoryBlobFile does not call os.Rename — expected an atomic tempfile-then-rename write, got:\n%s", body)
+	}
+
+	fileSyncBeforeRename := false
+	for i := 0; i < renameIdx; i++ {
+		if strings.Contains(lines[start+i], ".Sync()") {
+			fileSyncBeforeRename = true
+			break
+		}
+	}
+	if !fileSyncBeforeRename {
+		t.Errorf("restoreMemoryBlobFile calls os.Rename without an f.Sync() on the tempfile beforehand — "+
+			"a crash before this fsync can rename a partially-written blob into place. Body:\n%s", body)
+	}
+
+	dirSyncAfterRename := false
+	for i := renameIdx + 1; i < end-start; i++ {
+		if strings.Contains(lines[start+i], ".Sync()") {
+			dirSyncAfterRename = true
+			break
+		}
+	}
+	if !dirSyncAfterRename {
+		t.Errorf("restoreMemoryBlobFile renames the blob into place but never fsyncs the parent directory afterward — "+
+			"on ext4/xfs a crash right after rename can revive the prior directory entry, silently losing the blob "+
+			"even though the file's own bytes were durable. Body:\n%s", body)
+	}
+}
+
+// indexOfSubstring returns the index of the first line in lines
+// containing substr, or -1 if none matches. Small local helper so the
+// source-guard test above doesn't need a regexp import for a single
+// literal search.
+func indexOfSubstring(lines []string, substr string) int {
+	for i, line := range lines {
+		if strings.Contains(line, substr) {
+			return i
+		}
+	}
+	return -1
 }

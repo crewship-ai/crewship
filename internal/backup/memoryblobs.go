@@ -30,6 +30,8 @@ package backup
 import (
 	"archive/tar"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -270,32 +272,83 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 	return written, nil
 }
 
-// restoreMemoryBlobFile atomically writes r's remaining bytes to dst:
-// tempfile in the same directory, then rename. Matches the write
-// pattern internal/memory/versions.go writeBlobIfMissing uses for the
-// original write, so a blob landed by restore is indistinguishable
-// on-disk from one RecordVersion wrote directly.
+// restoreMemoryBlobFile durably writes r's remaining bytes to dst:
+// tempfile in the same directory (O_EXCL so we never adopt a crashed
+// restore's leftover tempfile), fsync the tempfile's content, atomic
+// rename over the destination, then fsync the parent directory so the
+// rename's directory-entry update is itself durable before we return.
+//
+// This is the same write-temp + fsync + atomic-rename + fsync-parent-
+// dir discipline as internal/memory's writeFileDurable /
+// WriteFileDurable (crash-safety audit, 2026-07-30) — a crash between
+// "restore reported success" and the next flush must not leave a blob
+// partially written, or worse, silently reverted to a torn directory
+// entry, while its memory_versions row already points at it. That is
+// exactly the class of bug this PR fixes; landing it via an un-synced
+// restore write instead of a missing collection step would be the
+// same defect wearing a different hat.
+//
+// Deliberately NOT delegated to memory.WriteFileDurable: that helper
+// takes the full content as []byte, but this call site streams a blob
+// straight out of the bundle's tar reader without knowing (or wanting
+// to hold) the whole thing in memory at once — buffering every blob
+// fully just to reuse a []byte-shaped helper would trade one
+// regression for another. Once WriteFileDurable grows a streaming
+// (io.Reader-based) variant, this function should be replaced by a
+// call to it so the two packages share one durability primitive
+// instead of two copies of the same sequence.
 func restoreMemoryBlobFile(dst string, r io.Reader) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	tmp := dst + ".restore.tmp"
-	out, err := os.Create(tmp)
+	var randBuf [8]byte
+	if _, rerr := rand.Read(randBuf[:]); rerr != nil {
+		return fmt.Errorf("rand for tempname: %w", rerr)
+	}
+	tmp := dst + ".restore.tmp." + hex.EncodeToString(randBuf[:])
+
+	// O_EXCL so a leftover tempfile from a previous crashed restore
+	// (same dst, different random suffix — so this can only collide on
+	// an astronomically unlikely rand repeat) is never silently adopted.
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
-	if _, err := io.Copy(out, r); err != nil {
+	cleanup := func() { _ = os.Remove(tmp) }
+
+	if _, err = io.Copy(out, r); err != nil {
 		_ = out.Close()
-		_ = os.Remove(tmp)
+		cleanup()
 		return fmt.Errorf("write: %w", err)
 	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(tmp)
+	if err = out.Sync(); err != nil {
+		_ = out.Close()
+		cleanup()
+		return fmt.Errorf("fsync temp: %w", err)
+	}
+	if err = out.Close(); err != nil {
+		cleanup()
 		return fmt.Errorf("close temp: %w", err)
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
+	if err = os.Rename(tmp, dst); err != nil {
+		cleanup()
 		return fmt.Errorf("rename: %w", err)
+	}
+	// fsync the parent dir so the rename's directory-entry update is
+	// durable — on ext4/xfs a crash between rename and the next flush
+	// can otherwise revive the prior entry. The blob's own bytes are
+	// already at dst, so we do not roll back on dir-fsync failure.
+	dir, openErr := os.Open(filepath.Dir(dst))
+	if openErr != nil {
+		return fmt.Errorf("open parent dir for fsync: %w", openErr)
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil {
+		return fmt.Errorf("fsync parent dir: %w", syncErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close parent dir: %w", closeErr)
 	}
 	return nil
 }
