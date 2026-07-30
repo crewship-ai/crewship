@@ -197,16 +197,27 @@ var missionCloneCmd = &cobra.Command{
 			return err
 		}
 
+		// The clone handler answers {"id": …, "status": "PLANNING"} and
+		// nothing else (MissionHandler.Clone, internal/api/task_state.go).
+		// This used to decode a `title` the server has never sent and print
+		// it, so every successful clone reported `Mission cloned: <id> ()` —
+		// an empty parenthesis that reads like a mission with no title
+		// rather than a field the CLI could not see. Report what the server
+		// actually told us; the title the caller asked for is echoed
+		// separately because we know it locally, not because it came back.
 		var result struct {
 			ID     string `json:"id"`
-			Title  string `json:"title"`
 			Status string `json:"status"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Mission cloned: %s (%s)", result.ID, result.Title))
+		msg := fmt.Sprintf("Mission cloned: %s (%s)", result.ID, result.Status)
+		if t, _ := body["title"].(string); t != "" {
+			msg += fmt.Sprintf(" — titled %q", t)
+		}
+		cli.PrintSuccess(msg)
 		return nil
 	},
 }

@@ -123,8 +123,13 @@ func TestIssueLabelsRunE(t *testing.T) {
 	defer s.Close()
 	covSetupCLI(t, s)
 	group := "area"
+	// `label_group`, which is the only key api.labelResponse has ever sent.
+	// This stub used to say `group` — the key the CLI's struct wrongly asked
+	// for — so it stayed green while every real GROUP cell printed "-" (see
+	// #1576). A stub that mirrors the CLI's belief tests nothing; it has to
+	// mirror the handler.
 	s.OnGet("/api/v1/labels", clitest.JSONResponse(200, []map[string]any{
-		{"id": "l1", "name": "bug", "color": "#ff0000", "group": group},
+		{"id": "l1", "name": "bug", "color": "#ff0000", "label_group": group},
 		{"id": "l2", "name": "feature", "color": "#00ff00"},
 	}))
 
