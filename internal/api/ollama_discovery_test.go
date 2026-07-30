@@ -73,7 +73,7 @@ func TestResolveModels_OllamaWorkspaceEndpoint(t *testing.T) {
 		gotURL = baseURL
 		return &fakeLister{models: []llm.ModelInfo{{ID: "ollama/ws-model"}}}, true
 	}
-	models, source := h.resolveModels(context.Background(), wsID, "OLLAMA", "")
+	models, source := h.resolveModels(context.Background(), wsID, "OLLAMA")
 	if gotURL != "http://ws-ollama.internal:11434/v1" {
 		t.Errorf("workspace lister built with %q, want the ENDPOINT_URL", gotURL)
 	}
@@ -90,7 +90,7 @@ func TestResolveModels_OllamaWorkspaceEndpoint(t *testing.T) {
 		globalURL = ollamaURL
 		return &fakeLister{models: []llm.ModelInfo{{ID: "ollama/global"}}}, true
 	}
-	models, source = h.resolveModels(context.Background(), wsID, "OLLAMA", "")
+	models, source = h.resolveModels(context.Background(), wsID, "OLLAMA")
 	if globalURL != "http://server-global:11434" {
 		t.Errorf("fail-open should use the server-global URL, built with %q", globalURL)
 	}

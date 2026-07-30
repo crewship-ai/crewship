@@ -292,3 +292,27 @@ func (p blockingProvider) Stream(ctx context.Context, req llm.Request, _ func(ll
 }
 
 func (blockingProvider) Name() string { return "blocking" }
+
+// /execute carries an agent-authored intent too, and it is the STRONGER of the
+// two requests — the command runs with the credential rather than the value
+// merely being read. Holding it to a looser bar than a plain read would be
+// backwards, and it was: the pre-model refusal was gated on the access flow
+// alone, so a three-word intent on a production-admin execute reached the model
+// while the same three words on a read did not.
+func TestTier_ThinIntentIsRefusedOnExecuteToo(t *testing.T) {
+	mock := &mockProvider{content: `{"decision":"ALLOW","reason":"sure","risk":1}`}
+	g := gatekeeper.New(mock, "test-model", newTestLogger())
+
+	req := tierReq(keeper.SecurityLevelL4, "prod access")
+	req.Command = "psql -c 'drop table orders'"
+	resp, err := g.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Decision != string(keeper.DecisionDeny) {
+		t.Errorf("decision = %s, want DENY for a thin intent on an execute", resp.Decision)
+	}
+	if mock.capturedPrompt != "" {
+		t.Error("the model was called for an execute the tier could refuse on its own")
+	}
+}

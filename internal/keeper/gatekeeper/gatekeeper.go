@@ -376,9 +376,12 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// what would work — which is the difference between an agent that retries with
 	// a real justification and one that retries with the same four words.
 	//
-	// Access flows only. The F4 evaluators carry L1 as a placeholder and have no
+	// Access AND execute — both carry an agent-authored intent, and /execute is
+	// the stronger request of the two (the command RUNS with the credential), so
+	// holding it to a looser bar than a plain read would be backwards. The F4
+	// evaluators are excluded because they carry L1 as a placeholder and have no
 	// user-authored intent to measure.
-	if isAccessFlow && tier.MinIntentChars > 0 && len(intent) < tier.MinIntentChars {
+	if (isAccessFlow || rt == keeper.RequestTypeExecute) && tier.MinIntentChars > 0 && len(intent) < tier.MinIntentChars {
 		g.logger.Info("keeper: intent below the tier minimum — denied without a model call",
 			"agent", req.AgentName, "credential", req.CredentialName,
 			"tier", tier.Label, "intent_len", len(intent), "min", tier.MinIntentChars)

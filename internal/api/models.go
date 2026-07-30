@@ -115,36 +115,24 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// `endpoint` inventories an address the caller has typed but not saved —
-	// "paste it, see what it has" — instead of only ever answering about a
-	// configuration that is already committed. OLLAMA only; anywhere else the
-	// provider is identified by its credential and a URL would be meaningless.
-	endpoint := strings.TrimSpace(r.URL.Query().Get("endpoint"))
-	if endpoint != "" && provider != "OLLAMA" {
-		writeProblem(w, r, http.StatusBadRequest,
-			"the endpoint parameter only applies to OLLAMA — other providers are identified by their credential")
-		return
-	}
-	if endpoint != "" {
-		normalised, err := judgeRoot(endpoint)
-		if err != nil {
-			writeProblem(w, r, http.StatusBadRequest, err.Error())
-			return
-		}
-		endpoint = normalised
-	}
-
-	models, source := h.resolveModels(r.Context(), wsID, provider, endpoint)
+	// Deliberately NO caller-supplied endpoint here.
+	//
+	// This route is authed(wsCtx(…)) — every workspace member reaches it,
+	// VIEWER included — so a URL parameter would turn a fixed-target lookup into
+	// a dial of whatever address the caller names. The SSRF fence blocks private
+	// and metadata ranges, but public ones stay reachable and the reply
+	// distinguishes "listed" from "could not reach", which is a scanning oracle
+	// with a login. "Inventory an address I have typed but not saved" is a real
+	// need and it has a home: POST-class /admin/keeper/judge/models, behind
+	// roleManage and the instance-wide probe bucket. Every caller uses that one.
+	models, source := h.resolveModels(r.Context(), wsID, provider)
 
 	// OLLAMA has no curated fallback. An empty live result with no curated
 	// backstop is a real failure state worth surfacing distinctly so callers
 	// don't silently treat "daemon unreachable" as "no models installed".
-	if provider == "OLLAMA" && (source == "unreachable" || (source == "curated" && len(models) == 0)) {
-		msg := "could not reach the Ollama daemon to list models"
-		if endpoint != "" {
-			msg = "could not reach " + endpoint + " — is Ollama running there, and is it listening on more than loopback? (OLLAMA_HOST)"
-		}
-		writeProblem(w, r, http.StatusBadGateway, msg)
+	if provider == "OLLAMA" && source == "curated" && len(models) == 0 {
+		writeProblem(w, r, http.StatusBadGateway,
+			"could not reach the Ollama daemon to list models")
 		return
 	}
 
@@ -161,12 +149,7 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 // e.g. for OLLAMA — the caller distinguishes that case), so the response
 // always serializes "models" as a JSON array rather than null.
 // resolveModels lists a provider's models, live where possible.
-//
-// endpointOverride is an explicit address the caller wants inventoried — how a
-// picker offers "type an address, see what it has" without saving anything
-// first. OLLAMA only: every other provider is identified by its credential, not
-// by a URL the caller supplies.
-func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider, endpointOverride string) ([]llm.ModelInfo, string) {
+func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string) ([]llm.ModelInfo, string) {
 	apiKey, err := h.activeCredential(ctx, wsID, provider)
 	// OLLAMA needs no credential; everything else does to list live.
 	if err != nil && provider != "OLLAMA" {
@@ -182,25 +165,6 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider, endpo
 	// blocks a tenant endpoint resolving internal/metadata unless the instance
 	// cap is on). Fail-open: a blocked or unreachable workspace endpoint falls
 	// through to the server-global path / curated, never rejecting an edit.
-	// An explicit address wins over everything: the caller is asking about THAT
-	// endpoint, and answering about a different one would be worse than an error.
-	// Same SSRF-guarded lister as a stored tenant endpoint — a caller-supplied
-	// address is exactly the shape that needs the fence.
-	if provider == "OLLAMA" && endpointOverride != "" && h.workspaceOllamaLister != nil {
-		if wl, ok := h.workspaceOllamaLister(endpointOverride); ok {
-			if live, err := wl.ListModels(ctx); err == nil {
-				return live, "live"
-			} else {
-				h.logger.Warn("models: explicit OLLAMA endpoint discovery failed",
-					"endpoint", endpointOverride, "error", err)
-				// Deliberately NOT falling through to another endpoint: the caller
-				// asked about this one, and a list from somewhere else would read
-				// as "your address works".
-				return []llm.ModelInfo{}, "unreachable"
-			}
-		}
-	}
-
 	if provider == "OLLAMA" && h.workspaceOllamaLister != nil {
 		if ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, wsID, nil); ep.BaseURL != "" {
 			if wl, ok := h.workspaceOllamaLister(ep.BaseURL); ok {
@@ -276,7 +240,7 @@ func (h *ModelsHandler) providerModelIDs(ctx context.Context, wsID, provider str
 	if !supportedModelProviders[provider] {
 		return nil, false
 	}
-	models, _ := h.resolveModels(ctx, wsID, provider, "")
+	models, _ := h.resolveModels(ctx, wsID, provider)
 	if len(models) == 0 {
 		return nil, false
 	}
