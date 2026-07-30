@@ -16,6 +16,25 @@ This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, 
 
 `/api/v1/internal/*` routes are deliberately excluded — that surface is sidecar-only, `X-Internal-Token` authenticated (see [Internal IPC](/api-reference/internal)), and this endpoint itself carries no auth. Publishing a route map of the one part of the API kept non-public would be counterproductive.
 
+## Methods not listed are rejected
+
+If the spec lists only `GET` for a path, every other method on that path answers `405 Method Not Allowed` with an [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#field.allow) `Allow` header naming the methods that do work:
+
+```
+$ curl -i -X DELETE https://your-instance/api/v1/notifications/count
+HTTP/1.1 405 Method Not Allowed
+Allow: GET, HEAD
+Content-Type: application/json
+
+{"error":"method_not_allowed"}
+```
+
+This used not to hold. Go's router matches method and path together, so an unlisted method on a literal path could fall through to a sibling parameterised route — `DELETE /api/v1/notifications/count` reached the delete-notification handler with `id="count"` and answered `401`/`404` instead of `405`. Twenty-nine paths behaved that way. A client can now trust the spec's method list: what it does not list, the server refuses.
+
+<Note>
+  Response bodies are still the generic `object` placeholder, and each operation still documents only `200`. Error statuses (`400`, `401`, `403`, `404`, `409`, `429`, `500`) are real and are listed under [Common Status Codes](/api-reference/overview#common-status-codes) — they are simply not yet enumerated per operation in the generated document. Treat the spec as authoritative for **paths, methods and path parameters**, and this reference section as authoritative for bodies and statuses.
+</Note>
+
 <Note>
   Before this endpoint existed, `GET /openapi.json` returned `200 text/html` — the embedded Next.js SPA answers every unmatched path with its index page. A status-code check alone can't tell that apart from a real spec; check the `Content-Type` is `application/json`.
 </Note>

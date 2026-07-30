@@ -174,7 +174,9 @@ Some older endpoints return a simpler format:
 | `402` | Payment Required -- license limit exceeded |
 | `403` | Forbidden -- insufficient role |
 | `404` | Not Found |
+| `405` | Method Not Allowed -- the path exists but not for this method; the `Allow` response header lists the ones it does support |
 | `409` | Conflict -- duplicate slug, relation already exists |
+| `429` | Too Many Requests -- per-IP rate limit; `Retry-After` and `X-RateLimit-*` say how long to back off |
 | `500` | Internal Server Error |
 
 ---
