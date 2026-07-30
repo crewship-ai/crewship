@@ -56,6 +56,20 @@ type RestoreOptions struct {
 	// bundle. Nil uses LocalStorageOps (see CreateOptions.Storage for
 	// the rationale).
 	Storage StorageOps
+	// BlobRoot is the content-addressed memory-version blob directory
+	// on THIS (target) instance — {MemoryRoot}/versions. When set and
+	// the bundle carries a memory-blobs section, RestoreBackup writes
+	// each blob under blobRoot (idempotent — existing content-addressed
+	// files are left alone) AND rewrites every restored memory_versions
+	// row's payload_ref to point at blobRoot instead of whatever
+	// absolute path the SOURCE instance recorded. That rewrite matters
+	// even when restoring onto "the same host": payload_ref is an
+	// absolute filesystem path baked in at write time
+	// (internal/memory/versions.go RecordVersion), so leaving it
+	// untouched would restore rows pointing at a path this instance
+	// never had. Empty skips both steps — matches CreateOptions.BlobRoot's
+	// "empty disables" convention.
+	BlobRoot string
 }
 
 // RestoreResult summarises what was restored.
@@ -321,6 +335,16 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 			ensureRestoringUserMembership(ctx, db, extracted.DBDump, opts.Actor.UserID, opts.Actor.Role)
 		}
+		// memory_versions.payload_ref is an absolute filesystem path
+		// baked in on the SOURCE instance at RecordVersion time. Unlike
+		// the --as-* rewrites above, this one runs on EVERY restore
+		// (not just forked-slug ones) — the path problem exists even
+		// for a same-slug disaster-recovery restore onto a fresh
+		// instance, because {MemoryRoot}/versions is rarely the same
+		// absolute path on two installs. Content-addressing makes the
+		// rewrite safe: the new payload_ref is always recomputed from
+		// the row's own sha256, never trusted from the bundle as-is.
+		rewriteMemoryVersionsPayloadRef(extracted.DBDump, opts.BlobRoot)
 	}
 
 	// Commit the DB restore only after the Docker phase completes.
@@ -415,6 +439,26 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		return nil
 	}
+	// memoryBlobsRestore lands the memory-blobs/ section (if any) onto
+	// opts.BlobRoot. Unlike dockerRestore this is NOT gated on
+	// skipDocker — memory_versions blobs are workspace-scoped content-
+	// addressed files, not per-crew container state, so --as-workspace
+	// / --as-crew forking a new workspace/crew identity doesn't change
+	// which blobs are needed (the sha references are unchanged; only
+	// rewriteMemoryVersionsPayloadRef above needed to run regardless of
+	// scope too). Runs inside PreCommit alongside dockerRestore so a
+	// write failure here also rolls back the DB insert, matching the
+	// "docker phase failure leaves no half-restored rows" guarantee.
+	memoryBlobsRestore := func(ctx context.Context) error {
+		n, err := RestoreMemoryBlobs(ctx, opts.BlobRoot, extracted)
+		if err != nil {
+			return fmt.Errorf("backup: restore memory blobs: %w", err)
+		}
+		if n > 0 && opts.Logger != nil {
+			opts.Logger(fmt.Sprintf("restored %d memory-version blob(s)", n))
+		}
+		return nil
+	}
 	// Dry-run short-circuit: all validation already ran (manifest
 	// parse, checksum verify, payload extract, schema-skew). Nothing
 	// left mutates state, so return early with a synthetic success
@@ -498,7 +542,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil
 		})
 		hooks := &RestoreDumpHooks{
-			PreCommit: dockerRestore,
+			PreCommit: func(ctx context.Context) error {
+				if err := memoryBlobsRestore(ctx); err != nil {
+					return err
+				}
+				return dockerRestore(ctx)
+			},
 			PreInsert: func(ctx context.Context, tx *sql.Tx) error {
 				for _, step := range preInsertSteps {
 					if err := step(ctx, tx); err != nil {
@@ -514,6 +563,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		stats = s
 	} else {
+		if err := memoryBlobsRestore(ctx); err != nil {
+			return nil, err
+		}
 		if err := dockerRestore(ctx); err != nil {
 			return nil, err
 		}

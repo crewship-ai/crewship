@@ -147,6 +147,13 @@ func (r *Router) registerAdminRoutes() {
 		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
+	// Same content-addressed blob root the memory-versions content
+	// endpoint uses (memContent above) — wiring it here lets
+	// Create/Restore carry memory_versions blobs through the bundle
+	// instead of leaving the DB rows pointing at nothing after a
+	// restore. Empty when memory versioning isn't configured, which
+	// disables the section (see internal/backup/memoryblobs.go).
+	backupH.SetMemoryBlobRoot(r.memoryVersionsBlobRoot)
 	// Wire the slug→container-name mapping from the active container
 	// provider so the backup runner uses the per-instance prefix
 	// (e.g. "crewship-3-team-research") instead of the hardcoded

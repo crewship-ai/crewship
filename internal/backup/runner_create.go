@@ -11,6 +11,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"time"
 
@@ -53,6 +54,16 @@ type CreateOptions struct {
 	// or S3-backed implementation via package-level SetDefaultStorage
 	// or this field.
 	Storage StorageOps
+	// BlobRoot is the content-addressed memory-version blob directory
+	// on THIS (source) instance — {MemoryRoot}/versions, the same path
+	// RecordVersion writes under (internal/memory/versions.go). When
+	// set, CreateBackup collects the blob referenced by every
+	// memory_versions row the DB dump carries into a dedicated bundle
+	// section so a restore can bring back readable memory history
+	// instead of DB rows pointing at nothing. Empty disables the
+	// section — matches the rest of the memory subsystem's "empty
+	// BlobRoot disables versioning" convention.
+	BlobRoot string
 }
 
 // Validate returns an error if opts lack the fields required by its
@@ -344,6 +355,30 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 			return nil, err
 		}
 	}
+
+	// 5d. Memory-version blobs referenced by the DB dump's
+	// memory_versions rows. Must run AFTER the dump is built (it reads
+	// dump.Tables["memory_versions"]) and BEFORE the payload tar is
+	// closed. See memoryblobs.go for why this section exists at all —
+	// memory_versions rode every workspace bundle already; the blob
+	// files it points at did not.
+	var memoryBlobsResult *MemoryBlobsResult
+	if dump != nil {
+		memoryBlobsResult, err = WriteMemoryBlobsSection(payloadWriter, opts.BlobRoot, dump, now)
+		if err != nil {
+			_ = payloadWriter.Close()
+			_ = payloadFile.Close()
+			return nil, err
+		}
+		if len(memoryBlobsResult.Missing) > 0 {
+			// Not fatal — see WriteMemoryBlobsSection doc comment. Still
+			// worth a loud breadcrumb: a memory_versions row with no
+			// blob on disk is exactly the shape of the bug this section
+			// exists to prevent from recurring.
+			slog.Warn("backup: memory_versions rows reference blobs missing on disk",
+				"count", len(memoryBlobsResult.Missing), "workspace_id", target.ID)
+		}
+	}
 	if err := payloadWriter.Close(); err != nil {
 		_ = payloadFile.Close()
 		return nil, fmt.Errorf("backup: close payload tar: %w", err)
@@ -389,6 +424,11 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if len(migrations) == 0 {
 		migrations = AppliedMigrationVersions(ctx, db)
 	}
+	contents := buildContents(target, level)
+	if memoryBlobsResult != nil {
+		contents.MemoryBlobsIncluded = memoryBlobsResult.Included
+		contents.MemoryBlobsMissing = len(memoryBlobsResult.Missing)
+	}
 	manifest := &Manifest{
 		FormatVersion:           FormatVersion,
 		CrewshipVersionAtBackup: DetectCrewshipVersion(opts.CrewshipVersion),
@@ -399,7 +439,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		CreatedAt:               now,
 		CreatedBy:               opts.Actor,
 		SourceInstance:          currentInstance(),
-		Contents:                buildContents(target, level),
+		Contents:                contents,
 		Checksums:               Checksums{PayloadSHA256: sha},
 	}
 	switch {
