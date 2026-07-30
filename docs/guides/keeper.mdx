@@ -395,6 +395,10 @@ and the four [Keeper Reviews](#keeper-reviews) sweeps, which run on the
 instance's `auxiliary.*` models (Anthropic by default). Those are separately
 opt-in per workspace, and the engine being on does not enable them.
 
+Which model each of those runs on is settable at runtime — see
+[Evaluator models](#evaluator-models) below, including the one-press way to move
+all of them onto the local judge and stop paying per token for governance.
+
 The engine ships **off**. Nothing turns it on for you: `keeper_runtime_settings`
 starts empty, and an empty row inherits `KEEPER_ENABLED`, which defaults to
 false. (Setting `KEEPER_OLLAMA_URL` in the environment *does* auto-enable it at
@@ -648,6 +652,79 @@ crewship keeper status          # -> "Gov model: openai_compat / gpt-4o-mini"
   working evaluator always exists. Choosing a model does not enable the watchdog;
   run `crewship keeper enable`. OWNER/ADMIN only.
 </Note>
+
+## Evaluator models
+
+The credential-access judge is one model. The behavioural watchdog and the four
+[Keeper Reviews](#keeper-reviews) sweeps are five more — the `auxiliary.*` slots —
+and unlike the judge they call a **hosted** model by default, so they bill per
+token. Those five used to be settable only through `CREWSHIP_AUX_*` at boot,
+which made the one Keeper spend decision an operator could see on the admin page
+the one they could not make.
+
+They are settable at runtime now, per slot, from **Admin → Keeper → Judge
+models** or the CLI. OWNER/ADMIN only.
+
+| Slot | What it evaluates | A change applies |
+|------|-------------------|------------------|
+| `curator` | skill review + memory consolidation | next evaluation |
+| `behavior` | tool-call behaviour monitor | next evaluation |
+| `memory_health` | memory-health audit | next evaluation |
+| `negative` | failure → lessons extraction | next evaluation |
+| `run_summary` | run summary verdicts | **after a restart** |
+| `fallback` | used when a slot itself is unset | **after a restart** |
+
+The four evaluator slots resolve their provider per request, so a change is live.
+`run_summary` is built once and handed to every pipeline executor at boot, and
+`fallback` is only consulted during that same boot-time resolution — those two
+need a restart, and both the card and `aux list` say so on the row.
+
+```bash
+crewship keeper aux list                                   # every slot + where its model comes from
+crewship keeper aux set behavior --model claude-opus-5      # a sharper watchdog
+crewship keeper aux set curator --provider ollama --model qwen2.5:7b
+crewship keeper aux set memory_health --timeout 45s
+crewship keeper aux reset behavior                          # back to the server's configuration
+crewship keeper aux reset --all
+```
+
+### Running governance for free
+
+```bash
+crewship keeper aux use-judge
+```
+
+or **Use local judge for all** on the Judge models card. Every slot is pointed at
+the instance judge's endpoint and model — the same local model that already
+decides credential access — so the sweeps and the watchdog stop billing per
+token. It writes explicit per-slot overrides rather than a mode flag, so each row
+still shows what it resolves to and `aux reset <slot>` still returns one slot to
+the server's configuration.
+
+<Warning>
+  This is a cost decision, not a free one. A 7B local classifier writes blunter
+  findings than `claude-haiku-4-5`, and the sweeps are the surfaces where nuance
+  shows (a skill review that only ever says "looks fine" is worse than no sweep,
+  because it reads as coverage). Try it on `behavior` first and read a few
+  findings before moving all five.
+</Warning>
+
+<Note>
+  Providers are `anthropic`, `openai`, and `ollama` — the set this build can
+  actually construct. Google/Gemini ids appear in model pickers elsewhere in the
+  app, but there is no Gemini provider in the evaluator path, so choosing one here
+  is refused with that reason rather than saved into a slot that fails at first
+  use. `ollama` means the **instance judge's** endpoint (`crewship keeper config`),
+  not `KEEPER_OLLAMA_URL` from the environment the server booted in — so moving the
+  judge moves these with it.
+</Note>
+
+A slot with no override inherits `CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}`,
+or the shipped default (`anthropic` / `claude-haiku-4-5`) when that is unset.
+`aux list` labels each field `set here`, `from server config`, or `shipped
+default`, so you can tell whether a reset would change anything. An override that
+cannot be built — `anthropic` with no `ANTHROPIC_API_KEY` — leaves that slot on
+its previous provider and logs the reason, rather than taking the evaluator down.
 
 ## Audit Trail
 

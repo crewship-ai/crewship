@@ -798,8 +798,23 @@ func (s *Server) mountAPIRouter(
 	// CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT} env overrides so an
 	// operator can repoint an aux slot at a cheaper/local model without
 	// a redeploy.
-	auxModels := llm.LoadAuxiliaryModels()
+	//
+	// keepercfg.AuxStore then layers keeper_aux_settings on top, which is what
+	// makes those five paid evaluators settable from the console instead of only
+	// from the process environment. Same shape as the judge store: env stays the
+	// inherited layer, a slot with no row resolves exactly as before, and a
+	// failed load is loud but non-fatal.
+	auxSettings := keepercfg.NewAuxStore(deps.DB, llm.LoadAuxiliaryModels())
+	auxLoadCtx, auxLoadCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	auxLoadErr := auxSettings.Load(auxLoadCtx)
+	auxLoadCancel()
+	if auxLoadErr != nil {
+		logger.Error("keeper evaluator overrides failed to load; running on CREWSHIP_AUX_* env values only",
+			"error", auxLoadErr)
+	}
+	auxModels := auxSettings.Resolved()
 	opts = append(opts, goapi.WithAuxiliaryModels(auxModels))
+	opts = append(opts, goapi.WithKeeperAuxSettings(auxSettings))
 
 	// PR-C F4 wire-up: construct the four Keeper Phase 2 evaluators
 	// (skill_review / behavior / memory_health / negative_learning)
@@ -815,7 +830,13 @@ func (s *Server) mountAPIRouter(
 	// evaluator — the matching endpoint then returns 503 so partial
 	// rollouts have a deterministic shape (graceful degradation, not
 	// crash on boot). See internal/server/keeper_phase2.go.
-	evals := buildPhase2Evaluators(auxModels, govResolver.Resolve, cfg.Keeper.OllamaURL, cfg.Keeper.Model, s.journalWriter, deps.DB, logger)
+	evals := buildPhase2Evaluators(auxModels, govResolver.Resolve,
+		cfg.Keeper.OllamaURL, cfg.Keeper.Model,
+		auxSettings, func() (string, string) {
+			eff := keeperSettings.Effective()
+			return eff.EndpointURL.Value, eff.Model.Value
+		},
+		s.journalWriter, deps.DB, logger)
 	opts = append(opts, goapi.WithKeeperPhase2Evaluators(
 		evals.skillReview,
 		evals.behavior,

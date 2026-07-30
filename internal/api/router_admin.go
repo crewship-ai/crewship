@@ -100,6 +100,19 @@ func (r *Router) registerAdminRoutes() {
 	r.authedMut("POST", "/api/v1/admin/keeper/judge/test", roleManage, keeperJudge.Test)
 	r.authedMut("GET", "/api/v1/admin/keeper/judge/models", roleManage, keeperJudge.Models)
 
+	// Keeper evaluator models. Same instance layer, for the OTHER half of the
+	// Keeper model stack: the five aux slots behind the watchdog and the Reviews
+	// sweeps. They bill per token where the judge does not, so this is where the
+	// cost decision gets made — including pointing them all at the local judge.
+	keeperAux := NewAdminKeeperAuxHandler(r.keeperAuxSettings, r.keeperSettings, r.Journal(), r.logger)
+	r.authedAdmin("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
+	r.authedMut("PUT", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Put)
+	r.authedMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Reset)
+	// The collection-scoped DELETE is "reset every slot"; {slot} is empty there,
+	// which is exactly what AuxStore.Reset("") means.
+	r.authedMut("DELETE", "/api/v1/admin/keeper/aux", roleManage, keeperAux.Reset)
+	r.authedMut("POST", "/api/v1/admin/keeper/aux/use-judge", roleManage, keeperAux.UseJudge)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())

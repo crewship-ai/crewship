@@ -169,6 +169,18 @@ func WithKeeperSettings(store *keepercfg.Store) RouterOption {
 	}
 }
 
+// WithKeeperAuxSettings attaches the runtime-tunable per-slot evaluator
+// overrides. Like WithKeeperSettings it supersedes the boot-time value as the
+// source of truth: AuxModels() reads through it, so the aux-status surface and
+// the run-verdict wiring report and use what is in force rather than what the
+// process booted with. Unset leaves both reading the WithAuxiliaryModels value,
+// and the admin aux endpoints reporting 503.
+func WithKeeperAuxSettings(store *keepercfg.AuxStore) RouterOption {
+	return func(r *Router) {
+		r.keeperAuxSettings = store
+	}
+}
+
 // WithComposioConfig passes the Composio managed-integration provider config
 // (API key + optional base URL) used by the /api/v1/integrations/composio/*
 // routes.
