@@ -23,7 +23,9 @@ package api
 //   - L3/L4 ONLY. L1/L2 are the boot-delivered self-service tier whose whole
 //     point is that the agent holds the value for the run; expiring those
 //     mid-run would break the agent's own LLM calls. Only Keeper-mediated
-//     (L3) and human-escalation (L4) credentials are auto-leased.
+//     (L3) and human-escalation (L4) credentials are auto-leased. Which tiers
+//     those are is not decided here — it is keeper.TierPolicy.SelfServiceDelivery
+//     (see autoLeasedTier below).
 //   - NEVER SHORTENS AN EXPLICIT LONGER LEASE. A standing grant (NULL) is
 //     narrowed to now+TTL — that IS the feature — but a grant an operator
 //     already leased for longer wins, so `--ttl 7d` is not silently rewritten
@@ -68,8 +70,10 @@ type leaseIssueInput struct {
 	AgentName      string
 	CredentialID   string
 	CredentialName string
-	// SecurityLevel gates issuance: below L3 the credential is boot-delivered
-	// self-service and must not start expiring underneath a running agent.
+	// SecurityLevel gates issuance, via autoLeasedTier: on a self-service tier
+	// the credential is boot-delivered and must not start expiring underneath a
+	// running agent. Which tiers those are is the tier table's answer, not a
+	// threshold spelled out here.
 	SecurityLevel int
 	// Source is one of the leaseSource* constants.
 	Source string
@@ -82,18 +86,46 @@ type leaseIssueInput struct {
 	TTLSeconds int
 }
 
+// autoLeasedTier reports whether a credential at this security level is subject
+// to auto-issuance, by asking the tier table rather than comparing to a literal
+// (#1557).
+//
+// The rule — L1/L2 are the boot-delivered self-service tier, L3/L4 are
+// Keeper-mediated and therefore leasable — lives on keeper.TierPolicy alongside
+// AutoAllow, HumanApproval and the rest, so this file cannot drift from it. The
+// previous `level >= int(keeper.SecurityLevelL3)` spelled the same boundary a
+// second time, and a second spelling of an authorization rule is a second thing
+// to keep in sync.
+//
+// Out-of-range levels inherit Tier()'s fail-closed default (unknown resolves to
+// L4), so an out-of-range security_level now yields a LEASED grant rather than a
+// standing one. That is the safe direction and the same reading every other tier
+// control already takes.
+//
+// Not a hypothetical: credentials.security_level is INTEGER NOT NULL DEFAULT 1
+// with NO CHECK constraint, and while the API and CLI write paths all gate on
+// SecurityLevel.Valid(), the admin backup restore inserts the bundle's row values
+// verbatim (internal/backup/dbdump.go — it whitelists column names, not values).
+// A bundle from a foreign or older instance can therefore carry a level outside
+// 1..4, and under the old literal that row bought a STANDING grant. Constraining
+// the column is a separate change; this gate no longer depends on it.
+func autoLeasedTier(level int) bool {
+	return !keeper.SecurityLevel(level).Tier().SelfServiceDelivery
+}
+
 // leaseEligible reports whether auto-issuance applies at all. Split out so both
 // the issuer and its tests can assert the gate without a DB.
 func (in leaseIssueInput) leaseEligible() bool {
 	return in.TTLSeconds > 0 &&
 		in.AgentID != "" && in.CredentialID != "" &&
-		in.SecurityLevel >= int(keeper.SecurityLevelL3)
+		autoLeasedTier(in.SecurityLevel)
 }
 
 // issueCredentialLease re-issues (agent, credential) as a short-lived lease and
 // returns the resulting expiry in RFC3339 UTC. issued is false when auto-lease
-// is off, the credential is below L3, no grant row exists, or the grant already
-// carries a lease that outlives the one we would mint.
+// is off, the credential is on a self-service tier (autoLeasedTier), no grant row
+// exists, or the grant already carries a lease that outlives the one we would
+// mint.
 //
 // The expires_at written here is the SAME fixed-width RFC3339 UTC form every
 // enforcement site compares against (keeper_execute's injection gate, the
@@ -236,8 +268,9 @@ func (h *QueryHandler) grantLeasedCredentialOnApprove(
 	}
 	// L1/L2 are the boot-delivered self-service tier: leasing them would expire
 	// a key underneath a running agent. issueCredentialLease enforces the same
-	// floor, but bail early so we don't create a grant we would not lease.
-	if secLevel < int(keeper.SecurityLevelL3) {
+	// floor — through the same tier-table lookup — but bail early so we don't
+	// create a grant we would not lease.
+	if !autoLeasedTier(secLevel) {
 		return
 	}
 
