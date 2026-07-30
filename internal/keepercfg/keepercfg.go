@@ -631,9 +631,15 @@ func IsValidation(err error) bool {
 // person who typed the value, not by us.
 func validate(next settings, dflt Defaults) error {
 	if next.provider != "" {
+		// Names only the provider this scope actually accepts. Listing
+		// openai_compat here was a wrong turn signposted: the very next check
+		// refuses it, so the operator was told to type the value that produces
+		// the second error (#1558).
 		if !governance.KnownGovProvider(next.provider) {
-			return newValidation(fmt.Sprintf("unknown judge provider %q — use %s or %s",
-				next.provider, ProviderOllama, ProviderOpenAICompat))
+			return newValidation(fmt.Sprintf(
+				"unknown judge provider %q — the instance judge accepts %s only; "+
+					"an %s or %s judge is configured as the workspace governance model",
+				next.provider, ProviderOllama, ProviderOpenAICompat, ProviderAnthropic))
 		}
 		// The instance row carries no credential reference by design: auth
 		// belongs in the vault, which is workspace-scoped. So a provider that
@@ -656,12 +662,18 @@ func validate(next settings, dflt Defaults) error {
 	}
 	if next.wire != "" {
 		if !KnownWire(next.wire) {
-			return newValidation(fmt.Sprintf("unknown judge wire %q — use one of %s, %s, %s, %s",
+			return newValidation(fmt.Sprintf(
+				"unknown judge wire %q — the instance judge accepts %s only (%s, %s and %s are recognised names but are not settable here); "+
+					"configure an OpenAI-compatible or Anthropic judge as the workspace governance model instead",
 				next.wire, WireOllama, WireOpenAIChat, WireOpenAIResponses, WireAnthropicMessages))
 		}
+		// Same refusal as the provider above, and it gets the same second
+		// sentence: naming the constraint without naming where the other case
+		// lives leaves the operator with nowhere to go (#1558).
 		if next.wire != WireOllama {
 			return newValidation(fmt.Sprintf(
-				"judge wire %q is not available as an instance default yet — the instance judge speaks the native Ollama wire (%s)",
+				"judge wire %q is not available as an instance default yet — the instance judge speaks the native Ollama wire (%s); "+
+					"configure an OpenAI-compatible or Anthropic judge as the workspace governance model instead",
 				next.wire, WireOllama))
 		}
 	}

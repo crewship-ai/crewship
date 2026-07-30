@@ -1035,6 +1035,22 @@ function GovernanceModelCard({
         ) : undefined
       }
     >
+      {/* The other half of the #1558 scope explanation. An operator who wants a
+          hosted judge starts on the instance card above, because that is the one
+          titled "Credential access judge" — and the only thing that used to send
+          them here was the server refusing the write. Say it on both cards, in
+          the same words, before either mistake is possible. */}
+      <div
+        className="px-4 py-2 border-b border-border/40 text-[11px] leading-snug text-muted-foreground"
+        data-testid="keeper-gov-scope"
+      >
+        <strong className="font-medium text-foreground/80">Scope:</strong> this workspace only. It overrides{" "}
+        <strong className="font-medium text-foreground/80">Credential access judge</strong> above, which is
+        instance-wide and speaks native Ollama only — so this card is the only place the credential judge can be
+        Anthropic or OpenAI-compatible, sourcing its endpoint or API key from this workspace&apos;s vault.
+        If that credential is later revoked, decisions fall back to the instance judge rather than failing.
+      </div>
+
       <SettingsRow
         label="What decides"
         description={chosen?.note ?? "Leave on the instance judge unless this workspace needs its own."}

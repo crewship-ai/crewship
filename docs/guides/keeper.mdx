@@ -316,9 +316,12 @@ Four cards, each answering one question, top to bottom:
 | **Watch what agents do** | The behaviour monitor: off by default, and it asks nothing else until you turn it on. |
 
 The split between the first two is real and not cosmetic: the first is the
-instance default, the second overrides it for one workspace. On a single-workspace
-instance you will only ever touch the first — unless you want a hosted judge, which
-is workspace-scoped because the API key lives in that workspace's vault.
+instance default and accepts a **native Ollama** endpoint only, the second
+overrides it for one workspace and is where a hosted judge lives. On a
+single-workspace instance you will only ever touch the first — unless you want a
+hosted judge, which is workspace-scoped because the API key lives in that
+workspace's vault. Both cards say so on themselves;
+[Two judge scopes](#two-judge-scopes-and-which-one-to-configure) is the long form.
 
 <Note>
   Several Anthropic keys is the normal case on an orchestration platform: each
@@ -349,6 +352,61 @@ KEEPER_MODEL=claude-haiku-4-5
 <Note>
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
+
+### Two judge scopes, and which one to configure
+
+"Which model judges credential access?" has two answers, at two scopes, set in
+two different places. That split is deliberate, and it starts with where the API
+key is allowed to live.
+
+| | **Instance judge** | **Workspace governance model** |
+|---|---|---|
+| Where | Admin → Keeper → **Credential access judge**, or `crewship keeper config` | Admin → Keeper → **Judge for this workspace**, or `crewship keeper model` |
+| Applies to | every workspace on this server, as the default | one workspace, overriding the instance judge |
+| Providers | native Ollama **only** | `ollama`, `anthropic`, `openai_compat` |
+| Secrets | none — the row holds no credential reference | an `ENDPOINT_URL` or `API_KEY` credential from that workspace's vault |
+| Also sets | whether Keeper runs at all, and the per-decision time budget — the budget bounds the credential decision whichever of the two scopes answers it | the auxiliary evaluators too (behaviour watchdog, skill review, memory health, negative learning), which resolve the same setting per request |
+
+Which one you want:
+
+- **A local model for the whole instance** → the instance judge. On a
+  single-workspace instance it is the only card you will ever touch.
+- **Anthropic, or any OpenAI-compatible endpoint** → the workspace governance
+  model. The credential judge has no instance-wide hosted equivalent, and the
+  absence is enforced rather than merely undocumented: a
+  `PUT /api/v1/admin/keeper/config` carrying `judge_provider: anthropic`,
+  `openai_compat`, or any non-Ollama `judge_wire` is refused with a 400 that
+  names the workspace setting. (**Background checks** is a different question and
+  a different answer: those five scheduled evaluators are configured at instance
+  scope and may run on a hosted model, but they read their key from the server
+  environment rather than the vault — and a workspace governance model, when set,
+  overrides which model they use for that workspace.)
+
+Why the instance row is Ollama-only:
+
+- **The key would have nowhere to live.** The instance settings row carries no
+  credential reference by design — auth belongs in the vault, and the vault is
+  workspace-scoped. A provider that cannot dial without a key therefore has no
+  way to work at instance scope.
+- **Nothing would read the wire.** A non-Ollama endpoint needs its request path
+  derived from the stored base URL and wire, which is the endpoint contract's job
+  (`internal/llm/endpoint`, #1528). The instance judge is still built as a native
+  Ollama client and does not route through that contract, so accepting
+  `openai_compat` today would store a value nothing consumes — a judge that keeps
+  POSTing the Ollama path, which is configuration that looks fine while denying
+  every request. That is the exact failure this settings table exists to end.
+
+`judge_provider` and `judge_wire` are still *reported* by `config get` and on the
+card, because what the judge speaks is worth knowing even when you cannot change
+it. The only value either one accepts on write is the `ollama` already in force,
+so treat them as read-only until both constraints above are lifted.
+
+The two scopes are chained rather than independent: if a workspace's
+governance-model credential is deleted or revoked, Keeper degrades to **the
+instance judge as it is configured right now** — not the values the process
+booted with — instead of losing its evaluator. See
+[Governance model](#governance-model-fully-local-no-api-key) for that setting in
+full.
 
 ### Changing the judge at runtime (no restart)
 
@@ -598,14 +656,6 @@ workspace is reported as unreachable rather than counted. No model is called, so
 it costs nothing and works with the engine off; the command exits non-zero when
 the finding reached nobody.
 
-<Note>
-  The judge provider and wire format are reported by `config get` but are not yet
-  settable: the instance judge speaks the native Ollama wire. An
-  OpenAI-compatible or Anthropic judge is configured per workspace as the
-  [governance model](#governance-model-fully-local-no-api-key), which carries its
-  endpoint and API key in the vault.
-</Note>
-
 ## Watchdog Governance (per workspace)
 
 Beyond the credential gatekeeper, Keeper runs a **behavioral watchdog** — a
@@ -802,6 +852,12 @@ The model that backs Keeper's governance is a **per-workspace, vault-backed
 setting**, chosen in-app rather than only via server env. This is what makes a
 **no-API-key Keeper** possible: point governance at a local Ollama classifier and
 Keeper runs entirely on your own hardware.
+
+It is also the *only* scope at which the **credential-access judge** can be
+hosted — the instance judge speaks native Ollama only, because the endpoint or
+API key a hosted judge needs comes from the vault and the vault is per workspace.
+See [Two judge scopes](#two-judge-scopes-and-which-one-to-configure) for the
+split and when to use which.
 
 <Note>
   Scope: this setting drives **both** the credential-access gatekeeper **and** the
