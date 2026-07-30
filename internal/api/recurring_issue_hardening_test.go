@@ -6,8 +6,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
+	// Embeds the IANA zone database so the TZ this file re-execs with
+	// resolves on a machine with no system tzdata (scratch containers).
+	_ "time/tzdata"
 )
 
 // Fix #1 (creator attribution): a fired issue must be stamped with the
@@ -93,12 +99,40 @@ func TestRecurringIssueDispatcher_FireIdempotent(t *testing.T) {
 // wall-clock (time.Now()) computation diverges from the UTC one. RED
 // before the fix: schedule.Next(time.Now()) yields the local-interpreted
 // occurrence.
+// tzChildEnv marks the re-exec'd child of TestRecurringIssueCreate_NextRunIsUTC.
+const tzChildEnv = "CREWSHIP_TEST_TZ_CHILD"
+
 func TestRecurringIssueCreate_NextRunIsUTC(t *testing.T) {
-	// Force a non-UTC local zone so a wall-clock computation would land on
-	// a different absolute instant than the UTC one.
-	origLocal := time.Local
-	time.Local = time.FixedZone("TEST+05", 5*3600)
-	t.Cleanup(func() { time.Local = origLocal })
+	// The assertion below is only meaningful on a non-UTC server, and the
+	// obvious way to arrange that — assigning time.Local and restoring it
+	// from t.Cleanup — is a data race: time.Local is process-global and
+	// every time.Now() in the binary reads it, including the background
+	// goroutines other tests leave running (the port-expose purger, the
+	// dispatchers). Under -race that reliably reports.
+	//
+	// So set the zone the only way that involves no write at all: hand TZ
+	// to a child process, where time.Local is non-UTC from init and stays
+	// read-only for the run.
+	if os.Getenv(tzChildEnv) == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, os.Args[0],
+			"-test.run=^"+t.Name()+"$", "-test.v", "-test.count=1")
+		cmd.Env = append(os.Environ(), tzChildEnv+"=1", "TZ=Asia/Kolkata")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("non-UTC child run failed: %v\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "PASS") {
+			t.Fatalf("non-UTC child run did not pass:\n%s", out)
+		}
+		return
+	}
+
+	// ── child: TZ=Asia/Kolkata (+05:30, no DST) ──
+	if _, offset := time.Now().Zone(); offset == 0 {
+		t.Fatalf("child expected a non-UTC local zone, got %s", time.Local)
+	}
 
 	h, userID, wsID, crewID := covRIFixture(t)
 

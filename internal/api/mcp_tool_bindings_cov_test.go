@@ -633,7 +633,8 @@ func TestCovMTBRegistrySyncForbidden(t *testing.T) {
 // network.
 func TestCovMTBRegistrySyncAcceptedThenCooldown(t *testing.T) {
 	db := setupTestDB(t)
-	h := NewMCPRegistryHandler(db, newTestLogger())
+	logger, waitForSync := syncDoneLogger(t)
+	h := NewMCPRegistryHandler(db, logger)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -651,6 +652,11 @@ func TestCovMTBRegistrySyncAcceptedThenCooldown(t *testing.T) {
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("first sync status = %d, want 202", rr.Code)
 	}
+	// The detached sync goroutine is live from here on: join it before the
+	// cleanups above tear down the httptest server, restore mcpRegistryURL
+	// (which it reads) and close the db (which it writes). Cleanups run
+	// LIFO, so registering last runs it first.
+	t.Cleanup(waitForSync)
 
 	req2 := httptest.NewRequest("POST", "/", nil)
 	req2 = withWorkspaceUser(req2, "u", "ws", "OWNER")
