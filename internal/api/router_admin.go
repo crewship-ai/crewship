@@ -124,6 +124,17 @@ func (r *Router) registerAdminRoutes() {
 	// operator who asks explicitly should be able to find out.
 	r.authedMut("POST", "/api/v1/admin/keeper/aux/{slot}/probe", roleManage, keeperAux.Probe)
 
+	// Manual runs for the four Reviews evaluators (issue #1555). The
+	// evaluators were reachable only by the scheduler and by sidecars holding
+	// an internal token — both machine paths — so "check my agents' skills
+	// now" was not expressible, and the behaviour watchdog (which only fires
+	// on a tool call) had never run outside its unit tests. This is the
+	// operator's trigger; it calls the same Phase 2 handler the internal
+	// routes do, so a manual run writes the same audit row a scheduled one
+	// does. OWNER/ADMIN: it spends model tokens and can escalate to the inbox.
+	keeperReview := NewAdminKeeperReviewHandler(r.db, r.keeperPhase2Handler(), r.logger)
+	r.authedMut("POST", "/api/v1/admin/keeper/review/{slot}/run", roleManage, keeperReview.Run)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())

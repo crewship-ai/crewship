@@ -216,17 +216,11 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// Evaluators are nil until the server bootstrap wires them via
 	// Router.SetKeeperPhase2Evaluators (follow-up wire-up commit on
 	// the server-startup side).
-	kp2 := NewKeeperPhase2Handler(
-		r.db, r.internalToken, r.PolicyResolver(),
-		r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
-		r.logger,
-	).WithMemoryBase(r.outputBasePath) // #1037: derive lesson write target server-side, not from the request body
-	// Same broadcaster the credential-path KeeperHandler gets — the F4
-	// endpoints write to the same inbox and owe the same realtime push
-	// (#1001 M0).
-	if r.hub != nil {
-		kp2.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
-	}
+	//
+	// Shared with the operator-facing manual-run route (#1555) via
+	// keeperPhase2Handler() — one handler instance, so a manual run and a
+	// scheduled/sidecar one cannot drift apart.
+	kp2 := r.keeperPhase2Handler()
 	// F4 Keeper Phase 2 endpoints — wrapped in BOTH internalAuth (sidecar
 	// token gate) AND internalWsCtx (puts ?workspace_id= into request
 	// context). Handlers depend on the context value to run
