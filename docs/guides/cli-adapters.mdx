@@ -108,6 +108,28 @@ OpenCode can route to a local, OpenAI-compatible model server instead of a cloud
 
    Leave it as a workspace credential to make it the default for every agent, or assign it to one agent to override: `crewship credential assign ollama-local <agent>`. Because it's an `ENDPOINT_URL` (a destination, not a secret), the URL is shown by `crewship credential list/get`.
 
+   <Note>
+   **The URL shape no longer matters.** `http://host:11434`, `.../v1`,
+   `.../v1/chat/completions` and `.../api/chat` are all reduced to the same mount
+   root, and each consumer appends the path its protocol needs. Previously the
+   three consumers disagreed about which shape was correct, so a value that worked
+   for an agent could 404 for the Keeper judge. A reverse-proxy mount prefix
+   (`https://gw.example.com/ollama`) is preserved.
+
+   **Azure is addressed on two levels, and both are handled.** Store the
+   deployment URL you were given
+   (`https://acme.openai.azure.com/openai/deployments/gpt4o/chat/completions?api-version=…`)
+   — completions go to that deployment, while model discovery goes to the
+   resource's own list at `.../openai/models`, because Azure serves no model
+   list under a deployment. The `?api-version=` query rides along on both.
+
+   **The host is not.** `host.docker.internal` is right for an *agent*, which
+   dials from inside its crew container. Anything dialling from the daemon — the
+   Keeper judge, `crewship doctor`, model discovery — needs `localhost` or the
+   host's LAN address instead. If one credential has to serve both, put the
+   endpoint on an address that resolves from both sides.
+   </Note>
+
    The URL is resolved **from inside crew containers** — `host.docker.internal` reaches the Docker host (Crewship maps it via `host-gateway` on Linux too). Don't use `localhost`; that's the container itself.
 3. **Pick a local model** on an OpenCode agent: `ollama/qwen2.5-coder:7b` (macOS-friendly), `ollama/qwen3-coder:30b`, or `ollama/devstral:24b`. The onboarding wizard and agent form make the API key optional for these. At run time the orchestrator resolves the endpoint (per-agent `ENDPOINT_URL` credential → workspace default) and injects the generated provider block via `OPENCODE_CONFIG_CONTENT`; in restricted network mode the endpoint's host is auto-allowlisted for that run only.
 
