@@ -613,3 +613,48 @@ zachová fail-toward-availability chování reaperu.
 Poučení, které patří k §10: nález odvozený z komentáře je hypotéza, ne fakt.
 Komentáře stárnou nezávisle na kódu, a tenhle stárnul směrem k pesimismu, což
 je vzácné a zákeřné — vypadá to jako přiznaná díra, takže se to nekontroluje.
+
+### Korekce: `internal/server` testoval proti DB bez foreign keys a bez WAL
+
+§2 uváděl jako silnou stránku, že „`setupTestDB` staví schéma z reálných migrací,
+FK zapnuté a otestované". To platí pro `database.Open` a pro `internal/api`.
+Neplatilo pro `internal/server`, a to je nejčistší instance celé té třídy
+problémů, kterou tenhle audit hledal.
+
+`internal/server/server_test.go:56` otevírá DB takto:
+```go
+sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL&_pragma=busy_timeout(5000)")
+```
+V jednom stringu jsou **dvě různé syntaxe**. `_pragma=busy_timeout(5000)` je
+správná forma pro `modernc.org/sqlite`; `_foreign_keys=on` a `_journal=WAL` je
+forma pro `mattn/go-sqlite3`, kterou modernc **tiše ignoruje**. Proto si toho za
+celou dobu nikdo nevšiml — ten DSN *vypadá* správně.
+
+Naměřeno přímo (`PRAGMA foreign_keys` / `PRAGMA journal_mode` po otevření):
+
+| DSN forma | `foreign_keys` | `journal_mode` |
+|---|---|---|
+| mattn (testy `internal/server`) | **0 — OFF** | **delete** |
+| modernc (`database.go:68-71`, produkce) | 1 — ON | wal |
+
+Celý balík tedy běžel proti jiné databázové semantice než produkce. Jak vážné to
+bylo: jakmile se FK zapnuly, okamžitě zčervenalo **9 testů**, které seedovaly
+řádky s neexistujícími rodiči (`newContainerFallbackServer` zakládal crew ve
+workspace, který nikdy nevznikl; `seedCostLedgerRow` odkazoval na neexistující
+agenty). Žádná asercia se přitom nemusela měnit — jen se doplnili rodiče. Ty
+testy tedy roky tvrdily „tenhle stav je platný", zatímco v produkci by ho
+databáze odmítla.
+
+Rozsah: 4 test soubory ve 3 balících (`internal/server/server_test.go`,
+`internal/api/lockout_test.go`, `internal/auth/sessions/store_test.go` a
+`store_cov_test.go`). **Produkční kód zasažený není** — jediný další výskyt v
+repu je `defer_foreign_keys=ON` uvnitř komentáře v
+`internal/backup/replace.go`, což je jen shoda v textu, ne DSN. (Málem jsem to
+nahlásil jako produkční bug; grep `_foreign_keys=` se chytil na konec slova
+`defer_foreign_keys=`. Uvádím to, protože je to přesně ta chyba, kterou tenhle
+audit u jiných dělá — nález z grepu je hypotéza, ne fakt.)
+
+Poučení k §5 G4: „coverage neříká, co si myslíš" má ještě horší variantu —
+**test může běžet proti jiné databázi než produkce a projít.** Žádné procento
+to nezachytí. Zachytilo to teprve to, že někdo ten DSN přečetl znak po znaku
+při jiné práci.
