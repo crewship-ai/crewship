@@ -136,6 +136,57 @@ expect_eq "unnumbered checkout falls back to its directory name" "crewship" \
 expect_eq "a path with no crewship_N anywhere still yields something" "src" \
   "$(clone_of '/home/dev/src')"
 
+echo "== the gate: who gets refused =="
+
+# The parse tests above prove the script can SEE a claim. These prove it ACTS
+# on one. That is the load-bearing half: everything else can be perfect and the
+# convention is still just a note if `claim` posts anyway. Exit 3 is the lock.
+#
+# report_claims reads the TSV the parser emits, so feed it that directly and
+# pin the identity with CLAIM_CLONE/CLAIM_BRANCH rather than depending on where
+# the test happens to be checked out.
+report() { # <clone> <branch> <tsv>  -> prints table, returns the gate verdict
+  printf '%s' "$3" | CLAIM_CLONE="$1" CLAIM_BRANCH="$2" "$CLAIM" --report
+}
+
+# tsv <clone> <branch> <createdAt> — one row in the parser's output shape.
+tsv() { printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "Srbino" "https://x/#c"; }
+
+NOW="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+if date --version >/dev/null 2>&1; then
+  LONG_AGO="$(date -u -d '30 days ago' +'%Y-%m-%dT%H:%M:%SZ')"
+else
+  LONG_AGO="$(date -u -v-30d +'%Y-%m-%dT%H:%M:%SZ')"
+fi
+
+out="$(report crewship_1 fix/alpha "")"; rc=$?
+expect_eq "an unclaimed issue does not block" "0" "$rc"
+expect_contains "…and says so" "$out" "no active claim"
+
+out="$(report crewship_1 fix/alpha "$(tsv crewship_2 fix/beta "$NOW")")"; rc=$?
+expect_eq "another clone's live claim BLOCKS (exit 3)" "3" "$rc"
+expect_contains "…and is labelled as someone else's" "$out" "HELD BY ANOTHER SESSION"
+
+# Same clone, different branch: still another session. Ten worktrees of
+# crewship_3 run at once, so the clone alone is not the identity.
+out="$(report crewship_3 fix/alpha "$(tsv crewship_3 fix/beta "$NOW")")"; rc=$?
+expect_eq "same clone, other branch still BLOCKS" "3" "$rc"
+
+out="$(report crewship_1 fix/alpha "$(tsv crewship_1 fix/alpha "$NOW")")"; rc=$?
+expect_eq "your own claim does not block you" "0" "$rc"
+expect_contains "…and is labelled yours" "$out" "yours"
+
+# The documented, deliberate choice: STALE is a label, not an amnesty. "Old"
+# and "abandoned" are not the same thing, so it still costs a --force.
+out="$(report crewship_1 fix/alpha "$(tsv crewship_2 fix/beta "$LONG_AGO")")"; rc=$?
+expect_eq "a STALE claim still BLOCKS (label, not amnesty)" "3" "$rc"
+expect_contains "…and is labelled stale" "$out" "STALE"
+
+# One live foreign claim is enough, even when your own is in the thread too.
+out="$(report crewship_1 fix/alpha "$(tsv crewship_1 fix/alpha "$NOW")
+$(tsv crewship_2 fix/beta "$NOW")")"; rc=$?
+expect_eq "yours + someone else's still BLOCKS" "3" "$rc"
+
 echo "== usage =="
 
 out="$("$CLAIM" 2>&1)"; rc=$?

@@ -207,6 +207,17 @@ worth more than a silent unassign.
   reason, or claimed months ago with nothing pushed. The claim comment is
   a record, not a reservation: re-claim it, and say in the thread what
   you are picking up from the previous attempt.
+- **The script guesses your identity wrong.** It reads the clone from the
+  checkout path (`crewship_3`) and the branch from `git rev-parse`. In a
+  detached-HEAD worktree that branch is the literal `HEAD`, and in a
+  container the path may carry no `crewship_N` at all — either way every
+  such session claims under the same name and the gate stops telling them
+  apart. Set `CLAIM_CLONE` / `CLAIM_BRANCH` to state it instead:
+
+  ```bash
+  CLAIM_CLONE=crewship_3 CLAIM_BRANCH=fix/aux-status scripts/claim-issue.sh 1488
+  ```
+
 - **You claimed only part of the issue.** Say so in the claim comment.
   A claim that names its scope ("items 1–2, not the Keeper panel") lets
   another session take the rest instead of the whole thing stalling.

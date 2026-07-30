@@ -27,8 +27,14 @@
 set -uo pipefail
 
 REPO="${REPO:-crewship-ai/crewship}"
-# A claim older than this is reported as stale — the session probably died
-# without releasing. Stale never blocks; it just stops being evidence.
+# A claim older than this is reported as STALE — the session probably died
+# without releasing.
+#
+# Stale still BLOCKS (exit 3). That is deliberate and it is the whole reason
+# the threshold is only a label: "old" and "abandoned" are not the same thing,
+# a long-running job that outlived the window is exactly the work you least
+# want to duplicate, and the script cannot tell the two apart. Say so in the
+# thread and take it over with --force. CONTRIBUTING.md → "When it goes wrong".
 STALE_HOURS="${CLAIM_STALE_HOURS:-24}"
 
 usage() {
@@ -55,7 +61,13 @@ clone_of_path() { # <path>
   printf '%s\n' "${path##*/}"
 }
 
+# CLAIM_CLONE / CLAIM_BRANCH override detection. Two real uses beyond the
+# tests: a detached-HEAD worktree, where `rev-parse --abbrev-ref HEAD` reports
+# the literal "HEAD" and every such session would claim under the same
+# meaningless branch name; and a container or CI checkout whose path carries no
+# crewship_N at all. An identity you can state is better than one guessed wrong.
 detect_clone() {
+  if [ -n "${CLAIM_CLONE:-}" ]; then printf '%s\n' "$CLAIM_CLONE"; return 0; fi
   local root
   root="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ||
     root="$(git rev-parse --show-toplevel 2>/dev/null)" ||
@@ -65,6 +77,7 @@ detect_clone() {
 }
 
 detect_branch() {
+  if [ -n "${CLAIM_BRANCH:-}" ]; then printf '%s\n' "$CLAIM_BRANCH"; return 0; fi
   git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'unknown\n'
 }
 
@@ -252,6 +265,10 @@ ISSUE=""; MODE="claim"; REASON=""; DRY_RUN=0; FORCE=0; LIMIT=100
 
 case "${1:-}" in
   --parse)     shift; parse_claims; exit 0 ;;   # internal: JSON on stdin (tests)
+  # internal: claims TSV on stdin, prints the table and exits with the gate's
+  # own verdict (3 = held by another session). This is the decision that makes
+  # the convention a lock rather than a note, so it is reachable on its own.
+  --report)    shift; report_claims "" "$(cat)"; exit $? ;;
   --clone-of)  shift; [ $# -eq 1 ] || die "--clone-of takes one path"; clone_of_path "$1"; exit 0 ;;
   -h|--help)   usage; exit 0 ;;
   "")          usage >&2; exit 2 ;;
