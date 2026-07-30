@@ -42,6 +42,10 @@ import (
 // written, so a failure before that point cannot corrupt or truncate
 // the file that was already there.
 func TestWritePersonaAgentLayerSurvivesDirectoryWriteFailure(t *testing.T) {
+	// SKIP-WAIVER: permanent platform guard, not deferred work. A read-only
+	// directory cannot deny root, so the failure this test injects is
+	// unreachable when euid is 0 — the test would pass without exercising
+	// anything. No tracking issue: there is nothing to come back and fix.
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory permissions; skip the RO-dir failure injection")
 	}
