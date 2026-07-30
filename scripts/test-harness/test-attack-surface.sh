@@ -280,6 +280,11 @@ else
   # The network-origin gate must not be spoofable by a header an edge proxy would
   # otherwise be trusted to set (#1020). A 2xx/4xx-other here means XFF is honoured.
   assert_code_edge "B6 spoofed X-Forwarded-For does not fake a private origin" 404 GET "/api/v1/internal/agents?workspace_id=$WS" -H "X-Forwarded-For: 127.0.0.1"
+  # B7 is the #1501 regression: keeper/request is POST-only, so net/http's router
+  # used to answer a GET with 405 + `Allow: POST` before the fence ran — a
+  # positive existence signal for a path the 404s above are busy hiding. A wrong
+  # METHOD must be as silent as a wrong PATH.
+  assert_code_edge "B7 wrong method on a real internal route does not confirm it" 404 GET "/api/v1/internal/keeper/request"
 fi
 
 section "Tier A · Cross-workspace isolation"

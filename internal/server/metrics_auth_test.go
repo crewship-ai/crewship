@@ -116,3 +116,71 @@ func TestMetricsAuthorized_UntrustedHopXFFIgnored(t *testing.T) {
 	assert.False(t, metricsAuthorized(req),
 		"untrusted clients can spoof XFF; trust only when the immediate hop is itself a trusted proxy")
 }
+
+// TestMetrics_MethodMismatchIs404_NotEnumerable is the /metrics half of #1501.
+//
+// handleMetrics answers 404 rather than 401 for an unauthorized scrape,
+// deliberately, so a scanner can't confirm the endpoint exists. That intent was
+// undone one layer up: the route was registered as `GET /metrics`, so ServeMux
+// rejected the METHOD before the handler ran and a bare `POST /metrics`
+// returned 405 with `Allow: GET, HEAD` — confirming exactly what the 404 was
+// hiding. An unauthorized caller must get the same answer whatever method it
+// tries, byte for byte.
+func TestMetrics_MethodMismatchIs404_NotEnumerable(t *testing.T) {
+	t.Setenv("CREWSHIP_METRICS_TOKEN", "")
+	s := newTestServer()
+
+	// The reference: an unauthorized GET, i.e. the response the deliberate
+	// 404 already produced.
+	ref := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	ref.RemoteAddr = "203.0.113.50:55555" // public peer
+	refRec := httptest.NewRecorder()
+	s.mux.ServeHTTP(refRec, ref)
+	if refRec.Code != http.StatusNotFound {
+		t.Fatalf("unauthorized GET /metrics: got %d, want 404", refRec.Code)
+	}
+
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/metrics", nil)
+			req.RemoteAddr = "203.0.113.50:55555"
+			w := httptest.NewRecorder()
+			s.mux.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNotFound, w.Code,
+				"405 tells an unauthorized scanner the endpoint is real")
+			assert.Empty(t, w.Header().Get("Allow"),
+				"the Allow header enumerates the route just as loudly as the 405")
+			assert.Equal(t, refRec.Body.String(), w.Body.String(),
+				"body must be indistinguishable from the unauthorized GET")
+			assert.Equal(t, refRec.Header().Get("Content-Type"), w.Header().Get("Content-Type"))
+		})
+	}
+}
+
+// TestMetrics_AuthorizedCallerStillGets405OnWrongMethod — hiding the endpoint
+// from strangers must not cost an authorized scraper an honest error. Once the
+// caller has proven it may see /metrics at all, a wrong method is a wrong
+// method.
+func TestMetrics_AuthorizedCallerStillGets405OnWrongMethod(t *testing.T) {
+	s := newTestServer()
+	req := httptest.NewRequest(http.MethodPost, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:55555" // authorized (loopback)
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	assert.Equal(t, "GET, HEAD", w.Header().Get("Allow"))
+}
+
+// TestMetrics_AuthorizedGETStillServes guards the obvious regression: the
+// method gate must not swallow the real scrape.
+func TestMetrics_AuthorizedGETStillServes(t *testing.T) {
+	s := newTestServer()
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req := httptest.NewRequest(method, "/metrics", nil)
+		req.RemoteAddr = "127.0.0.1:55555"
+		w := httptest.NewRecorder()
+		s.mux.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, method)
+	}
+}

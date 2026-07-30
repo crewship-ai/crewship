@@ -619,9 +619,11 @@ func isSelfServiceAuthPath(path string) bool {
 func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
-	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
-	if strings.HasPrefix(path, "/api/v1/internal/") {
-		r.mux.ServeHTTP(w, req)
+	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token
+	// auth). serveInternal — not r.mux directly — is the single door onto that
+	// surface; see its doc comment for why (#1501).
+	if strings.HasPrefix(path, internalPathPrefix) {
+		r.serveInternal(w, req)
 		return
 	}
 
