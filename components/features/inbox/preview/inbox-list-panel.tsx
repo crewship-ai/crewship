@@ -257,13 +257,13 @@ export function InboxListPanel(props: InboxListPanelProps) {
       </div>
 
       {/* ── Views + Filter + Display ── */}
-      <div className="flex shrink-0 items-center border-b border-white/[0.06] pr-2">
+      <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] pr-2">
         <TabBar
           value={view}
           onValueChange={(v) => onViewChange(v as InboxView)}
           layoutId="inbox-preview-view"
           ariaLabel="Inbox views"
-          className="flex-1 border-b-0"
+          className="min-w-0 flex-1 border-b-0"
         >
           <TabBar.Item value="inbox" count={viewCounts.inbox}>Inbox</TabBar.Item>
           <TabBar.Item value="unread" count={viewCounts.unread || null}>Unread</TabBar.Item>
@@ -271,10 +271,14 @@ export function InboxListPanel(props: InboxListPanelProps) {
         </TabBar>
 
         <div className="relative shrink-0">
+          {/* Compact: the toolbar's default h-8 buttons plus three tabs and
+              their counts do not fit 460px, and the row pushed its own tools
+              off the edge. */}
           <SidebarFilterButton
             activeCount={activeFilters}
             aria-expanded={filterOpen}
             onClick={() => { setFilterOpen(!filterOpen); setDisplayOpen(false) }}
+            className="h-6 gap-1 px-1.5 text-[10px]"
           />
           <AnimatePresence>
             {filterOpen && (
@@ -371,15 +375,15 @@ export function InboxListPanel(props: InboxListPanelProps) {
             aria-expanded={displayOpen}
             onClick={() => { setDisplayOpen(!displayOpen); setFilterOpen(false) }}
             className={cn(
-              "ml-1.5 inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 text-[11px] transition-colors",
+              "ml-1 inline-flex h-6 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 text-[10px] transition-colors",
               displayOpen
                 ? "border-primary/30 bg-primary/10 text-primary-hover"
                 : "border-white/[0.08] bg-white/[0.04] text-muted-foreground/70 hover:text-foreground",
             )}
           >
-            <SlidersHorizontal className="h-3 w-3" />
+            <SlidersHorizontal className="h-2.5 w-2.5" />
             Display
-            <ChevronDown className="h-3 w-3 opacity-60" />
+            <ChevronDown className="h-2.5 w-2.5 opacity-60" />
           </button>
           <AnimatePresence>
             {displayOpen && (
