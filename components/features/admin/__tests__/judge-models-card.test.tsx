@@ -169,9 +169,22 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
     })
   }
 
+  /**
+   * Open the per-evaluator detail.
+   *
+   * Collapsed is the default because on a stock instance the five background
+   * checks are the same model five times, and that wall of identical technical
+   * detail buries the credential judge above it. Every test that touches a slot
+   * has to ask for the detail first — which is the flow a real operator follows.
+   */
+  async function openDetail() {
+    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+  }
+
   it("offers the provider and model as controls, not as text", async () => {
     routed()
     render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
     // The row an operator wants to change is the paid one.
     expect(await screen.findByLabelText(/skill review.*provider/i)).toBeTruthy()
     expect(screen.getByLabelText(/skill review.*model: claude-haiku-4-5/i)).toBeTruthy()
@@ -180,6 +193,7 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
   it("says which override needs a restart, per row", async () => {
     routed()
     render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
     // run_summary is captured into the pipeline executors at boot; without this
     // an operator changes it, sees nothing happen, and calls it broken.
     expect(await screen.findByText(/needs restart/i)).toBeTruthy()
@@ -188,6 +202,7 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
   it("shows where each model came from so reset has a visible referent", async () => {
     routed()
     render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
     expect(await screen.findByText(/shipped default/i)).toBeTruthy()
     expect(screen.getByText(/set here/i)).toBeTruthy()
   })
@@ -195,11 +210,12 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
   it("resets one slot through the slot endpoint", async () => {
     routed()
     render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
     const reset = await screen.findByRole("button", { name: /^reset$/i })
     fireEvent.click(reset)
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith(
-        "/api/v1/admin/keeper/aux/run_summary",
+        expect.stringContaining("/api/v1/admin/keeper/aux/run_summary?workspace_id=ws1"),
         expect.objectContaining({ method: "PUT" }),
       ),
     )
@@ -212,7 +228,7 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
     fireEvent.click(btn)
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith(
-        "/api/v1/admin/keeper/aux/use-judge",
+        expect.stringContaining("/api/v1/admin/keeper/aux/use-judge?workspace_id=ws1"),
         expect.objectContaining({ method: "POST" }),
       ),
     )
@@ -221,7 +237,9 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
   it("hides the local-judge action when no judge is configured", async () => {
     routed({ ...AUX, judge_model: "", judge_provider: "" })
     render(<JudgeModelsCard workspaceId="ws1" />)
-    await screen.findByText(/skill review/i)
+    // The status row, which is present collapsed — not the aux slot label, which
+    // has the same text and only appears once the detail is open.
+    await screen.findAllByText(/skill review/i)
     // A button that can only 400 is worse than no button.
     expect(screen.queryByRole("button", { name: /use local judge for all/i })).toBeNull()
   })
@@ -248,6 +266,11 @@ describe("JudgeModelsCard — editing the evaluator models", () => {
 // moment to find out.
 describe("JudgeModelsCard — probing an evaluator", () => {
   beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  /** The per-slot controls sit behind "Change" — see the editing suite. */
+  async function openDetail() {
+    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+  }
 
   const AUX_ONE = {
     slots: [{
@@ -278,10 +301,11 @@ describe("JudgeModelsCard — probing an evaluator", () => {
     routeWithProbe({ ok: true, stages: [{ ok: true, detail: "verdict: ALLOW" }, { ok: true, detail: "1.2s of a 20s budget — comfortable headroom" }] })
     render(<JudgeModelsCard workspaceId="ws1" />)
 
+    await openDetail()
     fireEvent.click(await screen.findByTestId("keeper-aux-probe-curator"))
     await waitFor(() =>
       expect(apiFetch).toHaveBeenCalledWith(
-        "/api/v1/admin/keeper/aux/curator/probe",
+        expect.stringContaining("/api/v1/admin/keeper/aux/curator/probe?workspace_id=ws1"),
         expect.objectContaining({ method: "POST" }),
       ),
     )
@@ -300,9 +324,100 @@ describe("JudgeModelsCard — probing an evaluator", () => {
     })
     render(<JudgeModelsCard workspaceId="ws1" />)
 
+    await openDetail()
     fireEvent.click(await screen.findByTestId("keeper-aux-probe-curator"))
     // Which stage failed is the whole diagnostic: "answered but too slowly" and
     // "never answered" send an operator to different fixes.
     expect(await screen.findByText(/would DENY every credential request/i)).toBeTruthy()
+  })
+})
+
+// Not tiring an operator with five copies of the same technical detail.
+//
+// The card printed one row per background evaluator. On a stock instance those
+// are the SAME model with different timeouts, so it rendered
+// "anthropic / claude-haiku-4-5" five times and buried the one row that is in the
+// path of every credential request. Reported as: "why do I have Skill review +
+// memory consolidation when I can't change anything there — what use is that
+// information to people?"
+describe("JudgeModelsCard — how much detail it shows by default", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  const SAME = ["curator", "behavior", "memory_health", "negative", "run_summary"].map((slot) => ({
+    slot, label: slot, applies_at: "immediately",
+    provider: { value: "anthropic", source: "default", editable: true },
+    model: { value: "claude-haiku-4-5", source: "default", editable: true },
+    timeout_ms: { value: 30000, source: "default", editable: true },
+    overridden: false,
+  }))
+  const MIXED = [
+    { ...SAME[0], model: { value: "claude-opus-5", source: "instance", editable: true } },
+    ...SAME.slice(1),
+  ]
+
+  function route(slots: unknown[]) {
+    apiFetch.mockImplementation((url: string) => {
+      if (String(url).includes("aux-status")) {
+        return Promise.resolve(ok({ subsystems: [
+          { id: "access_gatekeeper", label: "Credential access judge", provider: "ollama", model: "qwen2.5:7b", source: "keeper_config", healthy: true, reachable: true },
+        ] }))
+      }
+      if (String(url).includes("/admin/keeper/aux")) {
+        return Promise.resolve(ok({
+          slots, providers: ["anthropic", "openai", "ollama"],
+          judge_provider: "ollama", judge_model: "qwen2.5:7b", any_overridden: false,
+        }))
+      }
+      return Promise.resolve(ok({ models: [] }))
+    })
+  }
+
+  it("collapses identical evaluators into one line and keeps the judge visible", async () => {
+    route(SAME)
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    // The row an operator opens this card for stays on screen.
+    expect(await screen.findByText(/credential access judge/i)).toBeTruthy()
+    // Five identical models are summarised, not listed.
+    expect(await screen.findByText(/all 5 on anthropic \/ claude-haiku-4-5/i)).toBeTruthy()
+    expect(screen.queryAllByTestId(/keeper-aux-probe-/)).toHaveLength(0)
+  })
+
+  it("expands on its own when the evaluators are NOT all the same", async () => {
+    route(MIXED)
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    // Here the difference IS the information, so hiding it would be the wrong
+    // default — an operator who pinned one slot to Opus needs to see which.
+    expect(await screen.findByTestId("keeper-aux-probe-curator")).toBeTruthy()
+    expect(screen.queryByText(/all 5 on/i)).toBeNull()
+  })
+
+  it("says whether the background checks cost anything", async () => {
+    route(SAME)
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    // The decision behind this card is a spend decision, and "anthropic" does not
+    // say that to someone who is not already fluent.
+    expect(await screen.findByText(/cost money per run/i)).toBeTruthy()
+  })
+
+  it("loads the editable half only once a workspace is known", async () => {
+    route(SAME)
+    render(<JudgeModelsCard workspaceId={null} />)
+    // The regression that made the whole card read-only: the aux route is behind
+    // RequireWorkspace and 400s without workspace_id, and a 400 was indistinguishable
+    // from "this server has no edit surface".
+    const targets = apiFetch.mock.calls.map((c) => String(c[0]))
+    expect(targets.some((t) => t.includes("/admin/keeper/aux"))).toBe(false)
+  })
+
+  it("sends workspace_id on the aux read, or the server refuses it", async () => {
+    route(SAME)
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/admin/keeper/aux?workspace_id=ws1"),
+      ),
+    )
   })
 })

@@ -139,8 +139,14 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   }, [workspaceId])
 
   const loadAux = useCallback(async () => {
+    // The evaluator config is instance-scoped, but the route is behind
+    // RequireWorkspace like every other admin route — it 400s without
+    // workspace_id. Waiting for one is the difference between an editable card
+    // and the read-only fallback, which is what this looked like for a while:
+    // five evaluators visibly configured and none of them touchable.
+    if (!workspaceId) return
     try {
-      const res = await apiFetch("/api/v1/admin/keeper/aux")
+      const res = await apiFetch(`/api/v1/admin/keeper/aux?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
       if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setAux(Array.isArray(data?.slots) ? (data as AuxConfig) : null)
@@ -150,7 +156,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
       // that are the reason an operator opened this.
       setAux(null)
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { loadAux() }, [loadAux])
@@ -159,7 +165,8 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   const saveSlot = useCallback(async (slot: string, patch: Record<string, unknown>) => {
     setBusy(true)
     try {
-      const res = await apiFetch(`/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}`, {
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -174,12 +181,14 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
     } finally {
       setBusy(false)
     }
-  }, [load])
+  }, [load, workspaceId])
 
   const switchToLocalJudge = useCallback(async () => {
     setBusy(true)
     try {
-      const res = await apiFetch("/api/v1/admin/keeper/aux/use-judge", { method: "POST" })
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/aux/use-judge?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
+        { method: "POST" })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`)
       setAux(body as AuxConfig)
@@ -192,12 +201,14 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
     } finally {
       setBusy(false)
     }
-  }, [load])
+  }, [load, workspaceId])
 
   const resetAll = useCallback(async () => {
     setBusy(true)
     try {
-      const res = await apiFetch("/api/v1/admin/keeper/aux", { method: "DELETE" })
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/aux?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
+        { method: "DELETE" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body = await res.json().catch(() => null)
       if (body) setAux(body as AuxConfig)
@@ -210,12 +221,14 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
     } finally {
       setBusy(false)
     }
-  }, [load])
+  }, [load, workspaceId])
 
   const probeSlot = useCallback(async (slot: string) => {
     setProbing(slot)
     try {
-      const res = await apiFetch(`/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}/probe`, { method: "POST" })
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/aux/${encodeURIComponent(slot)}/probe?workspace_id=${encodeURIComponent(workspaceId ?? "")}`,
+        { method: "POST" })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
         setProbeResults((p) => ({ ...p, [slot]: { ok: false, detail: body?.error || `HTTP ${res.status}` } }))
@@ -238,7 +251,15 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
     } finally {
       setProbing(null)
     }
-  }, [])
+  }, [workspaceId])
+
+  // The five background evaluators are collapsed by default. On a default
+  // instance they are five identical rows of "anthropic / claude-haiku-4-5", and
+  // a wall of the same technical detail five times is not information — it is
+  // noise that hides the one row that matters, the credential judge. Expanded
+  // only when an operator asks, or when they are NOT all the same (in which case
+  // the difference is the point).
+  const [showEach, setShowEach] = useState(false)
 
   const unusable = (rows ?? []).filter((r) => !isUsable(r)).length
   const auxBySlot = new Map((aux?.slots ?? []).map((s) => [s.slot, s]))
@@ -247,10 +268,29 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // operator cannot find.
   const extraSlots = (aux?.slots ?? []).filter((s) => !(rows ?? []).some((r) => r.id === s.slot))
 
+  // The credential judge is the row an operator opens this card for: it is the
+  // one in the path of every credential request. Everything else runs on a
+  // schedule and can be a summary until asked about.
+  const judgeRow = (rows ?? []).find((r) => r.id === "access_gatekeeper")
+  const evaluatorRows = (rows ?? []).filter((r) => r.id !== "access_gatekeeper")
+  const allSlots = aux?.slots ?? []
+  const uniformModel =
+    allSlots.length > 0 && allSlots.every((sl) => sl.model.value === allSlots[0].model.value)
+      ? `${allSlots[0].provider.value} / ${allSlots[0].model.value}`
+      : null
+  // A tier that costs money says so. "ollama" is the local judge and bills
+  // nothing; anything else is per-token, which is the fact an operator is
+  // actually deciding about.
+  const evaluatorsAreFree = allSlots.length > 0 && allSlots.every((sl) => sl.provider.value === "ollama")
+  const expanded = showEach || uniformModel === null
+  const orderedRows = judgeRow
+    ? (expanded ? [judgeRow, ...evaluatorRows] : [judgeRow])
+    : (expanded ? evaluatorRows : [])
+
   return (
     <SettingsCard
-      title="Judge models"
-      description="Which model decides what, and whether it can run. Instance-wide; a workspace governance model overrides it per request."
+      title="Which model decides"
+      description="The judge that answers credential requests, and the models behind the background checks. Applies to the whole instance — a workspace can override it under Judge for this workspace."
       actions={
         <>
           {aux && aux.judge_model && (
@@ -293,12 +333,16 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
         <SettingsEmpty>No judge models are wired into this build.</SettingsEmpty>
       ) : (
         <>
+          {/* "fail closed" is jargon that reads as a state rather than a
+              consequence. What an operator needs is what will HAPPEN, in words
+              they can act on. */}
           {unusable > 0 && (
             <div role="status" className="px-4 py-2 text-[11px] text-destructive border-b border-border/40 bg-destructive/[0.05]">
-              {unusable} of {rows.length} judges cannot run right now — evaluations that need them will fail closed.
+              {unusable === 1 ? "One check cannot run" : `${unusable} checks cannot run`} right now. Anything that
+              needs {unusable === 1 ? "it" : "them"} is refused rather than allowed — Keeper never guesses.
             </div>
           )}
-          {rows.map((r) => (
+          {orderedRows.map((r) => (
             <SettingsRow
               key={r.id}
               label={
@@ -351,7 +395,45 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
               )}
             </SettingsRow>
           ))}
-          {extraSlots.map((s) => (
+          {/* One row instead of five. On a default instance the five background
+              checks are the SAME model with different timeouts, and printing
+              "anthropic / claude-haiku-4-5" five times buries the credential judge
+              above it. The detail is one click away and stays open once asked
+              for; when they are NOT all the same, the card expands on its own,
+              because then the difference is the information. */}
+          {allSlots.length > 0 && (
+            <SettingsRow
+              label="Background checks"
+              description={
+                <span className="block max-w-[30rem] leading-snug text-muted-foreground/80">
+                  Skill reviews, the tool-call watchdog, memory audits and run summaries. They run on a
+                  schedule, not in the credential path — nothing waits on them.{" "}
+                  {evaluatorsAreFree
+                    ? "Running on your local model, so they cost nothing."
+                    : "These call a paid model, so they cost money per run."}
+                </span>
+              }
+            >
+              <span className="flex items-center gap-2">
+                {uniformModel && !expanded && (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    all {allSlots.length} on {uniformModel}
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                  onClick={() => setShowEach((v) => !v)}
+                  data-testid="keeper-aux-toggle"
+                >
+                  {expanded ? "Hide detail" : "Change"}
+                </Button>
+              </span>
+            </SettingsRow>
+          )}
+
+          {expanded && extraSlots.map((s) => (
             <SettingsRow key={s.slot} label={s.label}>
               <SlotEditor
                 slot={s}
