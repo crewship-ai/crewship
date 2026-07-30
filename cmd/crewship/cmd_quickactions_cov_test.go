@@ -25,6 +25,7 @@ const covWSCli5 = "c0000000000000000000000"
 // assertions. Tests using this must NOT call t.Parallel() (global state).
 func covSetupCli5(t *testing.T) *clitest.StubServer {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	t.Setenv("CREWSHIP_SERVER", "")
 	t.Setenv("CREWSHIP_WORKSPACE", "")
@@ -43,6 +44,7 @@ func covSetupCli5(t *testing.T) *clitest.StubServer {
 // printed. Not parallel-safe — callers must not use t.Parallel().
 func covCaptureStdoutCli5(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -67,6 +69,7 @@ func covCaptureStdoutCli5(t *testing.T, fn func()) string {
 // (stderr). Returns the two streams concatenated (stdout first).
 func covCaptureAll(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	origErr := os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -113,6 +116,7 @@ func covSwapStdin(t *testing.T, content string) {
 // unless restored.
 func covSetFlagCli5(t *testing.T, cmd *cobra.Command, name, val string) {
 	t.Helper()
+	guardCLIState(t)
 	f := cmd.Flags().Lookup(name)
 	if f == nil {
 		t.Fatalf("flag --%s not registered on %s", name, cmd.Name())

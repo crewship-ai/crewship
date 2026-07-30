@@ -403,66 +403,49 @@ jobs:
   # and — the real problem — package-level globals that outlive a single
   # test. Fixed source order hides all of that permanently.
   #
-  # ⚠ TEMPORARY — NON-BLOCKING, and it must not become blocking until the
-  # findings below are fixed. -shuffle=on WAS on the blocking `go` / `go-api`
-  # jobs in the first revision of this PR. It found **59 pre-existing
-  # order-dependent test failures on its first CI run**, which is why it is
-  # no longer there:
+  # SCOPE IS NOW THE WHOLE SUITE. The two packages this job used to exclude —
+  # cmd/crewship and internal/api — were fixed and the skip list is empty, so
+  # a red X here means a NEW order dependency, never known wallpaper.
   #
-  #  A. cmd/crewship — 58 failing top-level tests, seed 1785416330547433439
-  #     (job 90877558861). TestRoutineBudgetSummary,
-  #     TestEscalationPendingCountRunE_Table, TestChatListCmd,
-  #     TestWhoamiRunE_HumanOutput, TestPolicyListRunE_*, TestIntgListRunECov,
-  #     TestChatReactListCmd, TestRoutineBudgetGet, TestAdminMemoryConfigGet,
-  #     TestJournalCountRunE, TestTokenValidate_401Plain, … Failure shape is
-  #     assertions on captured CLI output reading another test's bytes, i.e.
-  #     shared command/output state that is never reset between tests.
+  # What was excluded, and what it turned out to be (kept because the shapes
+  # recur, and because "the failing test is never the guilty one" is the whole
+  # lesson of this job):
   #
-  #  B. internal/api — TestCovICICredAdapterCreate_Happy, seed
-  #     1785416220727378182 (job 90877558773):
-  #       internal_creds_integrations_cov_test.go:413:
-  #       status = 403, want 201, body: {"error":"Forbidden"}
-  #     Root cause is not that test. seedTestUser / seedTestWorkspace
-  #     (router_test.go:173,183) return the CONSTANTS "test-user-id" and
-  #     "test-workspace-id" for EVERY test, while defaultCapabilityCache
-  #     (capabilities_check.go) is a package-level global keyed on exactly
-  #     (workspaceID, userID). Every test therefore shares one cache identity
-  #     despite getting a fresh DB, so a capability answer computed against
-  #     one test's database is served to another's. Some tests call
-  #     InvalidateCapabilityCache and paper over it; this one does not.
+  #  A. cmd/crewship — up to 58 failing top-level tests per seed. Cobra binds
+  #     --format & co. to package-level variables and the root PersistentPreRun
+  #     blanks internal/cli's colour palette; a CLI process runs one command and
+  #     exits, a test binary runs ~3,000 in one process. Fix: every test is
+  #     handed the process's start-of-day state back — CLI globals, the colour
+  #     palette, and every Cobra flag's value AND its Changed bit (144 places
+  #     branch on Changed, and putting a flag back with Flags().Set leaves
+  #     Changed=true forever). See cmd/crewship/clistate_test.go.
   #
-  # These are genuine bugs and finding them is the whole point of the flag.
-  # But a shuffled run fails on a DIFFERENT subset depending on the seed — the
-  # second run of this job failed 28 cmd/crewship tests where the first failed
-  # 58, and internal/api passed the second time. As a gate on the whole suite
-  # that is a coin flip, not a gate, so the blocking `go` / `go-api` jobs keep
-  # deterministic source order.
+  #  B. internal/api — two separate ones. ENCRYPTION_KEY was installed by
+  #     whichever test called setTestEncryptionKeyParallelSafe first, so
+  #     fixtures that encrypt without asking (webhook signing secrets,
+  #     crew-template deploy) worked only when they sorted after it; TestMain
+  #     now installs it before any test. And defaultCapabilityCache is a
+  #     process-wide singleton keyed on the CONSTANT ids seedTestUser /
+  #     seedTestWorkspace hand every test, so a capability answer computed
+  #     against one test's database was served to the next one's router;
+  #     setupTestDB now clears it, since a fresh database deserves a cache that
+  #     knows nothing about the previous one.
   #
-  # Scope here is the whole suite MINUS the two packages with known
-  # order-dependent state, so this job's expected result is GREEN and a red X
-  # means a NEW order dependency rather than being permanent wallpaper.
+  # Verified before the exclusions were dropped: cmd/crewship green on 13
+  # distinct seeds (including 1785429252149193000, which failed 15 tests
+  # before), internal/api green on 10 (including 11 and 22, which failed
+  # before). Order-dependence is not proven absent by any number of seeds —
+  # which is exactly why this job runs a fresh random one every push.
   #
-  # OPEN FINDINGS: 2 packages, both excluded below and both diagnosed above.
-  # Highest observed count in one run was 59 failing top-level tests (58 in
-  # cmd/crewship + 1 in internal/api); the per-run number varies with the
-  # seed. When both packages are fixed and dropped from the exclusion list,
-  # this job's exclusion count reaches 0 and there is nothing left to stage.
-  #
-  # Still `continue-on-error` for now, and the reason is honest rather than
-  # convenient: one green run is not enough evidence that a randomised gate is
-  # stable, and shipping a blocking gate that flakes on an unlucky seed would
-  # be worse than shipping an advisory one. That makes this a staged rollout
-  # with a stated promotion criterion, not an escape hatch. Unlike `go-race`,
-  # this cannot be closed out in this PR: order-dependence here is shared
-  # mutable state across ~59 tests in two packages, not one buffer.
+  # Still `continue-on-error`, and the reason is honest rather than convenient:
+  # a randomised gate earns "blocking" by being green over time, not by being
+  # green in the PR that fixed it. The known findings are closed, so this is
+  # now a soak, not a workaround.
   #
   # ➜ TO PROMOTE TO BLOCKING: after a handful of consecutive green runs on
-  #   main, delete `continue-on-error`. Independently, fix the two excluded
-  #   packages — reset the CLI output/command globals per test in
-  #   cmd/crewship, and give internal/api's seed helpers per-test unique IDs
-  #   (or the capability cache a test reset hook) — then drop the exclusions.
-  #   The end state is -shuffle=on folded back into `go`/`go-api` and this job
-  #   deleted, since shuffling costs no extra wall-clock.
+  #   main, delete `continue-on-error`. The end state is -shuffle=on folded
+  #   back into `go`/`go-api` and this job deleted, since shuffling costs no
+  #   extra wall-clock.
   go-shuffle:
     needs: [merge-conflict-markers]
     name: Go Shuffle
@@ -470,8 +453,9 @@ jobs:
     continue-on-error: true
     # Same invariant as `go`: cap MUST exceed overhead + `go test -timeout`
     # so Go's goroutine dump wins over GitHub's opaque cancel. Measured at
-    # 11m52s for the full suite (job 90889450094); the exclusions below take
-    # the ~379s internal/api and ~168s cmd/crewship tails out of it.
+    # 11m52s for the full suite (job 90889450094) back when internal/api and
+    # cmd/crewship were excluded AND still cost 379s/168s; #1547 cut both, and
+    # they are back in scope, so the headroom is roughly unchanged.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -491,31 +475,21 @@ jobs:
         # tell that you are looking at shared state, not a broken assertion.
         run: |
           set -euo pipefail
-          # The two packages with known order-dependent shared state. Both
-          # are documented in the comment on this job, both are temporary,
-          # and NEITHER should be used as a place to park a new failure —
-          # a package added here silently loses order-dependence coverage.
-          skipfile="${RUNNER_TEMP:-/tmp}/shuffle-skip.txt"
-          cat > "$skipfile" <<'SKIP'
-          github.com/crewship-ai/crewship/cmd/crewship
-          github.com/crewship-ai/crewship/internal/api
-          SKIP
-          nskip="$(grep -c . "$skipfile")"
-          total="$(go list ./... | grep -c .)"
-          pkgs="$(go list ./... | grep -Fxv -f "$skipfile")"
-          n="$(printf '%s\n' "$pkgs" | grep -c .)"
-          # Each entry must remove exactly one real package, so a stale
-          # import path fails loudly instead of quietly re-including a
-          # known-broken package (or, worse, excluding nothing and making
-          # this job permanently red again).
-          if [ "$((total - n))" -ne "$nskip" ]; then
-            echo "::error::skip list removed $((total - n)) packages but has $nskip entries. An entry is stale — reconcile it against 'go list ./...'."
-            cat "$skipfile"
+          # No skip list any more: every package is shuffled. Resist adding
+          # one back. A package parked here silently loses order-dependence
+          # coverage, and the state that caused it goes on leaking into
+          # whichever test is unlucky — which is the failure mode this job
+          # exists to surface, not to route around.
+          n="$(go list ./... | grep -c .)"
+          # Guard against the list collapsing, same as the `go` job: `go test`
+          # with zero packages exits 0, so a truncated list would look like a
+          # full green run.
+          if [ "$n" -lt 90 ]; then
+            echo "::error::go list returned only $n packages — expected ~108. Refusing to report a pass on a truncated package list."
             exit 1
           fi
-          echo "Shuffling $n of $total packages ($nskip excluded, see job comment)."
-          # shellcheck disable=SC2086
-          go test $pkgs -count=1 -shuffle=on -timeout 15m
+          echo "Shuffling all $n packages."
+          go test ./... -count=1 -shuffle=on -timeout 15m
 
   # ── Go: race detector ──
   #

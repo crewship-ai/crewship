@@ -89,6 +89,7 @@ func TestReadConfigFile(t *testing.T) {
 
 func covResetCrewConfigFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	covSetFlagCli5(t, crewConfigCmd, "show", "false")
 	covSetFlagCli5(t, crewConfigCmd, "export", "false")
 	covSetFlagCli5(t, crewConfigCmd, "clear", "false")

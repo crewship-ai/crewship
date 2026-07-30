@@ -27,6 +27,7 @@ func covDeadServer(t *testing.T) string {
 // covSetupDead points cliCfg at a dead server.
 func covSetupDead(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	t.Setenv("CREWSHIP_SERVER", "")
 	t.Setenv("CREWSHIP_WORKSPACE", "")

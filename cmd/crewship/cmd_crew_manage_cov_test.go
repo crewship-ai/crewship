@@ -35,6 +35,7 @@ const (
 // registration + call assertions.
 func covSetupCli4(t *testing.T) *clitest.StubServer {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	stub := clitest.NewStubServer()
 	t.Cleanup(stub.Close)
@@ -53,6 +54,7 @@ func covSetupCli4(t *testing.T) *clitest.StubServer {
 // os.Stderr; tests assert against the combined terminal transcript.
 func covCaptureStdoutCli4(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	oldOut, oldErr := os.Stdout, os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -106,6 +108,7 @@ func covFreshCmd(src *cobra.Command, declare func(c *cobra.Command)) *cobra.Comm
 
 func covSetFlagsCli4(t *testing.T, c *cobra.Command, kv map[string]string) {
 	t.Helper()
+	guardCLIState(t)
 	for k, v := range kv {
 		if err := c.Flags().Set(k, v); err != nil {
 			t.Fatalf("set --%s=%s: %v", k, v, err)

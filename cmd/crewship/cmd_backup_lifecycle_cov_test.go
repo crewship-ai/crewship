@@ -22,6 +22,7 @@ func backupDefaultKeyringForTest(t *testing.T) (*backup.Keyring, error) {
 // baseline (and restores the previous values afterwards).
 func covResetBackupCreateFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	covSetFlagCli5(t, backupCreateCmd, "scope", "workspace")
 	covSetFlagCli5(t, backupCreateCmd, "crew", "")
 	covSetFlagCli5(t, backupCreateCmd, "no-encrypt", "false")
@@ -235,6 +236,7 @@ func TestBackupCreateRunE_APIError(t *testing.T) {
 
 func covResetBackupRestoreFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	covSetFlagCli5(t, backupRestoreCmd, "as-workspace", "")
 	covSetFlagCli5(t, backupRestoreCmd, "as-crew", "")
 	covSetFlagCli5(t, backupRestoreCmd, "passphrase-file", "")

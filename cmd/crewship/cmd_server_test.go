@@ -35,6 +35,7 @@ func TestServerCmdStructure(t *testing.T) {
 }
 
 func TestServerAddPersistsAndSetsCurrent(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	old := flagServer
 	flagServer = "https://crewship-dev1.example"
@@ -53,6 +54,7 @@ func TestServerAddPersistsAndSetsCurrent(t *testing.T) {
 }
 
 func TestServerAddRequiresURL(t *testing.T) {
+	guardCLIState(t)
 	redirectConfigHome(t)
 	old := flagServer
 	flagServer = ""
@@ -63,6 +65,7 @@ func TestServerAddRequiresURL(t *testing.T) {
 }
 
 func TestServerAddRejectsBadURL(t *testing.T) {
+	guardCLIState(t)
 	redirectConfigHome(t)
 	old := flagServer
 	flagServer = "not-a-url"
@@ -73,6 +76,7 @@ func TestServerAddRejectsBadURL(t *testing.T) {
 }
 
 func TestServerAddBindsDirectory(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	oldServer, oldDir := flagServer, serverAddDir
 	flagServer = "https://dev1.example"
@@ -89,6 +93,7 @@ func TestServerAddBindsDirectory(t *testing.T) {
 }
 
 func TestServerRemovePrunesDirBindings(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	oldServer, oldDir := flagServer, serverAddDir
 	flagServer = "https://dev1.example"
@@ -115,6 +120,7 @@ func TestServerUseRejectsUnknown(t *testing.T) {
 }
 
 func TestServerUsePersists(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	old := flagServer
 	t.Cleanup(func() { flagServer = old })
@@ -140,6 +146,7 @@ func TestServerUsePersists(t *testing.T) {
 // name the layer that actually won, and — when it's a directory override —
 // say what the persisted default would otherwise have been.
 func TestServerCurrentSurfacesDirectoryOverride(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	oldProfile := flagProfile
 	flagProfile = ""
@@ -190,6 +197,7 @@ func TestServerCurrentSurfacesDirectoryOverride(t *testing.T) {
 // Outside any directory-mapped clone, `server current` should show the
 // persisted default plainly, with no directory-override hint.
 func TestServerCurrentPlainWhenNoDirectoryOverride(t *testing.T) {
+	guardCLIState(t)
 	redirectConfigHome(t)
 	oldProfile := flagProfile
 	flagProfile = ""
@@ -230,6 +238,7 @@ func TestServerCurrentPlainWhenNoDirectoryOverride(t *testing.T) {
 // than the persisted `server use` default, so the two aren't visually
 // indistinguishable.
 func TestServerListMarksDirectoryOverride(t *testing.T) {
+	guardCLIState(t)
 	redirectConfigHome(t)
 	oldProfile := flagProfile
 	flagProfile = ""
@@ -280,6 +289,7 @@ func TestServerListMarksDirectoryOverride(t *testing.T) {
 }
 
 func TestServerRemoveClearsCurrent(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	old := flagServer
 	t.Cleanup(func() { flagServer = old })

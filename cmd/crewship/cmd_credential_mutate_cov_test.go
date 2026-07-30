@@ -13,6 +13,7 @@ import (
 // on error. Pair with covResetFlags so the Changed bits don't leak.
 func covSetFlags(t *testing.T, cmd *cobra.Command, kv map[string]string) {
 	t.Helper()
+	guardCLIState(t)
 	for k, v := range kv {
 		if err := cmd.Flags().Set(k, v); err != nil {
 			t.Fatalf("set --%s=%s: %v", k, v, err)

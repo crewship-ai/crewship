@@ -17,6 +17,7 @@ func newJSONFlagCmd() *cobra.Command {
 }
 
 func TestResolvedFormat_GlobalFormatFlagWins(t *testing.T) {
+	guardCLIState(t)
 	oldFormat, oldCfg := flagFormat, cliCfg
 	defer func() { flagFormat, cliCfg = oldFormat, oldCfg }()
 
@@ -29,6 +30,7 @@ func TestResolvedFormat_GlobalFormatFlagWins(t *testing.T) {
 }
 
 func TestResolvedFormat_LegacyJSONBoolFoldsToJSON(t *testing.T) {
+	guardCLIState(t)
 	oldFormat, oldCfg := flagFormat, cliCfg
 	defer func() { flagFormat, cliCfg = oldFormat, oldCfg }()
 
@@ -45,6 +47,7 @@ func TestResolvedFormat_LegacyJSONBoolFoldsToJSON(t *testing.T) {
 }
 
 func TestResolvedFormat_DefaultsToTable(t *testing.T) {
+	guardCLIState(t)
 	oldFormat, oldCfg := flagFormat, cliCfg
 	defer func() { flagFormat, cliCfg = oldFormat, oldCfg }()
 
@@ -62,6 +65,7 @@ func TestResolvedFormat_DefaultsToTable(t *testing.T) {
 }
 
 func TestResolvedFormat_ConfigFormatRespected(t *testing.T) {
+	guardCLIState(t)
 	oldFormat, oldCfg := flagFormat, cliCfg
 	defer func() { flagFormat, cliCfg = oldFormat, oldCfg }()
 

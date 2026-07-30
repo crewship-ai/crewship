@@ -36,6 +36,7 @@ func covMissionStubs(s *clitest.StubServer) {
 
 func covResetMissionCreateFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	t.Cleanup(func() {
 		_ = missionCreateCmd.Flags().Set("title", "")
 		_ = missionCreateCmd.Flags().Set("description", "")

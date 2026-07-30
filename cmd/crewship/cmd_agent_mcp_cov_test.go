@@ -107,6 +107,7 @@ func TestAgentMCPListRunE(t *testing.T) {
 
 func covResetAgentMCPAddFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	t.Cleanup(func() {
 		_ = agentMCPAddCmd.Flags().Set("scope", "workspace")
 		for _, f := range []string{"credential", "cred-type", "env-var"} {
@@ -203,6 +204,7 @@ func TestAgentMCPAddRunE(t *testing.T) {
 
 func covResetAgentMCPUpdateFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	t.Cleanup(func() {
 		for _, f := range []string{"credential", "cred-type", "env-var", "tools"} {
 			_ = agentMCPUpdateCmd.Flags().Set(f, "")

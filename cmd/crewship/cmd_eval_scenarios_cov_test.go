@@ -17,6 +17,7 @@ import (
 // covSetFormat pins the global --format resolution for the test.
 func covSetFormat(t *testing.T, format string) {
 	t.Helper()
+	guardCLIState(t)
 	old := flagFormat
 	flagFormat = format
 	t.Cleanup(func() { flagFormat = old })

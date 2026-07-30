@@ -441,6 +441,7 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 
 func covSetupRunSeed(t *testing.T, s *clitest.StubServer) {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	covSeedEnv(t)
 	flagServer = s.URL()

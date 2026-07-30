@@ -138,6 +138,7 @@ func TestCheckCLIConfigServerScheme(t *testing.T) {
 // symmetrically, that a profile with NO server fails closed to INFO rather than
 // leaking through to env/cfg. Mirrors the shim's exact resolution.
 func TestCheckCLIConfigServerScheme_HonorsActiveProfile(t *testing.T) {
+	guardCLIState(t)
 	origServer, origProfile := flagServer, flagProfile
 	t.Cleanup(func() { flagServer, flagProfile = origServer, origProfile })
 	// Profile server must win over CREWSHIP_SERVER (profile > env), just like
