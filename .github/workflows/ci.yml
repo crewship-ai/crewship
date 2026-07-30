@@ -786,6 +786,12 @@ jobs:
           name: nextjs-static-export
           path: web/out
 
+      # Same gate the release path uses: prove the artifact that landed in
+      # web/out/ is a real Next.js export before compiling it in, so this
+      # job cannot go green over an empty or placeholder embed (#1567).
+      - name: Verify a real export is staged for embedding
+        run: ./scripts/embed-web-out.sh verify
+
       - name: Build single binary with embedded frontend
         run: go build -o crewship ./cmd/crewship
 

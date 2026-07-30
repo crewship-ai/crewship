@@ -70,16 +70,15 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Build web UI into the embed dir
-        # setup-go-embed only writes a one-line web/out/index.html stub so
-        # `go:embed` compiles. That is enough for the API-only jobs, but this
-        # job drives the UI with a browser: against the stub, /login serves a
-        # bare doctype with no Next router, so the client-side redirect to
-        # /bootstrap never happens and the first spec times out. Export the
-        # real UI over the stub (same two steps as `make build`) before the
-        # binary is compiled.
+        # A bare checkout carries only web/out/.placeholder.html, which is
+        # enough for `go:embed` to compile (#1567) and fine for the API-only
+        # jobs — but this job drives the UI with a browser, and against the
+        # placeholder every UI route answers 503, so the client-side redirect
+        # to /bootstrap never happens and the first spec times out. Export the
+        # real UI (same two steps as `make build`) before the binary is built.
         run: |
           pnpm build
-          rm -rf web/out && cp -r out web/out
+          ./scripts/embed-web-out.sh sync
 
       - name: Build CLI
         run: go build -o crewship ./cmd/crewship

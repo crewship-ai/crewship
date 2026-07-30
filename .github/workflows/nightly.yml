@@ -147,8 +147,9 @@ jobs:
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
           NEXT_PUBLIC_CREWSHIP_VERSION: nightly-${{ github.sha }}
 
+      # Verifies a real export landed, not the tracked placeholder (#1567).
       - name: Copy static export for embedding
-        run: rm -rf web/out && cp -r out web/out
+        run: ./scripts/embed-web-out.sh sync
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
