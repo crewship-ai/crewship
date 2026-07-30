@@ -101,9 +101,28 @@ const lockoutThresholdMax = 1000
 // See defaults_headroom_test.go, which asserts the headroom rather than the
 // numbers, so a future tightening has to argue with a measurement.
 var registry = []Meta{
+	// The per-IP auth bucket bounds two different things, and only one of
+	// them has a second layer. Repeated guesses at ONE account are bounded by
+	// the lockout counter (50 consecutive failures, KeyLoginLockoutThresh),
+	// which is what the 10/min default was really protecting. Guesses spread
+	// across MANY accounts — password spraying — are bounded by this bucket
+	// and nothing else: checkAndLockoutOnFail keys its counter by user id, so
+	// one guess per account never trips it. Raising this to 600 therefore
+	// raises single-IP spray throughput from 10 accounts/min to 600, an
+	// accepted trade for the NAT case (an office behind one address used to
+	// get ten sign-ins between everyone). The control that would actually
+	// close it is per-IP failure velocity across accounts, which does not
+	// exist yet.
 	{KeyHTTPAuthPerMin, "HTTP (per-IP)", "Auth endpoints", "Login / token-refresh / bootstrap, per client IP. Read-only session polls do NOT count against this.", "req/min", 600, 1, hardMax},
 	{KeyHTTPAPIPerMin, "HTTP (per-IP)", "General API", "Every other /api/* route, per client IP. Authenticated CLI tokens are exempt.", "req/min", 12000, 1, hardMax},
-	{KeyHTTPCredTestPerMin, "HTTP (per-IP)", "Credential test", "The credential-validation test endpoints, per IP — tighter to blunt their use as a key-validation oracle.", "req/min", 600, 1, hardMax},
+	// Not "tighter" any more — this sits at the same 600/min as the auth
+	// bucket, and saying otherwise was the same kind of label-that-outruns-the-
+	// code these defaults exist to stop shipping. What it still is: 20x under
+	// the general API bucket, and an authenticated route. The oracle concern is
+	// real (a stolen key can be validated here against the real provider), and
+	// 600/min makes that sweep 10x faster than before; the honest description
+	// is a deliberate loosening, not a tight bucket.
+	{KeyHTTPCredTestPerMin, "HTTP (per-IP)", "Credential test", "The credential-validation test endpoints, per IP. 20x under the general API bucket — loose enough for interactive use, not a meaningful brake on a scripted key-validation sweep.", "req/min", 600, 1, hardMax},
 	// Reveal is the only endpoint that returns a stored secret in
 	// plaintext (PRD-CREDENTIALS-V2-2026 §2.6 L6), so it gets a bucket of
 	// its own instead of sharing the general 120/min. Legitimate use is a
@@ -119,6 +138,15 @@ var registry = []Meta{
 	// walking a vault of any size still hits a wall. Detecting enumeration
 	// properly is the deferred anomaly/auto-seal work; a rate limit tuned
 	// until it hurts real users was never going to be that.
+	//
+	// Be clear about what that costs, because §2.6 names this exact number
+	// as the one to avoid ("ne obecných 120/min"): an attacker holding a
+	// valid session can now pull 120 plaintext secrets a minute instead of 3.
+	// The compensating control §2.6 pairs with the bucket — alert on breach,
+	// optionally auto-seal the credential — is NOT implemented, so until it
+	// is, this bucket is the only thing bounding the one route that hands
+	// back a secret. Accepted deliberately, recorded here rather than left
+	// for the next person to rediscover from the diff.
 	{KeyHTTPCredRevealPerMin, "HTTP (per-IP)", "Credential reveal", "The credential reveal endpoint, per IP. The only route that returns a secret in plaintext — deliberately far tighter than the general API bucket.", "req/min", 120, 1, hardMax},
 	{KeyLoginLockoutThresh, "Login", "Account lockout threshold", "Consecutive failed sign-ins on one account before it locks. Layered on top of the per-IP auth bucket.", "attempts", 50, 1, lockoutThresholdMax},
 	{KeyLoginLockoutDurSec, "Login", "Account lockout duration", "How long a locked account stays frozen before a legitimate user can retry.", "seconds", 300, 1, 86400},
