@@ -97,6 +97,20 @@ func (r *Router) registerAdminRoutes() {
 	r.authedAdmin("GET", "/api/v1/admin/keeper/governance", keeperGov.Get)
 	r.authedMut("PUT", "/api/v1/admin/keeper/governance", roleManage, keeperGov.Put)
 
+	// Findings routing check. Sends ONE synthetic finding through the real inbox
+	// writer with real target resolution and returns who it reached. Whether a
+	// security control can actually reach a human is not something to discover
+	// during the incident it was bought for. Costs nothing — no model is called.
+	// The hub may be absent in a bare test router; the handler is nil-safe about
+	// the broadcast, so the write still happens and only the live badge push is
+	// skipped.
+	var keeperBcast KeeperBroadcaster
+	if r.hub != nil {
+		keeperBcast = &keeperWSBroadcaster{hub: r.hub}
+	}
+	keeperFindings := NewAdminKeeperFindingsHandler(r.db, r.Journal(), keeperBcast, r.logger)
+	r.authedMut("POST", "/api/v1/admin/keeper/findings/test", roleManage, keeperFindings.SendTest)
+
 	// PR-F F6: Admin GDPR cascade endpoints — Art. 15 access +
 	// Art. 17 erasure across the four cascadable tables
 	// (peer_cards, memory_versions, inbox_items; keeper_requests

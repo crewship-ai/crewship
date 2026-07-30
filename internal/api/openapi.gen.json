@@ -588,6 +588,35 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/findings/test": {
+      "post": {
+        "operationId": "post_api_v1_admin_keeper_findings_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/keeper/governance": {
       "get": {
         "operationId": "get_api_v1_admin_keeper_governance",

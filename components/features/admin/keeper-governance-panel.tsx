@@ -312,7 +312,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   return (
     <>
       <WatchdogCard gov={gov} serverEnabled={serverEnabled} canEdit={canEdit} put={put} />
-      <FindingsRoutingCard gov={gov} admins={admins} canEdit={canEdit} put={put} />
+      <FindingsRoutingCard gov={gov} admins={admins} canEdit={canEdit} put={put} workspaceId={workspaceId} />
       <CredentialLeasesCard gov={gov} canEdit={canEdit} put={put} />
       <GovernanceModelCard gov={gov} credentials={govCredentials} canEdit={canEdit} put={put} />
     </>
@@ -452,14 +452,70 @@ function WatchdogCard({
 
 // ── Findings & routing: who hears about a finding, and when ─────────────────
 
+// keeperFindingsRecipient / keeperFindingsTestResult mirror
+// internal/api/admin_keeper_findings.go.
+interface FindingsRecipient {
+  user_id: string
+  email?: string
+  name?: string
+  role?: string
+  reason: string
+}
+
+interface FindingsTestResult {
+  recipients: FindingsRecipient[]
+  warning?: string
+}
+
 function FindingsRoutingCard({
-  gov, admins, canEdit, put,
+  gov, admins, canEdit, put, workspaceId,
 }: {
   gov: GovernanceResponse
   admins: WorkspaceMember[]
   canEdit: boolean
   put: PutGovernance
+  workspaceId: string
 }) {
+  // Routing check (POST /admin/keeper/findings/test). Separate from the card's
+  // draft on purpose: it is an action, not a setting, and it must run against
+  // what is SAVED — testing an unsaved contact would answer a question nobody
+  // asked.
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<FindingsTestResult | null>(null)
+
+  const sendTestFinding = async () => {
+    if (testing) return
+    setTesting(true)
+    try {
+      const res = await apiFetch(
+        `/api/v1/admin/keeper/findings/test?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      )
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try {
+          const e = (await res.json()) as { error?: string; detail?: string }
+          msg = e.error ?? e.detail ?? msg
+        } catch {
+          /* keep the status fallback */
+        }
+        toast.error(`Test finding failed: ${msg}`)
+        return
+      }
+      const body = (await res.json()) as FindingsTestResult
+      setTestResult(body)
+      if (body.recipients.length === 0) {
+        toast.error("The test finding reached nobody — see the card for why.")
+      } else {
+        toast.success(`Test finding sent — check your inbox (${body.recipients.length} recipient${body.recipients.length === 1 ? "" : "s"}).`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Test finding failed")
+    } finally {
+      setTesting(false)
+    }
+  }
+
   const form = useDirtyForm({
     contact: gov.security_contact_user_id ?? "",
     // Kept as a string so the number input can be cleared and retyped without
@@ -491,6 +547,20 @@ function FindingsRoutingCard({
     <SettingsCard
       title="Findings &amp; routing"
       description="Who a finding reaches, and the threshold at which a DENY is worth someone's attention."
+      actions={
+        canEdit ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => { void sendTestFinding() }}
+            disabled={testing}
+            data-testid="keeper-findings-test"
+          >
+            {testing ? "Sending…" : "Send test finding"}
+          </Button>
+        ) : undefined
+      }
     >
       <SettingsRow
         label="Security contact"
@@ -570,6 +640,31 @@ function FindingsRoutingCard({
           aria-label="Toggle require a second approver"
         />
       </SettingsRow>
+
+      {testResult && (
+        <div
+          className="px-4 py-2.5 border-t border-border/40 bg-muted/20"
+          data-testid="keeper-findings-test-result"
+        >
+          <div className="text-[11px] text-foreground/80">
+            {testResult.recipients.length === 0
+              ? "That finding reached nobody."
+              : `A finding reaches ${testResult.recipients.length} ${testResult.recipients.length === 1 ? "person" : "people"}:`}
+          </div>
+          {testResult.warning && (
+            <div className="text-[11px] text-destructive/90 mt-1 leading-snug">{testResult.warning}</div>
+          )}
+          <ul className="mt-1.5 space-y-1">
+            {testResult.recipients.map((r) => (
+              <li key={r.user_id} className="text-[11px] text-muted-foreground flex flex-wrap gap-x-2">
+                <span className="text-foreground/80">{r.email || r.name || r.user_id}</span>
+                {r.role && <span className="font-mono">{r.role}</span>}
+                <span className="text-muted-foreground/70">{r.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {canEdit && (
         <SaveFooter

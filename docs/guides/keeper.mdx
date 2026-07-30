@@ -315,6 +315,76 @@ Turning Keeper on or off also changes how SECRET credentials reach agents
 started after the change — a container already running keeps the environment it
 was handed.
 
+### Where to run Ollama, and which address to use
+
+The judge dials from the **Crewship daemon**, not from inside a crew container.
+That single fact decides the address:
+
+| Ollama runs… | Endpoint to enter | Notes |
+|---|---|---|
+| on the same host as Crewship | `http://localhost:11434` | **The simple case — recommended.** Nothing to expose, nothing to firewall. |
+| on another machine on the LAN | `http://<that-machine-ip>:11434` | Ollama must be listening on that address, not just loopback — see below. |
+| behind a reverse proxy | `https://ollama.internal.example.com` | The only way to put authentication in front of it. |
+
+By default Ollama listens on `127.0.0.1:11434`, which means **only the machine it
+runs on can reach it**. To let Crewship on another host reach it, bind it to that
+machine's LAN address:
+
+```bash
+# macOS (launchd picks this up for the menu-bar app; restart Ollama after)
+launchctl setenv OLLAMA_HOST 192.168.1.50
+
+# Linux / anything started from a shell
+OLLAMA_HOST=192.168.1.50 ollama serve
+```
+
+<Warning>
+  **Ollama has no authentication.** Anything that can reach port 11434 can run
+  prompts and list or delete models. Bind it to one specific address, never
+  `0.0.0.0` — or front it with a reverse proxy that adds auth and point Crewship
+  at that instead. `host.docker.internal` is also the wrong answer here: it
+  resolves inside containers, and the judge dials from the host.
+</Warning>
+
+Private and loopback addresses are reachable for the judge regardless of
+`CREWSHIP_ALLOW_PRIVATE_ENDPOINTS` — running a model server on your own LAN is
+the point. Cloud metadata and link-local addresses (`169.254.0.0/16` and its IPv6
+forms), multicast and the unspecified address stay blocked.
+
+### What it costs
+
+The local Ollama judge costs **nothing per decision** — it is your hardware, and
+no paid API is called. Turning the Keeper engine on does not start a meter.
+
+What *is* billed per token are the auxiliary evaluators: the behavioural watchdog
+and the four [Keeper Reviews](#keeper-reviews) sweeps, which run on the
+instance's `auxiliary.*` models (Anthropic by default). Those are separately
+opt-in per workspace, and the engine being on does not enable them.
+
+The engine ships **off**. Nothing turns it on for you: `keeper_runtime_settings`
+starts empty, and an empty row inherits `KEEPER_ENABLED`, which defaults to
+false. (Setting `KEEPER_OLLAMA_URL` in the environment *does* auto-enable it at
+boot unless `KEEPER_ENABLED=false` is also set — that is the one path that
+switches it on without anybody clicking.)
+
+### Confirming a finding reaches you
+
+Keeper writes to the inbox when it escalates, and on a DENY at or above the
+workspace's risk threshold. Whether that actually reaches a human is not
+something to discover during the incident it was bought for:
+
+```bash
+crewship keeper findings test
+```
+
+or **Send test finding** on the Findings & routing card. It sends one synthetic
+finding through the same inbox writer with the same target resolution and the
+same realtime push, then prints who it resolved to and why — the named security
+contact, plus everyone with MANAGER or above. A contact who has since left the
+workspace is reported as unreachable rather than counted. No model is called, so
+it costs nothing and works with the engine off; the command exits non-zero when
+the finding reached nobody.
+
 <Note>
   The judge provider and wire format are reported by `config get` but are not yet
   settable: the instance judge speaks the native Ollama wire. An

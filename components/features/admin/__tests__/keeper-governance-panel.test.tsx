@@ -485,6 +485,73 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
     })
   })
 
+  // ── Findings routing check ───────────────────────────────────────────────
+
+  it("sends a test finding and lists who it reached", async () => {
+    mockRoutes(BASE)
+    // Layer the findings endpoint over the governance mock.
+    const govImpl = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/admin/keeper/findings/test")) {
+        return jsonResponse({
+          inbox_item_id: "ibx_escalation_keepertest_1",
+          recipients: [
+            { user_id: "u-owner", email: "owner@x.dev", role: "OWNER", reason: "security contact" },
+            { user_id: "u-mgr", email: "mgr@x.dev", role: "MANAGER", reason: "role fanout" },
+          ],
+        })
+      }
+      return govImpl(url, init)
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.click(await screen.findByTestId("keeper-findings-test"))
+
+    const result = await screen.findByTestId("keeper-findings-test-result")
+    expect(result).toHaveTextContent(/reaches 2 people/i)
+    expect(result).toHaveTextContent(/owner@x.dev/)
+    expect(result).toHaveTextContent(/security contact/i)
+    expect(result).toHaveTextContent(/role fanout/i)
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+    // The check must not disturb the card's settings — it is an action on what
+    // is already saved.
+    expect(screen.queryByTestId("keeper-findings-save")).not.toBeInTheDocument()
+  })
+
+  // A finding with no audience is the misconfiguration the button exists to
+  // find, so it has to read as a failure rather than a green "sent".
+  it("reports a test finding that reached nobody as a problem", async () => {
+    mockRoutes(BASE)
+    const govImpl = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/admin/keeper/findings/test")) {
+        return jsonResponse({
+          inbox_item_id: "ibx_escalation_keepertest_2",
+          recipients: [],
+          warning: "This finding reached nobody: no security contact is set and this workspace has no member with MANAGER, ADMIN or OWNER role.",
+        })
+      }
+      return govImpl(url, init)
+    })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    fireEvent.click(await screen.findByTestId("keeper-findings-test"))
+
+    const result = await screen.findByTestId("keeper-findings-test-result")
+    expect(result).toHaveTextContent(/reached nobody/i)
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+
+  it("offers no test-finding button to a non-manager", async () => {
+    canManage = false
+    mockRoutes(BASE)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    await screen.findByTestId("keeper-governance-risk")
+    expect(screen.queryByTestId("keeper-findings-test")).not.toBeInTheDocument()
+  })
+
   // ── Cross-cutting ────────────────────────────────────────────────────────
 
   it("disables every control and offers no Save for non-managers", async () => {
