@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
@@ -13,7 +14,7 @@ import { InboxDetail } from "./inbox-detail"
 import { InboxListPanel } from "./inbox-list-panel"
 import type { DirectoryEntry } from "./inbox-subject-picker"
 import {
-  OUTCOME_LABEL, bucketOf, expiresIn, subjectOf, type WorkspaceRole,
+  OUTCOME_LABEL, bucketOf, expiresIn, subjectOf, withinPeriod, type WorkspaceRole,
 } from "./inbox-derive"
 import type { Bucket, GroupBy, InboxView } from "./inbox-types"
 
@@ -76,6 +77,10 @@ export function groupOf(item: InboxItem): { key: string; label: string } {
 
 export function InboxList() {
   const { workspaceId, role } = useWorkspace()
+  const params = useSearchParams()
+  // ?item=<id> is how the top-bar popover hands over the row it showed. Without
+  // it, acting on what the bell surfaced starts with finding it again.
+  const requestedId = params?.get("item") ?? null
   const [view, setView] = useState<InboxView>("inbox")
   const [bucket, setBucket] = useState<Bucket | null>(null)
   const [subject, setSubject] = useState<string | null>(null)
@@ -85,7 +90,7 @@ export function InboxList() {
   const [period, setPeriod] = useState("30")
   const [groupBy, setGroupBy] = useState<GroupBy>("smart")
   const [sort, setSort] = useState("newest")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(requestedId)
 
   const archive = view === "archived"
   // inbox → active (unread + read, resolved excluded SERVER-side so archived
@@ -172,6 +177,7 @@ export function InboxList() {
       if (!archive && bucket && bucketOf(it) !== bucket) return false
       if (archive && outcome && it.resolved_action !== outcome) return false
       if (archive && actor && it.resolved_by_user_id !== actor) return false
+      if (archive && !withinPeriod(it, period)) return false
       if (subject && subjectOf(it).id !== subject) return false
       if (q) {
         // Body included: the sentence someone remembers is usually in the
@@ -196,7 +202,7 @@ export function InboxList() {
       const tb = Date.parse(b.created_at)
       return sort === "oldest" ? ta - tb : tb - ta
     })
-  }, [items, archive, bucket, outcome, actor, subject, search, sort])
+  }, [items, archive, bucket, outcome, actor, subject, search, sort, period])
 
   // Keep the last opened item rendered even after it leaves the filtered list
   // — opening an unread row marks it read, which drops it from the Unread

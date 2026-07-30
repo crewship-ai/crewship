@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, CircleDot, MessageSquare, ScrollText, XCircle } from "lucide-react"
+import { CheckCircle2, CircleDot, MessageSquare, Play, Power, ScrollText, XCircle } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -477,33 +477,104 @@ export function KindActions({
         </div>
       )
     }
-    case "schedule_circuit_breaker_tripped":
-      // The routine disabled itself and nothing in the API can switch it back
-      // on — `crewship routine schedules enable` is the only path today. Say
-      // that instead of drawing a button that cannot work; the follow-up is an
-      // endpoint plus its CLI command, per the API↔CLI parity rule.
+    case "schedule_circuit_breaker_tripped": {
+      // The schedule turned itself off after N consecutive failures. Turning it
+      // back on is PATCH pipeline-schedules/{id} {enabled:true} — the same call
+      // `crewship routine schedules enable` makes, and OWNER/ADMIN like it.
+      const scheduleID = typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
+      if (!scheduleID) {
+        return (
+          <Button
+            size="sm"
+            disabled={disabled || busy !== null}
+            onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
+            className="gap-1.5"
+          >
+            Dismiss
+          </Button>
+        )
+      }
       return (
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={disabled || busy !== null}
+            onClick={() =>
+              wrap("reenabled", async () => {
+                let res: Response
+                try {
+                  res = await apiFetch(
+                    `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipeline-schedules/${encodeURIComponent(scheduleID)}`,
+                    {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ enabled: true }),
+                    },
+                  )
+                } catch (e) {
+                  toast.error(e instanceof Error ? `Re-enable failed: ${e.message}` : "Re-enable failed (network error)")
+                  return
+                }
+                if (!res.ok) {
+                  const b = await res.json().catch(() => null)
+                  toast.error(b?.error ?? `Re-enable failed (${res.status})`)
+                  return
+                }
+                toast.success("Schedule re-enabled — it fires on the next tick")
+                await onResolve("reenabled")
+              })
+            }
+            className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+          >
+            <Power className="h-3 w-3" />
+            {busy === "reenabled" ? "Enabling…" : "Re-enable schedule"}
+          </Button>
           <Button asChild size="sm" variant="ghost" className="gap-1.5">
             <Link href="/routines">
               <ScrollText className="h-3 w-3" />
               Open routines
             </Link>
           </Button>
-          <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-            crewship routine schedules enable {String(item.payload?.schedule_id ?? "")}
-          </code>
         </div>
       )
-    case "schedule_missed":
+    }
+    case "schedule_missed": {
+      // The occurrences are gone; what a person wants is to fire it now, which
+      // is the same out-of-cycle run the CLI's `schedules now` performs.
+      const scheduleID = typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
       return (
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="sm" variant="ghost" className="gap-1.5">
-            <Link href="/routines">
-              <ScrollText className="h-3 w-3" />
-              Open routines
-            </Link>
-          </Button>
+          {scheduleID !== "" && (
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() =>
+                wrap("ran", async () => {
+                  let res: Response
+                  try {
+                    res = await apiFetch(
+                      `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipeline-schedules/${encodeURIComponent(scheduleID)}/run`,
+                      { method: "POST", headers: { "Content-Type": "application/json" } },
+                    )
+                  } catch (e) {
+                    toast.error(e instanceof Error ? `Run failed: ${e.message}` : "Run failed (network error)")
+                    return
+                  }
+                  if (!res.ok) {
+                    const b = await res.json().catch(() => null)
+                    toast.error(b?.error ?? `Run failed (${res.status})`)
+                    return
+                  }
+                  toast.success("Schedule fired — see /activity")
+                  await onResolve("ran")
+                })
+              }
+              className="gap-1.5"
+            >
+              <Play className="h-3 w-3" />
+              {busy === "ran" ? "Running…" : "Run now"}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -515,6 +586,7 @@ export function KindActions({
           </Button>
         </div>
       )
+    }
     case "message":
       // Messages from the orchestrator (e.g. "ENG-1 ready for review")
       // carry the issue identifier in payload so the inbox can offer

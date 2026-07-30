@@ -101,13 +101,17 @@ func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsID,
 		Kind:        inbox.KindEscalation,
 		SourceID:    skillProposalInboxSource(crewID, fileName),
-		TargetRole:  "MANAGER",
-		Title:       "Skill proposed for review: " + staged.Slug,
-		BodyMD:      "An agent authored a new skill. Approve it to add it to the crew, or reject it.",
-		SenderType:  "agent",
-		SenderName:  "Agent skill author",
-		Priority:    "high",
-		Blocking:    true,
+		// ADMIN, not MANAGER: /skills/proposed/approve is roleManage, so a
+		// MANAGER-addressed row could only ever hand its reader a 403. Address
+		// what can act — the visibility clause is hierarchical, so OWNER sees
+		// it too. See TestInboxTargetRoleMatchesDecider.
+		TargetRole: "ADMIN",
+		Title:      "Skill proposed for review: " + staged.Slug,
+		BodyMD:     "An agent authored a new skill. Approve it to add it to the crew, or reject it.",
+		SenderType: "agent",
+		SenderName: "Agent skill author",
+		Priority:   "high",
+		Blocking:   true,
 		Payload: map[string]interface{}{
 			"kind":        "skill_proposal",
 			"crew_id":     crewID,

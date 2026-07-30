@@ -4,7 +4,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 
 import {
   absolute, bucketOf, canRole, categoryOf, decisionMetaFor, durationLabel, expiresIn, jumpFor,
-  payloadNumber, payloadString, remainingLabel, resolverOf, since, subjectOf,
+  payloadNumber, payloadString, remainingLabel, resolverOf, since, subjectOf, withinPeriod,
 } from "../inbox-derive"
 
 // The derivations decide what every row is called, where it files, who may act
@@ -142,6 +142,39 @@ describe("time", () => {
     expect(durationLabel(null)).toBe("—")
     expect(durationLabel(30)).toBe("30m")
     expect(durationLabel(120)).toBe("2h")
+  })
+})
+
+describe("withinPeriod", () => {
+  const day = 24 * 60 * 60 * 1000
+  const at = (daysAgo: number) => new Date(Date.now() - daysAgo * day).toISOString()
+
+  it("dates the DECISION, not the arrival", () => {
+    // Raised long ago, closed yesterday: the archive answers "what did we
+    // decide lately", so this is inside a 7-day window.
+    const old = item({ kind: "escalation", created_at: at(120), resolved_at: at(1) })
+    expect(withinPeriod(old, "7")).toBe(true)
+    expect(withinPeriod(item({ kind: "escalation", resolved_at: at(90) }), "30")).toBe(false)
+  })
+
+  it("lets everything through on all time", () => {
+    expect(withinPeriod(item({ kind: "escalation", resolved_at: at(999) }), "all")).toBe(true)
+  })
+
+  it("fails open on a window it cannot read, rather than hiding rows", () => {
+    // A hidden row is worse than an unfiltered one: the reader cannot tell the
+    // difference between "nothing matched" and "the filter broke".
+    expect(withinPeriod(item({ kind: "escalation", resolved_at: at(999) }), "nonsense")).toBe(true)
+    expect(withinPeriod(item({ kind: "escalation", resolved_at: at(999) }), "0")).toBe(true)
+  })
+
+  it("fails open on an unparsable timestamp", () => {
+    expect(withinPeriod(item({ kind: "escalation", resolved_at: "not-a-date" }), "7")).toBe(true)
+  })
+
+  it("falls back to arrival when nothing closed it", () => {
+    expect(withinPeriod(item({ kind: "waitpoint", created_at: at(2) }), "7")).toBe(true)
+    expect(withinPeriod(item({ kind: "waitpoint", created_at: at(40) }), "7")).toBe(false)
   })
 })
 

@@ -145,8 +145,12 @@ func TestSkillAuthor_SurfacesInboxReviewItem(t *testing.T) {
 	if state != "unread" {
 		t.Errorf("inbox state = %q, want unread", state)
 	}
-	if targetRole != "MANAGER" {
-		t.Errorf("inbox target_role = %q, want MANAGER", targetRole)
+	// ADMIN, not MANAGER: /skills/proposed/approve is roleManage, so a
+	// MANAGER-addressed row put the decision in front of the one role the
+	// server would answer with a 403. TestInboxTargetRoleMatchesDecider keeps
+	// the pair from drifting apart again.
+	if targetRole != "ADMIN" {
+		t.Errorf("inbox target_role = %q, want ADMIN", targetRole)
 	}
 	if !strings.Contains(payload, "skill_proposal") || !strings.Contains(payload, "deploy-staging") {
 		t.Errorf("inbox payload missing discriminator/slug: %s", payload)

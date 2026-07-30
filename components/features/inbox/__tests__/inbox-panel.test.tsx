@@ -209,13 +209,59 @@ describe("the archive asks different questions", () => {
     expect(list().queryByText("Approve release")).not.toBeInTheDocument()
   })
 
-  it("narrows by period", () => {
+  it("narrows by period, measured on when it was DECIDED", () => {
+    // Raised long ago, closed yesterday: the archive answers "what did we
+    // decide lately", so this belongs inside a 7-day window.
+    useInboxState = {
+      items: [
+        item({
+          id: "old", kind: "escalation", title: "raised in March, closed yesterday", state: "resolved",
+          created_at: new Date(now - 120 * 24 * 3600_000).toISOString(),
+          resolved_at: new Date(now - 24 * 3600_000).toISOString(),
+          resolved_action: "approved", resolved_by_user_id: "pavel",
+        }),
+        item({
+          id: "ancient", kind: "escalation", title: "closed in April", state: "resolved",
+          created_at: new Date(now - 100 * 24 * 3600_000).toISOString(),
+          resolved_at: new Date(now - 90 * 24 * 3600_000).toISOString(),
+          resolved_action: "approved", resolved_by_user_id: "pavel",
+        }),
+      ],
+      unreadCount: 0, loading: false, error: null,
+    }
     render(<InboxList />)
     fireEvent.click(screen.getByRole("tab", { name: /Archived/ }))
+
+    // Default window is 30 days. Measured on created_at, the March row would
+    // drop out too — it survives because the decision is what is being dated.
+    expect(list().getByText("raised in March, closed yesterday")).toBeInTheDocument()
+    expect(list().queryByText("closed in April")).not.toBeInTheDocument()
+
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /Last 7 days/ }))
 
-    expect(screen.getByText("Last 7 days", { selector: "span" })).toBeInTheDocument()
+    expect(list().getByText("raised in March, closed yesterday")).toBeInTheDocument()
+  })
+
+  it("shows everything again on All time", () => {
+    useInboxState = {
+      items: [
+        item({
+          id: "ancient", kind: "escalation", title: "closed in April", state: "resolved",
+          resolved_at: new Date(now - 90 * 24 * 3600_000).toISOString(), resolved_action: "approved",
+        }),
+      ],
+      unreadCount: 0, loading: false, error: null,
+    }
+    render(<InboxList />)
+    fireEvent.click(screen.getByRole("tab", { name: /Archived/ }))
+    // Outside the default 30-day window.
+    expect(list().queryByText("closed in April")).not.toBeInTheDocument()
+
+    openFilter()
+    fireEvent.click(screen.getByRole("button", { name: /All time/ }))
+
+    expect(list().getByText("closed in April")).toBeInTheDocument()
   })
 
   it("shows the outcome and the human who reached it", () => {

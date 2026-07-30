@@ -128,13 +128,16 @@ func (c *Consolidator) writeProposal(
 			WorkspaceID: cfg.WorkspaceID,
 			Kind:        inbox.KindMemoryConsolidation,
 			SourceID:    proposalID,
-			TargetRole:  "MANAGER",
-			Title:       fmt.Sprintf("Memory consolidation: %d rules pending review", len(rules)),
-			BodyMD:      proposalInboxBody(len(rules), entriesScanned),
-			SenderType:  "system",
-			SenderName:  "consolidator",
-			Priority:    "medium",
-			Blocking:    false,
+			// ADMIN, not MANAGER: /consolidate/proposed/{id}/approve requires
+			// OWNER or ADMIN (requireOwnerOrAdmin), so addressing MANAGER put
+			// the decision in front of someone the server would refuse.
+			TargetRole: "ADMIN",
+			Title:      fmt.Sprintf("Memory consolidation: %d rules pending review", len(rules)),
+			BodyMD:     proposalInboxBody(len(rules), entriesScanned),
+			SenderType: "system",
+			SenderName: "consolidator",
+			Priority:   "medium",
+			Blocking:   false,
 			Payload: map[string]any{
 				"proposal_id":     proposalID,
 				"proposal_path":   proposalPath,

@@ -243,14 +243,17 @@ describe("each kind reaches its own endpoint", () => {
     expect(body).toEqual({ inputs: { a: 1 }, triggered_via: "manual" })
   })
 
-  it("offers no fake button for a tripped breaker, and names the command that works", () => {
+  it("re-enables a tripped breaker through the schedules endpoint", async () => {
     render(<InboxList />)
     open("Routine paused")
 
-    // Re-enabling a schedule has no endpoint yet. A button here would be a
-    // promise the product cannot keep.
-    expect(card().queryByRole("button", { name: /Re-enable/i })).not.toBeInTheDocument()
-    expect(card().getByText(/crewship routine schedules enable sch-1/)).toBeInTheDocument()
+    fireEvent.click(card().getByRole("button", { name: /Re-enable schedule/ }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/workspaces/ws-test/pipeline-schedules/sch-1",
+        expect.objectContaining({ method: "PATCH" }),
+      ))
   })
 })
 

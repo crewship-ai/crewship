@@ -114,6 +114,39 @@ describe("failure paths that would otherwise pass silently", () => {
   })
 })
 
+describe("the schedule calls fail loudly too", () => {
+  it("reports a network failure on re-enable", async () => {
+    apiFetch.mockRejectedValueOnce(new Error("offline"))
+    mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "s1" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/offline/)))
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it("reports a network failure on run-now", async () => {
+    apiFetch.mockRejectedValueOnce(new Error("dns"))
+    mount(item({ kind: "schedule_missed", payload: { schedule_id: "s2" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/dns/)))
+  })
+
+  it("reports a refused run-now", async () => {
+    apiFetch.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ error: "runner not wired" }) })
+    mount(item({ kind: "schedule_missed", payload: { schedule_id: "s2" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("runner not wired"))
+  })
+
+  it("offers only Dismiss when a missed notice carries no schedule id", () => {
+    mount(item({ kind: "schedule_missed", payload: {} }))
+    expect(screen.queryByRole("button", { name: /Run now/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Dismiss/ })).toBeInTheDocument()
+  })
+})
+
 describe("the reject half of every escalation shape", () => {
   it("rejects a credential escalation that already has a proposed value", async () => {
     mount(item({ kind: "escalation", source_id: "e1", payload: { escalation_type: "CREDENTIAL", has_pending_credential: true } }))

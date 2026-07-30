@@ -43,8 +43,7 @@ import {
 export interface InboxBellViewProps {
   items: InboxItem[]
   role: WorkspaceRole | null
-  /** Deep-link to the item. Today /inbox selects the newest match; the
-   *  follow-up is ?item=<id> so the row the popover showed opens directly. */
+  /** Deep-link to the row: /inbox?item=<id> opens exactly what was shown. */
   onOpenItem: (id: string) => void
   onOpenInbox: () => void
   /** Marks every unread row read. Undefined hides the affordance entirely. */

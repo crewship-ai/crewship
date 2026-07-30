@@ -231,6 +231,48 @@ describe("schedule kinds", () => {
   })
 })
 
+describe("schedules reach the endpoints the CLI already uses", () => {
+  it("re-enables a tripped schedule with the same PATCH as `routine schedules enable`", async () => {
+    mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "sch-1" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/workspaces/ws/pipeline-schedules/sch-1",
+        expect.objectContaining({ method: "PATCH" }),
+      ))
+    expect(JSON.parse((apiFetch.mock.calls[0][1] as { body: string }).body)).toEqual({ enabled: true })
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("reenabled"))
+  })
+
+  it("reports a refused re-enable — it is OWNER/ADMIN only", async () => {
+    apiFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) })
+    mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "sch-1" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Forbidden"))
+    expect(onResolve).not.toHaveBeenCalled()
+  })
+
+  it("fires a missed schedule out of cycle", async () => {
+    mount(item({ kind: "schedule_missed", payload: { schedule_id: "sch-2" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Run now/ }))
+
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/v1/workspaces/ws/pipeline-schedules/sch-2/run",
+        expect.objectContaining({ method: "POST" }),
+      ))
+    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("ran"))
+  })
+
+  it("offers only Dismiss when the payload carries no schedule id", () => {
+    mount(item({ kind: "schedule_circuit_breaker_tripped", payload: {} }))
+    expect(screen.queryByRole("button", { name: /Re-enable/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Dismiss/ })).toBeInTheDocument()
+  })
+})
+
 describe("resolved items", () => {
   it("disables every action once the row is closed", () => {
     mount(item({ kind: "message" }), true)

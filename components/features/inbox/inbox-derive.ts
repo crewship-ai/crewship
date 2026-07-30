@@ -129,6 +129,26 @@ export function expiresIn(item: InboxItem): number | null {
   return Number.isFinite(mins) ? mins : null
 }
 
+/**
+ * Is this row inside the archive window?
+ *
+ * Measured on resolved_at, not created_at: the archive answers "what did we
+ * decide lately", and an item raised in March and closed yesterday belongs in
+ * the last-7-days view. Rows that somehow have no resolved_at fall back to
+ * when they arrived rather than vanishing.
+ *
+ * Client-side over the loaded page, which is honest only while the page IS the
+ * archive; the server-side form is a `since` predicate on the same column.
+ */
+export function withinPeriod(item: InboxItem, period: string, now = Date.now()): boolean {
+  if (period === "all") return true
+  const days = Number(period)
+  if (!Number.isFinite(days) || days <= 0) return true
+  const at = Date.parse(item.resolved_at ?? item.created_at)
+  if (Number.isNaN(at)) return true
+  return now - at <= days * 24 * 60 * 60 * 1000
+}
+
 export interface DecisionMeta {
   heading: string
   tone: "warn" | "default"
@@ -174,7 +194,8 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
   }
 
   if (item.kind === "schedule_circuit_breaker_tripped") {
-    return { heading: "Routine is disabled", tone: "warn", requires: "create" }
+    // Re-enabling is PATCH pipeline-schedules/{id}, which is roleManage.
+    return { heading: "Routine is disabled", tone: "warn", requires: "manage" }
   }
 
   if (item.kind === "schedule_missed") {

@@ -123,7 +123,9 @@ describe("the popover", () => {
 
     fireEvent.click(screen.getByTestId("bell-row-msg"))
 
-    expect(push).toHaveBeenCalledWith("/inbox")
+    // Deep-link, not just "/inbox": acting on what the popover showed must not
+    // start with finding it again.
+    expect(push).toHaveBeenCalledWith("/inbox?item=msg")
   })
 
   it("closes when the trigger is clicked again", async () => {

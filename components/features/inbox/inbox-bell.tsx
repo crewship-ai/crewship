@@ -31,7 +31,7 @@ export function InboxBell() {
     <InboxBellView
       items={items}
       role={(role as WorkspaceRole | null) ?? null}
-      onOpenItem={() => router.push("/inbox")}
+      onOpenItem={(id) => router.push(`/inbox?item=${encodeURIComponent(id)}`)}
       onOpenInbox={() => router.push("/inbox")}
       onMarkAllRead={async (ids) => {
         if (!workspaceId || ids.length === 0) return
