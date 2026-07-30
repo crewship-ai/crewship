@@ -455,7 +455,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// identical tool call (see loop_guard.go). It observes the same tool_call
 	// events the behavior monitor does, so it's adapter-agnostic.
 	guard := &loopGuard{}
+	// inBand records a run-level failure the agent CLI reports inside its own
+	// event stream while still exiting 0 — a refusal, an internal CLI error, an
+	// exhausted quota. Every adapter parses that signal already; this is the
+	// one place that reads it, so the terminal status below can stop treating
+	// "exit 0" as "it worked". Tool-level failures are deliberately excluded —
+	// see inband_failure.go for the run-vs-tool boundary.
+	var inBand inBandFailure
 	tappedHandler := EventHandler(func(event AgentEvent) {
+		inBand.observe(event)
 		// Surface the model the run ACTUALLY resolved to. adapter_claude.go
 		// stamps meta["model"] on the session-init system event — that's
 		// ground truth for what the API served (the subscription may serve
@@ -596,12 +604,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// the command exited non-zero — the default warn+ filter surfaces
 	// failures without consumers having to parse payload.
 	endSeverity := "info"
-	if exitCode != 0 {
+	if exitCode != 0 || inBand.seen {
 		endSeverity = "warn"
+	}
+	endPayload := map[string]any{"exit_code": exitCode, "running": running}
+	if inBand.seen {
+		// An exit-0 run the agent itself called failed must not read as a clean
+		// exec in Crow's Nest just because the process was polite about it.
+		endPayload["in_band_error"] = true
 	}
 	o.emitExecEnd(ctx, req, result.ExecID, cmd, endSeverity,
 		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
-		execStart, map[string]any{"exit_code": exitCode, "running": running})
+		execStart, endPayload)
 	// Flip agent back to online for the Watch Roster now that the run
 	// is done. If the agent stays in-session, the presence sweeper
 	// still tracks idleness separately.
@@ -637,6 +651,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		default:
 			execErr = fmt.Errorf("agent exited with code %d — check the journal for details", exitCode)
 		}
+	} else if inBandErr := inBand.Err(); inBandErr != nil {
+		// Exit 0, but the CLI's own terminal event said the turn failed. Same
+		// treatment as a non-zero exit: the run is an error and the chat gets a
+		// visible message, so a mission/routine step does not carry on with an
+		// empty answer while the user sees a green run.
+		status = "error"
+		o.logger.Warn("agent reported an in-band failure despite exit 0",
+			"agent_id", req.AgentID,
+			"adapter", req.CLIAdapter,
+			"subtype", inBand.subtype,
+		)
+		execErr = inBandErr
 	}
 	o.failRun(ctx, req, runState.ID, status)
 

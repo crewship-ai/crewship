@@ -42,6 +42,16 @@ func writeMemoryFileNoFollow(path string, content []byte, perm os.FileMode) erro
 	return writeFileDurable(path, content, perm)
 }
 
+// WriteFileDurable is the exported form of writeFileDurable for callers
+// outside package memory (internal/consolidate's proposal staging and
+// lesson-file writers) that need the same crash-safe write-temp +
+// fsync + atomic-rename + fsync-parent-dir semantics for a whole-file
+// overwrite. Same contract as the unexported form: on any failure the
+// target path is left untouched and the tempfile is cleaned up.
+func WriteFileDurable(path string, content []byte, perm os.FileMode) error {
+	return writeFileDurable(path, content, perm)
+}
+
 func writeFileDurable(path string, content []byte, perm os.FileMode) (err error) {
 	var randBuf [8]byte
 	if _, rerr := rand.Read(randBuf[:]); rerr != nil {

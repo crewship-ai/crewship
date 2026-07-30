@@ -35,6 +35,9 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+# JSON reporter output of playwright.nightly.config.ts — the nightly-e2e
+# workflow reads it in-job and uploads it as an artifact; it is never committed.
+playwright-nightly-report.json
 
 # Prisma
 lib/generated/

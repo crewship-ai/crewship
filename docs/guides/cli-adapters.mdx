@@ -202,6 +202,67 @@ This narrowly permits RFC1918/loopback for that crew's agents. **Cloud-metadata 
 
 **Which models actually work:** we ship a curated shortlist — Qwen3 Coder 30B (A3B; runs on a single 24 GB GPU at 4-bit) and Devstral Small 24B (built for agent workflows). This is deliberate: below roughly this tier, community reports and upstream issues (`anomalyco/opencode#1034`, `#4428`) show local models "think about" tool calls but emit them as text instead of executing — the agent looks alive but nothing happens. Generic chat models under ~14B will frustrate you; frontier cloud models remain meaningfully stronger for hard tasks. Expect local models to handle routine, well-scoped work.
 
+## In-band failures: when exit 0 still means the run failed
+
+Every supported CLI can end a turn with a refusal, an internal error, or an exhausted quota **and still exit 0**, saying so only inside its own event stream. Crewship treats that as a failed run: the run is recorded as `error` (journal `run.failed`), `RunAgent` returns an error, and the chat shows the CLI's own message instead of an empty assistant bubble.
+
+<Warning>
+  This is a change in observable behaviour introduced with the in-band gate. Runs that previously showed as **completed** — an agent that refused the task, hit its usage limit, or crashed inside the CLI while exiting 0 — now show as **failed**. That is the point: a mission or routine step must not continue on an empty answer, and the run must not be billed as a success. If your success-rate metric drops after upgrading, it is reporting failures that were always happening.
+</Warning>
+
+Only two signals count as **run-level**:
+
+| Adapter | Run-level failure signal | Shape |
+|---|---|---|
+| `CLAUDE_CODE` | `result` event with `is_error: true` | `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"…"}` |
+| `CURSOR_CLI` | `result` event with `is_error: true` **or** `subtype: "error"` | `{"type":"result","subtype":"error","is_error":true,"result":"…"}` |
+| `FACTORY_DROID` | `result` event with `is_error` / `isError` true (Droid mixes conventions per event, so both spellings count on this envelope), or an `error` event | `{"type":"result","is_error":true,…}` / `{"type":"error","error":"…"}` |
+| `CODEX_CLI` | `turn.failed` envelope, or an `error` event | `{"type":"turn.failed","error":"…"}` |
+| `GEMINI_CLI` | `result` event with `status:"error"` or a non-empty `error`, or an `error` event at `severity != "warning"` | `{"type":"result","status":"error","error":"429 quota exceeded",…}` |
+| `OPENCODE` | `error` event **only** — its `step_finish` result envelopes never report an error | `{"type":"error","error":{"name":"…","data":{"message":"…"}}}` |
+
+A Gemini `error` event with `severity: "warning"` is a soft block / advisory, not a failure; the parser demotes it to a `system` event and the run stays successful.
+
+The reason shown to you is the CLI's **cause**, never its answer. Gemini in particular reports both on the same event — `error` is why the turn failed, `response` is whatever the model had produced — and only the former is quoted. Same for a turn cap, where `result` holds unfinished work rather than an explanation.
+
+### What does *not* fail a run
+
+A failed **tool call** is normal agent work and keeps the run `completed`. A grep that matched nothing, a build that failed and then got fixed, a 404 from a fetch — the agent sees the failure and works around it, and reddening the run for those would mark nearly every real run as failed. So none of these are run-level:
+
+- `is_error` on a Claude Code `tool_result` content block
+- `isError` on a Factory Droid `tool_result` event
+- `status: "error"` on a Gemini `tool_result` or on an OpenCode `tool_use` part state
+- a non-zero `exit_code` on a Codex `command_execution` item
+
+Tool failures still surface: the tool result carries `is_error` in its journal metadata and the run trace marks that sub-span errored.
+
+### Ordering
+
+The check is **sticky**, not last-one-wins: once a CLI has reported a failed turn, a later successful envelope does not clear it. Adapters emit several terminal envelopes per run (Droid emits both `completion` and `result`, OpenCode one `step_finish` per step, Codex one `turn.completed` per turn) and their ordering is not guaranteed across CLI versions.
+
+### What a failed run does downstream
+
+- **Chat** — the turn is still persisted. The agent's own text (a refusal is the agent speaking) is kept as the assistant turn, with an error part carrying the reason; when the agent produced nothing at all, the turn is a system notice whose body *is* the reason. A reload shows the failure either way — the same treatment a run that produced no output at all gets.
+- **Delegation / missions** — the assignment is `FAILED` and the mission task fails, instead of the mission advancing on an empty answer. The sub-agent's output is still written to the assignment's `result_summary`, so the delegating agent and the mission timeline can read what it managed to say before failing.
+- **Routines / pipelines** — the step fails and, under the default `on_fail: escalate_tier`, walks to the next fallback tier. It is deliberately **not** retried on the same tier: an in-band failure is the agent's verdict on its own work, not a transport fault, so a retry repeats a deterministic failure and bills for it. The classifier keys off the error's identity, not its prose — a refusal reading "I cannot process a list of 500 items" does not become "transient" because it contains `500`. See [Retry transient failures](/guides/routines#retry-transient-failures).
+- **Memory** — the post-run consolidator does not fire. We don't learn from a run the agent called a failure.
+
+On the two paths that carry the agent's words — chat and delegation — the correct `error` status never costs you text you could otherwise read. Other callers of the run API surface the error only.
+
+### Turn cap (`error_max_turns`)
+
+Crewship always passes a turn cap to Claude Code (`--max-turns`): 50 for interactive runs, and a tighter 20 for unattended routine runs. An agent that reaches it stops mid-task and reports `error_max_turns` **with exit 0**, so it is the in-band failure you are most likely to meet. It gets its own message naming the cap and the turn count — *"agent stopped at its turn cap (20 turns) before finishing the task — raise max_turns for this run, or split the work into smaller steps"* — because the generic "check the journal" copy would leave you paying for a limit you didn't know existed.
+
+<Note>
+  A turn-cap failure currently walks the fallback-tier chain like any other step failure, which means a task that flails for 20 turns on a cheap model can replay all 20 on a more expensive one. Whether the turn cap *should* escalate — a smarter model may need fewer turns, but the cap itself does not change — is under review; if you hit this, set an explicit `max_turns` or `on_fail: abort` on the step.
+</Note>
+
+### Where to look when a run fails this way
+
+- The chat / API error message quotes the CLI's own text (truncated at 300 characters).
+- The journal `exec.command` end entry is raised to severity `warn` and carries `in_band_error: true` alongside `exit_code: 0` — that pair is the fingerprint of an in-band failure.
+- The full terminal event, with usage and cost, is in the `result` event's journal metadata.
+
 ## Adapters that are deliberately NOT supported
 
 `BuildCLICommand` only ships adapters for CLI agents that meet four criteria. CLI agents that don't meet all four are skipped today. Adding a new adapter is a one-line change once the upstream surface stabilises; open a GitHub issue to discuss before opening a PR.

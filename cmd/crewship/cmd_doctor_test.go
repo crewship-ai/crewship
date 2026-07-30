@@ -5,8 +5,6 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,26 +13,16 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/crewship-ai/crewship/internal/update"
 )
 
-// openTestDB stands up a fully-migrated SQLite database in t.TempDir().
-// We deliberately use database.Open + database.Migrate (rather than a raw
-// sql.Open) so the app_settings table exists — the doctor checks read
-// telemetry consent through crashreport.Status, which queries that table.
+// openTestDB stands up a fully-migrated SQLite database. It must be the real
+// migrated schema (not a hand-rolled subset) because the doctor checks read
+// telemetry consent through crashreport.Status, which queries app_settings.
 func openTestDB(t *testing.T) *database.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "doctor.db"))
-	if err != nil {
-		t.Fatalf("database.Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("database.Migrate: %v", err)
-	}
-	return db
+	return testutil.MigratedDB(t)
 }
 
 func TestCheckTelemetryStatus(t *testing.T) {

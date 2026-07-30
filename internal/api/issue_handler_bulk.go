@@ -64,7 +64,7 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 				continue // skip invalid transitions
 			}
 			ub.Set("status", newStatus)
-			if newStatus == "DONE" || newStatus == "CANCELLED" {
+			if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
 				ub.Set("completed_at", now)
 			}
 		}

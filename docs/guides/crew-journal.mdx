@@ -75,8 +75,8 @@ Since PR #234 (migration 61) the legacy `agent_runs` table no longer exists; a "
 | Entry type | When |
 |---|---|
 | `run.started` | Orchestrator picked up the assignment and exec'd the CLI. |
-| `run.completed` | CLI returned exit 0 within budget. |
-| `run.failed` | Non-zero exit, panic, or upstream API error. |
+| `run.completed` | CLI returned exit 0 within budget **and** its own terminal stream event reported success. |
+| `run.failed` | Non-zero exit, panic, upstream API error, or an [in-band failure](/guides/cli-adapters#in-band-failures-when-exit-0-still-means-the-run-failed) — the CLI exited 0 but its own result event said the turn failed. |
 | `run.cancelled` | Operator or hook called stop. |
 | `run.timeout` | Run TTL elapsed without a terminal entry. |
 
