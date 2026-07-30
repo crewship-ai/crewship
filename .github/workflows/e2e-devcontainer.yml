@@ -23,7 +23,7 @@ name: E2E Devcontainer
 # manually on the dev VM via
 #     pnpm exec playwright test e2e/a11y.spec.ts
 # against a seeded instance. The embed half of the blocker is gone — the
-# onboarding job now exports the real UI over the stub before `go build`
+# onboarding job now exports the real UI over the placeholder before `go build`
 # (see "Build web UI into the embed dir"), so an a11y job can copy that
 # step. What it still needs is an onboarded + seeded workspace
 # (`crewship seed`) plus E2E_EMAIL/E2E_PASSWORD for playwright.config.ts

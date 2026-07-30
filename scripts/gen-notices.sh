@@ -25,10 +25,21 @@ if ! command -v go-licenses >/dev/null 2>&1; then
   fi
 fi
 
-# Create embed stub so go-licenses can analyze packages importing web/embed.go
-if [ ! -f web/out/index.html ]; then
-  mkdir -p web/out
-  echo '<!doctype html>' > web/out/index.html
+# No embed stub needed: web/out/.placeholder.html is tracked in git, so
+# `//go:embed all:out` resolves on a bare checkout and go-licenses can analyze
+# the packages importing web/embed.go (#1567).
+#
+# This used to `echo '<!doctype html>' > web/out/index.html`. That is the exact
+# hand-rolled stub CONTRIBUTING.md now tells contributors not to create, and
+# leaving it here defeated the point of the placeholder twice over: the file is
+# gitignored so it survives on the developer's disk, and from then on
+# internal/api.StaticFileHandler sees an index.html, skips the 503 "web UI was
+# not built" page, and serves a blank 200 — the silent failure the placeholder
+# exists to replace. It also makes dev.sh's `-s web/out/index.html` freshness
+# probe read a non-empty export where there is none.
+if [ ! -f web/out/.placeholder.html ]; then
+  echo "ERROR: web/out/.placeholder.html is missing — it is tracked in git and is what makes //go:embed all:out resolve (#1567). Restore it with 'git checkout -- web/out/.placeholder.html'." >&2
+  exit 1
 fi
 
 # modernc.org/mathutil is BSD-3-Clause but its LICENSE file has a format
