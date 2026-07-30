@@ -48,16 +48,25 @@ func (h *KeeperStatusHandler) WithGovModelStatus(s GovModelStatusProvider) *Keep
 }
 
 type keeperStatusResponse struct {
-	Enabled       bool   `json:"enabled"`
-	OllamaURL     string `json:"ollama_url,omitempty"`
-	Model         string `json:"model,omitempty"`
-	OllamaOnline  bool   `json:"ollama_online"`
-	GatekeeperSet bool   `json:"gatekeeper_configured"`
-	TotalRequests int    `json:"total_requests"`
-	AllowCount    int    `json:"allow_count"`
-	DenyCount     int    `json:"deny_count"`
-	EscalateCount int    `json:"escalate_count"`
-	SecretCount   int    `json:"secret_count"`
+	Enabled      bool   `json:"enabled"`
+	OllamaURL    string `json:"ollama_url,omitempty"`
+	Model        string `json:"model,omitempty"`
+	OllamaOnline bool   `json:"ollama_online"`
+	// OllamaProbed separates "we dialled and got nothing" from "we never
+	// dialled". The probe used to be skipped whenever the engine was off, and
+	// ollama_online then stayed false — so every disabled instance reported its
+	// model server as OFFLINE, which is the single most confusing thing the status
+	// card can say to somebody who is configuring Keeper for the first time and
+	// has not turned it on yet. The probe now runs whenever an endpoint is
+	// configured (it is a 3s HEAD against a loopback or LAN address, and knowing
+	// the endpoint answers BEFORE enabling is the whole point of checking).
+	OllamaProbed  bool `json:"ollama_probed"`
+	GatekeeperSet bool `json:"gatekeeper_configured"`
+	TotalRequests int  `json:"total_requests"`
+	AllowCount    int  `json:"allow_count"`
+	DenyCount     int  `json:"deny_count"`
+	EscalateCount int  `json:"escalate_count"`
+	SecretCount   int  `json:"secret_count"`
 
 	// Provenance of the three fields above: "default", "env" (KEEPER_* at boot)
 	// or "instance" (a runtime override). Without this, "enabled: false" cannot
@@ -125,8 +134,12 @@ func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		resp.Model = h.cfg.Model
 	}
 
-	// Probe Ollama health if configured
-	if resp.Enabled && resp.OllamaURL != "" {
+	// Probe whenever there is an endpoint to probe, enabled or not: an operator
+	// setting Keeper up needs to know the endpoint answers before they turn it on,
+	// and reporting "offline" for an instance we never dialled is worse than
+	// saying nothing.
+	if resp.OllamaURL != "" {
+		resp.OllamaProbed = true
 		resp.OllamaOnline = probeOllama(r.Context(), resp.OllamaURL)
 	}
 

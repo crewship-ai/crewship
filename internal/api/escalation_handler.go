@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
@@ -407,7 +408,35 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// four-eyes control keyed on ownership, which covers the common case.
 	if escalationType == "CREDENTIAL" && initiatorUserID.Valid && initiatorUserID.String != "" {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
-		if gov.RequireSecondApprover {
+		// The workspace toggle is the opt-in. The credential's tier can also demand
+		// it: an L4 credential is one an operator marked as production-critical, and
+		// "one person can close out a request their own agent raised" is exactly the
+		// hole four-eyes exists to close — so the tier forces the rule on whether or
+		// not the workspace opted in. A workspace that has NOT opted in still gets
+		// the rule for L4 only, which is the narrowest reading of what the level
+		// means (internal/keeper/tier.go).
+		tierForces := false
+		if credentialID.Valid && credentialID.String != "" {
+			var lvl int
+			if err := h.db.QueryRowContext(r.Context(),
+				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
+				credentialID.String, workspaceID).Scan(&lvl); err == nil {
+				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				// A read failure must not silently drop a security control: treat an
+				// unreadable tier as the strict case, the same fail-closed default the
+				// tier table itself takes for an unknown level.
+				h.logger.Warn("resolve escalation: credential tier unreadable; enforcing four-eyes",
+					"error", err, "credential_id", credentialID.String)
+				tierForces = true
+			}
+		}
+		if gov.RequireSecondApprover || tierForces {
+			forcedBy := "workspace policy"
+			if tierForces {
+				// The tier is the more specific reason, so it is the one named.
+				forcedBy = "critical credential tier"
+			}
 			approverID := ""
 			if user := UserFromContext(r.Context()); user != nil {
 				approverID = user.ID
@@ -429,16 +458,20 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 						"blocked self-approval: user tried to %s a credential escalation raised by agent %s they own",
 						body.Action, fromSlug),
 					Payload: map[string]any{
-						"rule":              "segregation_of_duties",
-						"action":            body.Action,
-						"escalation_type":   escalationType,
-						"from_slug":         fromSlug,
+						"rule":            "segregation_of_duties",
+						"action":          body.Action,
+						"escalation_type": escalationType,
+						"from_slug":       fromSlug,
+						// Which of the two rules fired. An incident review asking "why
+						// was this blocked" should not have to infer it from the
+						// workspace settings as they stand weeks later.
+						"forced_by":         forcedBy,
 						"initiator_user_id": initiatorUserID.String,
 					},
 					Refs: map[string]any{"escalation_id": escalationID, "chat_id": chatID},
 				})
 				replyError(w, http.StatusForbidden,
-					"a second approver is required: you cannot resolve a credential escalation raised by an agent you own")
+					"a second approver is required ("+forcedBy+"): you cannot resolve a credential escalation raised by an agent you own")
 				return
 			}
 		}

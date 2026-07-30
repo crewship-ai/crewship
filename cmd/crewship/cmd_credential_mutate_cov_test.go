@@ -31,8 +31,11 @@ func TestCredCreateCmd_Validation(t *testing.T) {
 		{"missing name", map[string]string{}, "--name is required"},
 		{"missing type", map[string]string{"name": "x"}, "--type is required"},
 		{"missing value", map[string]string{"name": "x", "type": "API_KEY"}, "--value or --value-stdin is required"},
+		// 7 is not a tier. The message names the tiers rather than a numeric range,
+		// because an operator picking a level needs to know which one their
+		// credential is, not the shape of the field.
 		{"bad security level", map[string]string{"name": "x", "type": "API_KEY", "value": "v", "security-level": "7"},
-			"--security-level must be between 0 and 3"},
+			"is not a tier"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,7 +163,7 @@ func TestCredUpdateCmd_BadSecurityLevel(t *testing.T) {
 	covResetFlags(t, credUpdateCmd)
 	covSetFlags(t, credUpdateCmd, map[string]string{"security-level": "9"})
 	err := credUpdateCmd.RunE(credUpdateCmd, []string{covCredIDCli3})
-	if err == nil || !strings.Contains(err.Error(), "--security-level must be between 0 and 3") {
+	if err == nil || !strings.Contains(err.Error(), "is not a tier") {
 		t.Fatalf("expected security-level error, got %v", err)
 	}
 }

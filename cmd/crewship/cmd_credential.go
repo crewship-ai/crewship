@@ -605,14 +605,14 @@ func init() {
 	credCreateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed")
 	credCreateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
-	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read.")
 	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
 	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
-	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credUpdateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+". L4 requires a human to approve every read.")
 	credUpdateCmd.Flags().StringSlice("crews", nil, "Replace the crew scoping with these crew slugs or IDs (repeatable/comma-separated); pass an empty value to clear crews and make it workspace-wide")
 	credUpdateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE or CREW. Usually inferred from --crews; set explicitly to override")
 

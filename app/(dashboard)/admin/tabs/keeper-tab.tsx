@@ -73,13 +73,21 @@ export const KeeperTab = React.memo(function KeeperTab({
                 ok={keeperStatus.enabled}
                 text={keeperStatus.enabled ? "Running" : "Off"}
               />
+              {/* Three states. "Not answering" for an endpoint the server never
+                  dialled is the most misleading thing this strip can say to
+                  somebody configuring Keeper before switching it on — which is
+                  the normal order, since the engine ships off. */}
               <StatusFact
                 label="Judge"
                 ok={keeperStatus.ollama_online}
                 text={
                   keeperStatus.ollama_online
                     ? `Answering · ${keeperStatus.model || "no model"}`
-                    : keeperStatus.enabled ? "Not answering" : "Not configured"
+                    : !keeperStatus.ollama_url
+                      ? "No endpoint set"
+                      : keeperStatus.ollama_probed === false
+                        ? "Not checked yet"
+                        : `Not answering · ${keeperStatus.ollama_url}`
                 }
               />
               <StatusFact

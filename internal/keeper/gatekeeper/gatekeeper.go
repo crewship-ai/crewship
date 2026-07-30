@@ -309,9 +309,16 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		watch = g.watchSpec(ctx, req.Request.WorkspaceID)
 	}
 
+	// The credential's tier policy (internal/keeper/tier.go). It decides whether
+	// the fast path is available at all, how much of an intent this tier demands,
+	// what extra questions the judge is asked, and what may be done with the
+	// answer. An unknown level resolves to L4, so a corrupt row is the strictest
+	// case rather than the cheapest bypass.
+	tier := req.SecurityLevel.Tier()
+
 	if isAccessFlow &&
 		req.Command == "" &&
-		req.SecurityLevel == keeper.SecurityLevelL1 &&
+		tier.AutoAllow &&
 		watch == "" &&
 		len(intent) >= minIntentLength &&
 		hasMinDistinctChars(intent, l1MinDistinctChars) &&
@@ -322,6 +329,28 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 			Decision:  string(keeper.DecisionAllow),
 			Reason:    "L1 credential with stated intent — auto-approved",
 			RiskScore: 1,
+		}, nil
+	}
+
+	// An intent shorter than the tier demands is refused here rather than sent to
+	// the judge. Two reasons, and the second is the one that matters: a model call
+	// for "need db access" on a production-admin credential is money spent to
+	// reach a foregone conclusion, and the refusal we can write ourselves says
+	// what would work — which is the difference between an agent that retries with
+	// a real justification and one that retries with the same four words.
+	//
+	// Access flows only. The F4 evaluators carry L1 as a placeholder and have no
+	// user-authored intent to measure.
+	if isAccessFlow && tier.MinIntentChars > 0 && len(intent) < tier.MinIntentChars {
+		g.logger.Info("keeper: intent below the tier minimum — denied without a model call",
+			"agent", req.AgentName, "credential", req.CredentialName,
+			"tier", tier.Label, "intent_len", len(intent), "min", tier.MinIntentChars)
+		return keeper.GatekeeperResponse{
+			Decision: string(keeper.DecisionDeny),
+			Reason: fmt.Sprintf(
+				"%s credential (%s): the stated intent is %d characters, and this tier needs at least %d. Say what the credential is for, on what system, and why this one — a longer restatement of the credential's name will be denied again.",
+				tier.Label, tier.Blast, len(intent), tier.MinIntentChars),
+			RiskScore: tier.RefusalRisk(),
 		}, nil
 	}
 
@@ -398,6 +427,27 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		reason = "Keeper LLM returned unparseable response — deny by default"
 	}
 
+	// The tier floor is applied to the judge's answer, never before it: the model
+	// still gets to deny, and its reason is still what the human reads. What the
+	// floor adds is that a tier can only tighten — an ALLOW on a human-approval
+	// tier becomes an ESCALATE, and the risk score cannot land under the tier's
+	// floor (DENY-notify is a risk comparison, so a critical decision the model
+	// scored 2 would otherwise never reach anybody's inbox).
+	//
+	// Access AND execute flows. /execute is the stronger of the two — the command
+	// runs with the credential — so exempting it would leave the tier enforced on
+	// the safer path only.
+	if isAccessFlow || rt == keeper.RequestTypeExecute {
+		var note string
+		decision, risk, note = keeper.ApplyTierFloor(req.SecurityLevel, decision, risk)
+		if note != "" {
+			reason += note
+			g.logger.Info("keeper: tier floor applied to the judge's verdict",
+				"agent", req.AgentName, "credential", req.CredentialName,
+				"tier", tier.Label, "decision", decision)
+		}
+	}
+
 	return keeper.GatekeeperResponse{
 		Decision:       decision,
 		Reason:         reason,
@@ -405,6 +455,35 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		Prompt:         truncateForAudit(prompt),
 		RawLLMResponse: truncateForAudit(raw),
 	}, nil
+}
+
+// tierPolicyBlock renders the credential's tier as an authoritative instruction:
+// what the tier means, what to check at it, and — where it applies — that the
+// judge's approval alone does not grant the read.
+//
+// Same trust class as the watch spec (see watchPolicyBlock): this is our own
+// policy text derived from an operator-set level, not agent-controlled data, so it
+// instructs rather than being escaped as a literal. It is placed above the
+// untrusted conversation fence for the same reason.
+//
+// Why the tier gets its own block instead of one more line in the request header:
+// the level used to be exactly that — "(Security Level: L4)" — and a bare number
+// tells a 3B classifier nothing about what it should do differently.
+func tierPolicyBlock(level keeper.SecurityLevel) string {
+	p := level.Tier()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "========== CREDENTIAL TIER: %s ==========\n", p.Label)
+	fmt.Fprintf(&sb, "What a credential at this tier can do: %s\n", p.Blast)
+	if p.HumanApproval {
+		sb.WriteString("This tier cannot be granted by you. A human approves every read.\n")
+		sb.WriteString("Answer ALLOW only if you would recommend the grant; it will be recorded as an escalation for a person to confirm. Answer DENY if you would not.\n")
+	}
+	sb.WriteString("Check, at this tier:\n")
+	for _, c := range p.Checks {
+		fmt.Fprintf(&sb, "- %s\n", c)
+	}
+	sb.WriteString("==================================================\n\n")
+	return sb.String()
 }
 
 const maxAuditText = 2000
@@ -482,6 +561,9 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	// Admin watch policy first — above the untrusted conversation fence so
 	// injected text in the history can't get ahead of the operator's rules.
 	sb.WriteString(watchPolicyBlock(watch))
+	// Then the credential's tier, for the same reason: it is our policy, derived
+	// from an operator-set level, and it has to outrank anything the history says.
+	sb.WriteString(tierPolicyBlock(req.SecurityLevel))
 
 	if req.ConvHistory != "" {
 		delim, ok := randomDelimiter()
@@ -498,7 +580,7 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 
 	sb.WriteString("========== CURRENT REQUEST TO EVALUATE ==========\n")
 	fmt.Fprintf(&sb, "Agent: %q (crew: %q)\n", req.AgentName, req.CrewName)
-	fmt.Fprintf(&sb, "Credential: %q (Security Level: L%d)\n", req.CredentialName, req.SecurityLevel)
+	fmt.Fprintf(&sb, "Credential: %q (tier: %s)\n", req.CredentialName, req.SecurityLevel.Label())
 	fmt.Fprintf(&sb, "Intent: %q\n", req.Request.Intent)
 
 	if req.Command != "" {

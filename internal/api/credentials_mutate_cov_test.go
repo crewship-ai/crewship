@@ -246,24 +246,27 @@ func TestCovCMCreate_SecurityLevelHonored(t *testing.T) {
 	}
 }
 
-func TestCovCMCreate_SecurityLevelOutOfRangeDefaultsTo1(t *testing.T) {
+func TestCovCMCreate_SecurityLevelOutOfRangeIsRefused(t *testing.T) {
 	t.Parallel()
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	// 9 is out of [1,3]; Create silently keeps the default of 1.
+	// 9 is not a tier. This used to be accepted and silently filed as 1, which is
+	// how `security_level: 4` — a real tier — became the LOWEST one: it fell
+	// outside the old [1,3] check and took the same path. A tier an operator asks
+	// for is now either stored or refused, never quietly replaced.
 	rr := covCMCreate(t, h, userID, wsID, "OWNER",
 		`{"name":"sl2","value":"v","security_level":9}`)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201; body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
 	}
-	var lvl int
-	if err := db.QueryRow(`SELECT security_level FROM credentials WHERE name='sl2'`).Scan(&lvl); err != nil {
-		t.Fatalf("scan security_level: %v", err)
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM credentials WHERE name='sl2'`).Scan(&n); err != nil {
+		t.Fatalf("count credentials: %v", err)
 	}
-	if lvl != 1 {
-		t.Errorf("security_level = %d, want 1 (out-of-range default)", lvl)
+	if n != 0 {
+		t.Errorf("a refused create still wrote %d row(s)", n)
 	}
 }
 
@@ -518,7 +521,9 @@ func TestCovCMUpdate_SecurityLevelBadType(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "security_level must be 1, 2, or 3") {
+	// The message names the tiers rather than a numeric range: an operator picking
+	// a level needs to know which one their credential is.
+	if !strings.Contains(rr.Body.String(), "security_level must be one of") {
 		t.Errorf("body missing reason: %s", rr.Body.String())
 	}
 }
