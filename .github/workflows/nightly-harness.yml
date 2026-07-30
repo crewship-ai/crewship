@@ -5,13 +5,20 @@ name: Nightly Harness
 #
 # Why this workflow exists
 # ------------------------
-# Until it landed, NOT ONE of the 19 harness suites ran in CI. `ci.yml` runs
-# `scripts/test-harness-lib-test.sh`, which unit-tests the harness *library*
-# (assertion helpers, exit codes) and never starts a server or asserts a single
-# product behaviour. So the tests CLAUDE.md calls "the universal use case" —
-# memory recall across sessions, crew-shared isolation, delegation/hire,
-# notifications after a routine, recipe determinism, credential escalation,
-# keeper ingress fence, TOCTOU, audit integrity — were gated by nothing.
+# Until it landed, NOT ONE of the `scripts/test-harness/test-*.sh` suites ran in
+# CI. `ci.yml` runs `scripts/test-harness-lib-test.sh`, which unit-tests the
+# harness *library* (assertion helpers, exit codes) and never starts a server or
+# asserts a single product behaviour. So the tests CLAUDE.md calls "the universal
+# use case" — memory recall across sessions, crew-shared isolation,
+# delegation/hire, notifications after a routine, recipe determinism, credential
+# escalation, keeper ingress fence, TOCTOU, audit integrity — were gated by
+# nothing.
+#
+# No suite count is written down anywhere in this file on purpose: the first
+# draft said "19", and two suites landed in merged PRs before it shipped. What
+# matters is not a number but a property — every `test-*.sh` on disk must be
+# claimed by exactly one of the two matrices below or by EXCLUDED_SUITES — and
+# the `suite-coverage-guard` job enforces that property on every run.
 #
 # What this workflow does and does NOT gate — READ THIS BEFORE TRUSTING IT
 # -----------------------------------------------------------------------
@@ -76,8 +83,96 @@ permissions:
 
 env:
   GO_VERSION: "1.26.5"
+  # Suites this workflow deliberately never runs. The reason for each is in the
+  # "Suites deliberately NOT run here" block above; this list is the machine-
+  # readable half, read by `suite-coverage-guard`. The two RUN lists are not
+  # duplicated here — the guard reads them out of the matrices themselves, so
+  # there is nothing to keep in sync.
+  EXCLUDED_SUITES: >-
+    test-datastore-redis-auth.sh
+    test-notifications-shoutrrr.sh
+    test-ollama-local.sh
+    test-realworld-github.sh
+    test-redteam-insider.sh
+    test-secretless-github.sh
 
 jobs:
+  # ── Guard: no suite may silently belong to no tier ──
+  suite-coverage-guard:
+    name: Every harness suite is in a tier
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert control-plane + runtime + EXCLUDED covers test-*.sh
+        # This job exists because the prose in this file already went stale once:
+        # it claimed "19 suites" while 20 were on disk, because test-crew-links.sh
+        # and test-secretless-github.sh landed in merged PRs in between. A number
+        # in a comment cannot be enforced; set membership can.
+        #
+        # The two RUN lists are parsed out of this workflow's own matrices rather
+        # than restated in env, so a suite added to a matrix is automatically
+        # accounted for and there is no second copy to drift. Only the EXCLUDED
+        # list needs declaring — those suites have no matrix to be read from.
+        #
+        # Fails on a suite in no tier (it would silently get zero nightly
+        # coverage, the exact failure mode this workflow exists to end) and on a
+        # tier naming a suite that no longer exists (renamed/deleted).
+        run: |
+          set -euo pipefail
+          # PyYAML is present on the hosted images today but is not a documented
+          # guarantee, and this guard must never red the nightly over a missing
+          # library. Install it only if the import fails.
+          python3 -c 'import yaml' 2>/dev/null \
+            || pip install --quiet --disable-pip-version-check pyyaml
+          python3 - <<'PY'
+          import os, pathlib, sys, yaml
+
+          wf = yaml.safe_load(open(".github/workflows/nightly-harness.yml"))
+          jobs = wf["jobs"]
+
+          def matrix_suites(job):
+              inc = jobs[job]["strategy"]["matrix"]["include"]
+              return {e["suite"] for e in inc}
+
+          gated = matrix_suites("harness-control-plane")
+          runtime = matrix_suites("harness-runtime")
+          excluded = set(os.environ["EXCLUDED_SUITES"].split())
+
+          overlap = (gated & runtime) | (gated & excluded) | (runtime & excluded)
+          claimed = gated | runtime | excluded
+          on_disk = {p.name for p in pathlib.Path("scripts/test-harness").glob("test-*.sh")}
+
+          unclaimed = sorted(on_disk - claimed)
+          phantom = sorted(claimed - on_disk)
+
+          print(f"on disk: {len(on_disk)}  gated: {len(gated)}  "
+                f"runtime: {len(runtime)}  excluded: {len(excluded)}")
+
+          rc = 0
+          if unclaimed:
+              print("::error::harness suite(s) in no tier — add to the "
+                    "harness-control-plane matrix, the harness-runtime matrix, or "
+                    "EXCLUDED_SUITES (with a reason in the workflow header):")
+              for s in unclaimed:
+                  print(f"  {s}")
+              rc = 1
+          if phantom:
+              print("::error::a tier names a suite that does not exist "
+                    "(renamed or deleted?):")
+              for s in phantom:
+                  print(f"  {s}")
+              rc = 1
+          if overlap:
+              print("::error::suite(s) claimed by more than one tier:")
+              for s in sorted(overlap):
+                  print(f"  {s}")
+              rc = 1
+          if rc == 0:
+              print(f"All {len(on_disk)} harness suites are accounted for.")
+          sys.exit(rc)
+          PY
+
   # ── Hard gate: control-plane suites, no provider credential needed ──
   harness-control-plane:
     name: "Harness: ${{ matrix.suite }}"
@@ -388,6 +483,109 @@ jobs:
           set -uo pipefail
           [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
 
+  # ── A green tick must not overstate what ran ──
+  # On a fully green night the runtime tier does not execute at all (no provider
+  # credential), and the only trace of that is an ephemeral `::warning::` buried
+  # in the provider-key job log. Anyone who reads the tick in the Actions list
+  # and never opens the run learns nothing — which is the same "looks fine,
+  # verified less" shape that `continue-on-error` was rejected for.
+  #
+  # So write the coverage into $GITHUB_STEP_SUMMARY, which renders on the run
+  # page itself. Deliberately on the SUCCESS path too, not only on failure, and
+  # on every event rather than `schedule` only: a manual shakedown run should be
+  # just as honest about what it skipped.
+  #
+  # This never fails the workflow — a skipped runtime tier is a legitimate state
+  # until the secret exists. It just refuses to be silent about it.
+  coverage-summary:
+    name: What this run actually verified
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [suite-coverage-guard, provider-key, harness-control-plane, harness-runtime]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Write the tier coverage table to the run summary
+        env:
+          KEY_PRESENT: ${{ needs.provider-key.outputs.present }}
+          GUARD: ${{ needs.suite-coverage-guard.result }}
+          CONTROL_PLANE: ${{ needs.harness-control-plane.result }}
+          RUNTIME: ${{ needs.harness-runtime.result }}
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null \
+            || pip install --quiet --disable-pip-version-check pyyaml
+          # Suite names come from this workflow's own matrices + EXCLUDED_SUITES,
+          # the same single source of truth the guard reads, so the table cannot
+          # drift from what actually ran.
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import os, yaml
+
+          wf = yaml.safe_load(open(".github/workflows/nightly-harness.yml"))
+          jobs = wf["jobs"]
+
+          def suites(job):
+              return sorted(e["suite"] for e in jobs[job]["strategy"]["matrix"]["include"])
+
+          gated = suites("harness-control-plane")
+          runtime = suites("harness-runtime")
+          excluded = sorted(os.environ["EXCLUDED_SUITES"].split())
+
+          key = os.environ["KEY_PRESENT"] == "true"
+          res = {
+              "guard": os.environ["GUARD"],
+              "cp": os.environ["CONTROL_PLANE"],
+              "rt": os.environ["RUNTIME"],
+          }
+          mark = {"success": "✅ passed", "failure": "❌ FAILED",
+                  "cancelled": "⏹ cancelled", "skipped": "⏭ skipped"}
+
+          def status(r):
+              return mark.get(r, f"⚠️ {r}")
+
+          rt_status = (status(res["rt"]) if key
+                       else "⚠️ **NOT RUN** — no provider credential configured")
+
+          out = ["## What this run actually verified", ""]
+          if not key:
+              out += [
+                  "> [!WARNING]",
+                  "> **A green tick here covers the control-plane tier only.**",
+                  "> `SEED_ANTHROPIC_API_KEY` is not configured in this repository, so the "
+                  f"{len(runtime)} runtime suites never executed. Their assertions all sit "
+                  "downstream of a real agent reply or routine run, which the server refuses "
+                  "without a provider credential (`LLMRunner: provider: no active Anthropic "
+                  "credential in workspace`). **This run does not show that memory, delegation, "
+                  "notifications, orchestration, determinism or credential escalation still "
+                  "work.** Configure the secret and this tier becomes a hard gate with no "
+                  "workflow edit.",
+                  "",
+              ]
+          out += [
+              "| tier | suites | this run |",
+              "|------|-------:|----------|",
+              f"| coverage guard (every `test-*.sh` is in a tier) | — | {status(res['guard'])} |",
+              f"| control-plane — **hard gate**, no credential needed | {len(gated)} | {status(res['cp'])} |",
+              f"| runtime — needs a provider credential | {len(runtime)} | {rt_status} |",
+              f"| excluded by design (secret / external service / shared slot) | {len(excluded)} | never run — see the workflow header |",
+              "",
+              "<details><summary>Which suites are in which tier</summary>",
+              "",
+              "**Control-plane (gated):**",
+              "",
+          ]
+          out += [f"- `{s}`" for s in gated]
+          out += ["", "**Runtime (gated only when a provider credential exists):**", ""]
+          out += [f"- `{s}`" for s in runtime]
+          out += ["", "**Excluded — reasons in the workflow header:**", ""]
+          out += [f"- `{s}`" for s in excluded]
+          out += ["", "</details>", ""]
+          print("\n".join(out))
+          PY
+          echo "coverage summary written"
+
   # ── A nightly nobody notices is worth nothing: file/refresh ONE issue ──
   # Same containment contract as security.yml's `scheduled-report`: label +
   # bot author + title/marker match, so a human-filed issue carrying the label
@@ -396,7 +594,7 @@ jobs:
     name: Nightly harness alert
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [provider-key, harness-control-plane, harness-runtime]
+    needs: [suite-coverage-guard, provider-key, harness-control-plane, harness-runtime]
     if: always() && github.event_name == 'schedule'
     permissions:
       contents: read
@@ -413,6 +611,7 @@ jobs:
           CONTROL_PLANE: ${{ needs.harness-control-plane.result }}
           RUNTIME: ${{ needs.harness-runtime.result }}
           PROVIDER_KEY_JOB: ${{ needs.provider-key.result }}
+          GUARD: ${{ needs.suite-coverage-guard.result }}
         run: |
           set -euo pipefail
 
@@ -424,7 +623,8 @@ jobs:
           # The one legitimate skip: harness-runtime when no provider
           # credential is configured. That is a known, stated gap — recorded in
           # the issue body, not treated as a regression.
-          results="provider-key=${PROVIDER_KEY_JOB}
+          results="suite-coverage-guard=${GUARD}
+          provider-key=${PROVIDER_KEY_JOB}
           harness-control-plane=${CONTROL_PLANE}"
           if [ "$KEY_PRESENT" = "true" ]; then
             results="${results}
@@ -490,6 +690,10 @@ jobs:
           $coverage_note
 
           These suites drive the real \`crewship\` CLI against a real seeded instance, so a failure here is a **runtime** regression the Go/Vitest units cannot see (memory recall, crew isolation, the internal auth fence, credential lifecycle). Open the failing matrix square, read its per-assertion output, and check the \"Dump server log on failure\" step. Suite-by-suite contracts: \`scripts/test-harness/README.md\`.
+
+          A \`suite-coverage-guard\` failure is different: it means a \`scripts/test-harness/test-*.sh\` file is claimed by no tier (or a tier names one that no longer exists). Nothing regressed — a suite is about to get zero nightly coverage. Add it to the \`harness-control-plane\` matrix, the \`harness-runtime\` matrix, or \`EXCLUDED_SUITES\` with a reason.
+
+          The \"What this run actually verified\" section on the run page lists which tiers executed and which were skipped.
 
           This issue auto-closes when the nightly is green again."
           if [ -n "$existing" ]; then

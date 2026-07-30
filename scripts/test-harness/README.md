@@ -64,6 +64,40 @@ delegation still work" until then.
 provisioned crew, or a shared dev slot it is allowed to mutate. The reasons are
 spelled out per suite in the workflow header.
 
+### Adding a suite: the tiers are enforced, not documented
+
+Deliberately no total is quoted here or in the workflow. The first draft of that
+header said "19 suites" and was wrong within days — `test-crew-links.sh` and
+`test-secretless-github.sh` landed in merged PRs while it was being written. A
+number in prose cannot be enforced, so the invariant is stated as set membership
+instead:
+
+> every `scripts/test-harness/test-*.sh` on disk must be claimed by exactly one
+> of the two matrices in `nightly-harness.yml` or by its `EXCLUDED_SUITES` list
+
+and the `suite-coverage-guard` job **fails the workflow** on any suite in no
+tier, any tier naming a suite that no longer exists, and any suite claimed
+twice. It reads the two run lists out of the matrices themselves — there is no
+second copy of them to drift — so adding a suite to a matrix is all the
+bookkeeping there is. A new `test-*.sh` that nobody wired up turns the nightly
+red instead of silently getting zero coverage.
+
+So: add the file, then put it in a matrix (with a per-suite timeout) or in
+`EXCLUDED_SUITES` with the reason in the header block. There is no third option
+the guard will accept.
+
+### A green run states what it did not verify
+
+`nightly-harness.yml` has a `coverage-summary` job that writes a tier table to
+the run's summary page — on the **success** path too, not only on failure, and
+on manual dispatches as well as the schedule. Until a provider credential
+exists, that table carries a warning banner saying in as many words that the
+green tick covers the control-plane tier only and that the run does **not**
+show memory, delegation, notifications, orchestration, determinism or credential
+escalation still working. The banner disappears by itself the moment
+`SEED_ANTHROPIC_API_KEY` is configured and the runtime tier starts executing.
+The point is that the run page never claims more coverage than the run had.
+
 `run-all.sh` is not used by CI: it is a flat sequential loop with no per-suite
 timeout, so one wedged `ask` consumes the whole job budget and the summary
 cannot say which subsystem broke. The workflow gives every suite its own
