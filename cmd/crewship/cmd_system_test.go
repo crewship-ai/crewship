@@ -189,6 +189,70 @@ func TestSystemAuxStatusRunE_RendersSubsystems(t *testing.T) {
 	}
 }
 
+// TestSystemAuxStatusRunE_UnprobedReasonNotRepeated pins the reason block to
+// reasons that are actually about this row's problem.
+//
+// A paid-API slot that fails to BUILD — the everyday "no ANTHROPIC_API_KEY"
+// case — comes back healthy=false with the build error in `detail`, and the
+// server also stamps the standing policy note into `reach_detail` ("not
+// probed — Crewship does not call a paid API…") for every non-self-hosted
+// row, probed or not. Printing both put the policy note directly under the
+// real error, where it reads as a second fault and invites the operator to
+// go looking for a probe that was never the problem.
+//
+// `reach_detail` is only evidence when a probe actually happened, i.e. when
+// `reachable` is non-nil. Unprobed rows carry their state in the status word.
+func TestSystemAuxStatusRunE_UnprobedReasonNotRepeated(t *testing.T) {
+	saveCLIState(t)
+
+	m := &systemAuxMock{t: t, resBody: `{"subsystems":[
+		{"id":"curator","label":"Skill review","provider":"anthropic","model":"claude-haiku-4-5","timeout_ms":30000,"source":"fallback","healthy":false,"detail":"anthropic: no API key configured","reach_detail":"not probed — Crewship does not call a paid API to render a status page"}
+	]}`}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	cliCfg = auxTestCfg(srv.URL)
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = systemAuxStatusCmd.RunE(systemAuxStatusCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	// The real fault still has to reach the operator.
+	if !strings.Contains(out, "anthropic: no API key configured") {
+		t.Errorf("build failure must be reported:\n%s", out)
+	}
+	// The policy note must not be listed as one of this row's faults.
+	if strings.Contains(out, "not probed") {
+		t.Errorf("unprobed policy note must not be listed as a fault reason:\n%s", out)
+	}
+}
+
+// TestSystemAuxStatusRunE_ProbedReasonStillShown is the other half of the
+// pair above: when a probe DID run and failed, `reach_detail` is the whole
+// finding and must survive.
+func TestSystemAuxStatusRunE_ProbedReasonStillShown(t *testing.T) {
+	saveCLIState(t)
+
+	m := &systemAuxMock{t: t, resBody: `{"subsystems":[
+		{"id":"access_gatekeeper","label":"Credential access judge","provider":"ollama","model":"phi3","source":"keeper_config","healthy":true,"reachable":false,"reach_detail":"no response from http://localhost:11434"}
+	]}`}
+	srv := httptest.NewServer(m.handler())
+	defer srv.Close()
+
+	cliCfg = auxTestCfg(srv.URL)
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = systemAuxStatusCmd.RunE(systemAuxStatusCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "no response from http://localhost:11434") {
+		t.Errorf("a failed probe is the whole finding and must be printed:\n%s", out)
+	}
+}
+
 // TestSystemAuxStatusRunE_JSONPassThrough keeps `--format json` a stable
 // jq target on the CURRENT key: pipelines filtering `.slots[]` broke at
 // #1506 and must be pointed at `.subsystems[]`.

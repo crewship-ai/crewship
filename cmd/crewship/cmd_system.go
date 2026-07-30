@@ -625,14 +625,26 @@ Examples:
 			fmt.Printf("\n%s%d of %d subsystems cannot run right now — evaluations that need them fail closed.%s\n",
 				cli.Red, broken, len(payload.Subsystems), cli.Reset)
 		}
-		// Verbatim server reasons, for the rows that have a problem. The
-		// "not probed" note on a healthy paid-API row is already carried by
-		// its status word, so it is not repeated here.
+		// Verbatim server reasons, for the rows that have a problem.
+		//
+		// reach_detail only counts as a reason when a probe actually ran.
+		// The server stamps the standing policy note ("not probed — …") into
+		// reach_detail on EVERY non-self-hosted row, healthy or not, so a
+		// paid-API slot that simply failed to build — the everyday missing
+		// ANTHROPIC_API_KEY case — would otherwise print that note directly
+		// beneath its real error, reading as a second fault and sending the
+		// operator after a probe that was never the problem. A nil
+		// `reachable` is "not probed", and that state is already carried by
+		// the status word.
 		for _, s := range payload.Subsystems {
 			if auxUsable(s) {
 				continue
 			}
-			for _, reason := range []string{s.Detail, s.ReachDetail} {
+			reasons := []string{s.Detail}
+			if s.Reachable != nil {
+				reasons = append(reasons, s.ReachDetail)
+			}
+			for _, reason := range reasons {
 				if reason != "" {
 					fmt.Printf("  %s%s%s: %s\n", cli.Bold, s.ID, cli.Reset, reason)
 				}
