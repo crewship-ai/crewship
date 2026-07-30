@@ -29,5 +29,8 @@
 #                    permanent→normal priority downgrade — and is skipped
 #                    behind SKIP-WAIVER(#1572) so the fix has a red test to
 #                    turn green. Lower this back to 120 when #1572 lands.
+#   120  2026-07-30  −1: #1572 landed. The waived test is unskipped and green,
+#                    the waiver comment is gone, and the debt entry above is
+#                    closed out rather than left standing.
 
-121
+120

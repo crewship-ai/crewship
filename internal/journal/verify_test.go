@@ -414,7 +414,7 @@ func TestVerifyChain_BreaksAreCapped(t *testing.T) {
 }
 
 // TestVerifyChain_RecoversBackfilledPriority: a row broken by the v166 backfill
-// is RECOVERABLE, not lost — and proving that is better than waiving it.
+// has its emit-time priority RECOVERED — and, since #1572, is still reported.
 //
 // The v166 migration set priority_at_emit = COALESCE(priority,'normal') from
 // the value at migration time. For a row whose priority had already been
@@ -425,12 +425,21 @@ func TestVerifyChain_BreaksAreCapped(t *testing.T) {
 // The emit-time value is not gone, though — it is one of exactly four:
 // normal | high | pin | permanent. Recomputing the keyed hash against each and
 // finding the one that reproduces the STORED hash proves the entry is
-// authentic and recovers the value at the same time.
+// authentic and recovers the value at the same time. That search does not
+// weaken the oracle: the hash is an HMAC under a secret chain key, so an
+// attacker who could produce a matching hash for any of four candidate
+// priorities could already forge one for the real value.
 //
-// This does not weaken the oracle. The hash is an HMAC under a secret chain
-// key; an attacker who could produce a matching hash for any of four candidate
-// priorities could already forge one for the real value. What the search
-// removes is a false positive, not a real detection.
+// WHAT CHANGED IN #1572, and why this test now asserts OK=false. Recovery
+// proves the CONTENT authentic. It says nothing about how the live priority
+// column came to hold what it holds — and a pre-v166 operator pin and an
+// attacker's two-column downgrade leave byte-identical rows, so the verifier
+// cannot tell them apart even in principle. It used to resolve that ambiguity
+// silently in favour of "benign", which is the bug: `permanent → normal` was
+// laundered past the check that guards compaction's exemption. The row is now
+// reported, with the recovered value carried in Repairable as the material a
+// repair needs. Recovery keeps every bit of its diagnostic value; what it lost
+// is the authority to close the case by itself.
 func TestVerifyChain_RecoversBackfilledPriority(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
@@ -452,12 +461,17 @@ func TestVerifyChain_RecoversBackfilledPriority(t *testing.T) {
 		t.Fatalf("verify: %v", err)
 	}
 
-	if len(res.Breaks) != 0 {
-		t.Errorf("reported %d break(s) for a row whose content is provably authentic: %+v",
-			len(res.Breaks), res.Breaks)
+	// One break, on that row, and it names the priority — not the content,
+	// which the recovery search proved authentic.
+	if len(res.Breaks) != 1 {
+		t.Fatalf("Breaks = %+v, want exactly one — an unresolved provenance is reported, not absolved", res.Breaks)
 	}
-	if !res.OK {
-		t.Errorf("OK=false — a recoverable backfill artefact is not tampering (reason: %q)", res.Reason)
+	if res.Breaks[0].ID != ids[1] || res.Breaks[0].Kind != "priority" {
+		t.Errorf("Breaks[0] = %+v, want a priority break on %s", res.Breaks[0], ids[1])
+	}
+	if res.OK {
+		t.Error("OK=true — a recovered row is proven authentic in its CONTENT only; " +
+			"its live priority is exactly as unexplained as an attacker's downgrade (#1572)")
 	}
 	if len(res.Repairable) != 1 {
 		t.Fatalf("Repairable = %d, want 1 — the wrong stored value must still be surfaced", len(res.Repairable))
@@ -535,7 +549,18 @@ func TestVerifyChain_RepairableIsCapped(t *testing.T) {
 	if !res.RepairableTruncated {
 		t.Error("RepairableTruncated must say the list was trimmed")
 	}
-	if !res.OK {
-		t.Error("recoverable rows are not tampering — OK must stay true")
+	// Since #1572 each recovered row is also a break (its live priority has no
+	// recorded provenance), so the Breaks list is capped by the same rule and
+	// BreakCount stays exact. Both counts matter: a workspace where the
+	// migration touched thousands of rows must not answer an admin request with
+	// one item per row, and must not understate the scale either.
+	if res.OK {
+		t.Error("recovered rows leave the live priority unexplained — OK must be false")
+	}
+	if res.BreakCount != n {
+		t.Errorf("BreakCount = %d, want %d", res.BreakCount, n)
+	}
+	if len(res.Breaks) > maxReportedBreaks {
+		t.Errorf("Breaks = %d, want at most %d", len(res.Breaks), maxReportedBreaks)
 	}
 }
