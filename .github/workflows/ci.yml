@@ -476,7 +476,8 @@ jobs:
   #   internal/auth/sessions      29-33s    (was ~1500s per the original PR)
   #
   # With the multiplier gone, `go test ./... -race` was re-tried in full —
-  # 105 of 108 packages, the 3 exclusions below — and it PASSES, 0 races,
+  # 105 of 108 packages at the time, 107 of 108 now that internal/api and
+  # cmd/crewship are fixed and back in — and it PASSES, 0 races,
   # locally in 322s wall clock under heavy contention. So the polarity
   # flips: a short, justified deny-list is now affordable, and it closes the
   # allow-list's real weakness — a new package silently getting NO coverage.
@@ -499,12 +500,12 @@ jobs:
   # -timeout bumped to 20m (below) on that estimate: roughly 2x the
   # extrapolated need, not a guess pulled from nowhere, but still provisional
   # until a CI run actually clears it. If 20m is not enough either, the next
-  # step is a 4th deny-list entry for internal/backup with whatever real
+  # step is a second deny-list entry for internal/backup with whatever real
   # number that run reports — not a further bump, since a package whose
   # -race cost is dominated by a fixed-cost KDF rather than fixture setup
   # doesn't get faster with more retries the way the #1547 packages did.
   #
-  # ── The 3 exclusions ──
+  # ── The 1 exclusion ──
   #
   # internal/database is excluded STRUCTURALLY, not temporarily. It is the
   # package containing the migration engine that internal/testutil wraps, so
@@ -519,39 +520,34 @@ jobs:
   # Not a fit for a per-PR gate; a dedicated long-budget job would be a
   # separate, deliberate follow-up, not a default inclusion here.
   #
-  # internal/api and cmd/crewship are excluded because they fail with REAL
-  # data races, not slowness or flakiness. #1551 (merged) fixed both packages'
-  # ORDER-DEPENDENCE — defaultCapabilityCache and the CLI's package-level
-  # globals now reset per test, which is why `go-shuffle` below runs both with
-  # an empty skip list. That is a different bug class from what -race catches
-  # here: two tests can reset shared state correctly between runs and still
-  # race each other when they execute CONCURRENTLY under t.Parallel(). RE-
-  # VERIFIED on this branch, after rebasing onto #1551 — both races are still
-  # present, unchanged:
-  #   internal/api: writes race inside TestCovMRSyncAcceptedThenCooldown
-  #     (mcp_registry_cov_test.go:370), TestCovMTBRegistrySyncAcceptedThenCooldown
-  #     (mcp_tool_bindings_cov_test.go:645), and TestRecurringIssueCreate_NextRunIsUTC
-  #     (recurring_issue_hardening_test.go:101).
-  #   cmd/crewship: reads race in internal/cli.(*Client) (client.go:307,315,
-  #     called from resolveWorkspaceID) from a *Client instance shared across
-  #     parallel tests — 7 separate warnings across two runs.
-  # A parallel PR is fixing both (test-only: t.Cleanup writes to package-level
-  # variables in the two internal/api cov-test files above; a per-test client
-  # instead of a shared one in cmd/crewship). Do not add either package here
-  # until that lands, or this gate goes red on the next PR that touches either
-  # file. Lift this exclusion in that PR, not here.
+  # internal/api and cmd/crewship WERE excluded here for real data races.
+  # Both are fixed and both are back in the gate:
+  #   internal/api — test-only, two root causes. Tests swapped the package
+  #     global mcpRegistryURL and restored it from t.Cleanup while the
+  #     detached goroutine MCPRegistryHandler.Sync spawns was still reading
+  #     it; and TestRecurringIssueCreate_NextRunIsUTC assigned time.Local,
+  #     which every time.Now() in the binary reads, including the background
+  #     goroutines other tests leave running. Fixed by joining the sync
+  #     goroutine on its terminal log record, and by getting the non-UTC zone
+  #     from a TZ-set child process instead of writing the global.
+  #   cmd/crewship — NOT a test bug. internal/cli.(*Client).resolveWorkspaceID
+  #     memoised into two unguarded Client fields, and `crewship diff`, `me`,
+  #     `today`, `now`, `history` and the TUI all fan out over ONE client, so
+  #     every real invocation of those commands raced. The tests were only the
+  #     messenger. Fixed by moving the memo behind a shared, mutex-guarded
+  #     wsResolveState. Regression test: internal/cli/client_concurrency_test.go.
   #
-  # A deny-list still rots silently if unchecked — a renamed or removed
-  # package would just vanish from its effect. The step below fails if any
-  # of the 3 entries stops resolving against `go list ./...`.
+  # A deny-list rots silently if unchecked — a renamed or removed package
+  # would just vanish from its effect. The step below fails if the entry
+  # stops resolving against `go list ./...`.
   go-race:
     needs: [merge-conflict-markers]
     name: Go Race
     runs-on: ubuntu-latest
     # BLOCKING, with no continue-on-error. A red run means a race landed —
     # or a package belongs on the exclusion list above, held to the same
-    # justification bar as the 3 already there (structural incompatibility
-    # or a tracked pre-existing bug, not "it's slow").
+    # justification bar as the one already there (structural incompatibility,
+    # not "it's slow" and not "the race is inconvenient to fix").
     #
     # Same invariant as the `go` job: cap MUST exceed overhead + the
     # `go test -timeout` below, so Go's goroutine-dumping panic wins the
@@ -576,24 +572,22 @@ jobs:
         # is reproducible from the log without also having to replay a seed.
         run: |
           set -euo pipefail
-          # The 3 exclusions, each justified in the job comment above. A
-          # stale entry (renamed/removed package) fails loudly rather than
+          # The 1 exclusion, justified in the job comment above. A stale
+          # entry (renamed/removed package) fails loudly rather than
           # silently covering less than this comment claims.
           denyfile="${RUNNER_TEMP:-/tmp}/race-deny.txt"
           cat > "$denyfile" <<'DENY'
           github.com/crewship-ai/crewship/internal/database
-          github.com/crewship-ai/crewship/internal/api
-          github.com/crewship-ai/crewship/cmd/crewship
           DENY
           ndeny="$(grep -c . "$denyfile")"
           total="$(go list ./... | grep -c .)"
           pkgs="$(go list ./... | grep -Fxv -f "$denyfile")"
           n="$(printf '%s\n' "$pkgs" | grep -c .)"
-          # Each entry must remove exactly one real package. If it doesn't,
-          # either an entry is stale (a rename silently re-includes a
-          # known-bad package) or `go list` collapsed (which would otherwise
-          # look like a truncated-but-green run — the uncounted-t.Skip
-          # failure mode again).
+          # The entry must remove exactly one real package. If it doesn't,
+          # either it is stale (a rename silently re-includes a known-bad
+          # package) or `go list` collapsed (which would otherwise look
+          # like a truncated-but-green run — the uncounted-t.Skip failure
+          # mode again).
           if [ "$((total - n))" -ne "$ndeny" ]; then
             echo "::error::race deny-list removed $((total - n)) packages but has $ndeny entries. An entry is stale — reconcile it against 'go list ./...'."
             cat "$denyfile"

@@ -154,7 +154,7 @@ func TestGetWorkspaceIDEmpty(t *testing.T) {
 
 func TestGetWorkspaceIDUsesCachedResolution(t *testing.T) {
 	c := NewClient("http://example.com", "", "my-slug")
-	c.resolvedWorkspaceID = "c1234567890123456789"
+	c.wsResolve.resolved = "c1234567890123456789"
 	if got := c.GetWorkspaceID(); got != "c1234567890123456789" {
 		t.Errorf("GetWorkspaceID() = %q, want cached CUID without HTTP", got)
 	}
@@ -170,8 +170,8 @@ func TestGetWorkspaceIDSlugFallbackOnResolveError(t *testing.T) {
 	if got := c.GetWorkspaceID(); got != "my-slug" {
 		t.Errorf("GetWorkspaceID() = %q, want slug fallback on resolve failure", got)
 	}
-	if c.resolvedWorkspaceID != "" {
-		t.Errorf("failed resolution must not be cached, got %q", c.resolvedWorkspaceID)
+	if c.wsResolve.resolved != "" {
+		t.Errorf("failed resolution must not be cached, got %q", c.wsResolve.resolved)
 	}
 }
 
