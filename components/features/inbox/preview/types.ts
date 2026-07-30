@@ -11,10 +11,35 @@ export type InboxView = "inbox" | "unread" | "archived"
  */
 export type Bucket = "decisions" | "replies" | "review" | "routines" | "other"
 
-/** An agent or routine the rows are ABOUT — the rail's bottom list. */
-export interface SubjectFacet {
+/**
+ * The three arrangements this preview exists to compare. The rail is the same
+ * in all of them — what differs is what sits to the right of it.
+ *
+ *   split  — mail-client: a list column and a reading pane.
+ *   table  — the /routines catalog shape: dense rows, detail in a drawer.
+ *   stream — detail-kit cards, decision on the card, no reading pane.
+ */
+export type LayoutStyle = "split" | "table" | "stream"
+
+/**
+ * Who a row is about or from.
+ *
+ * The distinction the product cares about is machine vs human: an agent, a
+ * routine and the system act on their own, a user is a person who answered.
+ * Rendering them alike is what makes "casey requested GH_TOKEN" and "pavel
+ * approved it" read as the same kind of thing when they are opposites.
+ */
+export type ActorKind = "agent" | "user" | "routine" | "system" | "crew"
+
+export interface Actor {
+  kind: ActorKind
   id: string
   label: string
-  kind: "agent" | "pipeline"
+  /** Avatar seed — agents only; everything else draws a glyph. */
+  seed?: string
+}
+
+/** A facet row in the rail's bottom list. */
+export interface SubjectFacet extends Actor {
   count: number
 }
