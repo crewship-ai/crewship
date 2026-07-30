@@ -16,6 +16,7 @@ import (
 // a shell with CREWSHIP_SERVER=<dev3> bootstrapped against dev3 while every
 // authenticated call hit prod.
 func TestSeedTargetServerHonoursProfileOverEnv(t *testing.T) {
+	guardCLIState(t)
 	origProfile, origServer, origCfg := flagProfile, flagServer, cliCfg
 	t.Cleanup(func() { flagProfile, flagServer, cliCfg = origProfile, origServer, origCfg })
 

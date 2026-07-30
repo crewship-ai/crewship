@@ -100,6 +100,7 @@ func TestCheckEpisodicRecallMode_ServerUnreachable(t *testing.T) {
 // > cfg — same as its sibling checks in this PR (checkServerReachable,
 // runCheckCLIConfigServerScheme).
 func TestRunCheckEpisodicRecallMode_HonorsActiveProfile(t *testing.T) {
+	guardCLIState(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/healthz" {
 			http.NotFound(w, r)

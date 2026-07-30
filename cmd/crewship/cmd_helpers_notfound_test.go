@@ -83,6 +83,7 @@ func TestResolverMissesAreExitNotFound(t *testing.T) {
 // (exit 2), not a generic exit 1. Its sibling requireAuth already types its
 // failure as ExitAuth.
 func TestRequireWorkspaceIsExitValidation(t *testing.T) {
+	guardCLIState(t)
 	origWorkspace, origCfg := flagWorkspace, cliCfg
 	t.Cleanup(func() { flagWorkspace, cliCfg = origWorkspace, origCfg })
 	t.Setenv("CREWSHIP_WORKSPACE", "")

@@ -31,7 +31,32 @@ import (
 // returns — see #892). The reasoning for each is recorded at the helper.
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
+	resetCapabilityCache()
 	return testutil.MigratedSQLDB(t)
+}
+
+// resetCapabilityCache empties the process-wide capability cache.
+//
+// defaultCapabilityCache is a deliberate singleton — RBAC answers must not
+// diverge between router instances in one binary (see capabilities_check.go) —
+// and it is keyed on (workspaceID, userID) with a 30s TTL. seedTestUser and
+// seedTestWorkspace hand every test the SAME two ids, so although each test
+// gets a private database, they all share one cache identity: a capability set
+// computed against one test's rows is served to the next test's router, whose
+// database says something else. Tests that call InvalidateCapabilityCache
+// happen to escape it; the rest are hostage to whoever ran before them, which
+// is invisible in source order and a coin flip under -shuffle=on
+// (TestCovICICredAdapterCreate_Happy, 403 instead of 201, is the recorded case).
+//
+// Clearing here rather than renaming the ids: the two constants are written out
+// as literals in ~110 places across the package's tests, and per-test ids would
+// change what those tests assert about their own fixtures. The cache is the
+// shared state, so the cache is what gets reset — a fresh database deserves a
+// cache that knows nothing about the previous one.
+func resetCapabilityCache() {
+	defaultCapabilityCache.mu.Lock()
+	defer defaultCapabilityCache.mu.Unlock()
+	defaultCapabilityCache.store = map[string]capabilityCacheEntry{}
 }
 
 func seedTestUser(t *testing.T, db *sql.DB) string {
