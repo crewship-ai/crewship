@@ -20,12 +20,30 @@ func newLazyTestStore(t *testing.T, dflt keepercfg.Defaults) *keepercfg.Store {
 	// The real migrated schema rather than a hand-copied CREATE TABLE: a column
 	// added to the migration would otherwise leave a stale copy here that keeps
 	// passing.
-	s := keepercfg.New(openTestDB(t), dflt)
+	db := openTestDB(t)
+	// keeper_runtime_settings.updated_by is a real foreign key into users, and
+	// these tests write it. Seeding the actor rather than passing a made-up id is
+	// not tidiness: an id with no user is a row PRODUCTION can never write, so a
+	// test that gets away with it is testing a shape that does not exist.
+	//
+	// It got away with it by accident. The helper's DSN says `_foreign_keys=on`,
+	// which is mattn/go-sqlite3 syntax that modernc.org/sqlite ignores — so FK
+	// enforcement here depends on whether a pooled connection picked the pragma up
+	// from somewhere else, and the write failed only under a test order that
+	// happened to hand it an enforcing connection.
+	if _, err := db.Exec(`INSERT OR IGNORE INTO users (id, email, full_name)
+		VALUES (?, 'operator@example.com', 'Operator')`, lazyTestActor); err != nil {
+		t.Fatalf("seed actor: %v", err)
+	}
+	s := keepercfg.New(db, dflt)
 	if err := s.Load(context.Background()); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	return s
 }
+
+// lazyTestActor is the seeded user every Apply in this file attributes to.
+const lazyTestActor = "usr_lazy_test_operator"
 
 // stubEvaluator records the model it was built for and how often it was asked.
 type stubEvaluator struct {
@@ -98,7 +116,7 @@ func TestLazyGatekeeper_EnableTakesEffectWithoutRestart(t *testing.T) {
 		Enabled:     &on,
 		EndpointURL: ptr("http://127.0.0.1:11434"),
 		Model:       ptr("qwen2.5:7b"),
-	}, "operator"); err != nil {
+	}, lazyTestActor); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
 
@@ -129,7 +147,7 @@ func TestLazyGatekeeper_DisableTakesEffectWithoutRestart(t *testing.T) {
 		t.Fatalf("expected the stub judge to answer while enabled, got %s", resp.Decision)
 	}
 	off := keepercfg.TriOff
-	if _, err := store.Apply(ctx, keepercfg.Patch{Enabled: &off}, "operator"); err != nil {
+	if _, err := store.Apply(ctx, keepercfg.Patch{Enabled: &off}, lazyTestActor); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	resp, _ := gk.Evaluate(ctx, gatekeeper.EvalRequest{})
@@ -155,7 +173,7 @@ func TestLazyGatekeeper_RebuildsOnlyWhenTheWiringChanges(t *testing.T) {
 		t.Fatalf("built %d judges for three evaluations of one config, want 1", len(b.built))
 	}
 
-	if _, err := store.Apply(ctx, keepercfg.Patch{Model: ptr("qwen3:4b")}, "operator"); err != nil {
+	if _, err := store.Apply(ctx, keepercfg.Patch{Model: ptr("qwen3:4b")}, lazyTestActor); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	resp, err := gk.Evaluate(ctx, gatekeeper.EvalRequest{})
