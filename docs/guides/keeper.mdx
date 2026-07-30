@@ -619,7 +619,7 @@ restart needed:
 | **Watchdog enabled** | Master toggle for behavior monitoring + DENY notifications in this workspace | **Off (opt-in)** — enable per workspace |
 | **Security contact** | A named OWNER/ADMIN the escalation is highlighted for (via the inbox item's target) | Unset — findings go to all MANAGER+ members |
 | **Notify on DENY at risk ≥ N** | High-risk DENY decisions (1–10 scale) also land in the inbox as non-blocking items — ESCALATE always does | 7 |
-| **Require a second approver** | Four-eyes: a `CREDENTIAL` escalation can't be resolved by the person who owns the requesting agent (segregation of duties, #1084) | **Off (opt-in)** |
+| **Require a second approver** | Four-eyes: a `CREDENTIAL` escalation can't be resolved by the person who owns the requesting agent (segregation of duties, #1084) | **Off (opt-in)** — but see below: the toggle is not the whole rule |
 
 The **Require a second approver** switch sits in the same **Admin → Keeper →
 Watchdog governance** panel as the settings above and writes through the same
@@ -627,6 +627,53 @@ Watchdog governance** panel as the settings above and writes through the same
 fewer than two eligible approvers (OWNER/ADMIN/MANAGER) is allowed but surfaces
 a non-blocking warning — the gate would otherwise deadlock. This is the in-app
 equivalent of `crewship keeper second-approver enable`.
+
+#### The switch is a floor, not a master switch
+
+Turning it **off does not mean "one approver is enough"**. The credential's
+[security tier](#credential-tiers-l1-l4) forces four-eyes on
+its own at **L4 · critical**, whatever the workspace setting says. So:
+
+| Workspace toggle | Credential tier | Second approver required? | Why |
+|---|---|---|---|
+| Off | L1–L3 | No | Nothing forces it |
+| Off | **L4** | **Yes** | The tier forces it (`TierPolicy.SecondApprover`) |
+| On | L1–L3 | Yes | The workspace setting |
+| On | **L4** | **Yes** | Both, independently — turning the setting off would not lift it |
+
+A tier can only **tighten** this rule, never loosen it. There is no setting that
+exempts an L4 credential from four-eyes; the way to make one resolvable by a
+single person is to give it a lower tier, which is a decision about blast radius,
+not about approvals.
+
+The rule compares the approver against the **recorded owner of the agent that
+raised the escalation** (`agents.created_by_user_id`). An agent with no recorded
+owner (a legacy row) has no identity to compare against, so the rule cannot be
+enforced for its escalations and resolution proceeds as before.
+
+Three places tell you which of the two applies, so you find out before you are
+refused rather than from the `403`:
+
+- **Admin → Keeper**, under the switch, while it is off: names the tier that
+  still requires a second approver.
+- **The escalation row** in the crew's escalations panel: says whether the
+  workspace setting, the tier, or both apply to *that* request.
+- **`crewship keeper status`**, on the `In force:` line under `2nd approver:`.
+
+```text
+  2nd approver: off
+  In force:     L4 · critical credentials and above (tier floor — the workspace
+                toggle is off, but a tier can only tighten this rule, never loosen it)
+```
+
+The same answer is on the API: `GET /api/v1/admin/keeper/governance` returns an
+`effective_second_approver` block (`min_security_level`,
+`min_security_level_label`, `source` = `workspace` \| `tier` \| `none`, plus
+`tier_floor_security_level` / `tier_floor_label` — what the tier forces on its
+own, reported whatever the toggle says). `GET /api/v1/crews/{crewId}/escalations`
+carries the per-row answer as `second_approver_required` with
+`second_approver_by_workspace` / `second_approver_by_tier` and
+`security_level_label`.
 
 When a security contact is set the escalation targets that person **and** keeps
 the MANAGER fanout, so managers still see it as a fallback. Keeper findings push
@@ -644,7 +691,9 @@ manual refresh.
 ### API + CLI
 
 ```bash
-# Combined server + workspace governance status
+# Combined server + workspace governance status. The "2nd approver" line is the
+# stored toggle; the "In force" line under it is the rule that will actually be
+# applied, once the credential tiers are folded in.
 crewship keeper status
 
 # Toggle the watchdog for the current workspace (OWNER/ADMIN)

@@ -155,6 +155,34 @@ func TestApplyTierFloor_UnknownLevelEscalates(t *testing.T) {
 	}
 }
 
+// The four-eyes rule has two independent sources: the per-workspace
+// require_second_approver toggle, and this table. Every surface that explains
+// the EFFECTIVE rule to an operator (the governance card, the escalation row,
+// `crewship keeper status`, docs/guides/keeper.mdx) derives the tier half from
+// MinSecondApproverLevel rather than writing "L4" down again, so this test is
+// what stops those four copies from drifting away from the policy they describe.
+func TestMinSecondApproverLevel_MatchesTheTable(t *testing.T) {
+	lvl, ok := MinSecondApproverLevel()
+	if !ok {
+		t.Fatal("no tier forces a second approver — every surface that says one does is now lying")
+	}
+	if lvl != SecurityLevelL4 {
+		t.Errorf("lowest tier forcing four-eyes = %s, want %s (the copy names it)", lvl, SecurityLevelL4)
+	}
+	for _, l := range SecurityLevels() {
+		// Nothing below the floor may force the rule, or every surface saying
+		// "from <lvl> up" understates what is actually enforced.
+		if l < lvl && l.Tier().SecondApprover {
+			t.Errorf("%s forces four-eyes but is below the reported floor %s", l, lvl)
+		}
+		// And nothing at or above it may skip the rule, or the same phrasing
+		// overstates it.
+		if l >= lvl && !l.Tier().SecondApprover {
+			t.Errorf("%s is at or above the reported floor %s but does not force four-eyes", l, lvl)
+		}
+	}
+}
+
 func TestSecurityLevel_Rendering(t *testing.T) {
 	if got := SecurityLevelL3.String(); got != "L3" {
 		t.Errorf("String() = %q, want L3", got)
