@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 	_ "modernc.org/sqlite"
 )
@@ -27,16 +27,7 @@ func quietLogger() *slog.Logger {
 
 func newInboxTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	name := fmt.Sprintf("crewship-inbox-test-%d", inboxTestCounter.Add(1))
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(ON)", name)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db, quietLogger()); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := testutil.MigratedSQLDB(t)
 	// inbox_items.workspace_id has a FK to workspaces — seed a row so
 	// Insert calls don't get rejected by referential integrity.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'ws', 'ws')`); err != nil {

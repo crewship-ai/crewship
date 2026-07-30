@@ -3,27 +3,15 @@ package governance
 import (
 	"context"
 	"database/sql"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := testutil.MigratedDB(t)
 	// FK targets for keeper_governance_settings.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'W', 'w1')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)

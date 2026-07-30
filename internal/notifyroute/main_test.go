@@ -1,9 +1,7 @@
 package notifyroute
 
 import (
-	"context"
 	"database/sql"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	_ "modernc.org/sqlite"
 )
 
@@ -45,16 +43,7 @@ func quietLogger() *slog.Logger {
 func newRouteTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	t.Setenv("ENCRYPTION_KEY", testEncKey)
-	dir := t.TempDir()
-	name := fmt.Sprintf("%s/notifyroute-%d.db", dir, routeTestCounter.Add(1))
-	db, err := database.Open("file:" + name)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, quietLogger()); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := testutil.MigratedDB(t)
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
