@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { HelpCircle, Trash2 } from "lucide-react"
+import { ChevronRight, HelpCircle, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -12,13 +12,21 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
+  Collapsible, CollapsibleContent, CollapsibleTrigger,
+} from "@/components/ui/collapsible"
+import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
-import { CapabilityGrid } from "@/components/admin/capability-grid"
+import {
+  BulkPresetAction,
+  CapabilityPips,
+  MemberCapabilityToggles,
+  useMemberCapabilities,
+} from "@/components/admin/member-capabilities"
 import { UserAvatar, personLabel } from "@/components/ui/user-avatar"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
@@ -51,8 +59,8 @@ interface MembersSectionProps {
   // gone rather than left declared-and-ignored for the next reader to trip
   // over. See lib/permissions/tiers.ts.
   onRefresh: () => void
-  /** Caller's workspace role. Surfaces the per-member capability
-   *  grid (PRD-SLASH-CAPABILITIES-2026 §6.7), the invite control and the
+  /** Caller's workspace role. Surfaces the per-member capabilities
+   *  (PRD-SLASH-CAPABILITIES-2026 §6.7), the invite control and the
    *  remove control only for ADMIN+ (`isAdminTier`); role-change stays
    *  gated separately in `MemberRoleControl` at MANAGER+ (`isManagerTier`). */
   callerRole?: string
@@ -86,6 +94,14 @@ const roleSummaries: { role: string; summary: string }[] = [
   { role: "Viewer", summary: "Read only" },
 ]
 
+/** What a single role grants, keyed by the wire value. Same sentences as
+ *  the legend — the legend answers "what are the roles?", this answers
+ *  "what does THIS person's role mean?" next to the control that changes
+ *  it, which is the half that used to be reachable only through a popover. */
+const roleSummaryByRole: Record<string, string> = Object.fromEntries(
+  roleSummaries.map((r) => [r.role.toUpperCase(), r.summary]),
+)
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function relativeTime(dateStr: string): string {
@@ -109,12 +125,11 @@ function relativeTime(dateStr: string): string {
 /**
  * The role legend, as help rather than furniture.
  *
- * It used to be a permanently-present accordion. The content is static —
- * identical in every workspace, forever — so it is reference material, and
- * reference material belongs behind a help affordance next to the thing it
- * explains, not competing for space with the live roster. The trigger sits
- * in the Members card header because roles apply to the whole list; a `?`
- * repeated on every row would be noise.
+ * It is the whole ladder — five roles, identical in every workspace,
+ * forever — so it is reference material you consult when *choosing* a role,
+ * and it earns a help affordance rather than permanent screen space. The
+ * per-person half of it is not hidden here: each expanded row states what
+ * that member's own role grants, inline.
  */
 function RoleLegend() {
   return (
@@ -198,6 +213,8 @@ function MemberRoleControl({
           body: JSON.stringify({ role }),
         },
       )
+      // apiFetch resolves on 4xx/5xx — only a network failure rejects, so a
+      // bare `await` would toast every 403 as a successful role change.
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         // The role endpoint returns RFC 7807 problems (`detail`); fall back
@@ -270,6 +287,192 @@ function MemberRoleControl({
   )
 }
 
+// ── One row per person ───────────────────────────────────────────────
+
+/**
+ * A member row. Collapsed it answers "who is here" — avatar, name, role,
+ * a fixed-column pip strip for the capability grants, when they joined.
+ * Expanded it answers "what may they do" — the role control with the
+ * sentence that role implies, and the eight per-person grants.
+ *
+ * Before #1517 those two answers lived in two lists keyed by the same
+ * identity, and reconciling them was the reader's job.
+ *
+ * Only the identity block is the disclosure trigger: the role select and
+ * the remove button are interactive in their own right, and nesting them
+ * inside a <button> would be invalid markup and unreachable by keyboard.
+ */
+function MemberRow({
+  member,
+  workspaceId,
+  currentUserId,
+  callerRole,
+  isAdmin,
+  granted,
+  capsLoading,
+  onRefresh,
+  onRemove,
+  removing,
+  isLast,
+}: {
+  member: Member
+  workspaceId: string
+  currentUserId?: string
+  callerRole?: string
+  isAdmin: boolean
+  granted: string[]
+  capsLoading: boolean
+  onRefresh: () => void
+  onRemove: (memberId: string) => void
+  removing: boolean
+  isLast: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const isSelf = currentUserId === member.user.id
+  const isOwner = member.role === "OWNER"
+  const label = personLabel(member.user.full_name, member.user.email)
+  // Capabilities are an ADMIN+ read (the bulk endpoint 403s otherwise), so
+  // non-admins expand to the role explanation alone.
+  const showCaps = isAdmin && Boolean(currentUserId)
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={cn(!isLast && "border-b border-border/40")}
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2.5 pl-1.5 pr-3",
+          open && "bg-muted/30",
+        )}
+      >
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${open ? "Collapse" : "Expand"} permissions for ${label}`}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-2 pl-1 pr-2 text-left transition-colors hover:bg-muted/40"
+          >
+            <ChevronRight
+              aria-hidden="true"
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                open && "rotate-90",
+              )}
+            />
+            <UserAvatar
+              name={member.user.full_name}
+              email={member.user.email}
+              src={member.user.avatar_url}
+              className="h-7 w-7"
+              textClassName="text-[10px]"
+            />
+            <span className="min-w-0">
+              <span className="block truncate text-xs text-foreground">{label}</span>
+              {(member.user.full_name ?? "").trim() && (
+                <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground/80">
+                  {member.user.email}
+                </span>
+              )}
+            </span>
+          </button>
+        </CollapsibleTrigger>
+
+        <div className="flex shrink-0 items-center gap-2.5">
+          <MemberRoleControl
+            member={member}
+            workspaceId={workspaceId}
+            callerRole={callerRole}
+            isSelf={isSelf}
+            onRefresh={onRefresh}
+          />
+          {showCaps && (
+            <CapabilityPips granted={granted} isOwner={isOwner} label={label} />
+          )}
+          <span className="w-[52px] text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+            {relativeTime(member.created_at)}
+          </span>
+          <div className="flex w-6 justify-center">
+            {isAdmin && !isOwner && !isSelf ? (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    disabled={removing}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    <span className="sr-only">Remove member</span>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="text-sm">Remove member</AlertDialogTitle>
+                    <AlertDialogDescription className="text-xs">
+                      Are you sure you want to remove{" "}
+                      <span className="font-medium text-foreground">{label}</span>{" "}
+                      from this workspace? This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={() => onRemove(member.id)}
+                    >
+                      Remove
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <CollapsibleContent>
+        <div className="bg-muted/20 px-4 pb-3.5 pt-1 pl-9">
+          <div className="mb-1.5 mt-2 flex items-baseline gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Role
+            </span>
+            <span className="text-[10px] text-muted-foreground/80">
+              what the tier grants before any per-person capability
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            <span className="font-mono text-foreground">{member.role}</span>
+            {" — "}
+            {roleSummaryByRole[member.role] ?? "Permissions are defined by this role."}
+            {isOwner && " The owner's role and capabilities are immutable."}
+          </p>
+
+          {showCaps && (
+            <>
+              <div className="mb-1 mt-3.5 flex items-baseline gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Capabilities
+                </span>
+                <span className="text-[10px] text-muted-foreground/80">
+                  granted individually on top of the role · applies immediately
+                </span>
+              </div>
+              <MemberCapabilityToggles
+                member={member}
+                workspaceId={workspaceId}
+                currentUserId={currentUserId as string}
+                granted={granted}
+                isLoading={capsLoading}
+              />
+            </>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 // ── Component ────────────────────────────────────────────────────────
 
 export function MembersSection({
@@ -280,12 +483,20 @@ export function MembersSection({
   callerRole,
 }: MembersSectionProps) {
   const [removingId, setRemovingId] = useState<string | null>(null)
-  // isAdmin gates invite, remove AND the per-member capability grid — all
-  // three map to `roleManage` routes. isManager is strictly wider (also
-  // true for MANAGER) and only used for the muted copy below; the
-  // role-change control itself is gated inside MemberRoleControl.
+  // isAdmin gates invite, remove AND the per-member capabilities — all three
+  // map to `roleManage` routes. isManager is strictly wider (also true for
+  // MANAGER) and only used for the muted copy below; the role-change control
+  // itself is gated inside MemberRoleControl.
   const isAdmin = isAdminTier(callerRole)
   const isManager = isManagerTier(callerRole)
+  const capsEnabled = isAdmin && Boolean(currentUserId) && members.length > 0
+
+  // One round-trip for the whole roster, whether or not any row is expanded:
+  // the collapsed pips need it too, and 500 rows must not mean 500 requests.
+  const { data: capsByUser, isLoading: capsLoading } = useMemberCapabilities(
+    workspaceId,
+    capsEnabled,
+  )
 
   async function handleRemove(memberId: string) {
     setRemovingId(memberId)
@@ -294,6 +505,7 @@ export function MembersSection({
         `/api/v1/workspaces/${workspaceId}/members/${memberId}?workspace_id=${workspaceId}`,
         { method: "DELETE" },
       )
+      // apiFetch resolves on 4xx/5xx — only a network failure rejects.
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         const msg = typeof body?.error === "string" ? body.error : "Failed to remove member"
@@ -311,104 +523,49 @@ export function MembersSection({
 
   return (
     <div className="space-y-5">
-      {/* ── Members ── */}
+      {/* ── Members ──
+          One row per person. The roster used to be this card plus a second
+          "Per-member capabilities" table listing the same people again;
+          answering "what can this person do?" meant reading both and
+          reconciling them (#1517). The grid folded into the row. */}
       <SettingsCard
         title="Members"
-        description={`${members.length} member${members.length === 1 ? "" : "s"} in this workspace`}
+        description={
+          isAdmin
+            ? `${members.length} member${members.length === 1 ? "" : "s"} — the dots summarise each person's capabilities; expand a row to change them`
+            : `${members.length} member${members.length === 1 ? "" : "s"} in this workspace`
+        }
         actions={
           <>
             <RoleLegend />
+            {isAdmin && currentUserId && (
+              <BulkPresetAction
+                members={members}
+                workspaceId={workspaceId}
+                currentUserId={currentUserId}
+                capsByUser={capsByUser}
+              />
+            )}
             {isAdmin && <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} />}
           </>
         }
       >
-        {members.map((member, idx) => {
-          const isSelf = currentUserId === member.user.id
-          const isOwner = member.role === "OWNER"
-          const isLast = idx === members.length - 1
-          return (
-            <div
-              key={member.id}
-              className={cn(
-                "flex items-center justify-between gap-4 px-4 py-2.5",
-                !isLast && "border-b border-border/40",
-              )}
-            >
-              {/* Left: avatar + name + email */}
-              <div className="flex items-center gap-2.5 min-w-0">
-                <UserAvatar
-                  name={member.user.full_name}
-                  email={member.user.email}
-                  src={member.user.avatar_url}
-                  className="h-7 w-7"
-                  textClassName="text-[10px]"
-                />
-                <div className="min-w-0">
-                  <div className="text-xs text-foreground truncate">
-                    {personLabel(member.user.full_name, member.user.email)}
-                  </div>
-                  {(member.user.full_name ?? "").trim() && (
-                    <div className="text-[10px] text-muted-foreground/80 font-mono truncate mt-0.5">
-                      {member.user.email}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right: role control + joined + remove */}
-              <div className="flex items-center gap-2.5 shrink-0">
-                <MemberRoleControl
-                  member={member}
-                  workspaceId={workspaceId}
-                  callerRole={callerRole}
-                  isSelf={isSelf}
-                  onRefresh={onRefresh}
-                />
-                <span className="text-[10px] text-muted-foreground font-mono tabular-nums w-[52px] text-right">
-                  {relativeTime(member.created_at)}
-                </span>
-                <div className="w-6 flex justify-center">
-                  {isAdmin && !isOwner && !isSelf ? (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          disabled={removingId === member.id}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          <span className="sr-only">Remove member</span>
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle className="text-sm">Remove member</AlertDialogTitle>
-                          <AlertDialogDescription className="text-xs">
-                            Are you sure you want to remove{" "}
-                            <span className="font-medium text-foreground">
-                              {personLabel(member.user.full_name, member.user.email)}
-                            </span>{" "}
-                            from this workspace? This action cannot be undone.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            onClick={() => handleRemove(member.id)}
-                          >
-                            Remove
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          )
-        })}
+        {members.map((member, idx) => (
+          <MemberRow
+            key={member.id}
+            member={member}
+            workspaceId={workspaceId}
+            currentUserId={currentUserId}
+            callerRole={callerRole}
+            isAdmin={isAdmin}
+            granted={capsByUser?.[member.user.id] ?? []}
+            capsLoading={capsLoading}
+            onRefresh={onRefresh}
+            onRemove={handleRemove}
+            removing={removingId === member.id}
+            isLast={idx === members.length - 1}
+          />
+        ))}
       </SettingsCard>
 
       {/* The roster above stays visible to everyone; only the mutating
@@ -420,31 +577,6 @@ export function MembersSection({
             ? "Only admins can invite or remove members."
             : "Only managers and admins can make changes here."}
         </p>
-      )}
-
-      {/* ── Per-member capabilities ──
-          Deliberately NOT behind a disclosure. Progressive disclosure is for
-          reference material; this is live state whose checkboxes apply
-          immediately. Hiding it meant "who can do what here?" — the question
-          this screen exists to answer — cost an extra click. */}
-      {isAdmin && currentUserId && (
-        <div>
-          <div className="flex items-baseline gap-2 mb-2.5">
-            <span className="text-body font-medium text-foreground/80 leading-none">
-              Per-member capabilities
-            </span>
-            <span className="text-[10px] text-muted-foreground leading-none">
-              grant individual high-value actions without promoting role
-            </span>
-          </div>
-          <div className="rounded-xl border border-border/60 bg-card p-3">
-            <CapabilityGrid
-                members={members}
-                workspaceId={workspaceId}
-                currentUserId={currentUserId}
-              />
-          </div>
-        </div>
       )}
     </div>
   )
