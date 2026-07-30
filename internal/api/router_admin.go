@@ -111,7 +111,10 @@ func (r *Router) registerAdminRoutes() {
 	// sweeps. They bill per token where the judge does not, so this is where the
 	// cost decision gets made — including pointing them all at the local judge.
 	keeperAux := NewAdminKeeperAuxHandler(r.keeperAuxSettings, r.keeperSettings, r.Journal(), r.logger).
-		WithProbe(keeperJudge.ProbeModel)
+		WithProbe(keeperJudge.ProbeModel).
+		// Which vault key each evaluator spends (#1554), validated against the
+		// caller's own workspace before it is stored.
+		WithCredentials(newAuxCredentialCheck(r.db))
 	r.authedAdmin("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
 	r.authedMut("PUT", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Put)
 	r.authedMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Reset)

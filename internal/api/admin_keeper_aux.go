@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -30,11 +31,24 @@ type AdminKeeperAuxHandler struct {
 	// judge handler so the rate limit, the budget comparison and the stage
 	// vocabulary have exactly one implementation. nil → the probe route 503s.
 	probe func(w http.ResponseWriter, r *http.Request, provider, model string)
+	// creds validates, at write time, that a chosen credential is usable AND
+	// belongs to the caller's own workspace (#1554). nil → the credential field
+	// 503s rather than being stored unchecked: keeper_aux_settings is
+	// instance-global while the vault is workspace-scoped, so this check is the
+	// only thing standing between one workspace's admin and another's key.
+	creds func(ctx context.Context, workspaceID, credentialID string) error
 }
 
 // WithProbe wires the shared judge probe. See AdminKeeperAuxHandler.probe.
 func (h *AdminKeeperAuxHandler) WithProbe(fn func(http.ResponseWriter, *http.Request, string, string)) *AdminKeeperAuxHandler {
 	h.probe = fn
+	return h
+}
+
+// WithCredentials wires the write-time credential check. See
+// AdminKeeperAuxHandler.creds.
+func (h *AdminKeeperAuxHandler) WithCredentials(fn func(context.Context, string, string) error) *AdminKeeperAuxHandler {
+	h.creds = fn
 	return h
 }
 
@@ -57,6 +71,12 @@ type keeperAuxSlotResponse struct {
 	Provider  keeperConfigField[string] `json:"provider"`
 	Model     keeperConfigField[string] `json:"model"`
 	TimeoutMS keeperConfigField[int64]  `json:"timeout_ms"`
+	// CredentialID is the vault API_KEY this slot spends (#1554). Empty means the
+	// provider reads its key from the server process environment, which is what
+	// every slot did before the field existed. Editable only when the server has
+	// a credential check wired — a picker that cannot be validated is a picker
+	// that would let one workspace bind another's key.
+	CredentialID keeperConfigField[string] `json:"credential_id"`
 
 	Overridden bool   `json:"overridden"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
@@ -79,14 +99,17 @@ type keeperAuxResponse struct {
 	AnyOverridden bool `json:"any_overridden"`
 }
 
-func auxSlotPayload(eff keepercfg.AuxEffective) keeperAuxSlotResponse {
+func auxSlotPayload(eff keepercfg.AuxEffective, credsEditable bool) keeperAuxSlotResponse {
 	return keeperAuxSlotResponse{
-		Slot:       eff.Slot,
-		Label:      eff.Label,
-		AppliesAt:  eff.AppliesAt,
-		Provider:   keeperConfigField[string]{Value: eff.Provider.Value, Source: string(eff.Provider.Source), Editable: true},
-		Model:      keeperConfigField[string]{Value: eff.Model.Value, Source: string(eff.Model.Source), Editable: true},
-		TimeoutMS:  keeperConfigField[int64]{Value: eff.TimeoutMS.Value, Source: string(eff.TimeoutMS.Source), Editable: true},
+		Slot:      eff.Slot,
+		Label:     eff.Label,
+		AppliesAt: eff.AppliesAt,
+		Provider:  keeperConfigField[string]{Value: eff.Provider.Value, Source: string(eff.Provider.Source), Editable: true},
+		Model:     keeperConfigField[string]{Value: eff.Model.Value, Source: string(eff.Model.Source), Editable: true},
+		TimeoutMS: keeperConfigField[int64]{Value: eff.TimeoutMS.Value, Source: string(eff.TimeoutMS.Source), Editable: true},
+		CredentialID: keeperConfigField[string]{
+			Value: eff.CredentialID.Value, Source: string(eff.CredentialID.Source), Editable: credsEditable,
+		},
 		Overridden: eff.Overridden,
 		UpdatedAt:  eff.UpdatedAt,
 		UpdatedBy:  eff.UpdatedBy,
@@ -100,7 +123,7 @@ func (h *AdminKeeperAuxHandler) payload() keeperAuxResponse {
 		Providers: keepercfg.AuxProviders(),
 	}
 	for _, e := range effs {
-		out.Slots = append(out.Slots, auxSlotPayload(e))
+		out.Slots = append(out.Slots, auxSlotPayload(e, h.creds != nil))
 		if e.Overridden {
 			out.AnyOverridden = true
 		}
@@ -144,6 +167,9 @@ type keeperAuxSlotRequest struct {
 	Provider  *string `json:"provider"`
 	Model     *string `json:"model"`
 	TimeoutMS *int64  `json:"timeout_ms"`
+	// CredentialID pins the vault API_KEY this slot spends; "" clears it and
+	// returns the slot to the server's own environment key.
+	CredentialID *string `json:"credential_id"`
 }
 
 // Put applies a partial update to one slot.
@@ -164,14 +190,35 @@ func (h *AdminKeeperAuxHandler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A chosen credential is validated BEFORE it is stored, against the caller's
+	// own workspace. Storing first and finding out at build time would degrade
+	// silently — the failure mode this feature exists to remove — and would let an
+	// admin bind a key their workspace does not hold.
+	if body.CredentialID != nil {
+		id := strings.TrimSpace(*body.CredentialID)
+		if h.creds == nil && id != "" {
+			replyError(w, http.StatusServiceUnavailable,
+				"This server cannot verify credentials, so an evaluator key cannot be pinned here")
+			return
+		}
+		if h.creds != nil {
+			if err := h.creds(r.Context(), WorkspaceIDFromContext(r.Context()), id); err != nil {
+				replyError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		body.CredentialID = &id
+	}
+
 	actor := ""
 	if u := UserFromContext(r.Context()); u != nil {
 		actor = u.ID
 	}
 	eff, err := h.store.Apply(r.Context(), slot, keepercfg.AuxPatch{
-		Provider:  body.Provider,
-		Model:     body.Model,
-		TimeoutMS: body.TimeoutMS,
+		Provider:     body.Provider,
+		Model:        body.Model,
+		TimeoutMS:    body.TimeoutMS,
+		CredentialID: body.CredentialID,
 	}, actor)
 	if err != nil {
 		if keepercfg.IsValidation(err) {
@@ -266,8 +313,12 @@ func (h *AdminKeeperAuxHandler) audit(r *http.Request, actor, summary string, ef
 			"provider":   e.Provider.Value,
 			"model":      e.Model.Value,
 			"timeout_ms": e.TimeoutMS.Value,
-			"source":     string(e.Model.Source),
-			"overridden": e.Overridden,
+			// The credential ID, not its value: which subscription an evaluator
+			// spends is exactly what an incident review needs, and the id is a
+			// reference rather than a secret.
+			"credential_id": e.CredentialID.Value,
+			"source":        string(e.Model.Source),
+			"overridden":    e.Overridden,
 		}
 	}
 	h.logger.Warn("keeper evaluator models changed via admin API",

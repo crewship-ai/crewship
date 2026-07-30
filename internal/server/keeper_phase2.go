@@ -77,13 +77,16 @@ type phase2Evaluators struct {
 // wirings, which then behave exactly as before): each evaluator's gov-model
 // resolver is wrapped so an override applies at request time instead of
 // requiring these evaluators to be rebuilt — see keeper_aux_live.go. judge
-// resolves the current instance judge endpoint for a slot pointed at "ollama".
+// resolves the current instance judge endpoint for a slot pointed at "ollama",
+// and creds resolves the vault key a hosted slot spends (#1554; nil = the
+// pre-existing process-env key).
 func buildPhase2Evaluators(
 	aux llm.AuxiliaryModels,
 	govModel gatekeeper.GovModelResolver,
 	dfltOllamaURL, dfltOllamaModel string,
 	auxSettings *keepercfg.AuxStore,
 	judge func() (string, string),
+	creds keepercfg.AuxCredentialLookup,
 	j journal.Emitter,
 	db *sql.DB,
 	logger *slog.Logger,
@@ -91,7 +94,7 @@ func buildPhase2Evaluators(
 	out := phase2Evaluators{}
 
 	live := func(slot llm.Slot) gatekeeper.GovModelResolver {
-		return newAuxLiveResolver(string(slot), auxSettings, govModel, judge, j, db, logger)
+		return newAuxLiveResolver(string(slot), auxSettings, govModel, judge, creds, j, db, logger)
 	}
 
 	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, live(llm.SlotCurator), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {

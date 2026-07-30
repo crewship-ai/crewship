@@ -1,0 +1,45 @@
+-- Which vault KEY an evaluator slot spends (#1554).
+--
+-- keeper_aux_settings already let an operator pick a provider and a model per
+-- slot. It did not let them pick the credential, so every hosted evaluator
+-- dialled with whatever ANTHROPIC_API_KEY / OPENAI_API_KEY the server process
+-- booted with. On an instance holding several keys — the normal case on an
+-- orchestration platform, where each key carries its own subscription limit —
+-- the console could say WHICH model a sweep runs and not WHICH key it bills.
+--
+-- That is an asymmetry with the judge, not just a missing field: the workspace
+-- governance model has pointed at a vault credential since v142
+-- (keeper_governance_settings.gov_model_credential_id). The five evaluator rows
+-- are the PAID half of the Keeper stack and had no such column.
+--
+-- It also hid a failure. An instance whose ANTHROPIC_API_KEY is stale has five
+-- dead background evaluators and says nothing: the slots render as configured,
+-- because they ARE configured — the key they inherit is the broken part. Naming
+-- the key makes the thing that can be wrong a thing the console can show.
+--
+-- NULL / empty is today's behaviour: the provider builder sources its key from
+-- the process environment exactly as before, so an instance nobody has touched
+-- is unchanged by this column.
+--
+-- REVOKE-SAFETY. ON DELETE SET NULL is here for the same narrow reason it is on
+-- gov_model_credential_id, and with the same caveat: a REVOKE in this product is
+-- a SOFT delete (credentials.deleted_at set, status flipped), so the FK does NOT
+-- fire and the id stays in this row. The FK only nulls the column on a hard
+-- delete of the credential row. The runtime half is what actually protects the
+-- evaluators: the resolver looks the credential up per build, requires
+-- status = 'ACTIVE' AND deleted_at IS NULL, and a credential that no longer
+-- matches degrades the slot back to the process-env key with a WARN instead of
+-- dialling with a stale id. See internal/keeper/governance/govmodel.go
+-- (ResolveGovModel §4.4) — this mirrors it.
+--
+-- Instance-global, like the rest of the table. The vault is workspace-scoped, so
+-- the two halves meet in the middle: the ADMIN API validates on WRITE that the
+-- chosen credential lives in the caller's own workspace (no cross-tenant
+-- binding), and resolution at BUILD time looks the row up by id alone, so one
+-- instance-global setting resolves the same way for every workspace's
+-- evaluations instead of working in one and silently degrading in the rest.
+-- (The wider "instance-global setting over a workspace-scoped vault" question is
+-- #1558's; this is the narrowest answer that is not a silent failure.)
+
+ALTER TABLE keeper_aux_settings
+    ADD COLUMN credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL;

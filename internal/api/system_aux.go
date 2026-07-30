@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
@@ -37,6 +39,16 @@ type AuxStatusHandler struct {
 	keeper *config.KeeperConfig
 	logger *slog.Logger
 
+	// auxStore/creds answer "which vault key does this slot spend" (#1554).
+	// Without them this surface builds every provider from the process
+	// environment, so a slot deliberately pinned to a vault key on a box with no
+	// ANTHROPIC_API_KEY rendered "ANTHROPIC_API_KEY env not set" against an
+	// evaluator that works — the same class of lie, pointing the other way, as
+	// the one the credential field exists to remove. Both nil (test/older
+	// wirings) keeps the exact previous behaviour.
+	auxStore *keepercfg.AuxStore
+	creds    keepercfg.AuxCredentialLookup
+
 	// Probe results are cached so several open admin consoles do not turn a
 	// status read into a poll loop against the model server.
 	probeMu  sync.Mutex
@@ -50,6 +62,14 @@ type AuxStatusHandler struct {
 // status surface can't drift from what the resolvers actually use.
 func NewAuxStatusHandler(cfg llm.AuxiliaryModels, keeper *config.KeeperConfig, logger *slog.Logger) *AuxStatusHandler {
 	return &AuxStatusHandler{cfg: cfg, keeper: keeper, logger: logger}
+}
+
+// WithCredentials makes the buildability check honour each slot's pinned vault
+// key. See AuxStatusHandler.auxStore.
+func (h *AuxStatusHandler) WithCredentials(store *keepercfg.AuxStore, lookup keepercfg.AuxCredentialLookup) *AuxStatusHandler {
+	h.auxStore = store
+	h.creds = lookup
+	return h
 }
 
 // auxSlotRow is the wire shape returned per slot. TimeoutMS is the
@@ -155,7 +175,7 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		// Construction only — no network. This is the exact check the server
 		// makes at boot before falling back to the local judge, so a row that
 		// reports unhealthy here is a row that fell back there.
-		if _, berr := llm.BuildAuxProvider(resolved); berr != nil {
+		if _, berr := h.buildForStatus(r.Context(), string(s.slot), resolved); berr != nil {
 			row.Healthy = false
 			row.Detail = berr.Error()
 		}
@@ -164,6 +184,38 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+// buildForStatus is the row's buildability check, with the slot's pinned vault
+// key in force (#1554).
+//
+// It resolves the key the same way the running evaluator does, so the card
+// agrees with what actually happens:
+//
+//   - no key pinned (or no vault wired) → the historical env-key build.
+//   - a key that resolves → build from it, so a slot deliberately moved off the
+//     process environment stops being reported as a missing env var.
+//   - a key that does NOT resolve → retry the env build, because that is exactly
+//     what the runtime degrade does. If the env key covers it the slot really is
+//     running and the row is honest to say so; if it does not, the reason
+//     reported is the CREDENTIAL's, not "ANTHROPIC_API_KEY env not set", which
+//     would send the operator to fix a variable they deliberately stopped using.
+//
+// No network either way: the same construction-only contract as before.
+func (h *AuxStatusHandler) buildForStatus(ctx context.Context, slot string, m llm.AuxModel) (llm.Provider, error) {
+	credID := h.auxStore.CredentialFor(slot)
+	if h.creds == nil || credID == "" || m.Provider == keepercfg.ProviderOllama {
+		return llm.BuildAuxProvider(m)
+	}
+	key, err := h.creds(ctx, credID)
+	if err != nil {
+		p, envErr := llm.BuildAuxProvider(m)
+		if envErr == nil {
+			return p, nil
+		}
+		return nil, fmt.Errorf("the key pinned to this evaluator is unusable (%v), and there is no server key to fall back on", err)
+	}
+	return llm.BuildAuxProviderWithKey(m, "", key)
 }
 
 // accessJudgeRow describes the credential-access gatekeeper, which server.go

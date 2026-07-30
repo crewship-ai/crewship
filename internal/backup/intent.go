@@ -111,6 +111,21 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"journal_entries_archived": IntentExcludeOperational,
 	"journal_embeddings":       IntentExcludeOperational,
 	"agent_runs_archive":       IntentExcludeOperational,
+	// keeper_aux_settings is instance-global evaluator wiring — one row per
+	// Keeper slot for the whole server, no workspace_id. It sat in
+	// NonBackedUpTables until #1554 gave the table a credential_id FK into
+	// `credentials`; because credentials ARE workspace-scoped, the reverse-FK
+	// walk in DiscoverScopedTables now reaches this table from `workspaces` and
+	// requires an entry here (the deny-list only covers tables discovery never
+	// finds, and the two maps are pinned disjoint).
+	//
+	// The classification is unchanged by that move: still "do not export".
+	// Carrying these rows across a restore would repoint the TARGET instance's
+	// evaluators at the source's models and at a credential id that means
+	// nothing in the target's vault — and these five slots are the PAID half of
+	// the Keeper stack, so the damage is a silent spend against the wrong
+	// subscription rather than a cosmetic drift.
+	"keeper_aux_settings": IntentExcludeOperational,
 
 	// === Runtime state (regenerates on restore) =====================
 	"user_sessions":   IntentExcludeRuntime,
@@ -287,11 +302,14 @@ var NonBackedUpTables = map[string]struct{}{
 
 	// ── Instance-global configuration & operational state. Local to THIS
 	//    instance; carrying it across a restore would clobber the target's own.
-	"app_settings":             {},
-	"instance_config":          {},
-	"rate_limit_overrides":     {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
-	"keeper_runtime_settings":  {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
-	"keeper_aux_settings":      {}, // instance-global evaluator wiring, same reason — and these slots are the PAID models
+	"app_settings":            {},
+	"instance_config":         {},
+	"rate_limit_overrides":    {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
+	"keeper_runtime_settings": {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
+	// keeper_aux_settings moved to BackupTableIntent (IntentExcludeOperational)
+	// in #1554: its new credential_id FK makes the reverse-FK walk discover it,
+	// and a discovered table must be classified there, not here. Same verdict —
+	// instance-global evaluator wiring, never exported.
 	"feature_flags":            {}, // global flag defaults (per-ws feature_flag_overrides IS backed up)
 	"scheduler_leader":         {}, // leader-election lease
 	"pipeline_run_idempotency": {}, // dispatch dedup keys, runtime

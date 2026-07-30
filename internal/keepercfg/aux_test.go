@@ -19,17 +19,20 @@ import (
 // evaluators are built from, and clearing one returns the slot to the inherited
 // value rather than to a guess.
 
-// auxTableDDL mirrors internal/database/migrations/20260730111147_keeper_aux_settings.sql.
+// auxTableDDL mirrors internal/database/migrations/20260730111147_keeper_aux_settings.sql
+// plus 20260730205811_keeper_aux_credential.sql.
 const auxTableDDL = `
 CREATE TABLE users (id TEXT PRIMARY KEY);
+CREATE TABLE credentials (id TEXT PRIMARY KEY);
 CREATE TABLE keeper_aux_settings (
-    slot       TEXT PRIMARY KEY,
-    provider   TEXT NOT NULL DEFAULT '',
-    model      TEXT NOT NULL DEFAULT '',
-    timeout_ms INTEGER CHECK (timeout_ms IS NULL OR timeout_ms > 0),
-    updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    slot          TEXT PRIMARY KEY,
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    timeout_ms    INTEGER CHECK (timeout_ms IS NULL OR timeout_ms > 0),
+    updated_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL
 );`
 
 func newAuxStore(t *testing.T) *AuxStore {

@@ -965,9 +965,53 @@ crewship keeper aux test behavior                          # call that evaluator
 crewship keeper aux set behavior --model claude-opus-5      # a sharper watchdog
 crewship keeper aux set curator --provider ollama --model qwen2.5:7b
 crewship keeper aux set memory_health --timeout 45s
+crewship keeper aux set behavior --credential prod-anthropic  # and on WHICH key
 crewship keeper aux reset behavior                          # back to the server's configuration
 crewship keeper aux reset --all
 ```
+
+### Which key an evaluator spends
+
+A hosted evaluator bills a key. By default that is the one in the server's own
+environment — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` — which is fine until you
+hold more than one. Several Anthropic keys is the normal case on an orchestration
+platform: each carries its own subscription limit, and "which model does this
+sweep run" was answerable while "whose subscription does it charge" was not.
+
+Each evaluator row on the Judge models card now has a **key** picker, and the CLI
+takes the credential **by name**:
+
+```bash
+crewship keeper aux set behavior --credential prod-anthropic
+crewship keeper aux set behavior --credential ""   # back to the server's own key
+crewship keeper aux list                            # prints the pinned key per slot
+```
+
+Empty is the default and is exactly the previous behaviour, so an instance nobody
+has touched is unchanged.
+
+<Note>
+  Only an **API_KEY** credential can back an evaluator. The endpoint a hosted
+  evaluator dials is the vendor's, not one you configure, so an `ENDPOINT_URL`
+  credential has nothing to do here — it is refused with that reason instead of
+  saved into a slot that fails at first use. An `ollama` slot ignores the field
+  entirely: it dials the instance judge's endpoint and needs no key.
+</Note>
+
+<Note>
+  The evaluator settings are **instance-wide** while the vault is per-workspace.
+  The two meet in the middle: you can only pin a key your own workspace holds
+  (the write is refused otherwise), and once pinned it is resolved the same way
+  for every workspace's evaluations rather than working in one and silently
+  degrading in the rest.
+</Note>
+
+**If the key is revoked**, the slot degrades to the server's own environment key
+and logs a warning — it does not keep dialling with the revoked id, and it does
+not take the evaluator down. A revoke in Crewship is a soft delete, so the
+reference survives in the row on purpose: re-issuing the credential under the
+same id puts the slot straight back. `crewship keeper aux test <slot>` is the
+fastest way to find out which state you are in.
 
 ### Running governance for free
 
@@ -1004,8 +1048,9 @@ A slot with no override inherits `CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}`,
 or the shipped default (`anthropic` / `claude-haiku-4-5`) when that is unset.
 `aux list` labels each field `set here`, `from server config`, or `shipped
 default`, so you can tell whether a reset would change anything. An override that
-cannot be built — `anthropic` with no `ANTHROPIC_API_KEY` — leaves that slot on
-its previous provider and logs the reason, rather than taking the evaluator down.
+cannot be built — `anthropic` with neither a pinned key nor an
+`ANTHROPIC_API_KEY` — leaves that slot on its previous provider and logs the
+reason, rather than taking the evaluator down.
 
 ### Testing an evaluator without waiting for a sweep
 
