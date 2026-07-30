@@ -517,11 +517,10 @@ jobs:
   #   cmd/crewship            325.3s     1102.8s      3.39x   ok, 8% headroom
   #   internal/api            519.4s     >1200s        n/a    KILLED at -timeout
   #
-  # internal/api hit the 20m per-binary timeout. At the 3.4-3.8x band those
-  # two rows establish, it needs 29-33 minutes; at a deliberately pessimistic
-  # 4x, 35. There is no tuning lever hiding in it either — only 502 of its
-  # 5263 tests call t.Parallel(), so it is ~90% serial and a wider -parallel
-  # buys nothing on a 4-vCPU runner. It is simply a very large package.
+  # internal/api hit the 20m per-binary timeout. There is no tuning lever
+  # hiding in it either — only 502 of its 5263 tests call t.Parallel(), so it
+  # is ~90% serial and a wider -parallel buys nothing on a 4-vCPU runner. It
+  # is simply a very large package.
   #
   # So it gets its own job (go-race-api) with its own budget, running in
   # parallel with this one — the same shape #1548 used to split go-api out of
@@ -530,10 +529,30 @@ jobs:
   # other 106. The two lists below are deliberately separate files so that
   # distinction is structural rather than a comment someone can skim past.
   #
-  # cmd/crewship stays here, but -timeout goes 20m → 30m. At 1102.8s it
+  # ── What the split actually measured (job 30577789512) ──
+  #
+  # The 3.4-3.8x extrapolation said internal/api would need 29-33 minutes.
+  # It needs 17.6. The ratio was calibrated on packages measured while four
+  # test binaries shared 4 vCPUs; alone in its own job, internal/api gets all
+  # four, and CONTENTION, not raw runner speed, turns out to be most of what
+  # the multiplier was capturing. Splitting it out sped up everything else
+  # for the same reason:
+  #
+  #   package             before split   after split
+  #   internal/api            >1200s       1056.5s   (was killed at 20m)
+  #   cmd/crewship            1102.8s       940.9s
+  #   internal/backup          726.9s       565.5s
+  #   internal/server          217.7s       180.0s
+  #   go-race wall clock       24m38s       17m53s   (+19m41s in parallel)
+  #
+  # Treat that as a warning about the ratio, not a licence to pack more back
+  # in: it is a property of how many binaries are competing, so it moves
+  # every time the package set does.
+  #
+  # cmd/crewship stays here, but -timeout goes 20m → 25m. At 1102.8s it had
   # cleared the old cap by 97 seconds, which is not headroom, it is luck; the
-  # next PR that adds tests to that package would have turned this gate red
-  # for a reason that has nothing to do with a race.
+  # next PR that added tests to that package would have turned this gate red
+  # for a reason that has nothing to do with a race. 25m is ~1.6x its 940.9s.
   #
   # ── The 1 exclusion ──
   #
@@ -590,15 +609,15 @@ jobs:
     #
     # Same invariant as the `go` job: cap MUST exceed overhead + the
     # `go test -timeout` below, so Go's goroutine-dumping panic wins the
-    # race against GitHub's opaque cancel. -timeout is 30m; overhead is
+    # race against GitHub's opaque cancel. -timeout is 25m; overhead is
     # ~2.5 min of checkout + setup-go + race-compiling the dependency graph
     # (measured on job 90981983760: script start 19:33:23, first binary
-    # under way by ~19:36). 40m clears 30m + overhead with room.
+    # under way by ~19:36). 35m clears 25m + overhead with room.
     #
-    # Slowest binary here is cmd/crewship at 1102.8s on the runner, so the
-    # job itself lands around 20-22 min; the 30m -timeout is headroom for
-    # that one package, not an expectation.
-    timeout-minutes: 40
+    # Whole job measures 17m53s with the shard split out, slowest binary
+    # cmd/crewship at 940.9s. The 25m -timeout is ~1.6x headroom for that
+    # one package, not an expectation.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -648,27 +667,30 @@ jobs:
             exit 1
           fi
           echo "Race-testing $n of $total packages (1 excluded, 1 sharded to go-race-api; see job comment)."
-          # -timeout 30m per test binary. Was 20m, which cmd/crewship
-          # cleared by only 97 seconds (1102.8s on the runner) — that is
-          # luck, not headroom. Every other package here finishes in well
-          # under two minutes, so this is generosity for one package, not a
-          # general bump. It only ever bounds a hang, and a hang here should
-          # produce Go's goroutine dump rather than a GitHub cancel.
+          # -timeout 25m per test binary. Was 20m, which cmd/crewship
+          # cleared by only 97 seconds (1102.8s then, 940.9s now that the
+          # shard is not competing for the same 4 vCPUs) — that was luck,
+          # not headroom. Everything here except cmd/crewship and
+          # internal/backup finishes in under two minutes, so this is
+          # generosity for two packages, not a general bump. It only ever
+          # bounds a hang, and a hang here should produce Go's goroutine
+          # dump rather than a GitHub cancel.
           # shellcheck disable=SC2086
-          go test $pkgs -race -count=1 -timeout 30m
+          go test $pkgs -race -count=1 -timeout 25m
 
   # ── Go race: the internal/api shard ──
   #
   # Same gate, one package, its own budget. internal/api is ~90% serial
   # (502 t.Parallel calls across 5263 tests) and simply large: 519.4s local
-  # under -race, which at the 3.4-3.8x local→runner ratio the rest of the
-  # suite exhibits means 29-33 minutes here. Sharing go-race's per-binary
-  # timeout meant either that job carried a 45m cap for everyone or
-  # internal/api died at 20m — it died at 20m (job 90981983760).
+  # under -race, 1056.5s here. Sharing go-race's per-binary timeout meant
+  # either that job carried a 30m+ cap for all 107 packages or internal/api
+  # died at 20m — it died at 20m (job 90981983760).
   #
   # Splitting it out is the shape #1548 used for go-api, and it costs
   # nothing in wall clock: this runs in parallel with go-race, so the PR's
-  # critical path is max(the two), not the sum.
+  # critical path is max(the two), not the sum — and in practice it went
+  # DOWN, because the four binaries left in go-race stopped competing with
+  # this one for the same 4 vCPUs (see the table in go-race's comment).
   #
   # This job existing is what lets internal/api stay OFF the deny-list.
   # If it is ever deleted, internal/api loses race coverage silently —
@@ -678,17 +700,16 @@ jobs:
     needs: [merge-conflict-markers]
     name: Go Race (internal/api)
     runs-on: ubuntu-latest
-    # BLOCKING, same as go-race. Same cap invariant too: 55m > 45m
+    # BLOCKING, same as go-race. Same cap invariant too: 40m > 30m
     # -timeout + ~3 min overhead, so Go's goroutine dump wins over
     # GitHub's opaque cancel.
     #
-    # 45m against a 29-33m projection is deliberately loose for a first
-    # run — the projection is an extrapolation, and this package running
-    # alone on all 4 vCPUs instead of contending with three other binaries
-    # may well beat it. Tighten both numbers once a green run reports the
-    # real one, the same way #1552 tightened -timeout off a real number
-    # rather than a guess.
-    timeout-minutes: 55
+    # Measured, not extrapolated: 1056.5s (17.6m) for the binary, 19m41s
+    # for the job, on this job's first green run. 30m is ~1.7x that — the
+    # same ratio go-race gives cmd/crewship, and enough that ordinary
+    # growth in the repo's largest package does not turn this red for a
+    # reason unrelated to any race.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -712,7 +733,7 @@ jobs:
             echo "::error::$pkg does not resolve against 'go list ./...'. This shard is testing nothing — reconcile it and go-race's race-shard.txt together."
             exit 1
           fi
-          go test "$pkg" -race -count=1 -timeout 45m
+          go test "$pkg" -race -count=1 -timeout 30m
 
   # ── Go: cross-platform test matrix ──
   #
