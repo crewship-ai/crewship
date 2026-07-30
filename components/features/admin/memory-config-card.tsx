@@ -112,7 +112,12 @@ export function MemoryConfigCard({ workspaceId }: {
     } finally {
       setSaving(false)
     }
-  }, [parsed, valid])
+    // workspaceId is read in the request URL above, so it belongs here. This
+    // card stays mounted across a workspace switch, and two workspaces sitting
+    // on the same default value leave `days` (and therefore parsed/valid)
+    // unchanged — so without this the callback keeps the PREVIOUS workspace
+    // closed over and Save writes to the wrong one, with a success toast.
+  }, [parsed, valid, workspaceId])
 
   return (
     <SettingsCard

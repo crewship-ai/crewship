@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
+import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo,
@@ -175,9 +175,16 @@ export default function AdminPage() {
   // Lifted out of the effect so an action on a tab (creating a workspace,
   // adding a member) can ask for the same refresh the page does on mount —
   // a list that does not catch up after a create reads as a failed create.
+  // A generation counter rather than a captured flag: lifting this into a
+  // useCallback left a `const` that nothing could ever flip, so every
+  // staleness check below was unreachable and a slow response for the previous
+  // workspace could overwrite the current one's screen. A ref survives the
+  // callback being recreated, which a local no longer does.
+  const fetchGeneration = useRef(0)
   const fetchData = useCallback(async () => {
     if (!workspaceId || !isAdmin) return
-    const cancelled = false
+    const generation = ++fetchGeneration.current
+    const isStale = () => generation !== fetchGeneration.current
     {
       setLoading(true)
       try {
@@ -195,7 +202,7 @@ export default function AdminPage() {
           apiFetch(`/api/v1/admin/security-posture?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/journal/verify?workspace_id=${workspaceId}`),
         ])
-        if (cancelled) return
+        if (isStale()) return
 
         // Surface a failure on any of the three core tables instead of
         // rendering them empty — the whole point of the honesty pass (#868).
@@ -225,9 +232,9 @@ export default function AdminPage() {
         if (postureRes.ok) setPosture(await postureRes.json())
         if (journalRes.ok) setJournal(await journalRes.json())
       } catch (e) {
-        if (!cancelled) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
+        if (!isStale()) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!isStale()) setLoading(false)
       }
     }
   }, [workspaceId, isAdmin])

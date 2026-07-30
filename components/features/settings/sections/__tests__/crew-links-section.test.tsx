@@ -131,7 +131,9 @@ describe("Crew links — per-crew view", () => {
     })
   })
 
-  it("unlinks a pair by deleting the stored row", async () => {
+  it("unlinks a pair by deleting the stored row, once confirmed", async () => {
+    const confirmSpy = vi.fn(() => true)
+    vi.stubGlobal("confirm", confirmSpy)
     render(<ConnectionsSection workspaceId="ws1" />)
     await screen.findByRole("button", { name: "Engineering" })
 
@@ -142,6 +144,25 @@ describe("Crew links — per-crew view", () => {
     const [url, init] = mutations()[0]
     expect(String(url)).toContain("/api/v1/crew-connections/cc-eng-ops")
     expect((init as RequestInit).method).toBe("DELETE")
+    expect(confirmSpy).toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  // Removing a link severs every dispatch, message and shared-file path
+  // between two crews, and the dropdown makes it one arrow-key press away.
+  // Declining the question has to mean nothing happened.
+  it("does not unlink when the confirmation is declined", async () => {
+    const confirmSpy = vi.fn(() => false)
+    vi.stubGlobal("confirm", confirmSpy)
+    render(<ConnectionsSection workspaceId="ws1" />)
+    await screen.findByRole("button", { name: "Engineering" })
+
+    openSelect(pairControl("Ops"))
+    fireEvent.click(await screen.findByRole("option", { name: /not linked/i }))
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+    expect(mutations()).toHaveLength(0)
+    vi.unstubAllGlobals()
   })
 
   // The stored row has an orientation. Asking for "sends work" when the row

@@ -214,8 +214,18 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     }
     try {
       // "not linked" is the one state with no row, so it is a plain delete.
+      //
+      // It keeps its confirmation. Narrowing or re-pointing a link is
+      // recoverable by picking another option; removing it severs every
+      // dispatch, message and shared-file path between two crews, and the old
+      // screen asked before doing that. Turning the control into a dropdown
+      // made it a single arrow-key press, which is a reason to keep the
+      // question, not to drop it.
       if (next === "none") {
         if (!existing) return
+        if (!window.confirm(`Unlink ${selected.name} and ${other.name}? Agents will no longer be able to hand work between them.`)) {
+          return
+        }
         const res = await apiFetch(
           `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}`,
           { method: "DELETE" },

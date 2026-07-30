@@ -448,7 +448,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           <button
             key={s.value}
             type="button"
-            onClick={() => { setSource(s.value); setPage(1); setExpandedId(null) }}
+            onClick={() => { setSource(s.value); setCategory("all"); setPage(1); setExpandedId(null) }}
             aria-pressed={source === s.value}
             title={s.hint}
             className={cn(
@@ -465,6 +465,11 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
 
       {/* ── Filter bar ── */}
       <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-border/40">
+        {/* entity_type is the workspace trail's vocabulary, and fetchLogs only
+            sends it for that source. Rendering the buttons on the other trails
+            left them pressable and pressed while filtering nothing — the
+            selector said "Credentials" over an unfiltered Keeper log. */}
+        {source === "workspace" && (
         <div
           className="inline-flex items-center gap-0.5 p-0.5 rounded-md bg-muted/40 border border-border/60"
           role="group"
@@ -489,6 +494,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
             </Button>
           ))}
         </div>
+        )}
         <Select value={dateRange} onValueChange={handleDateRangeChange}>
           <SelectTrigger aria-label="Date range" className="w-[120px] h-7 text-xs">
             <SelectValue />
