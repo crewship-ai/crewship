@@ -275,8 +275,14 @@ func TestMissionCloneRunE(t *testing.T) {
 		defer s.Close()
 		covSetupCLI(t, s)
 		covMissionStubs(s)
+		// {id, status} — exactly what MissionHandler.Clone writes
+		// (internal/api/task_state.go). This stub used to add a `title`
+		// the handler has never sent, which is the same defect as the
+		// `group`/`label_group` stub in cmd_issue_workflow_cov_test.go:
+		// a stub that mirrors the CLI's belief instead of the handler
+		// keeps the drift invisible (#1576).
 		s.OnPost(clonePath, clitest.JSONResponse(201, map[string]string{
-			"id": "m-clone", "title": "Copy of mission", "status": "PLANNING",
+			"id": "m-clone", "status": "PLANNING",
 		}))
 		if err := missionCloneCmd.Flags().Set("title", "Copy of mission"); err != nil {
 			t.Fatal(err)

@@ -292,7 +292,12 @@ func TestMissionClone_ReportsWhatTheServerActuallySent(t *testing.T) {
 	}
 }
 
-func TestMissionClone_EchoesTheRequestedTitleOnly(t *testing.T) {
+// --title is sent, and the handler discards it: MissionHandler.Clone never
+// reads the request body and titles the clone "<original> (copy)". So the
+// success line must not claim the requested title either — echoing a string
+// back because we happen to know it locally still tells the user the clone is
+// named that, and it is not. Same failure family, one layer up.
+func TestMissionClone_DoesNotClaimTheRequestedTitle(t *testing.T) {
 	stub := covSetupCli5(t)
 	stub.OnGet("/api/v1/missions", clitest.JSONResponse(200, []map[string]any{
 		{"id": "msn_original_0001", "crew_id": "crew_0001"},
@@ -310,9 +315,24 @@ func TestMissionClone_EchoesTheRequestedTitleOnly(t *testing.T) {
 			t.Fatalf("mission clone --title: %v", err)
 		}
 	})
-	// We know this string because we sent it, not because it came back —
-	// and the message says so.
-	if !strings.Contains(out, "Retry of the triage run") {
-		t.Errorf("requested title not echoed.\n%s", out)
+	if strings.Contains(out, "Retry of the triage run") {
+		t.Errorf("output claims the clone carries the requested title, which the handler ignored.\n%s", out)
+	}
+	// It must still report the two facts the server did send.
+	if !strings.Contains(out, "msn_clone_0003") || !strings.Contains(out, "PLANNING") {
+		t.Errorf("clone id/status missing from output.\n%s", out)
+	}
+	// The request still carries the title — dropping it silently would be a
+	// second wrong, and the server may honour it one day.
+	calls := stub.CallsFor("POST", "/api/v1/crews/crew_0001/missions/msn_original_0001/clone")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 clone POST, got %d", len(calls))
+	}
+	var reqBody map[string]any
+	if err := clitest.DecodeJSONBody(calls[0].Body, &reqBody); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	if reqBody["title"] != "Retry of the triage run" {
+		t.Errorf("clone request dropped the title: %v", reqBody)
 	}
 }

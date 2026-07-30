@@ -31,8 +31,32 @@ import (
 //
 // Both invariants walk real source: the CLI's call sites via go/ast, the
 // router's table via the registration helpers in internal/api. Nothing is
-// hand-maintained, so a new command or a new route is covered the moment it
-// is written.
+// hand-maintained, so a new route is covered the moment it is written.
+//
+// KNOWN COVERAGE LIMIT — read this before trusting a green run. A call site
+// is only examined when its path argument renders to a literal starting with
+// `/api/`. Two very common shapes therefore render as an opaque `{}`, fail
+// that prefix filter, and are dropped SILENTLY rather than reported:
+//
+//	// (a) path assembled into a local first — ~56 sites
+//	path := "/api/v1/inbox?" + q.Encode()
+//	resp, err := client.Get(path)
+//
+//	// (b) routed through the wrappers in api_helpers.go — ~95 sites,
+//	//     including 55 getJSON calls. These are plain functions, not
+//	//     methods on *cli.Client, and take the path as their SECOND
+//	//     argument, so neither the AST shape nor the arg index matches.
+//	getJSON(client, "/api/v1/agents/"+slug, &out)
+//
+// About 452 of ~600 call sites are covered. That is a floor, not a ceiling:
+// what is covered is checked correctly, and the `len(sites) < 100` guard
+// below stops the extractor from silently going vacuous. But do not read a
+// pass as "every command reaches a real route" — it is not, yet. Closing (a)
+// needs one-level local resolution in renderPathExpr; closing (b) needs a
+// second call-shape table keyed on the wrapper name with Arg: 1. Doing so
+// immediately surfaces live drift (`cmd_resume.go` calls GET /api/v1/chats
+// and GET /api/v1/chats/{id}, neither of which the router registers), which
+// is why it is a follow-up rather than part of this change.
 
 // ─── shared plumbing ─────────────────────────────────────────────────────
 
