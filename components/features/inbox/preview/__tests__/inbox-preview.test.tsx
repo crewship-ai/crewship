@@ -1,9 +1,21 @@
-import { describe, it, expect, afterEach } from "vitest"
+import { describe, it, expect, afterEach, vi } from "vitest"
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react"
+
+// The page reads the caller's role from the workspace rather than a picker, so
+// the hook has to exist here. Every test passes initialRole explicitly, which
+// takes precedence — this mock only keeps the hook from reaching the network.
+vi.mock("@/hooks/use-workspace", () => ({
+  useWorkspace: () => ({ workspaceId: "ws_preview", role: "OWNER" }),
+}))
 
 import { InboxPreview } from "../inbox-preview"
 
 afterEach(cleanup)
+
+/** Facets live behind the Filter button now, so a facet test has to open it. */
+function openFilter() {
+  fireEvent.click(screen.getByRole("button", { name: /Filter/ }))
+}
 
 // The preview exists to show the 1.0 design against real component tokens, so
 // these tests pin the two behaviours the wireframe actually argues for: that
@@ -45,13 +57,14 @@ describe("InboxPreview — RBAC", () => {
 describe("InboxPreview — buckets and facets", () => {
   it("counts the decision bucket from blocking rows", () => {
     render(<InboxPreview initialRole="OWNER" />)
+    openFilter()
 
-    const chip = screen.getByTestId("facet-bucket-decisions")
-    expect(chip).toHaveTextContent("4")
+    expect(screen.getByTestId("facet-bucket-decisions")).toHaveTextContent("4")
   })
 
   it("narrows the list when a bucket is picked", () => {
     render(<InboxPreview initialRole="OWNER" />)
+    openFilter()
 
     fireEvent.click(screen.getByTestId("facet-bucket-replies"))
 
@@ -72,10 +85,11 @@ describe("InboxPreview — buckets and facets", () => {
 describe("InboxPreview — the rail swaps its facets with the view", () => {
   it("replaces the bucket section with archive facets when Archiv is picked", () => {
     render(<InboxPreview initialRole="OWNER" />)
-
+    openFilter()
     expect(screen.getByTestId("facet-bucket-decisions")).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("view-archived"))
+    openFilter()
 
     // Live buckets have no meaning over resolved rows, so they leave; the
     // questions the archive answers take their place.
@@ -93,6 +107,7 @@ describe("InboxPreview — the rail swaps its facets with the view", () => {
 
     expect(screen.getByText("casey requested GH_TOKEN for crewship-ai/web")).toBeInTheDocument()
 
+    openFilter()
     fireEvent.click(screen.getByTestId("outcome-approved"))
 
     expect(screen.getByText("casey requested GH_TOKEN for crewship-ai/docs")).toBeInTheDocument()

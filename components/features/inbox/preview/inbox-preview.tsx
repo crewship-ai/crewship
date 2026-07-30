@@ -3,17 +3,18 @@
 import { useMemo, useState } from "react"
 
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
 import { InboxExplorer } from "./inbox-explorer"
-import { ArchiveTable, SplitLayout, StreamLayout, TableLayout } from "./layouts"
+import { ArchiveTable, SplitLayout } from "./layouts"
 import { bucketOf, subjectOf } from "./logic"
 import { OUTCOME_LABEL } from "./logic"
 import {
   PREVIEW_ARCHIVE, PREVIEW_ITEMS, PREVIEW_USER_ID, isVisibleTo,
   type PreviewInboxItem, type WorkspaceRole,
 } from "./mock-data"
-import type { Bucket, InboxView, LayoutStyle, SubjectFacet } from "./types"
+import type { Bucket, InboxView, SubjectFacet } from "./types"
 
 // =============================================================================
 // /inbox/preview — the 1.0 inbox design rendered against the real kit.
@@ -23,29 +24,33 @@ import type { Bucket, InboxView, LayoutStyle, SubjectFacet } from "./types"
 // — the title is its first section, the count is on every row of it, and the
 // role switch is a control, not chrome.
 //
-// Three content arrangements are switchable at the bottom of the rail so the
-// choice can be made by looking. Rows come from a fixture set copied out of the
-// Go producers, so the page can be opened on any instance and still show the
-// same screen, and the role switch applies the SAME two rules the server does:
-// inboxVisibilityClause for what is listed, canRole for what is decidable.
+// The role is whoever is signed in — the server decides it and the page reads
+// it. There is no picker: a person does not choose to be a VIEWER, and a
+// control that pretends they might is a control that lies about the product.
+// The two rules the server enforces still shape the page, they just take their
+// input from the session: inboxVisibilityClause for what is listed, canRole
+// for what is decidable.
+//
+// Rows come from a fixture set copied out of the Go producers, so the page can
+// be opened on any instance and still show the same screen.
 // =============================================================================
 
 export interface InboxPreviewProps {
+  /** Tests only — production takes the role from the signed-in session. */
   initialRole?: WorkspaceRole
   initialView?: InboxView
-  initialLayout?: LayoutStyle
   initialSelectedId?: string
 }
 
 export function InboxPreview({
-  initialRole = "OWNER",
+  initialRole,
   initialView = "inbox",
-  initialLayout = "split",
   initialSelectedId,
 }: InboxPreviewProps) {
-  const [role, setRole] = useState<WorkspaceRole>(initialRole)
+  const { role: sessionRole } = useWorkspace()
+  const role = (initialRole ?? sessionRole ?? null) as WorkspaceRole | null
+
   const [view, setView] = useState<InboxView>(initialView)
-  const [layout, setLayout] = useState<LayoutStyle>(initialLayout)
   const [bucket, setBucket] = useState<Bucket | null>(null)
   const [subject, setSubject] = useState<string | null>(null)
   const [search, setSearch] = useState("")
@@ -58,12 +63,16 @@ export function InboxPreview({
   const archive = view === "archived"
   const source = archive ? PREVIEW_ARCHIVE : PREVIEW_ITEMS
 
+  // Until the workspace resolves the caller's role there is no honest answer to
+  // "what may this person see", so the page waits rather than guessing high and
+  // showing rows it might have to take back.
   const visible = useMemo(
-    () => source.filter((it) => isVisibleTo(it, role, PREVIEW_USER_ID)),
+    () => (role ? source.filter((it) => isVisibleTo(it, role, PREVIEW_USER_ID)) : []),
     [source, role],
   )
 
   const viewCounts = useMemo<Record<InboxView, number>>(() => {
+    if (!role) return { inbox: 0, unread: 0, archived: 0 }
     const live = PREVIEW_ITEMS.filter((it) => isVisibleTo(it, role, PREVIEW_USER_ID))
     return {
       inbox: live.length,
@@ -123,13 +132,6 @@ export function InboxPreview({
     })
   }, [visible, view, archive, bucket, outcome, actor, subject, search])
 
-  const layoutProps = {
-    rows,
-    total: visible.length,
-    role,
-    selectedId,
-    onSelect: setSelectedId,
-  }
 
   return (
     <div className="flex h-[calc(100vh-3rem)] overflow-hidden">
@@ -169,10 +171,6 @@ export function InboxPreview({
             actorCounts={actorCounts}
             period={period}
             onPeriodChange={setPeriod}
-            role={role}
-            onRoleChange={setRole}
-            layout={layout}
-            onLayoutChange={setLayout}
             search={search}
             onSearchChange={setSearch}
             onToggleCollapse={() => setRailCollapsed(true)}
@@ -180,14 +178,20 @@ export function InboxPreview({
         )}
       </aside>
 
-      {archive ? (
+      {!role ? (
+        <p className="type-row flex-1 px-6 py-10 text-center text-muted-foreground-soft">
+          Resolving your workspace role…
+        </p>
+      ) : archive ? (
         <ArchiveTable rows={rows} total={visible.length} />
-      ) : layout === "table" ? (
-        <TableLayout {...layoutProps} />
-      ) : layout === "stream" ? (
-        <StreamLayout {...layoutProps} />
       ) : (
-        <SplitLayout {...layoutProps} />
+        <SplitLayout
+          rows={rows}
+          total={visible.length}
+          role={role}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
       )}
     </div>
   )
