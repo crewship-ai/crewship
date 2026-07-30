@@ -46,13 +46,11 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up current status (and current assignee_type — needed as a
-	// fallback below when a PATCH sets assignee_id but not assignee_type).
+	// Look up current status.
 	var missionID, currentStatus string
-	var currentAssigneeType sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status, assignee_type FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &currentStatus, &currentAssigneeType)
+		`SELECT id, status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &currentStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -73,22 +71,20 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Priority != nil {
 		ub.Set("priority", *req.Priority)
 	}
-	if req.AssigneeType != nil {
-		ub.Set("assignee_type", *req.AssigneeType)
-	}
-	if req.AssigneeID != nil {
-		if *req.AssigneeID != "" {
-			// Workspace check matches the same gate in Create/parent_issue_id —
-			// pre-fix a caller could PATCH assignee_id to point at another
-			// workspace's user or agent, and the read path would then hand
-			// that foreign identity's display name to anyone viewing the
-			// issue. assignee_type may arrive in the same request or be left
-			// unset (client only changing the assignee, not the type); fall
-			// back to the row's current assignee_type in that case.
-			assigneeType := currentAssigneeType.String
-			if req.AssigneeType != nil {
-				assigneeType = *req.AssigneeType
-			}
+	// assigneeTypeSet tracks whether the assignee_id branch below already
+	// queued an assignee_type SET clause, so the plain pass-through further
+	// down doesn't also queue one — updateBuilder.Set has no dedup, and two
+	// "assignee_type = ?" clauses in one UPDATE would leave the outcome to
+	// SQL's last-write-wins ordering instead of this handler's own logic.
+	assigneeTypeSet := false
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		// Workspace check matches the same gate in Create/parent_issue_id —
+		// pre-fix a caller could PATCH assignee_id to point at another
+		// workspace's user or agent, and the read path would then hand that
+		// foreign identity's display name to anyone viewing the issue.
+		var assigneeType string
+		if req.AssigneeType != nil {
+			assigneeType = *req.AssigneeType
 			if assigneeType != "user" && assigneeType != "agent" {
 				writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
 				return
@@ -102,7 +98,35 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
 				return
 			}
+		} else {
+			// assignee_type omitted: resolve it instead of trusting the row's
+			// stale type. Trusting the stale type was a false-reject bug —
+			// reassigning an issue currently held by a user to an agent in
+			// the SAME workspace, sending only assignee_id, looked the new
+			// agent id up in workspace_members (the user table) under the
+			// stale "user" type, found no match, and rejected a valid
+			// same-workspace target with a misleading "does not exist"
+			// (found by assignee_write_invariant_test.go's review, not by a
+			// test — there wasn't one covering this branch).
+			var ok bool
+			var rErr error
+			assigneeType, ok, rErr = resolveAssigneeType(r.Context(), h.db, *req.AssigneeID, wsID)
+			if rErr != nil {
+				internalError(w, r, h.logger, "resolve assignee_type", rErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+				return
+			}
 		}
+		ub.Set("assignee_type", assigneeType)
+		assigneeTypeSet = true
+	}
+	if req.AssigneeType != nil && !assigneeTypeSet {
+		ub.Set("assignee_type", *req.AssigneeType)
+	}
+	if req.AssigneeID != nil {
 		ub.Set("assignee_id", *req.AssigneeID)
 	}
 	if req.DueDate != nil {

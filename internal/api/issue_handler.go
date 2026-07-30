@@ -79,6 +79,43 @@ func validateAssigneeWorkspace(ctx context.Context, q rowQuerier, assigneeType, 
 	return exists > 0, nil
 }
 
+// resolveAssigneeType determines assignee_type for an assignee_id when a
+// PATCH sets assignee_id but leaves assignee_type unset — a client
+// reassigning without changing the assignee's KIND (user→user, agent→agent)
+// shouldn't have to resend the type on every request. It tries "user" then
+// "agent" against wsID and returns the one that matches.
+//
+// This exists because three call sites (issue_handler_update.go,
+// issue_handler_bulk.go, recurring_issue_handler.go's Update) used to fall
+// back to the ROW'S CURRENT assignee_type instead of resolving it — safe
+// when the reassignment keeps the same kind, but a false-reject when it
+// doesn't: reassigning an issue currently held by a user to an agent in the
+// SAME workspace, sending only assignee_id, looked "agent" up in
+// workspace_members (the user table) under the stale "user" type, found no
+// match, and rejected a perfectly valid same-workspace target with the
+// misleading "assignee_id does not exist in this workspace". It fails safe
+// (never a cross-workspace leak, just a wrong-table miss) but is still a
+// false reject of a legitimate request.
+//
+// assignee_id spaces don't overlap between the two tables (CUIDs are
+// effectively unique across both), so at most one of the two checks can
+// match; returns ("", false, nil) — not an error — when assigneeID belongs
+// to neither table in wsID, matching validateAssigneeWorkspace's "not found"
+// signal so callers can report the same "does not exist" 400.
+func resolveAssigneeType(ctx context.Context, q rowQuerier, assigneeID, wsID string) (assigneeType string, ok bool, err error) {
+	if ok, err := validateAssigneeWorkspace(ctx, q, "user", assigneeID, wsID); err != nil {
+		return "", false, err
+	} else if ok {
+		return "user", true, nil
+	}
+	if ok, err := validateAssigneeWorkspace(ctx, q, "agent", assigneeID, wsID); err != nil {
+		return "", false, err
+	} else if ok {
+		return "agent", true, nil
+	}
+	return "", false, nil
+}
+
 // SetStoragePath wires the host storage root for the F4.5
 // mission-outcomes-to-crew-memory hook. See MissionHandler.SetStoragePath
 // for the same contract — handlers share the storage path because both
