@@ -450,7 +450,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// write failure here also rolls back the DB insert, matching the
 	// "docker phase failure leaves no half-restored rows" guarantee.
 	memoryBlobsRestore := func(ctx context.Context) error {
-		n, err := RestoreMemoryBlobs(ctx, opts.BlobRoot, extracted)
+		// expectedShas is sourced from the DB dump this restore is
+		// landing — NOT from the archive being walked inside
+		// RestoreMemoryBlobs. See memoryVersionShaSet's doc comment: this
+		// is what lets the write destination for every blob be derived
+		// from a trusted value instead of an arbitrary tar entry name.
+		expectedShas := memoryVersionShaSet(extracted.DBDump)
+		n, err := RestoreMemoryBlobs(ctx, opts.BlobRoot, extracted, expectedShas)
 		if err != nil {
 			return fmt.Errorf("backup: restore memory blobs: %w", err)
 		}

@@ -89,6 +89,31 @@ func distinctMemoryVersionShas(dump *DBDump) []string {
 	return out
 }
 
+// memoryVersionShaSet returns the sha256 values referenced by dump's
+// memory_versions rows as a map from sha to itself, so a caller can
+// look up an archive-derived candidate string against values that
+// originated from the DB dump — never from the archive entry being
+// restored. RestoreMemoryBlobs uses this to derive its write
+// destination from "what memory_versions rows are actually being
+// restored" instead of from an arbitrary tar entry name: an entry
+// whose name is not in this set is skipped, full stop, regardless of
+// whether it happens to look like a valid sha256.
+//
+// Invalid-shaped values (defence against a tampered dump.json) are
+// excluded here rather than left for the caller to filter, so the
+// returned set is unconditionally safe to feed into filepath.Join.
+func memoryVersionShaSet(dump *DBDump) map[string]string {
+	shas := distinctMemoryVersionShas(dump)
+	out := make(map[string]string, len(shas))
+	for _, sha := range shas {
+		if !validSha256Hex(sha) {
+			continue
+		}
+		out[sha] = sha
+	}
+	return out
+}
+
 // validSha256Hex reports whether s looks like a lowercase-hex sha256
 // digest (64 chars) — the format RecordVersion produces via
 // hex.EncodeToString(sha256.Sum256(...)). Guards every place a sha
@@ -211,11 +236,30 @@ func rewriteMemoryVersionsPayloadRef(dump *DBDump, blobRoot string) {
 // a crew container) so it writes directly to the local filesystem
 // instead of going through DockerOps.
 //
+// expectedShas gates which archive entries actually get written: it
+// must come from memoryVersionShaSet(extracted.DBDump) — the sha256
+// values referenced by the memory_versions rows THIS restore is
+// landing, sourced from the DB dump, not from the tar archive being
+// walked below. An archive entry whose name isn't a key in this map is
+// skipped, whatever it's named. This is deliberate on two levels:
+//
+//  1. Security: the write destination for every blob this function
+//     ever touches is built from expectedShas' VALUE (DB-derived), never
+//     from the tar header name (archive-derived) — hdr.Name is used only
+//     as a lookup key. A tampered bundle cannot smuggle an extra file
+//     into blobRoot via a crafted entry name, validly-shaped sha or not,
+//     because nothing about the write path is ever constructed from
+//     that name.
+//  2. Correctness: restore only ever repopulates blobs some row being
+//     restored actually points at — an orphan blob nobody references
+//     doesn't get resurrected just because it happened to ride the
+//     bundle.
+//
 // Idempotent per blob: content-addressed means the same sha always
 // carries the same bytes, so an existing file at the destination is
 // left untouched rather than rewritten — safe to re-run restore
 // against a target that already has some blobs.
-func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *ExtractedPayload) (int, error) {
+func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *ExtractedPayload, expectedShas map[string]string) (int, error) {
 	if payload == nil || blobRoot == "" {
 		return 0, nil
 	}
@@ -246,26 +290,33 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		// hdr.Name is "<sha[:2]>/<sha>" — repackIntoSink already strips
-		// the memory-blobs/ prefix at extract time.
-		sha := path.Base(hdr.Name)
-		if !validSha256Hex(sha) {
-			// Defence in depth; ExtractPayload's ".." / symlink checks
-			// already reject a tampered entry name before this point.
+		// hdr.Name ("<sha[:2]>/<sha>") is archive-controlled input. It is
+		// used ONLY as a lookup key into expectedShas below — never to
+		// build a filesystem path directly. The actual destination comes
+		// from the map's VALUE, which is sourced from the DB dump (see
+		// memoryVersionShaSet), not from this tar entry.
+		archiveSha := path.Base(hdr.Name)
+		canonicalSha, known := expectedShas[archiveSha]
+		if !known {
+			// Not referenced by any memory_versions row this restore is
+			// landing — drain and skip. Covers both a merely-unreferenced
+			// (but validly named) blob and a malformed/traversal-shaped
+			// entry name in one check, since expectedShas only ever
+			// contains values memoryVersionShaSet already validated.
 			if _, err := io.Copy(io.Discard, tr); err != nil {
-				return written, fmt.Errorf("backup: drain rejected memory blob entry %q: %w", hdr.Name, err)
+				return written, fmt.Errorf("backup: drain unreferenced memory blob entry %q: %w", hdr.Name, err)
 			}
 			continue
 		}
-		dst := filepath.Join(blobRoot, sha[:2], sha)
+		dst := filepath.Join(blobRoot, canonicalSha[:2], canonicalSha)
 		if _, statErr := os.Stat(dst); statErr == nil {
 			if _, err := io.Copy(io.Discard, tr); err != nil {
-				return written, fmt.Errorf("backup: drain existing memory blob %s: %w", sha, err)
+				return written, fmt.Errorf("backup: drain existing memory blob %s: %w", canonicalSha, err)
 			}
 			continue
 		}
 		if err := restoreMemoryBlobFile(dst, tr); err != nil {
-			return written, fmt.Errorf("backup: restore memory blob %s: %w", sha, err)
+			return written, fmt.Errorf("backup: restore memory blob %s: %w", canonicalSha, err)
 		}
 		written++
 	}
