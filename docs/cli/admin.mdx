@@ -456,6 +456,14 @@ Beyond the raw state, the report derives warnings that name the **consequence**:
 - `signup_open` (**medium**, **high** in production) — anyone who can reach the instance can create an account.
 - `private_endpoints_ceiling_open` (**info**) — crews that also opt in can reach RFC1918/loopback. Link-local and cloud-metadata stay blocked regardless.
 
+The keys above read the **environment**. The rest read what the instance has actually *become*, which is the half no config file can tell you:
+
+- `encryption_key_generated` (**medium**) — Crewship bootstrapped the master key itself instead of an operator supplying one, so the key lives with the data it protects.
+- `privileged_credentials_enabled` (**high**) — at least one workspace has `allow_privileged_credentials` on, which removes the fail-closed boundary between privileged crews and stored secrets.
+- `private_endpoints_in_use` (**medium**) — crews have opted into private-endpoint egress *and* the instance ceiling is open, so the reach is live rather than merely permitted.
+- `seed_account_default_password` (**high**) — the `crewship seed` demo account still authenticates with the password printed in these docs.
+- `no_backup_recorded` (**medium**) — no `backup.*` action appears in the audit trail. Reported only when that query succeeds: a failed probe is unknown state, not a missing backup.
+
 The same data backs the **Admin → Runtime → Security posture** card in the dashboard.
 
 

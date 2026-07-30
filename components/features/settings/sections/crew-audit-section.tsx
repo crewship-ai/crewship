@@ -5,14 +5,12 @@ import { Shield, ChevronRight, ChevronLeft, Search, RefreshCw, Download } from "
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
-import { StatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
-import { formatDateTime } from "@/lib/time"
 import { personLabel } from "@/components/ui/user-avatar"
 import { SettingsCard, SettingsEmpty } from "../shared"
 
@@ -63,26 +61,6 @@ function getDateFrom(range: string): string | undefined {
     case "30d": return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
     default: return undefined
   }
-}
-
-// Map audit action verbs → canonical StatusBadge keys so colors are routed
-// through STATUS_BADGE_CLASSES instead of hardcoded shade classes.
-const actionStatusKeys: Record<string, string> = {
-  created: "COMPLETED",
-  started: "COMPLETED",
-  completed: "COMPLETED",
-  updated: "IN_PROGRESS",
-  rotated: "BLOCKED",
-  invited: "IN_PROGRESS",
-  deleted: "FAILED",
-  failed: "FAILED",
-}
-
-function getActionStatusKey(action: string): string {
-  for (const [key, statusKey] of Object.entries(actionStatusKeys)) {
-    if (action.includes(key)) return statusKey
-  }
-  return "PENDING"
 }
 
 const PAGE_SIZE = 50
@@ -323,12 +301,17 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       const totalToFetch = Math.min(total, EXPORT_MAX_ROWS)
       const pageCount = Math.ceil(totalToFetch / PAGE_SIZE)
       for (let p = 1; p <= pageCount; p++) {
+        // Same params as fetchLogs, for the same reason: an export that
+        // drops `source` hands back the workspace trail under a filename
+        // that says Keeper, and entity_type is the workspace trail's
+        // vocabulary alone.
         const params = new URLSearchParams({
           workspace_id: workspaceId,
           page: String(p),
           limit: String(PAGE_SIZE),
+          source,
         })
-        if (category !== "all") params.set("entity_type", category)
+        if (source === "workspace" && category !== "all") params.set("entity_type", category)
         const dateFrom = getDateFrom(dateRange)
         if (dateFrom) params.set("date_from", dateFrom)
         const res = await apiFetch(`/api/v1/audit?${params}`, { signal: controller.signal })
@@ -367,7 +350,9 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
+      // Name the trail: four sources land in the same downloads folder,
+      // and "audit-log-<date>" for all of them is not a filename.
+      a.download = `audit-log-${source}-${new Date().toISOString().slice(0, 10)}.csv`
       a.click()
       URL.revokeObjectURL(url)
       if (total > EXPORT_MAX_ROWS) {
@@ -384,7 +369,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       exportAbortRef.current = null
       setExporting(false)
     }
-  }, [workspaceId, pagination, category, dateRange])
+  }, [workspaceId, pagination, source, category, dateRange])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
 

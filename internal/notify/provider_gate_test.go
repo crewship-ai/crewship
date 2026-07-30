@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -108,5 +109,54 @@ func TestDispatcher_NoGateDeliversAsBefore(t *testing.T) {
 	}
 	if len(prov.sent) != 1 {
 		t.Fatalf("sent %d, want 1", len(prov.sent))
+	}
+}
+
+// The gate used to be opt-in: NewDispatcher left providerGate nil and each
+// call site was expected to remember SetProviderGate. Two of the four
+// production sites in cmd_start.go did not, so a provider switched off
+// stopped the channel-created path and kept delivering on the router and
+// scheduled-run paths. Whether the kill switch worked depended on which code
+// sent the message. Installing the gate in the constructor is what makes that
+// unreachable rather than merely unlikely.
+func TestNewDispatcher_InstallsTheProviderGateByDefault(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO app_settings (key, value) VALUES (?, 'false')`,
+		ProviderSettingKey("discord")); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := &gateProvider{}
+	defer SetProviderForTesting(prov)()
+
+	// No SetProviderGate call anywhere — this is the whole point.
+	d := NewDispatcher(nil, nil, nil, db)
+
+	err = d.deliverShoutrrr(context.Background(), gateChannel(),
+		NotificationEvent{Type: "run.failed", WorkspaceID: "ws-1"})
+	if err == nil {
+		t.Fatal("a dispatcher built the ordinary way delivered through a disabled provider")
+	}
+	if !strings.Contains(err.Error(), "disabled") {
+		t.Errorf("error does not say why it refused: %v", err)
+	}
+	if len(prov.sent) != 0 {
+		t.Fatalf("the message went out anyway: %v", prov.sent)
+	}
+
+	// A provider with no row is enabled — upgrades must not go silent.
+	if err := d.deliverShoutrrr(context.Background(),
+		Channel{ID: "ch-2", WorkspaceID: "ws-1", Type: ChannelShoutrrr,
+			Provider: "slack", Secret: "slack://token@id", Enabled: true},
+		NotificationEvent{Type: "run.failed", WorkspaceID: "ws-1"}); err != nil {
+		t.Fatalf("a provider with no toggle row was refused: %v", err)
 	}
 }

@@ -32,7 +32,11 @@ const (
 // directly, credential_audit reaches it through the credential, and the
 // keeper ledger's column is nullable, so a row with no workspace is excluded
 // rather than shown to everyone.
-type auditSourceQuery struct{ list, count string }
+// The list/count strings stop at the workspace predicate so the date
+// range can be appended as a bound clause before ORDER BY; `ts` names
+// the qualified timestamp column that range applies to, which differs
+// per source (created_at, occurred_at, recorded_at).
+type auditSourceQuery struct{ list, count, ts, order string }
 
 var auditSourceQueries = map[string]auditSourceQuery{
 	auditSourceWorkspace: {}, // handled by the main List path
@@ -44,9 +48,10 @@ var auditSourceQueries = map[string]auditSourceQuery{
 			       NULL, NULL,
 			       (SELECT name FROM crews WHERE id = COALESCE(c.from_crew_id, c.to_crew_id))
 			FROM crew_audit_log c
-			WHERE c.workspace_id = ?
-			ORDER BY c.created_at DESC LIMIT ? OFFSET ?`,
-		count: `SELECT COUNT(*) FROM crew_audit_log WHERE workspace_id = ?`,
+			WHERE c.workspace_id = ?`,
+		count: `SELECT COUNT(*) FROM crew_audit_log c WHERE c.workspace_id = ?`,
+		ts:    "c.created_at",
+		order: "ORDER BY c.created_at DESC",
 	},
 
 	auditSourceCredentials: {
@@ -57,12 +62,13 @@ var auditSourceQueries = map[string]auditSourceQuery{
 			       cr.name
 			FROM credential_audit ca
 			JOIN credentials cr ON cr.id = ca.credential_id
-			WHERE cr.workspace_id = ?
-			ORDER BY ca.occurred_at DESC LIMIT ? OFFSET ?`,
+			WHERE cr.workspace_id = ?`,
 		count: `
 			SELECT COUNT(*) FROM credential_audit ca
 			JOIN credentials cr ON cr.id = ca.credential_id
 			WHERE cr.workspace_id = ?`,
+		ts:    "ca.occurred_at",
+		order: "ORDER BY ca.occurred_at DESC",
 	},
 
 	auditSourceKeeper: {
@@ -72,9 +78,10 @@ var auditSourceQueries = map[string]auditSourceQuery{
 			       NULL, NULL,
 			       COALESCE(k.command, k.intent, k.request_type)
 			FROM keeper_request_events k
-			WHERE k.workspace_id = ?
-			ORDER BY k.recorded_at DESC LIMIT ? OFFSET ?`,
-		count: `SELECT COUNT(*) FROM keeper_request_events WHERE workspace_id = ?`,
+			WHERE k.workspace_id = ?`,
+		count: `SELECT COUNT(*) FROM keeper_request_events k WHERE k.workspace_id = ?`,
+		ts:    "k.recorded_at",
+		order: "ORDER BY k.recorded_at DESC",
 	},
 }
 
@@ -88,11 +95,34 @@ var auditSourceQueries = map[string]auditSourceQuery{
 // offering it. The date range and pagination, which mean the same thing
 // everywhere, do apply.
 func (h *AuditHandler) listAlternateSource(
-	w http.ResponseWriter, r *http.Request, source, workspaceID string, page, limit, offset int,
+	w http.ResponseWriter, r *http.Request, source, workspaceID string,
+	page, limit, offset int, dateFrom, dateTo string,
 ) {
 	q := auditSourceQueries[source]
 
-	rows, err := h.db.QueryContext(r.Context(), q.list, workspaceID, limit, offset)
+	listQuery, countQuery := q.list, q.count
+	args := []any{workspaceID}
+	countArgs := []any{workspaceID}
+	// Same semantics as the workspace stream: inclusive on both ends,
+	// compared as stored strings.
+	if dateFrom != "" {
+		clause := " AND " + q.ts + " >= ?"
+		listQuery += clause
+		countQuery += clause
+		args = append(args, dateFrom)
+		countArgs = append(countArgs, dateFrom)
+	}
+	if dateTo != "" {
+		clause := " AND " + q.ts + " <= ?"
+		listQuery += clause
+		countQuery += clause
+		args = append(args, dateTo)
+		countArgs = append(countArgs, dateTo)
+	}
+	listQuery += " " + q.order + " LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := h.db.QueryContext(r.Context(), listQuery, args...)
 	if err != nil {
 		replyInternalError(w, h.logger, "list audit source "+source, err)
 		return
@@ -116,7 +146,7 @@ func (h *AuditHandler) listAlternateSource(
 	}
 
 	var total int
-	if err := h.db.QueryRowContext(r.Context(), q.count, workspaceID).Scan(&total); err != nil {
+	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total); err != nil {
 		replyInternalError(w, h.logger, "count audit source "+source, err)
 		return
 	}

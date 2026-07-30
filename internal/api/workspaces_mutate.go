@@ -203,7 +203,8 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.RunRetentionDays != nil {
 		ub.Set("run_retention_days", *req.RunRetentionDays)
 	}
-	if !ub.Empty() {
+	persisted := !ub.Empty()
+	if persisted {
 		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 			replyInternalError(w, h.logger, "update workspace", err)
@@ -252,7 +253,14 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		meta["fields"] = changed
 		meta["allow_privileged_credentials"] = *req.AllowPrivilegedCredentials
 	}
-	auditFromRequest(r, h.db, "workspace.update", "WORKSPACE", workspaceID, meta)
+	// Only a PATCH that actually persisted something is an event. A `{}`
+	// body (or one carrying nothing but ignored fields) skips the update
+	// above, and recording it anyway fills the trail with settings changes
+	// that never happened — which is exactly the trail an operator later
+	// reads to find out when a setting moved.
+	if persisted {
+		auditFromRequest(r, h.db, "workspace.update", "WORKSPACE", workspaceID, meta)
+	}
 
 	writeJSON(w, http.StatusOK, ws)
 }

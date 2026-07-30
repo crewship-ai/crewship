@@ -119,7 +119,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
 
 	if source != auditSourceWorkspace {
-		h.listAlternateSource(w, r, source, workspaceID, page, limit, offset)
+		h.listAlternateSource(w, r, source, workspaceID, page, limit, offset, dateFrom, dateTo)
 		return
 	}
 

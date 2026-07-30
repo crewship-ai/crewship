@@ -77,13 +77,26 @@ func TestPostureState_SeedAccountStillUsesTheDocumentedPassword(t *testing.T) {
 }
 
 func TestPostureState_NoBackupEverTaken(t *testing.T) {
-	p := buildSecurityPosture(false, false, false, false, postureState{BackupsRecorded: 0})
+	p := buildSecurityPosture(false, false, false, false,
+		postureState{BackupsRecorded: 0, BackupsRecordedKnown: true})
 	if warningFor(p, "no_backup_recorded") == nil {
 		t.Fatal("an instance with no backup at all was not flagged")
 	}
 	if warningFor(buildSecurityPosture(false, false, false, false,
-		postureState{BackupsRecorded: 1}), "no_backup_recorded") != nil {
+		postureState{BackupsRecorded: 1, BackupsRecordedKnown: true}), "no_backup_recorded") != nil {
 		t.Error("flagged despite a backup having been taken")
+	}
+}
+
+// This is the one finding that fires on a zero, so a failed COUNT and a
+// never-backed-up instance look identical in the state struct. Reporting
+// "no backup has ever been recorded" because a query errored sends an
+// operator to fix a recovery story that may not be broken.
+func TestPostureState_FailedBackupProbeDoesNotInventAFinding(t *testing.T) {
+	p := buildSecurityPosture(false, false, false, false,
+		postureState{BackupsRecorded: 0, BackupsRecordedKnown: false})
+	if w := warningFor(p, "no_backup_recorded"); w != nil {
+		t.Errorf("a failed probe was reported as a finding: %+v", w)
 	}
 }
 
@@ -93,6 +106,7 @@ func TestPostureState_WarningsAreOrderedBySeverity(t *testing.T) {
 		EncryptionKeySource:        "generated",
 		SeedAccountDefaultPassword: true,
 		BackupsRecorded:            0,
+		BackupsRecordedKnown:       true,
 	})
 	rank := map[string]int{"high": 0, "medium": 1, "low": 2, "info": 3}
 	for i := 1; i < len(p.Warnings); i++ {

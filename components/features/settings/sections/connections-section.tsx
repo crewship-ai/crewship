@@ -195,6 +195,23 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     if (current === next) return
 
     setPendingPair(other.id)
+    // The re-point below is a delete followed by a create, and the create
+    // can fail: a link the user asked to re-point would silently become no
+    // link at all. Remember what was removed so every failure path — a
+    // rejected POST or a thrown request — can put it back.
+    let removed: Connection | null = null
+    const restoreRemoved = async () => {
+      if (!removed) return
+      await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from_crew_id: removed.from_crew_id,
+          to_crew_id: removed.to_crew_id,
+          direction: removed.direction,
+        }),
+      }).catch(() => {})
+    }
     try {
       // "not linked" is the one state with no row, so it is a plain delete.
       if (next === "none") {
@@ -223,12 +240,14 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         existing !== undefined &&
         direction === "unidirectional" &&
         (existing.direction === "bidirectional" || existing.from_crew_id !== from)
+
       if (needsReplace && existing) {
         const del = await apiFetch(
           `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}`,
           { method: "DELETE" },
         )
         if (!del.ok) { toast.error("Failed to change the link"); return }
+        removed = existing
       }
 
       const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
@@ -238,13 +257,18 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
       })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
+        await restoreRemoved()
         toast.error(body?.detail ?? body?.error ?? "Failed to change the link")
+        // The rendered state is now a guess either way — re-read it.
+        await fetchData()
         return
       }
       toast.success(`${selected.name} → ${other.name}: ${PAIR_LABELS[next].toLowerCase()}`)
       await fetchData()
     } catch {
+      await restoreRemoved()
       toast.error("Failed to change the link")
+      await fetchData()
     } finally {
       setPendingPair(null)
     }

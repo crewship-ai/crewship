@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -107,6 +108,82 @@ func TestAuditSources_KeeperStreamIsReadable(t *testing.T) {
 	}
 	if got.Data[0].Action != "DENY" {
 		t.Errorf("action = %q, want DENY", got.Data[0].Action)
+	}
+}
+
+// The date range is the one filter that means the same thing on every
+// trail, and the UI sends date_from on all of them. Dropping it made the
+// selector and the result disagree: the operator narrowed to a week and
+// got all history back, with no sign the range had been ignored.
+func TestAuditSources_HonourTheDateRange(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		seed   func(t *testing.T, db *sql.DB, wsID, userID, when string)
+	}{
+		{"crews", func(t *testing.T, db *sql.DB, wsID, userID, when string) {
+			crewA := seedCrewRow(t, db, "crew-dr-"+when[:4], wsID, "Engineering", "eng-"+when[:4])
+			if _, err := db.Exec(`
+				INSERT INTO crew_audit_log (id, workspace_id, action, from_crew_id, details, created_at)
+				VALUES (?, ?, 'message.sent', ?, '{}', ?)`,
+				generateCUID(), wsID, crewA, when); err != nil {
+				t.Fatalf("seed crew audit: %v", err)
+			}
+		}},
+		{"credentials", func(t *testing.T, db *sql.DB, wsID, userID, when string) {
+			credID := "cred-dr-" + when[:4]
+			if _, err := db.Exec(
+				`INSERT INTO credentials (id, workspace_id, name, encrypted_value, created_by) VALUES (?, ?, ?, 'x', ?)`,
+				credID, wsID, "GH_TOKEN_"+when[:4], userID); err != nil {
+				t.Fatalf("seed credential: %v", err)
+			}
+			if _, err := db.Exec(`
+				INSERT INTO credential_audit (id, credential_id, event_type, occurred_at)
+				VALUES (?, ?, 'revealed', ?)`, generateCUID(), credID, when); err != nil {
+				t.Fatalf("seed credential audit: %v", err)
+			}
+		}},
+		{"keeper", func(t *testing.T, db *sql.DB, wsID, userID, when string) {
+			if _, err := db.Exec(`
+				INSERT INTO keeper_request_events (id, request_id, workspace_id, seq, state, actor_type, recorded_at)
+				VALUES (?, ?, ?, 1, 'DENY', 'keeper', ?)`,
+				generateCUID(), "req-"+when[:4], wsID, when); err != nil {
+				t.Fatalf("seed keeper event: %v", err)
+			}
+		}},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			h, db := newAuditHandler(t)
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			tc.seed(t, db, wsID, userID, "2020-01-01 00:00:00")
+			tc.seed(t, db, wsID, userID, "2026-06-01 00:00:00")
+
+			all := auditListSource(t, h, wsID, tc.source)
+			if len(all.Data) != 2 {
+				t.Fatalf("unfiltered rows = %d, want 2: %+v", len(all.Data), all.Data)
+			}
+
+			req := httptest.NewRequest("GET",
+				"/api/v1/audit?source="+tc.source+"&date_from=2026-01-01&date_to=2026-12-31", nil)
+			req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+			rr := httptest.NewRecorder()
+			h.List(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+			}
+			var got auditListResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if len(got.Data) != 1 {
+				t.Fatalf("rows in range = %d, want 1 (the 2020 row leaked): %+v", len(got.Data), got.Data)
+			}
+			// The count drives pagination — a total that ignores the range
+			// tells the operator there are pages of results that aren't there.
+			if got.Pagination.Total != 1 {
+				t.Errorf("pagination total = %d, want 1", got.Pagination.Total)
+			}
+		})
 	}
 }
 

@@ -343,10 +343,20 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 // with the keep-latest-N floor, and the blob GC that depends on a BlobRoot),
 // then the per-workspace pass that can only tighten it further.
 //
-// Order matters: the global pass satisfies the keep-N floor, and the
-// per-workspace pass then trims purely by age, so a workspace configured
-// tighter than the instance default gets its window and never loses more of
-// its recent history than the floor allows.
+// Order matters, but not because the floor survives the second pass — it does
+// not, and this comment used to claim otherwise. The per-workspace pass is
+// strictly age-based BY DESIGN (see the contract pinned in
+// retention_coordination_test.go): a workspace that configures a tighter
+// window is stating a retention policy, and a keep-latest-N floor that
+// retained rows past that window would quietly overrule it. So a path whose
+// last write predates the workspace's window loses every version row,
+// including the newest. That is history, not live memory — the working copy
+// is the file in the crew container; memory_versions backs `memory versions`
+// and the persona history view.
+//
+// What the order does buy: the global pass runs first, so its blob GC sees the
+// full row set and the keep-N floor governs the instance-wide 30-day rule
+// rather than being pre-empted by tenant sweeps.
 //
 // Both are single DELETE statements against concrete cutoffs, which is what
 // makes this safe to run from the boot catch-up as well as the daily tick.

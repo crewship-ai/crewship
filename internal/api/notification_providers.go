@@ -32,8 +32,12 @@ func NewNotifyProvidersHandler(db *sql.DB, logger *slog.Logger) *NotifyProviders
 // providerSettingKey returns the app_settings key gating provider p.
 // Namespaced under "notify.provider." so a future admin-settings sweep
 // doesn't collide with the pre-existing telemetry keys in that table.
+//
+// Delegates to notify so the key the toggle WRITES and the key delivery
+// READS are one definition — two copies of a string like this drift, and the
+// symptom would be a switch that flips without stopping anything.
 func providerSettingKey(p string) string {
-	return "notify.provider." + p + ".enabled"
+	return notify.ProviderSettingKey(p)
 }
 
 // providerInfo describes one provider to a client. It carries the FORM
@@ -127,29 +131,15 @@ func (h *NotifyProvidersHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"provider": provider, "enabled": body.Enabled})
 }
 
-// newProviderGate adapts providerEnabled to the dispatcher's gate signature,
-// so the instance-wide toggle is read by the SAME query on the way out as at
-// channel-create time. Two readers of one switch is how they drift.
-func newProviderGate(db *sql.DB) func(ctx context.Context, provider string) (bool, error) {
-	return func(ctx context.Context, provider string) (bool, error) {
-		return providerEnabled(ctx, db, provider)
-	}
-}
-
 // providerEnabled reads the app_settings toggle for provider p, defaulting
 // to true (enabled) when no row exists — a freshly-upgraded instance
 // doesn't need an admin to opt every provider back in. Shared with
 // NotifyChannelHandler.Create, which fails closed on a disabled provider.
+//
+// Delegates to the same reader delivery uses, so the create-time check and
+// the on-the-way-out check cannot answer differently.
 func providerEnabled(ctx context.Context, db *sql.DB, p string) (bool, error) {
-	var value string
-	err := db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, providerSettingKey(p)).Scan(&value)
-	if err == sql.ErrNoRows {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return value == "true", nil
+	return notify.DefaultProviderGate(db)(ctx, p)
 }
 
 // newGatedDispatcher builds a dispatcher that honours the instance-wide
@@ -158,8 +148,10 @@ func providerEnabled(ctx context.Context, db *sql.DB, p string) (bool, error) {
 // Without the gate, switching Discord off stopped nobody: every channel made
 // before the switch kept delivering, which is the opposite of what an
 // operator reaches for that switch to do.
+//
+// The gate now comes from notify.NewDispatcher itself — an opt-in that two of
+// the four construction sites missed is not a gate. This wrapper stays as the
+// named entry point for the handlers, and pins the default with a test.
 func newGatedDispatcher(store notify.ChannelLister, mail mailer.Mailer, logger *slog.Logger, db *sql.DB) *notify.Dispatcher {
-	d := notify.NewDispatcher(store, mail, logger, db)
-	d.SetProviderGate(newProviderGate(db))
-	return d
+	return notify.NewDispatcher(store, mail, logger, db)
 }

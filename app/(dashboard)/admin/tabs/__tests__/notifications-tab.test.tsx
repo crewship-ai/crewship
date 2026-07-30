@@ -4,7 +4,7 @@
 // admin one carried no information at all: eleven identical icons.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, cleanup } from "@testing-library/react"
 
 import { NotificationsTab } from "../notifications-tab"
 

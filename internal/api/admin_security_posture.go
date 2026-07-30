@@ -143,6 +143,13 @@ type postureState struct {
 	// BackupsRecorded counts backup actions in the audit trail. Zero means
 	// this instance has never been backed up.
 	BackupsRecorded int
+	// BackupsRecordedKnown is false when that COUNT errored. It matters
+	// because this is the one probe whose *finding* fires on zero: without
+	// it, a failed query is indistinguishable from a never-backed-up
+	// instance and the panel invents a warning out of a database error.
+	// The other probes only warn on a non-zero count, so a failed probe
+	// there under-reports rather than fabricates.
+	BackupsRecordedKnown bool
 }
 
 func buildSecurityPosture(allowSignup, oauthConfigured, emailConfigured, rateLimitOff bool, st postureState) securityPostureResponse {
@@ -296,7 +303,7 @@ func buildSecurityPosture(allowSignup, oauthConfigured, emailConfigured, rateLim
 
 	// Not a vulnerability — a recoverability one, and the panel an operator
 	// checks before an incident is the right place to learn it.
-	if st.BackupsRecorded == 0 {
+	if st.BackupsRecordedKnown && st.BackupsRecorded == 0 {
 		p.Warnings = append(p.Warnings, postureWarning{
 			Key: "no_backup_recorded", Severity: "medium",
 			Message: "No backup has ever been recorded on this instance. The database holds every " +
@@ -351,10 +358,12 @@ func readPostureState(ctx context.Context, db *sql.DB, logger *slog.Logger) post
 		return st
 	}
 
-	probe := func(what, query string, dest *int) {
+	probe := func(what, query string, dest *int) bool {
 		if err := db.QueryRowContext(ctx, query).Scan(dest); err != nil {
 			logger.Warn("security posture probe failed", "probe", what, "error", err)
+			return false
 		}
+		return true
 	}
 	probe("privileged_credentials",
 		`SELECT COUNT(*) FROM workspaces WHERE allow_privileged_credentials = 1 AND deleted_at IS NULL`,
@@ -362,7 +371,7 @@ func readPostureState(ctx context.Context, db *sql.DB, logger *slog.Logger) post
 	probe("private_endpoint_crews",
 		`SELECT COUNT(*) FROM crews WHERE allow_private_endpoints = 1 AND deleted_at IS NULL`,
 		&st.PrivateEndpointCrews)
-	probe("backups_recorded",
+	st.BackupsRecordedKnown = probe("backups_recorded",
 		`SELECT COUNT(*) FROM audit_logs WHERE action LIKE 'backup.%'`,
 		&st.BackupsRecorded)
 

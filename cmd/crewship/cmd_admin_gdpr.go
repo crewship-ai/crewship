@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,9 +26,31 @@ import (
 )
 
 // gdprDeleteResult is the receipt: the audit row's id plus what went.
+// The shape mirrors AdminGDPRHandler.DeleteUserData — including the
+// partial-erasure case, which answers 207 with an `error` alongside the
+// rows it did manage to remove. 207 is a 2xx, so nothing upstream of
+// this decoder treats it as a failure; if the field is dropped here, an
+// operator closing a SAR ticket is told "Erased." over an erasure that
+// only partly happened.
 type gdprDeleteResult struct {
-	ActionID string         `json:"action_id"`
-	Deleted  map[string]int `json:"deleted"`
+	ActionID    string         `json:"action_id"`
+	DataSubject string         `json:"data_subject"`
+	WorkspaceID string         `json:"workspace_id"`
+	RowsDeleted int            `json:"rows_deleted"`
+	Scope       map[string]int `json:"scope"`
+	Error       string         `json:"error"`
+}
+
+// sortedScopeTables keeps the per-table breakdown in a stable order —
+// map iteration would reshuffle the receipt on every run, and this
+// output is meant to be pasted into a ticket.
+func sortedScopeTables(scope map[string]int) []string {
+	tables := make([]string, 0, len(scope))
+	for table := range scope {
+		tables = append(tables, table)
+	}
+	sort.Strings(tables)
+	return tables
 }
 
 // gdprUserPath builds the workspace-scoped endpoint for one subject.
@@ -171,16 +194,32 @@ Examples:
 			return fmt.Errorf("decode response: %w", err)
 		}
 
-		return resolvedFormatter(cmd).AutoHuman(result, func() {
+		if err := resolvedFormatter(cmd).AutoHuman(result, func() {
 			// The action id is the receipt. Print it first: it is what an
 			// operator records against the request they were answering.
-			cli.PrintSuccess(fmt.Sprintf("Erased. Audit action: %s", result.ActionID))
-			for table, n := range result.Deleted {
-				if n > 0 {
+			if result.Error == "" {
+				cli.PrintSuccess(fmt.Sprintf("Erased %d rows. Audit action: %s", result.RowsDeleted, result.ActionID))
+			} else {
+				cli.PrintWarning(fmt.Sprintf("Partly erased: %s", result.Error))
+				fmt.Printf("  %-28s %s\n", "audit action", result.ActionID)
+				fmt.Printf("  %-28s %d\n", "rows removed", result.RowsDeleted)
+			}
+			for _, table := range sortedScopeTables(result.Scope) {
+				if n := result.Scope[table]; n > 0 {
 					fmt.Printf("  %-28s %d\n", table, n)
 				}
 			}
-		})
+		}); err != nil {
+			return err
+		}
+		// A 207 is still a 2xx, so CheckError let it through. Erasure
+		// that only partly happened must not exit 0 — an operator
+		// scripting a SAR queue would record it as done.
+		if result.Error != "" {
+			return fmt.Errorf("erasure incomplete: %s (audit action %s records what was removed)",
+				result.Error, result.ActionID)
+		}
+		return nil
 	},
 }
 
