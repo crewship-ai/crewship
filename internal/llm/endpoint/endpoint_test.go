@@ -287,3 +287,47 @@ func TestModelsURL_AzureDeploymentRootListsAtTheResource(t *testing.T) {
 		})
 	}
 }
+
+// A gateway mounted at a path that is ITSELF named like an API segment is the
+// case repeated stripping got wrong: "/api/v1/chat/completions" lost the
+// "/v1/chat/completions" suffix and then lost the gateway's own "/api" too,
+// leaving the bare host. That value used to work — the OpenAI provider POSTed
+// the stored string verbatim — so collapsing it is a regression, not a repair.
+// "/api" is one of the most common reverse-proxy mounts there is.
+func TestNormalize_MountPrefixNamedLikeAnAPISegment(t *testing.T) {
+	for _, tc := range []struct {
+		raw, wantRoot string
+		wantVersioned bool
+	}{
+		{"https://gw.example.com/api/v1/chat/completions", "https://gw.example.com/api", true},
+		{"https://gw.example.com/api/v1", "https://gw.example.com/api", true},
+		{"https://gw.example.com/v1/v1/chat/completions", "https://gw.example.com/v1", true},
+		// Unchanged by the fix — the ordinary layouts.
+		{"https://gw.example.com/ollama/v1/chat/completions", "https://gw.example.com/ollama", true},
+		{"https://api.example.com/v1/chat/completions", "https://api.example.com", true},
+		{"http://host:11434/api/chat", "http://host:11434", false},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			ep, err := Normalize(tc.raw)
+			if err != nil {
+				t.Fatalf("Normalize(%q): %v", tc.raw, err)
+			}
+			if got := ep.Root.String(); got != tc.wantRoot {
+				t.Errorf("root = %q, want %q", got, tc.wantRoot)
+			}
+			if ep.Versioned != tc.wantVersioned {
+				t.Errorf("versioned = %v, want %v", ep.Versioned, tc.wantVersioned)
+			}
+		})
+	}
+
+	// The whole point: the rebuilt chat URL still reaches the gateway.
+	ep, err := Normalize("https://gw.example.com/api/v1/chat/completions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "https://gw.example.com/api/v1/chat/completions"
+	if got := ep.WithWire(WireOpenAIChat).ChatURL(); got != want {
+		t.Errorf("chat URL = %q, want %q — the gateway mount was eaten", got, want)
+	}
+}

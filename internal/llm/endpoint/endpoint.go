@@ -212,24 +212,29 @@ func splitAPIPath(path string) (root string, versioned bool) {
 	return root, strings.HasPrefix(strings.TrimPrefix(original, root), "/v1")
 }
 
-// stripAPISuffixes removes trailing API path segments until none match, so
-// "/v1/v1" and "/openai/v1/chat/completions" both reduce correctly. The loop is
-// bounded by the path shrinking on every iteration.
+// stripAPISuffixes removes ONE trailing API path segment — the longest match,
+// since apiSuffixes lists the multi-segment forms first.
+//
+// Exactly one, deliberately. Stripping repeatedly ate a mount prefix that
+// happens to be named like an API segment, and "/api" is one of the most
+// common gateway mounts there is: "https://gw.example.com/api/v1/chat/completions"
+// reduced to the bare host, because "/v1/chat/completions" came off and then
+// "/api" did too. The rebuilt URL lost both the gateway's mount and the version
+// segment, and that value used to work — the OpenAI provider POSTed it verbatim.
+// Only the operator's own path can tell the two apart, and one strip is the
+// reading that keeps every documented shape working.
+//
+// The cost is that a doubled suffix ("/v1/v1") is preserved rather than
+// repaired. That is the right way to be wrong: a path we do not understand is
+// far more likely to be somebody's proxy than a typo.
 func stripAPISuffixes(path string) string {
 	p := strings.TrimRight(path, "/")
-	for {
-		matched := false
-		for _, suffix := range apiSuffixes {
-			if strings.HasSuffix(p, suffix) {
-				p = strings.TrimRight(strings.TrimSuffix(p, suffix), "/")
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return p
+	for _, suffix := range apiSuffixes {
+		if strings.HasSuffix(p, suffix) {
+			return strings.TrimRight(strings.TrimSuffix(p, suffix), "/")
 		}
 	}
+	return p
 }
 
 // versionPrefix is "/v1" for a versioned deployment and empty for one that
