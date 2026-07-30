@@ -50,6 +50,28 @@ Find your symptom below; each panel expands to its diagnosis and fix.
 
 <AccordionGroup>
 
+<Accordion title="A run says failed with `agent reported a failed run`, but the CLI exited 0">
+
+This is an **in-band failure**: the agent CLI exited cleanly and then said, in its own final stream event, that the turn failed — a refusal, an internal CLI error, or an exhausted quota. Crewship marks those runs `error` instead of `completed`, because the alternative is a mission or routine continuing on an empty answer while the run looks green and still gets billed.
+
+The error message quotes the CLI's own text. To confirm and find the cause:
+
+1. Open the run in the journal and find the `exec.command` end entry. An in-band failure has severity `warn` with `exit_code: 0` **and** `in_band_error: true` — that pair is the fingerprint.
+2. Read the `result` event's metadata on the same run; it carries the CLI's terminal envelope with usage and cost.
+
+In chat, the turn is still **persisted**: the agent's text (a refusal, or whatever it managed to say) plus an error part carrying the reason, so a reload shows the failure rather than an empty bubble. A delegated assignment keeps the sub-agent's output in `result_summary` for the same reason. In a routine, the step fails and — under the default `on_fail: escalate_tier` — walks to the next fallback tier. It is **not** retried on the same tier: an in-band failure is deterministic, so retrying it just bills for the same answer ([details](/guides/routines#retry-transient-failures)).
+
+Common causes by message:
+
+- **`turn cap (N turns)`** — the agent ran out of agent-loop turns mid-task. Raise `max_turns` on the step, or split the work. Note that the step still walks the fallback-tier chain, so a task that flails for 20 turns can replay them on a pricier model; `on_fail: abort` stops that.
+- **a refusal** ("I cannot help with…") — reword the task, or lower the tool profile's blast radius.
+- **a usage / quota message** — check [Paymaster](/guides/paymaster) and the credential's plan.
+- **an internal CLI error** — the vendor CLI in the crew image may be stale; reprovision the crew.
+
+Per-adapter signal shapes and the run-level vs tool-level boundary are documented in [CLI Adapters → In-band failures](/guides/cli-adapters#in-band-failures-when-exit-0-still-means-the-run-failed). A failed **tool** call does *not* fail a run.
+
+</Accordion>
+
 <Accordion title="Interactive `crewship ask` / `run` fails with `ws read: EOF`">
 
 The interactive path opens a WebSocket to the server. When the connection is refused **after** the upgrade (the `101` succeeds, then the socket closes), the CLI now prints the server's reason instead of a bare `ws read: EOF` — for example:
