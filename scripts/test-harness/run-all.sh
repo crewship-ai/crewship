@@ -6,6 +6,7 @@
 #   WITH_GITHUB=1 ./run-all.sh        # also the GitHub real-world scenario
 #   WITH_SECRETLESS=1 ./run-all.sh    # also the secretless-GitHub proof (T-H1…T-H9)
 #   WITH_KEEPER_SECURITY=1 ./run-all.sh  # also the keeper adversarial suite
+#   KEEPER_ESCALATION=1 ./run-all.sh     # also the real-agent credential tier flow
 #   WITH_NOTIFICATIONS_SHOUTRRR=1 ./run-all.sh  # also the #1412 preference-matrix suite
 #   ./run-all.sh --quick              # skip the slower determinism sweep
 #
@@ -32,6 +33,11 @@ tests=(test-memory.sh test-delegation.sh test-crew-links.sh test-notifications.s
 # internal keeper HTTP surface). Ingress-fence is read-only; toctou/audit clean
 # up after themselves.
 [[ "${WITH_KEEPER_SECURITY:-0}" == "1" ]] && tests+=(test-keeper-ingress-fence.sh test-keeper-toctou.sh test-keeper-audit-integrity.sh test-keeper-load.sh)
+# The tier flow drives a REAL agent through /keeper/request — the side of the
+# gatekeeper no unit or HTTP test covers, and the side that was completely broken
+# until the agent preamble learned the endpoint exists. Opt-in because it costs
+# agent tokens, needs a working judge on the target, and takes minutes.
+[[ "${KEEPER_ESCALATION:-0}" == "1" ]] && tests+=(test-keeper-escalation.sh)
 # Local-Ollama scenario is macOS-only and self-skips when Ollama isn't reachable,
 # so it's safe to always include; opt out with WITH_OLLAMA=0.
 [[ "${WITH_OLLAMA:-1}" == "1" ]] && tests+=(test-ollama-local.sh)
