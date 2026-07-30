@@ -60,12 +60,40 @@ describe("InboxPreview — buckets and facets", () => {
   })
 
   it("shows the resolved outcome and actor in the archive", () => {
-    render(<InboxPreview initialRole="OWNER" initialTab="archived" />)
+    render(<InboxPreview initialRole="OWNER" initialView="archived" />)
 
     const row = screen.getByText("casey žádá GH_TOKEN pro crewship-ai/docs").closest("[data-row]")
     expect(row).not.toBeNull()
     expect(within(row as HTMLElement).getByText(/schváleno/i)).toBeInTheDocument()
     expect(within(row as HTMLElement).getByText("pavel")).toBeInTheDocument()
+  })
+})
+
+describe("InboxPreview — the rail swaps its facets with the view", () => {
+  it("replaces the bucket section with archive facets when Archiv is picked", () => {
+    render(<InboxPreview initialRole="OWNER" />)
+
+    expect(screen.getByTestId("facet-bucket-decisions")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("view-archived"))
+
+    // Live buckets have no meaning over resolved rows, so they leave; the
+    // questions the archive answers take their place.
+    expect(screen.queryByTestId("facet-bucket-decisions")).not.toBeInTheDocument()
+    expect(screen.getByTestId("outcome-approved")).toBeInTheDocument()
+    expect(screen.getByText("Kdo rozhodl")).toBeInTheDocument()
+    expect(screen.getByText("Období")).toBeInTheDocument()
+  })
+
+  it("narrows the archive by outcome from the rail", () => {
+    render(<InboxPreview initialRole="OWNER" initialView="archived" />)
+
+    expect(screen.getByText("casey žádá GH_TOKEN pro crewship-ai/web")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("outcome-approved"))
+
+    expect(screen.getByText("casey žádá GH_TOKEN pro crewship-ai/docs")).toBeInTheDocument()
+    expect(screen.queryByText("casey žádá GH_TOKEN pro crewship-ai/web")).not.toBeInTheDocument()
   })
 })
 
