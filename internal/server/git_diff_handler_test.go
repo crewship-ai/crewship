@@ -6,15 +6,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // gitDiffMock reads the per-call CRW_NONCE the handler injects and emits a
@@ -44,15 +43,7 @@ func (g *gitDiffMock) Exec(_ context.Context, cfg provider.ExecConfig) (*provide
 // with a mock that honours the nonce, asserting the parsed file list + diff.
 func TestHandleContainerGitDiff_FullPath(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "gd.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, newSilentLogger()); err != nil {
-		t.Fatal(err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)

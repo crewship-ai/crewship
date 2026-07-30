@@ -16,11 +16,10 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/testutil"
 
 	_ "modernc.org/sqlite"
 )
@@ -31,14 +30,7 @@ func krLogger() *slog.Logger {
 
 func krDB(t *testing.T) *sql.DB {
 	t.Helper()
-	d, err := database.Open("file:" + filepath.Join(t.TempDir(), "kr.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = d.Close() })
-	if err := database.Migrate(context.Background(), d.DB, krLogger()); err != nil {
-		t.Fatal(err)
-	}
+	d := testutil.MigratedDB(t)
 	return d.DB
 }
 
