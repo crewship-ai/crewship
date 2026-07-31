@@ -134,6 +134,17 @@ jobs:
       - name: Skip budget (t.Skip ratchet)
         run: bash scripts/skip-budget.sh
 
+      # The same shape as the ratchet above, one layer out: a green check that
+      # never ran. CodeRabbit reports through a commit status, and when it hits
+      # its review limit that status is `pass / Review rate limited` — visually
+      # identical to `pass / Review completed` (#1580). scripts/review-status.sh
+      # answers "was this actually reviewed?" from the posted bodies; this step
+      # runs only its network-free classifier tests. It deliberately does NOT
+      # gate the merge on a real review — whether a green CodeRabbit status may
+      # block a merge is branch-protection policy and the repo owner's call.
+      - name: review-status.sh (throttled vs reviewed classifier)
+        run: bash scripts/review-status-test.sh
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     needs: [merge-conflict-markers]
