@@ -114,16 +114,21 @@ ORDER BY created_at`)
 // for the credstore to decrypt these at runtime; if the keys diverge,
 // keeper.Reload will log per-row "decrypt failed" entries and the
 // operator must re-enter affected credentials.
-func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []EncryptedCredential) (int, error) {
+//
+// security_level is NOT written verbatim: it is the second bundle path
+// into that column (RestoreDumpTxHooks is the first) and gets the same
+// tier-table guard, returning the clamps it had to make so the caller
+// can report them. See security_level.go for why clamp and not reject.
+func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []EncryptedCredential) (int, []SecurityLevelClamp, error) {
 	if db == nil {
-		return 0, fmt.Errorf("backup: ImportEncryptedCredentials: db is nil")
+		return 0, nil, fmt.Errorf("backup: ImportEncryptedCredentials: db is nil")
 	}
 	if len(creds) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("backup: begin credential restore: %w", err)
+		return 0, nil, fmt.Errorf("backup: begin credential restore: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -148,7 +153,7 @@ INSERT INTO credentials
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`)
 	if err != nil {
-		return 0, fmt.Errorf("backup: prepare credential insert: %w", err)
+		return 0, nil, fmt.Errorf("backup: prepare credential insert: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
 	// emptyAsNull keeps nullable text columns NULL when the source
@@ -162,13 +167,22 @@ ON CONFLICT(id) DO NOTHING`)
 		return s
 	}
 	var inserted int
+	var stats RestoreStats
 	for _, c := range creds {
+		// Same tier-table guard the dump path applies, for the same
+		// reason: this column is a security control's input, and an
+		// instance bundle is no more trusted than a workspace one.
+		level, clamped := clampRestoredSecurityLevel(c.SecurityLevel)
+		if clamped {
+			recordSecurityLevelClamp(&stats,
+				map[string]any{"id": c.ID, "name": c.Name}, c.SecurityLevel)
+		}
 		// NULL out empty crew_id since the FK is nullable; sqlite's
 		// empty-string → FK "crews.id = ''" would fail constraint.
 		res, err := stmt.ExecContext(ctx,
 			c.ID, c.WorkspaceID, emptyAsNull(c.CrewID), c.Name, c.Description,
 			c.Type, c.Scope, c.Status,
-			c.Provider, c.SecurityLevel, c.KeeperCrewID,
+			c.Provider, level, c.KeeperCrewID,
 			c.EncryptedValue,
 			emptyAsNull(c.EncryptedRefreshToken), emptyAsNull(c.TokenExpiresAt),
 			emptyAsNull(c.AccountLabel), emptyAsNull(c.AccountEmail),
@@ -176,15 +190,15 @@ ON CONFLICT(id) DO NOTHING`)
 			c.CreatedBy, c.CreatedAt, c.UpdatedAt,
 		)
 		if err != nil {
-			return 0, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)
+			return 0, nil, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)
 		}
 		if n, err := res.RowsAffected(); err == nil {
 			inserted += int(n)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("backup: commit credential restore: %w", err)
+		return 0, nil, fmt.Errorf("backup: commit credential restore: %w", err)
 	}
 	committed = true
-	return inserted, nil
+	return inserted, stats.SecurityLevelClamps, nil
 }

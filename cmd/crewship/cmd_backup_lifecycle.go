@@ -180,6 +180,16 @@ var backupCreateCmd = &cobra.Command{
 	},
 }
 
+// restoreClamp mirrors backup.SecurityLevelClamp on the wire: one
+// credential whose security_level the restore had to rewrite because the
+// bundle carried a tier that does not exist (#1603).
+type restoreClamp struct {
+	CredentialID string `json:"credential_id"`
+	Name         string `json:"name"`
+	From         string `json:"from"`
+	To           int    `json:"to"`
+}
+
 var backupRestoreCmd = &cobra.Command{
 	Use:   "restore <file>",
 	Short: "Restore a workspace or crew from a backup bundle",
@@ -253,11 +263,13 @@ var backupRestoreCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			RestoredWs          string `json:"restored_ws"`
-			RestoredWorkspaceID string `json:"restored_workspace_id"`
-			CrewsCount          int    `json:"crews_count"`
-			RowsInserted        int    `json:"rows_inserted"`
-			DockerPhaseSkipped  bool   `json:"docker_phase_skipped"`
+			RestoredWs           string         `json:"restored_ws"`
+			RestoredWorkspaceID  string         `json:"restored_workspace_id"`
+			CrewsCount           int            `json:"crews_count"`
+			RowsInserted         int            `json:"rows_inserted"`
+			DockerPhaseSkipped   bool           `json:"docker_phase_skipped"`
+			SecurityLevelClamped int            `json:"security_level_clamped"`
+			SecurityLevelClamps  []restoreClamp `json:"security_level_clamps"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -285,6 +297,31 @@ var backupRestoreCmd = &cobra.Command{
 		// the DB mutated when it did not.
 		if !dryRun && out.DockerPhaseSkipped {
 			cli.PrintWarning("Docker phase skipped (--as-workspace/--as-crew supplied). Provision the new crews with `crewship crew provision` and re-run restore without the rewrite flag to land container state.")
+		}
+		// Unlike the docker warning this one DOES matter on a dry run:
+		// "this bundle carries credentials at a tier that does not
+		// exist" is exactly what an admin wants to hear before they
+		// commit to the restore, not after.
+		if out.SecurityLevelClamped > 0 {
+			verb := "were clamped to"
+			if dryRun {
+				verb = "would be clamped to"
+			}
+			details := make([]string, 0, len(out.SecurityLevelClamps))
+			for _, c := range out.SecurityLevelClamps {
+				label := c.CredentialID
+				if c.Name != "" {
+					label = c.Name
+				}
+				details = append(details, fmt.Sprintf("%s (bundle said %s)", label, c.From))
+			}
+			more := ""
+			if out.SecurityLevelClamped > len(details) {
+				more = fmt.Sprintf(" (+%d more)", out.SecurityLevelClamped-len(details))
+			}
+			cli.PrintWarning(fmt.Sprintf(
+				"%d credential(s) carried a security_level outside L1-L4 and %s the strictest tier: %s%s. Re-set each one with `crewship credential update <name> --security-level N`.",
+				out.SecurityLevelClamped, verb, strings.Join(details, ", "), more))
 		}
 		return nil
 	},

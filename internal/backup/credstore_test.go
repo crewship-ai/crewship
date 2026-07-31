@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/keeper"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -61,7 +63,7 @@ VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','u1','2026-01-01'),
 		db := seedSource(t)
 		exported, _ := ExportEncryptedCredentials(ctx, db)
 		target := newCredentialsDB(t)
-		n, err := ImportEncryptedCredentials(ctx, target, exported)
+		n, _, err := ImportEncryptedCredentials(ctx, target, exported)
 		if err != nil {
 			t.Fatalf("import: %v", err)
 		}
@@ -70,14 +72,44 @@ VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','u1','2026-01-01'),
 		}
 	})
 
+	t.Run("import clamps a security_level the tier table does not define", func(t *testing.T) {
+		target := newCredentialsDB(t)
+		levels := keeper.SecurityLevels()
+		strictest := int(levels[len(levels)-1])
+		in := []EncryptedCredential{
+			{ID: "c_ok", WorkspaceID: "ws1", Name: "ok", Type: "SECRET",
+				EncryptedValue: "v1:a", CreatedBy: "u1", SecurityLevel: int(levels[0])},
+			{ID: "c_bad", WorkspaceID: "ws1", Name: "bad", Type: "SECRET",
+				EncryptedValue: "v1:b", CreatedBy: "u1", SecurityLevel: 42},
+		}
+		n, clamps, err := ImportEncryptedCredentials(ctx, target, in)
+		if err != nil {
+			t.Fatalf("import: %v", err)
+		}
+		if n != 2 {
+			t.Fatalf("insert count: got %d want 2 — a clamped credential must still land", n)
+		}
+		if len(clamps) != 1 || clamps[0].CredentialID != "c_bad" || clamps[0].To != strictest {
+			t.Fatalf("clamps = %+v, want one entry for c_bad at L%d", clamps, strictest)
+		}
+		var got int
+		if err := target.QueryRowContext(ctx,
+			`SELECT security_level FROM credentials WHERE id = 'c_bad'`).Scan(&got); err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+		if got != strictest {
+			t.Errorf("stored security_level = %d, want %d", got, strictest)
+		}
+	})
+
 	t.Run("re-import is idempotent (ON CONFLICT DO NOTHING)", func(t *testing.T) {
 		db := seedSource(t)
 		exported, _ := ExportEncryptedCredentials(ctx, db)
 		target := newCredentialsDB(t)
-		if _, err := ImportEncryptedCredentials(ctx, target, exported); err != nil {
+		if _, _, err := ImportEncryptedCredentials(ctx, target, exported); err != nil {
 			t.Fatalf("first import: %v", err)
 		}
-		n2, err := ImportEncryptedCredentials(ctx, target, exported)
+		n2, _, err := ImportEncryptedCredentials(ctx, target, exported)
 		if err != nil {
 			t.Fatalf("re-import: %v", err)
 		}
@@ -93,14 +125,14 @@ VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','u1','2026-01-01'),
 	})
 
 	t.Run("nil db fails fast on import", func(t *testing.T) {
-		if _, err := ImportEncryptedCredentials(ctx, nil, []EncryptedCredential{{ID: "x"}}); err == nil {
+		if _, _, err := ImportEncryptedCredentials(ctx, nil, []EncryptedCredential{{ID: "x"}}); err == nil {
 			t.Error("import with nil db must error")
 		}
 	})
 
 	t.Run("empty import slice is no-op", func(t *testing.T) {
 		target := newCredentialsDB(t)
-		n, err := ImportEncryptedCredentials(ctx, target, nil)
+		n, _, err := ImportEncryptedCredentials(ctx, target, nil)
 		if err != nil {
 			t.Fatalf("empty import: %v", err)
 		}

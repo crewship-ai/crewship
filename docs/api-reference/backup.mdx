@@ -336,11 +336,17 @@ Restore a bundle into the current workspace.
   "restored_workspace_id": "ws_abc123",
   "crews_count": 4,
   "rows_inserted": 312,
-  "docker_phase_skipped": false
+  "docker_phase_skipped": false,
+  "security_level_clamped": 1,
+  "security_level_clamps": [
+    { "credential_id": "cred_abc123", "name": "deploy-key", "from": "0", "to": 4 }
+  ]
 }
 ```
 
 `docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed; call `POST /api/v1/crews/{crewId}/provision` afterwards.
+
+`security_level_clamped` counts the restored credentials whose `security_level` was not one of the defined tiers (L1–L4) and were therefore written at the strictest tier instead — every other writer of that column validates it, so restore does too. `security_level_clamps` is a bounded sample naming the affected credentials and the value the bundle carried; the full list of what happened is also written to the journal as `credential.security_level.clamped`. On a `dry_run` both fields report what *would* be clamped. Re-set each affected credential with `PATCH /api/v1/credentials/{id}` (`security_level`) or `crewship credential update <name> --security-level N`.
 
 ### Errors
 

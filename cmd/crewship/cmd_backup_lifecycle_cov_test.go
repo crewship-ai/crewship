@@ -274,6 +274,57 @@ func TestBackupRestoreRunE_HappyPath(t *testing.T) {
 	}
 }
 
+// An out-of-range credential tier is the one warning a dry run must NOT
+// suppress: knowing before the cutover that a bundle carries credentials at a
+// tier that does not exist is the whole value of dry-running it (#1603).
+func TestBackupRestoreRunE_SecurityLevelClampWarning(t *testing.T) {
+	// Registered on the PARENT: guardCLIState is a no-op inside a subtest
+	// (the parent owns the reset), so without this the shared CLI globals
+	// the subtests mutate would leak past this test.
+	guardCLIState(t)
+	for _, tc := range []struct {
+		name   string
+		dryRun string
+		want   string
+	}{
+		{"committed restore", "false", "were clamped to the strictest tier"},
+		{"dry run", "true", "would be clamped to the strictest tier"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := covSetupCli5(t)
+			covResetBackupRestoreFlags(t)
+			covSetFlagCli5(t, backupRestoreCmd, "dry-run", tc.dryRun)
+			stub.OnPost("/api/v1/admin/backups/restore", clitest.JSONResponse(200, map[string]any{
+				"restored_ws": "acme", "crews_count": 1, "rows_inserted": 10,
+				"security_level_clamped": 3,
+				"security_level_clamps": []map[string]any{
+					{"credential_id": "cred_a", "name": "deploy-key", "from": "0", "to": 4},
+					{"credential_id": "cred_b", "name": "", "from": "99", "to": 4},
+				},
+			}))
+
+			var err error
+			out := covCaptureAll(t, func() {
+				err = backupRestoreCmd.RunE(backupRestoreCmd, []string{"/b.tar"})
+			})
+			if err != nil {
+				t.Fatalf("RunE: %v", err)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("missing clamp warning %q; got:\n%s", tc.want, out)
+			}
+			// The admin needs the names to go and re-tier them, and the
+			// count must include the rows the sample did not carry.
+			if !strings.Contains(out, "deploy-key") || !strings.Contains(out, "cred_b") {
+				t.Errorf("clamp warning must name the credentials; got:\n%s", out)
+			}
+			if !strings.Contains(out, "(+1 more)") {
+				t.Errorf("clamp warning must report the rows beyond the sample; got:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestBackupRestoreRunE_DryRun(t *testing.T) {
 	stub := covSetupCli5(t)
 	covResetBackupRestoreFlags(t)
