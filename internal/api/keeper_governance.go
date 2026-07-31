@@ -16,6 +16,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
@@ -35,10 +36,84 @@ func NewKeeperGovernanceHandler(db *sql.DB, logger *slog.Logger, j journal.Emitt
 type keeperGovernanceResponse struct {
 	Configured bool `json:"configured"`
 	governance.Settings
+	// EffectiveSecondApprover is the four-eyes rule as ENFORCED, which is not
+	// what require_second_approver alone says (issue #1559). See the type.
+	EffectiveSecondApprover effectiveSecondApprover `json:"effective_second_approver"`
 	// Warning is a non-blocking advisory returned by Put — e.g. enabling the
 	// second-approver rule on a workspace that lacks a second eligible approver.
 	// Empty on Get and on a clean Put.
 	Warning string `json:"warning,omitempty"`
+}
+
+// Sources for effectiveSecondApprover.Source. Stable wire values — the console
+// and the CLI branch on them.
+const (
+	effectiveSourceWorkspace = "workspace"
+	effectiveSourceTier      = "tier"
+	effectiveSourceNone      = "none"
+)
+
+// effectiveSecondApprover answers "when does resolving a credential escalation
+// actually need a different approver?".
+//
+// The stored toggle does not answer it. keeper.TierPolicy.SecondApprover forces
+// the rule on the top tier regardless of the toggle (escalation_handler.go), so
+// a workspace with the toggle OFF still gets four-eyes on its most dangerous
+// credentials — and until #1559 nothing said so, which meant the first thing
+// that taught an operator was a 403 on their own approval.
+//
+// Expressed as a floor rather than a boolean because that is the shape of the
+// rule: it applies from some security level upward. The tier can only raise
+// that floor's reach, never lower it — turning the toggle on cannot exempt L4.
+type effectiveSecondApprover struct {
+	// MinSecurityLevel is the lowest credential security level at which the
+	// rule applies. 0 means it never does.
+	MinSecurityLevel int `json:"min_security_level"`
+	// MinSecurityLevelLabel is that level's operator-facing name ("L4 ·
+	// critical"), taken from the tier table so the console and the CLI cannot
+	// invent their own. Empty when the rule never applies.
+	MinSecurityLevelLabel string `json:"min_security_level_label,omitempty"`
+	// Source is what puts the rule in force at that level: "workspace" (the
+	// toggle, which covers every tier), "tier" (only the tier floor does, the
+	// toggle being off), or "none".
+	Source string `json:"source"`
+
+	// TierFloorSecurityLevel / TierFloorLabel are the level at which the tier
+	// table forces the rule ON ITS OWN, reported whatever the toggle says.
+	//
+	// Separate from the fields above because the console has to answer a
+	// question they cannot: "if I turn this toggle off, what is still in
+	// force?". With the toggle on, Source is "workspace" and MinSecurityLevel
+	// is the bottom tier — true, and no help at all to someone about to switch
+	// it off. Zero/empty when no tier forces the rule.
+	TierFloorSecurityLevel int    `json:"tier_floor_security_level,omitempty"`
+	TierFloorLabel         string `json:"tier_floor_label,omitempty"`
+}
+
+// resolveEffectiveSecondApprover folds the workspace toggle and the tier table
+// into the one rule the resolve endpoint will actually apply.
+func resolveEffectiveSecondApprover(s governance.Settings) effectiveSecondApprover {
+	out := effectiveSecondApprover{Source: effectiveSourceNone}
+	tierFloor, tierForces := keeper.MinSecondApproverLevel()
+	if tierForces {
+		out.TierFloorSecurityLevel = int(tierFloor)
+		out.TierFloorLabel = tierFloor.Label()
+	}
+
+	switch {
+	case s.RequireSecondApprover:
+		// The toggle is tier-blind: every CREDENTIAL escalation is covered, so
+		// the floor is the lowest tier there is.
+		lowest := keeper.SecurityLevels()[0]
+		out.MinSecurityLevel = int(lowest)
+		out.MinSecurityLevelLabel = lowest.Label()
+		out.Source = effectiveSourceWorkspace
+	case tierForces:
+		out.MinSecurityLevel = int(tierFloor)
+		out.MinSecurityLevelLabel = tierFloor.Label()
+		out.Source = effectiveSourceTier
+	}
+	return out
 }
 
 // Get handles GET /api/v1/admin/keeper/governance (ADMIN+).
@@ -50,7 +125,11 @@ func (h *KeeperGovernanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, keeperGovernanceResponse{Configured: found, Settings: s})
+	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
+		Configured:              found,
+		Settings:                s,
+		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
+	})
 }
 
 // keeperGovernancePutBody is a partial update: every field is a pointer, so a
@@ -304,5 +383,10 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, keeperGovernanceResponse{Configured: true, Settings: s, Warning: warning})
+	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
+		Configured:              true,
+		Settings:                s,
+		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
+		Warning:                 warning,
+	})
 }

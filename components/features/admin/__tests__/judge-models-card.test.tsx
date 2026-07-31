@@ -294,6 +294,113 @@ describe("JudgeModelsCard — probing an evaluator", () => {
   })
 })
 
+// Running an evaluator on request (issue #1555).
+//
+// "Test" answers "can this model be reached". It does not answer "what does this
+// check say about my crew right now" — that only happened on the nightly sweep,
+// and the behaviour watchdog needs a tool call to fire, so it had never run
+// outside its unit tests. Run is that trigger.
+describe("JudgeModelsCard — running an evaluator now", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  async function openDetail() {
+    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+  }
+
+  function auxSlot(slot: string, label: string) {
+    return {
+      slot, label, applies_at: "immediately",
+      provider: { value: "anthropic", source: "default", editable: true },
+      model: { value: "claude-haiku-4-5", source: "default", editable: true },
+      timeout_ms: { value: 30000, source: "default", editable: true },
+      overridden: false,
+    }
+  }
+
+  function routeWithRun(runBody: unknown, runOk = true) {
+    apiFetch.mockImplementation((url: string) => {
+      if (String(url).includes("aux-status")) return Promise.resolve(ok({ subsystems: [HEALTHY] }))
+      if (String(url).includes("/keeper/review/")) {
+        return Promise.resolve(runOk ? ok(runBody) : { ok: false, status: 400, json: async () => runBody })
+      }
+      if (String(url).includes("/admin/keeper/aux")) {
+        return Promise.resolve(ok({
+          slots: [auxSlot("curator", "Skill review"), auxSlot("behavior", "Tool-call watchdog")],
+          providers: ["anthropic", "ollama"],
+          judge_provider: "ollama", judge_model: "qwen2.5:7b", any_overridden: false,
+        }))
+      }
+      return Promise.resolve(ok({ models: [] }))
+    })
+  }
+
+  it("runs the evaluator the row is about, and shows the verdict", async () => {
+    routeWithRun({ request_id: "kpr_bhv_1", decision: "ESCALATE", reason: "this tool call looks like exfiltration" })
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    await openDetail()
+    fireEvent.click(await screen.findByTestId("keeper-review-run-behavior"))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/admin/keeper/review/behavior/run?workspace_id=ws1"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    )
+    // The verdict, in the evaluator's own words. "Done" would be the one useless
+    // outcome of asking a judge a question.
+    expect(await screen.findByText(/exfiltration/i)).toBeTruthy()
+    expect(screen.getByText(/ESCALATE/)).toBeTruthy()
+  })
+
+  it("maps the config slot to the evaluator it configures", async () => {
+    routeWithRun({ request_id: "kpr_skr_1", decision: "ALLOW", reason: "still in use" })
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    await openDetail()
+    // The card is keyed by aux slot ("curator"); the evaluator it runs is
+    // "skill-review". An operator should not have to know that.
+    fireEvent.click(await screen.findByTestId("keeper-review-run-curator"))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/v1/admin/keeper/review/skill-review/run"),
+        expect.objectContaining({ method: "POST" }),
+      ),
+    )
+  })
+
+  it("says what the server said when a run cannot happen", async () => {
+    routeWithRun({ error: "nothing has failed in this workspace yet, so there is no lesson to extract" }, false)
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    await openDetail()
+    fireEvent.click(await screen.findByTestId("keeper-review-run-behavior"))
+    // A refusal that explains itself is the difference between "the button is
+    // broken" and "there is nothing to check".
+    expect(await screen.findByText(/nothing has failed in this workspace yet/i)).toBeTruthy()
+  })
+
+  it("offers no Run on a slot that has no evaluator behind it", async () => {
+    routeWithRun({})
+    apiFetch.mockImplementation((url: string) => {
+      if (String(url).includes("aux-status")) return Promise.resolve(ok({ subsystems: [HEALTHY] }))
+      if (String(url).includes("/admin/keeper/aux")) {
+        return Promise.resolve(ok({
+          slots: [auxSlot("curator", "Skill review"), auxSlot("run_summary", "Run summaries")],
+          providers: ["anthropic"], judge_provider: "ollama", judge_model: "q", any_overridden: false,
+        }))
+      }
+      return Promise.resolve(ok({ models: [] }))
+    })
+    render(<JudgeModelsCard workspaceId="ws1" />)
+
+    await openDetail()
+    // run_summary is a verdict written at the end of a run, not a review that
+    // can be asked a question on demand — a button there could only fail.
+    await screen.findByTestId("keeper-review-run-curator")
+    expect(screen.queryByTestId("keeper-review-run-run_summary")).toBeNull()
+  })
+})
+
 // Not tiring an operator with five copies of the same technical detail.
 //
 // The card printed one row per background evaluator. On a stock instance those

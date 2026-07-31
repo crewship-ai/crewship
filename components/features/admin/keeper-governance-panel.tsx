@@ -61,6 +61,23 @@ interface GovernanceResponse {
   // agent hired by user A cannot be resolved by user A — a different approver
   // is required. Backed by keeper_governance_settings.require_second_approver.
   require_second_approver?: boolean
+  // The four-eyes rule as ENFORCED (#1559). The toggle above is only half of
+  // it: keeper.TierPolicy.SecondApprover forces the rule on the top tier
+  // whatever the toggle says, so a card that renders the toggle alone tells an
+  // operator the opposite of what the resolve endpoint will do.
+  //
+  // tier_floor_label is the half that does not depend on the toggle — what is
+  // still in force with it off — which is the only version of this answer the
+  // card can use, because it has to render for a draft the server hasn't seen.
+  // Absent from a server older than #1559: then the card says nothing rather
+  // than name a tier from a constant of its own.
+  effective_second_approver?: {
+    min_security_level: number
+    min_security_level_label?: string
+    source: string
+    tier_floor_security_level?: number
+    tier_floor_label?: string
+  }
   // Credential-lease auto-issuance TTL in seconds (#1373). 0 = off (grants stay
   // standing). A positive value makes a Keeper ALLOW / escalation approve
   // re-issue an L3/L4 grant as a lease of that length. Server accepts 0 or
@@ -156,7 +173,7 @@ function GovStageRow({ stage }: { stage: GovTestStage }) {
       ? "text-muted-foreground/60"
       : "text-destructive"
   return (
-    <div className="flex items-start gap-2 px-4 py-1.5 text-[11px]">
+    <div className="flex items-start gap-2 px-4 py-1.5 text-xs">
       <span className={`shrink-0 font-mono ${colour}`} aria-hidden="true">{mark}</span>
       <span className="w-[13rem] shrink-0 text-foreground/80">{stage.label}</span>
       <span className={`min-w-0 flex-1 leading-snug ${stage.ok ? "text-muted-foreground" : colour}`}>
@@ -385,7 +402,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         description="Workspace-level watchdog controls"
       >
         <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-[11px] text-destructive/90">{err ?? "Failed to load governance settings"}</span>
+          <span className="text-xs text-destructive/90">{err ?? "Failed to load governance settings"}</span>
           <Button
             variant="outline"
             size="sm"
@@ -472,7 +489,7 @@ function WatchdogCard({
           does not belong in a right-aligned control slot. */}
       <div className="px-4 py-2.5 border-b border-border/40">
         <div className="text-xs text-foreground">What to flag</div>
-        <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
+        <div className="text-xs text-muted-foreground/80 mt-0.5 leading-snug">
           Pick the ones that matter here. These are added to the checks it always does.
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -503,7 +520,7 @@ function WatchdogCard({
                 />
                 <span className="min-w-0">
                   <span className="text-xs text-foreground">{p.label}</span>
-                  <span className="block text-[11px] text-muted-foreground/80 leading-snug">
+                  <span className="block text-xs text-muted-foreground/80 leading-snug">
                     {p.caption}
                   </span>
                 </span>
@@ -516,7 +533,7 @@ function WatchdogCard({
       {/* Free-form rules — natural language, injected as authoritative policy. */}
       <div className="px-4 py-2.5">
         <div className="text-xs text-foreground">Anything else to flag</div>
-        <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
+        <div className="text-xs text-muted-foreground/80 mt-0.5 leading-snug">
           One rule per line, in your own words. Optional — leave it empty and the checks above still apply.
         </div>
         <Textarea
@@ -626,6 +643,11 @@ function FindingsRoutingCard({
   const riskNum = Number(form.draft.risk)
   const riskValid = Number.isInteger(riskNum) && riskNum >= 1 && riskNum <= 10
 
+  // Server-reported, never a constant here: the tier table lives in
+  // internal/keeper/tier.go and a copy of "L4" in the console is a copy that
+  // goes stale silently.
+  const tierFloorLabel = gov.effective_second_approver?.tier_floor_label ?? ""
+
   function handleSave() {
     void form.submit(async (draft) => {
       await put({
@@ -715,7 +737,7 @@ function FindingsRoutingCard({
             data-testid="keeper-governance-risk"
           />
           {!riskValid && (
-            <span className="text-[11px] text-destructive/90" data-testid="keeper-governance-risk-invalid">
+            <span className="text-xs text-destructive/90" data-testid="keeper-governance-risk-invalid">
               Must be a whole number from 1 to 10.
             </span>
           )}
@@ -725,10 +747,27 @@ function FindingsRoutingCard({
       {/* Four-eyes credential gate (#1084). When on, an escalation raised by an
           agent hired by user A must be resolved by a DIFFERENT approver. The
           server warns (not blocks) if the workspace lacks a second eligible
-          approver; that advisory arrives as a toast on save. */}
+          approver; that advisory arrives as a toast on save.
+
+          Off is not "nobody needs a second approver" (#1559): the credential's
+          tier forces the rule on its own at the floor the server reports, and
+          it can only tighten this switch, never loosen it. Said here, once,
+          while the switch is off — with it on the row's own description
+          already says a second approver is required. */}
       <SettingsRow
         label="Require a second approver"
-        description="Four-eyes: credential escalations can't be approved by the same person who owns the requesting agent. Needs ≥2 OWNER/ADMIN/MANAGER members."
+        description={
+          <>
+            Four-eyes: credential escalations can&rsquo;t be approved by the same person who
+            owns the requesting agent. Needs ≥2 OWNER/ADMIN/MANAGER members.
+            {!form.draft.secondApprover && tierFloorLabel && (
+              <span className="block mt-1" data-testid="keeper-second-approver-tier-note">
+                Off here, but {tierFloorLabel} credentials still require one. A credential&rsquo;s
+                tier can only tighten this rule, never loosen it.
+              </span>
+            )}
+          </>
+        }
         border={false}
       >
         <Switch
@@ -745,17 +784,17 @@ function FindingsRoutingCard({
           className="px-4 py-2.5 border-t border-border/40 bg-muted/20"
           data-testid="keeper-findings-test-result"
         >
-          <div className="text-[11px] text-foreground/80">
+          <div className="text-xs text-foreground/80">
             {testResult.recipients.length === 0
               ? "That finding reached nobody."
               : `A finding reaches ${testResult.recipients.length} ${testResult.recipients.length === 1 ? "person" : "people"}:`}
           </div>
           {testResult.warning && (
-            <div className="text-[11px] text-destructive/90 mt-1 leading-snug">{testResult.warning}</div>
+            <div className="text-xs text-destructive/90 mt-1 leading-snug">{testResult.warning}</div>
           )}
           <ul className="mt-1.5 space-y-1">
             {testResult.recipients.map((r) => (
-              <li key={r.user_id} className="text-[11px] text-muted-foreground flex flex-wrap gap-x-2">
+              <li key={r.user_id} className="text-xs text-muted-foreground flex flex-wrap gap-x-2">
                 <span className="text-foreground/80">{r.email || r.name || r.user_id}</span>
                 {r.role && <span className="font-mono">{r.role}</span>}
                 <span className="text-muted-foreground/70">{r.reason}</span>
@@ -851,7 +890,7 @@ function CredentialLeasesCard({
             <span className="text-xs text-muted-foreground">min</span>
           </span>
           {problem && (
-            <span className="text-[11px] text-destructive/90 text-right max-w-[15rem]" data-testid="keeper-governance-auto-lease-invalid">
+            <span className="text-xs text-destructive/90 text-right max-w-[15rem]" data-testid="keeper-governance-auto-lease-invalid">
               {problem}
             </span>
           )}
@@ -996,6 +1035,22 @@ function GovernanceModelCard({
         ) : undefined
       }
     >
+      {/* The other half of the #1558 scope explanation. An operator who wants a
+          hosted judge starts on the instance card above, because that is the one
+          titled "Credential access judge" — and the only thing that used to send
+          them here was the server refusing the write. Say it on both cards, in
+          the same words, before either mistake is possible. */}
+      <div
+        className="px-4 py-2 border-b border-border/40 text-xs leading-snug text-muted-foreground"
+        data-testid="keeper-gov-scope"
+      >
+        <strong className="font-medium text-foreground/80">Scope:</strong> this workspace only. It overrides{" "}
+        <strong className="font-medium text-foreground/80">Credential access judge</strong> above, which is
+        instance-wide and speaks native Ollama only — so this card is the only place the credential judge can be
+        Anthropic or OpenAI-compatible, sourcing its endpoint or API key from this workspace&apos;s vault.
+        If that credential is later revoked, decisions fall back to the instance judge rather than failing.
+      </div>
+
       <SettingsRow
         label="What decides"
         description={chosen?.note ?? "Leave on the instance judge unless this workspace needs its own."}
@@ -1051,7 +1106,7 @@ function GovernanceModelCard({
                   in the list yet. */}
               {catalogue.length > 0 && (
                 <span className="flex flex-col items-end gap-1" data-testid="keeper-gov-models">
-                  <span className="text-[10px] text-muted-foreground/70">click to use</span>
+                  <span className="text-xs text-muted-foreground/70">click to use</span>
                   <span className="flex flex-wrap justify-end gap-1 max-w-[22rem]">
                     {catalogue.map((m) => (
                       <button
@@ -1073,7 +1128,7 @@ function GovernanceModelCard({
                 </span>
               )}
               {modelMissing && (
-                <span className="text-[11px] text-destructive/90" data-testid="keeper-gov-model-required">
+                <span className="text-xs text-destructive/90" data-testid="keeper-gov-model-required">
                   A model is required for this provider.
                 </span>
               )}
@@ -1130,7 +1185,7 @@ function GovernanceModelCard({
             <GovStageRow key={st.name} stage={st} />
           ))}
           {testResult.ok && (
-            <p className="px-4 py-1.5 text-[11px] text-success">
+            <p className="px-4 py-1.5 text-xs text-success">
               This judge works. Save to put it in force for this workspace.
             </p>
           )}

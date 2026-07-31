@@ -344,19 +344,18 @@ func TestVerifyChain_ContentEditCannotBeHiddenBehindACheckpoint(t *testing.T) {
 //	 removes it later."
 //
 // That test flips `priority` and leaves `priority_at_emit` divergent, which
-// trips the backfill fingerprint at verify.go:646 and is caught. An attacker
-// who sets BOTH columns produces state that is byte-identical to legitimate
-// v166 backfill damage: recoverEmitPriority proves the row authentic, it is
-// filed as Repairable rather than a Break, skipReconcile (verify.go:686)
-// suppresses the priority check, and VerifyChain returns OK=true.
+// trips the backfill fingerprint at verify.go and is caught. An attacker who
+// sets BOTH columns used to produce state that is byte-identical to legitimate
+// v166 backfill damage: recoverEmitPriority proved the row authentic, it was
+// filed as Repairable rather than a Break, skipReconcile suppressed the
+// priority check, and VerifyChain returned OK=true.
 //
-// SKIP-WAIVER(#1572): this is a confirmed hole, not a flaky test. It is written
-// as the invariant that SHOULD hold so the fix has a red test to turn green;
-// unskip it as part of that fix. Filed from a test-only PR per #1486 rather
-// than patched here.
+// #1572 removed the suppression: recovery still proves the CONTENT authentic
+// (and still reports the recovered value, which is the repair material), but it
+// no longer excuses the live priority. Reconciliation runs against the
+// recovered emit-time value, and a live value that no ledger row explains is a
+// break — whichever way the two columns were written.
 func TestVerifyChain_SelfConsistentPriorityDowngradeIsNotLaundered(t *testing.T) {
-	t.Skip("SKIP-WAIVER(#1572): known hole — the priority_at_emit recovery path launders a permanent→normal downgrade; unskip with the fix")
-
 	t.Setenv("ENCRYPTION_KEY", bypassTestKey)
 
 	db := openTestDB(t)
@@ -420,6 +419,14 @@ func TestVerifyChain_SelfConsistentPriorityDowngradeIsNotLaundered(t *testing.T)
 // the test suite and not only in a comment: it asserts the current behaviour,
 // so implementing the cross-check will turn it red and the fixer will find this
 // note. See #1572, which tracks both vectors.
+//
+// #1572 UPDATE: the verifier's verdict here is deliberately unchanged — a
+// self-consistent forged ledger still verifies clean, and the cross-check
+// against `memory.priority_changed` is still not implemented. What changed is
+// the PAYLOAD: journal.UnresolvedIntegrity refuses to let compaction delete an
+// entry that was `permanent` at emit, whatever the ledger claims, so this
+// forgery no longer gets the record destroyed. See
+// TestCompactor_NeverDeletesAnEntryPinnedAtEmit in internal/consolidate.
 func TestVerifyChain_ConsistentForgedPriorityLedgerIsADocumentedResidual(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", bypassTestKey)
 

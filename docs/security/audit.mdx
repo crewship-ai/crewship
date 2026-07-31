@@ -367,21 +367,75 @@ authorise one.
 
 <Note>
 This check bounds forgery rather than eliminating it. An attacker with DB write
-can append a fully self-consistent chain of fake edits. Two things still stand in
-the way: the honest path is now verifiable (no false positives to hide behind),
-and every real edit also emits a `memory.priority_changed` entry **into the keyed
-chain** — so a forged ledger with no corresponding chained entry is detectable by
-comparing the two.
+can append a fully self-consistent chain of fake edits. Three things stand in the
+way: the honest path is now verifiable (no false positives to hide behind); every
+real edit also emits a `memory.priority_changed` entry **into the keyed chain**,
+so a forged ledger with no corresponding chained entry is detectable by comparing
+the two; and — since #1572 — a forged un-pin no longer achieves anything, because
+compaction refuses to delete an entry that was `permanent` at emit regardless of
+what the ledger claims. The forgery can still mislead a reader of the priority
+column; it can no longer get the record destroyed.
 </Note>
 
 <Note>
 Entries pinned **before** the upgrade keep working: `priority_at_emit` is seeded
-from their current priority — the value their stored hash was already computed
-over — and the edit ledger is deliberately left **empty** for them, so
-reconciliation holds with zero recorded changes. The pre-upgrade edit history is
-unrecoverable, and inventing a change nobody can be attributed to would be a
-fabricated audit record. The guarantee starts at the upgrade and runs forward.
+from their current priority and the edit ledger is deliberately left **empty**
+for them, so reconciliation holds with zero recorded changes. The pre-upgrade
+edit history is unrecoverable, and inventing a change nobody can be attributed
+to would be a fabricated audit record. The guarantee starts at the upgrade and
+runs forward.
 </Note>
+
+#### Recovered is not resolved
+
+An entry pinned before the upgrade is a partial exception to the note above. The
+backfill seeded `priority_at_emit` from the value at *migration* time, which for
+an already-edited row is not the value its stored hash was computed over — so
+the hash does not reproduce. Verification tries the four possible priorities
+against the stored HMAC and, when one reproduces it, reports the row as
+**repairable**: the content is proven authentic and the emit-time priority is
+recovered exactly. Producing content that hashes correctly under any candidate
+requires the key, so this removes a false positive without weakening the oracle.
+
+What it does **not** establish is where the live priority came from. A pre-v166
+pin and an attacker's write to both `priority` and `priority_at_emit` leave
+byte-identical rows. Recovery used to resolve that ambiguity silently in favour
+of "benign" and skip the live-priority check for such rows — which laundered a
+`permanent → normal` downgrade past the one check guarding compaction's
+exemption (issue #1572).
+
+So a repairable row is now reported, not absolved:
+
+- it appears in `repairable` with the recovered emit-time value **and** as a
+  `priority` break, so `ok` is `false`;
+- `crewship journal verify` prints it in its own block and **exits non-zero**;
+- compaction refuses to delete it (below).
+
+The cost is that a genuine pre-upgrade pin reads red until an operator looks at
+it — a row which, before the chain moved off the mutable column, was a hard
+break anyway. Reporting a real ambiguity is the honest answer; resolving it in
+the attacker's favour was not.
+
+#### Compaction only destroys what it can prove
+
+Detecting the downgrade is necessary but not sufficient: verification is read by
+an operator occasionally, while compaction runs on a timer and reads nothing. So
+the refusal also lives at the point of deletion. Before a compaction pass
+deletes anything it re-derives each candidate's keyed hash, and it skips any row
+that:
+
+- does not reproduce its stored hash (tampered, or repairable);
+- is in the chain (`seq > 0`) but carries no stored hash;
+- has a live priority not reachable from the emit-time value through the ledger; or
+- was **`permanent` at emit** — whatever the live column says today.
+
+The last rule is the one that survives future refactoring. `permanent` at emit is
+a keyed, unforgeable fact; the un-pin that moves the live column is a ledger row
+anyone with database write can append. An unauthenticated claim may move a label,
+but it does not authorise destroying the record the label protects. Un-pinning
+still works for curation — it just no longer makes the entry disposable by a
+timer. Rows that predate the hash-chain (`seq = 0`) make no tamper-evidence
+claim and are unaffected.
 
 <Note>
   **Residual gaps (no overclaiming).** Two attacks are *not* fully covered:

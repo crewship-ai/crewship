@@ -251,6 +251,16 @@ type Router struct {
 	memHealthEval   *gatekeeper.MemoryHealthEvaluator
 	negativeEval    *gatekeeper.NegativeLearningEvaluator
 
+	// keeperPhase2 is the single Phase 2 handler instance, shared by the
+	// sidecar IPC routes and the operator-facing manual-run route (#1555).
+	// Both registrars ask for it through keeperPhase2Handler(); the admin
+	// registrar runs first, so constructing it there and again in the
+	// internal one would give the two surfaces different handlers — and the
+	// evaluators are captured by value, so the second copy could silently
+	// hold a different set.
+	keeperPhase2     *KeeperPhase2Handler
+	keeperPhase2Once sync.Once
+
 	// runVerdictProvider/runVerdictModel back the post-run outcome
 	// verdict (#1403): built lazily (once) from the run_summary aux
 	// slot, shared by every production executor construction site —
@@ -340,6 +350,32 @@ func (r *Router) SetKeeperPhase2Evaluators(
 	r.behaviorEval = behavior
 	r.memHealthEval = memoryHealth
 	r.negativeEval = negative
+}
+
+// keeperPhase2Handler returns (lazily constructs) the shared Keeper Phase 2
+// handler. Nil evaluators are fine and deliberate: the handler answers 503
+// "not configured" per endpoint so a partial rollout has a deterministic
+// surface instead of a missing route.
+//
+// Evaluators are captured by value here, which is why
+// SetKeeperPhase2Evaluators is deprecated: calling it after registration
+// writes fields this handler has already snapshotted.
+func (r *Router) keeperPhase2Handler() *KeeperPhase2Handler {
+	r.keeperPhase2Once.Do(func() {
+		h := NewKeeperPhase2Handler(
+			r.db, r.internalToken, r.PolicyResolver(),
+			r.skillReviewEval, r.behaviorEval, r.memHealthEval, r.negativeEval,
+			r.logger,
+		).WithMemoryBase(r.outputBasePath) // #1037: derive lesson write target server-side, not from the request body
+		// Same broadcaster the credential-path KeeperHandler gets — the F4
+		// endpoints write to the same inbox and owe the same realtime push
+		// (#1001 M0).
+		if r.hub != nil {
+			h.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
+		}
+		r.keeperPhase2 = h
+	})
+	return r.keeperPhase2
 }
 
 // PolicyResolver returns (lazily constructs) the shared per-crew

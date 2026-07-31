@@ -41,6 +41,14 @@ Keeper is fail-closed, so it cannot be enabled without a judge: a request to
 enable it with no endpoint or model is refused rather than accepted into an
 instance that would DENY every credential request.
 
+SCOPE. This judge is instance-wide and speaks the NATIVE OLLAMA API only — the
+provider and wire are reported by 'config get', but native Ollama is the only
+value either accepts. A hosted judge (Anthropic, or any OpenAI-compatible
+endpoint) sources its endpoint or API key from a vault credential, and the vault
+is per workspace, so it is configured with 'crewship keeper model set' instead.
+That setting overrides this one for its workspace, and falls back to this judge
+if its credential is revoked.
+
 Examples:
   crewship keeper config get
   crewship keeper config set --endpoint http://192.168.1.40:11434 --model qwen2.5:7b
@@ -103,6 +111,13 @@ func printKeeperInstanceConfig(cfg keeperInstanceConfig) {
 	fmt.Printf("  Endpoint:   %s %s\n", orUnset(cfg.EndpointURL.Value), sourceNote(cfg.EndpointURL.Source))
 	fmt.Printf("  Model:      %s %s\n", orUnset(cfg.Model.Value), sourceNote(cfg.Model.Source))
 	fmt.Printf("  Provider:   %s (%s wire) %s\n", orUnset(cfg.Provider.Value), orUnset(cfg.Wire.Value), sourceNote(cfg.Provider.Source))
+	// The provider and wire are reported but not settable, and "reported" reads
+	// as "settable" on a line that sits between two fields that are. Saying
+	// which scope this row is and naming the command for the other one is the
+	// difference between the CLI teaching the split and a 400 teaching it
+	// (#1558).
+	fmt.Printf("              %sinstance-wide, native Ollama only — for an Anthropic or OpenAI-compatible judge use 'crewship keeper model set' (per workspace)%s\n",
+		cli.Dim, cli.Reset)
 	// Printed next to the model because it is a property OF the model choice: a
 	// bigger judge needs a bigger budget, and a judge slower than the budget
 	// denies every credential request while still reporting as reachable.

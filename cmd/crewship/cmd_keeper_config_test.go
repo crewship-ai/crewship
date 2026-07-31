@@ -202,3 +202,40 @@ func TestKeeperConfigCmds_NoAuth(t *testing.T) {
 		}
 	}
 }
+
+// #1558: `config get` is the CLI answer to "which model judges credential
+// access?", and that question has two answers at two scopes. The instance row
+// only ever accepts native Ollama (keepercfg.validate rejects the rest), so the
+// output has to say so AND name the command that configures the other case —
+// otherwise the CLI teaches less than the console does, and the first thing
+// that teaches an operator is a 400 from `keeper config set`.
+func TestPrintKeeperInstanceConfig_NamesTheOtherScope(t *testing.T) {
+	t.Parallel()
+
+	out := covCaptureStdoutCli3(t, func() {
+		printKeeperInstanceConfig(keeperInstanceConfig{
+			Enabled:     keeperConfigBoolField{Value: true, Source: "instance"},
+			Provider:    keeperConfigStrField{Value: "ollama", Source: "default"},
+			EndpointURL: keeperConfigStrField{Value: "http://127.0.0.1:11434", Source: "instance"},
+			Wire:        keeperConfigStrField{Value: "ollama", Source: "default"},
+			Model:       keeperConfigStrField{Value: "qwen2.5:7b", Source: "instance"},
+			TimeoutMS:   keeperConfigIntField{Value: 20000, Source: "default"},
+
+			JudgeConfigured: true,
+		})
+	})
+
+	for _, want := range []string{
+		// The scope this row applies at.
+		"instance-wide",
+		// The constraint the server enforces on write.
+		"native Ollama only",
+		// The other card/command, by name, so it is one copy-paste away.
+		"crewship keeper model",
+		"per workspace",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("config get output does not mention %q:\n%s", want, out)
+		}
+	}
+}

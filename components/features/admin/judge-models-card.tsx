@@ -97,6 +97,26 @@ function isUsable(r: Subsystem): boolean {
   return r.healthy && r.reachable !== false
 }
 
+/**
+ * The Reviews evaluator a config slot configures, or null when it configures
+ * something that cannot be asked a question on demand.
+ *
+ * The card is keyed by aux slot (`curator`, `negative`) because that is what the
+ * config endpoint returns; the run route is keyed by evaluator (`skill-review`,
+ * `negative-learning`). `run_summary` writes a verdict at the end of a run and
+ * `fallback` is not an evaluator at all — neither has anything to run, so
+ * neither gets a button.
+ */
+function reviewSlotFor(slot: string): string | null {
+  switch (slot) {
+    case "curator": return "skill-review"
+    case "behavior": return "behavior"
+    case "memory_health": return "memory-health"
+    case "negative": return "negative-learning"
+    default: return null
+  }
+}
+
 /** Provenance, in the words an operator needs to decide whether Reset does anything. */
 function sourceNote(source: string): string {
   switch (source) {
@@ -120,6 +140,11 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // the worst moment to find out.
   const [probing, setProbing] = useState<string | null>(null)
   const [probeResults, setProbeResults] = useState<Record<string, { ok: boolean; detail: string }>>({})
+  // Per-slot manual runs (#1555). "Test" says whether the model answers; this
+  // says what the check actually finds. Kept separate from probing so a slot
+  // can be tested and run without the two results overwriting each other.
+  const [running, setRunning] = useState<string | null>(null)
+  const [runResults, setRunResults] = useState<Record<string, { ok: boolean; detail: string }>>({})
 
   const load = useCallback(async () => {
     if (!workspaceId) return
@@ -244,6 +269,44 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
     }
   }, [workspaceId])
 
+  /**
+   * Run the evaluator this row configures, now.
+   *
+   * Sent with no subject: the server picks one from the workspace (the stalest
+   * skill, the crew's memory, the last recorded failure) so a manual check is
+   * one press rather than a form. What comes back is a real verdict, recorded
+   * in the Keeper audit log like any scheduled one.
+   */
+  const runSlot = useCallback(async (slot: string) => {
+    const evaluator = reviewSlotFor(slot)
+    if (!evaluator) return
+    setRunning(slot)
+    try {
+      const res = await adminFetch(`/api/v1/admin/keeper/review/${evaluator}/run`, workspaceId, { method: "POST" })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        // The server's own words. Its refusals name the thing that is missing
+        // ("no skill is assigned to an agent in this workspace"), which a
+        // generic "run failed" would throw away.
+        setRunResults((p) => ({ ...p, [slot]: { ok: false, detail: body?.error || `HTTP ${res.status}` } }))
+        return
+      }
+      const decision = String(body?.decision ?? "")
+      const reason = String(body?.reason ?? "")
+      setRunResults((p) => ({
+        ...p,
+        [slot]: { ok: decision === "ALLOW", detail: reason ? `${decision} — ${reason}` : decision || "no verdict" },
+      }))
+    } catch (e) {
+      setRunResults((p) => ({
+        ...p,
+        [slot]: { ok: false, detail: e instanceof Error ? e.message : "Network error" },
+      }))
+    } finally {
+      setRunning(null)
+    }
+  }, [workspaceId])
+
   // The five background evaluators are collapsed by default. On a default
   // instance they are five identical rows of "anthropic / claude-haiku-4-5", and
   // a wall of the same technical detail five times is not information — it is
@@ -336,7 +399,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
               consequence. What an operator needs is what will HAPPEN, in words
               they can act on. */}
           {unusable > 0 && (
-            <div role="status" className="px-4 py-2 text-[11px] text-destructive border-b border-border/40 bg-destructive/[0.05]">
+            <div role="status" className="px-4 py-2 text-xs text-destructive border-b border-border/40 bg-destructive/[0.05]">
               {unusable === 1 ? "One check cannot run" : `${unusable} checks cannot run`} right now. Anything that
               needs {unusable === 1 ? "it" : "them"} is refused rather than allowed — Keeper never guesses.
             </div>
@@ -384,9 +447,12 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                   onProbe={probeSlot}
                   probing={probing === r.id}
                   probeResult={probeResults[r.id]}
+                  onRun={runSlot}
+                  runningNow={running === r.id}
+                  runResult={runResults[r.id]}
                 />
               ) : (
-                <span className="text-[11px] text-muted-foreground font-mono tabular-nums text-right">
+                <span className="text-xs text-muted-foreground font-mono tabular-nums text-right">
                   {r.provider || "—"}
                   {r.model ? ` / ${r.model}` : ""}
                   {r.timeout_ms ? ` · ${Math.round(r.timeout_ms / 1000)}s` : ""}
@@ -415,7 +481,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
             >
               <span className="flex items-center gap-2">
                 {uniformModel && !expanded && (
-                  <span className="font-mono text-[11px] text-muted-foreground">
+                  <span className="font-mono text-xs text-muted-foreground">
                     all {allSlots.length} on {uniformModel}
                   </span>
                 )}
@@ -443,6 +509,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                 onProbe={probeSlot}
                 probing={probing === s.slot}
                 probeResult={probeResults[s.slot]}
+                onRun={runSlot}
+                runningNow={running === s.slot}
+                runResult={runResults[s.slot]}
               />
             </SettingsRow>
           ))}
@@ -463,6 +532,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
  */
 function SlotEditor({
   slot, providers, workspaceId, busy, onSave, onProbe, probing, probeResult,
+  onRun, runningNow, runResult,
 }: {
   slot: AuxSlot
   providers: string[]
@@ -472,7 +542,11 @@ function SlotEditor({
   onProbe: (slot: string) => Promise<void>
   probing: boolean
   probeResult?: { ok: boolean; detail: string }
+  onRun: (slot: string) => Promise<void>
+  runningNow: boolean
+  runResult?: { ok: boolean; detail: string }
 }) {
+  const evaluator = reviewSlotFor(slot.slot)
   // The models this slot's provider can serve. Loaded with the row rather than
   // behind a dialog: a control that has to be OPENED before it can tell you what
   // it contains is a control you have to interrogate, and the whole complaint
@@ -526,12 +600,12 @@ function SlotEditor({
             void onSave(slot.slot, { provider: next, model: slot.model.value })
           }}
         >
-          <SelectTrigger size="sm" className="h-7 w-[7.5rem] text-[11px]" aria-label={`${slot.label} provider`}>
+          <SelectTrigger size="sm" className="h-7 w-[7.5rem] text-xs" aria-label={`${slot.label} provider`}>
             <SelectValue placeholder="provider" />
           </SelectTrigger>
           <SelectContent>
             {providers.map((p) => (
-              <SelectItem key={p} value={p} className="text-[11px]">{p}</SelectItem>
+              <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -546,7 +620,7 @@ function SlotEditor({
         >
           <SelectTrigger
             size="sm"
-            className="h-7 min-w-[11rem] text-[11px] font-mono"
+            className="h-7 min-w-[11rem] text-xs font-mono"
             aria-label={`${slot.label} model`}
             data-testid={`keeper-aux-model-${slot.slot}`}
           >
@@ -554,7 +628,7 @@ function SlotEditor({
           </SelectTrigger>
           <SelectContent>
             {catalogue.map((m) => (
-              <SelectItem key={m} value={m} className="text-[11px] font-mono">{m}</SelectItem>
+              <SelectItem key={m} value={m} className="text-xs font-mono">{m}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -564,17 +638,17 @@ function SlotEditor({
           sweep fails, so it is said here — and the value is spelled out, because
           the dropdown cannot show a selection that is not in its list. */}
       {slot.model.value !== "" && catalogue.length > 0 && !catalogue.includes(slot.model.value) && (
-        <span className="max-w-[22rem] text-right text-[11px] leading-snug text-warn">
+        <span className="max-w-[22rem] text-right text-xs leading-snug text-warn">
           <span className="font-mono">{slot.model.value}</span> is not offered by {slot.provider.value} — pick one from the list.
         </span>
       )}
       {catalogueError && (
-        <span className="max-w-[22rem] text-right text-[11px] leading-snug text-muted-foreground">
+        <span className="max-w-[22rem] text-right text-xs leading-snug text-muted-foreground">
           {catalogueError}
         </span>
       )}
 
-      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {/* One real evaluation, on request. Explicitly a button rather than
             something the page does on load: probing five hosted evaluators to
             render a status card would bill the operator for looking. */}
@@ -587,6 +661,22 @@ function SlotEditor({
         >
           {probing ? "testing…" : "test"}
         </button>
+        {/* Test asks whether the model answers. Run asks the question the
+            evaluator exists to ask — and until this button there was no way to
+            ask it except by waiting for the nightly sweep, which is why the
+            behaviour watchdog had never run outside its own tests. */}
+        {evaluator && (
+          <button
+            type="button"
+            disabled={busy || runningNow || !slot.model.value}
+            onClick={() => void onRun(slot.slot)}
+            className="underline decoration-dotted hover:text-foreground disabled:opacity-50"
+            data-testid={`keeper-review-run-${slot.slot}`}
+            title="Run this check now against your workspace — the verdict is recorded in the Keeper log"
+          >
+            {runningNow ? "running…" : "run now"}
+          </button>
+        )}
         <span>{sourceNote(slot.model.source)}</span>
         {slot.timeout_ms.value > 0 && <span className="tabular-nums">{Math.round(slot.timeout_ms.value / 1000)}s</span>}
         {/* Named per row: an operator who changes this one and sees no change in
@@ -608,11 +698,25 @@ function SlotEditor({
         <span
           role="status"
           className={cn(
-            "max-w-[22rem] text-right text-[10px] leading-snug",
+            "max-w-[22rem] text-right text-xs leading-snug",
             probeResult.ok ? "text-success" : "text-destructive",
           )}
         >
           {probeResult.detail}
+        </span>
+      )}
+
+      {/* The verdict, verbatim. An ESCALATE is not an error — it is the check
+          working — so a non-ALLOW result is flagged as attention, not failure. */}
+      {runResult && (
+        <span
+          role="status"
+          className={cn(
+            "max-w-[22rem] text-right text-[10px] leading-snug",
+            runResult.ok ? "text-success" : "text-warn",
+          )}
+        >
+          {runResult.detail}
         </span>
       )}
 
