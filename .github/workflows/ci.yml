@@ -121,6 +121,8 @@ jobs:
         run: bash scripts/deploy-dev-test.sh
       - name: test-harness lib (binary resolution + preflight)
         run: bash scripts/test-harness-lib-test.sh
+      - name: claim-issue.sh (claim parsing + clone detection)
+        run: bash scripts/claim-issue-test.sh
 
       # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
       # every test called t.Skip, so a skip is indistinguishable from a pass
