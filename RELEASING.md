@@ -53,7 +53,10 @@ The push triggers `.github/workflows/release.yml`. Watch the run at
 
 1. Checkout, install pnpm + Node + Go.
 2. `pnpm install` and `pnpm build` to produce `out/`.
-3. `cp -r out web/out` so the Go embed FS picks it up.
+3. `scripts/embed-web-out.sh sync` stages `out/` into `web/out/` for the Go
+   embed FS **and fails the release** if what landed there is the tracked
+   placeholder rather than a real export — a release must never ship a
+   binary whose UI routes answer 503.
 4. `goreleaser release --clean` cross-compiles for darwin/linux/windows
    (amd64 + arm64 where supported), signs each binary with cosign
    keyless via GitHub OIDC, generates SPDX + CycloneDX SBOMs, builds

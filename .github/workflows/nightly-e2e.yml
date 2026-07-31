@@ -220,16 +220,16 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Build web UI into the embed dir
-        # setup-go-embed writes only a one-line web/out/index.html stub so
-        # `go:embed` compiles. Against that stub /login serves a bare doctype
-        # with no Next router, globalSetup's CSRF fetch has nothing to talk to,
-        # and every spec dies in setup. Export the real UI over it before the
-        # binary is compiled — same two steps as `make build`, and the same
-        # thing the onboarding job does.
+        # A bare checkout carries only web/out/.placeholder.html, which lets
+        # `go:embed` compile (#1567) but makes every UI route answer 503:
+        # globalSetup's CSRF fetch would have nothing to talk to and every
+        # spec would die in setup. Export the real UI before the binary is
+        # compiled — same two steps as `make build`, and the same thing the
+        # onboarding job does.
         run: |
           set -euo pipefail
           pnpm build
-          rm -rf web/out && cp -r out web/out
+          ./scripts/embed-web-out.sh sync
 
       - name: Build CLI
         run: go build -o crewship ./cmd/crewship
@@ -360,7 +360,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm build
-          rm -rf web/out && cp -r out web/out
+          ./scripts/embed-web-out.sh sync
 
       - name: Build CLI
         run: go build -o crewship ./cmd/crewship

@@ -186,10 +186,15 @@ func TestGatekeeper_L4_RoutesToLLM(t *testing.T) {
 }
 
 // TestGatekeeper_LLMDeadlineExceeded_DenyWithReason verifies that when the
-// upstream provider returns context.DeadlineExceeded (matching the audit-M4
-// 5s upstream timeout behaviour), the gatekeeper denies AND the reason
-// text surfaces the unavailability so audit logs are actionable.
-// Invariant: timeouts must fail closed, never fail open.
+// upstream provider returns context.DeadlineExceeded (the audit-M4 upstream
+// timeout behaviour), the gatekeeper denies AND the reason says what to do about
+// it. Invariant: timeouts must fail closed, never fail open.
+//
+// The assertions changed with the message. "unavailable: context deadline
+// exceeded" was accurate and useless: on dev1 it was produced by a correctly
+// configured 7B judge that simply needed longer than the 5s constant, and it read
+// as a broken endpoint. The reason now names the budget and the command that
+// changes it, so the audit log points at the fix.
 func TestGatekeeper_LLMDeadlineExceeded_DenyWithReason(t *testing.T) {
 	p := &modelCapturingProvider{err: context.DeadlineExceeded}
 	g := gatekeeper.New(p, "phi3:mini", newTestLogger())
@@ -216,12 +221,19 @@ func TestGatekeeper_LLMDeadlineExceeded_DenyWithReason(t *testing.T) {
 	if resp.RiskScore != 10 {
 		t.Errorf("expected risk score 10 on hard deny, got %d", resp.RiskScore)
 	}
-	if !strings.Contains(strings.ToLower(resp.Reason), "unavailable") {
-		t.Errorf("expected reason to cite unavailability, got %q", resp.Reason)
+	// The budget, so the reader knows what was exceeded.
+	if !strings.Contains(resp.Reason, "20s") {
+		t.Errorf("expected reason to name the budget, got %q", resp.Reason)
 	}
-	if !strings.Contains(resp.Reason, context.DeadlineExceeded.Error()) {
-		t.Errorf("expected reason to include underlying error %q, got %q",
-			context.DeadlineExceeded.Error(), resp.Reason)
+	// And the way out, because a slow model is the likely cause and it is a
+	// one-command fix.
+	if !strings.Contains(resp.Reason, "--judge-timeout") {
+		t.Errorf("expected reason to name the setting that fixes it, got %q", resp.Reason)
+	}
+	// Structured, so the audit evaluators' fail-soft widening cannot be broken by
+	// rewording this string again.
+	if !resp.InfraFailure {
+		t.Error("a timeout DENY is not marked as an infrastructure failure")
 	}
 }
 

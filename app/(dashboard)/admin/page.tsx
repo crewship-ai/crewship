@@ -45,6 +45,26 @@ interface NavSection {
   items: { key: TabKey; label: string; icon: React.ElementType }[]
 }
 
+/**
+ * One line per section, under the heading — the same shape Settings uses.
+ *
+ * Admin showed a bare icon and a word. Settings answers "what is this page for"
+ * before the first control, which is most of what makes it readable, and the two
+ * pages are the same kind of surface. A heading that only repeats the nav row you
+ * just clicked is a heading that costs a line and says nothing.
+ */
+const SECTION_ABOUT: Partial<Record<TabKey, string>> = {
+  overview: "Instance health, size and activity at a glance.",
+  workspaces: "Every workspace on this instance.",
+  users: "Every account, and which workspaces it belongs to.",
+  providers: "Container runtime, images and the daemon's own health.",
+  notifications: "Where this instance can send a message, and whether it works.",
+  ratelimits: "Request budgets, tunable without a restart.",
+  security: "Who may read a secret: the judge that decides, and the checks around it.",
+  reviews: "What the judge has decided, and what is waiting on a human.",
+  backups: "Snapshots of this instance, and restoring from one.",
+}
+
 const sections: NavSection[] = [
   {
     label: "Platform",
@@ -84,13 +104,41 @@ const sections: NavSection[] = [
 
 const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.map((i) => i.key))
 
+/**
+ * Resolve the section from `?tab=`, falling back to Overview.
+ *
+ * Exported so the deep-link contract is testable on its own — the same reason
+ * initialSettingsTab is.
+ */
+export function initialAdminTab(search: string): TabKey {
+  const t = new URLSearchParams(search).get("tab")
+  return t && (ALL_TABS as string[]).includes(t) ? (t as TabKey) : "overview"
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   // Admin console floor is ADMIN+ (#865) — kept in lockstep with the backend
   // ADMIN+ route floor so an ADMIN can open the console they can already drive.
   const isAdmin = role === "OWNER" || role === "ADMIN"
-  const [tab, setTab] = useState<TabKey>("overview")
+  // Deep-linkable, like /settings?tab=. Admin was the one console whose URL
+  // never changed — /admin whichever section you were on — so a section could
+  // not be bookmarked, linked in a ticket, or reloaded without losing your
+  // place. An unknown or absent key falls back to Overview, the section every
+  // admin can read.
+  const [tab, _setTab] = useState<TabKey>(() =>
+    typeof window === "undefined" ? "overview" : initialAdminTab(window.location.search),
+  )
+  const setTab = useCallback((next: TabKey) => {
+    _setTab(next)
+    // replaceState, not a route push: this is the same document, and a history
+    // entry per sidebar click would turn Back into "undo my last five clicks".
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href)
+      url.searchParams.set("tab", next)
+      window.history.replaceState(null, "", url.toString())
+    }
+  }, [])
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
   const navQ = navQuery.trim().toLowerCase()
@@ -415,9 +463,14 @@ export default function AdminPage() {
         <div className="flex-1 overflow-y-auto">
         <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
           {activeItem && (
-            <div className="flex items-center gap-2">
-              <activeItem.icon className="h-3.5 w-3.5 text-foreground/50" />
-              <h1 className="text-body font-medium text-foreground/80">{activeItem.label}</h1>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <activeItem.icon className="h-3.5 w-3.5 text-foreground/50" />
+                <h1 className="text-body font-medium text-foreground/80">{activeItem.label}</h1>
+              </div>
+              {SECTION_ABOUT[activeItem.key] && (
+                <p className="text-xs text-muted-foreground leading-snug">{SECTION_ABOUT[activeItem.key]}</p>
+              )}
             </div>
           )}
           {fetchError && (

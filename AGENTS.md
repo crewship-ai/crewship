@@ -29,6 +29,14 @@ pnpm build              # confirm static export still builds (cross-cutting chan
 Multi-instance: a clone named `crewship_N` auto-offsets all ports/data/sockets,
 so parallel agents/worktrees run conflict-free (see `dev.sh`).
 
+**`web/out` embed:** `web/embed.go` embeds the Next.js export, so `web/out/`
+must exist for *any* Go build to compile. It is tracked-by-one-file
+(`web/out/.placeholder.html`) so `go build ./...` works in a fresh worktree
+with zero setup — **do not `mkdir web/out` or hand-roll an `index.html` stub**,
+and do not let a `git add -A` delete the placeholder after a build. Such a
+binary has no UI (every UI route → `503` + an explanatory page); run
+`make build` for a real one. Details: [`CONTRIBUTING.md`](CONTRIBUTING.md#the-webout-embed).
+
 ## Before you merge: confirm the review happened
 
 Wait ~2–5 min after `gh pr create` for CodeRabbit, and never merge before it

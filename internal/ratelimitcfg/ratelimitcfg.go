@@ -62,6 +62,7 @@ const (
 	KeyProvMaxConcurrentWS  = "provisioning.max_concurrent_per_ws"
 	KeyProvMaxStartsPerMin  = "provisioning.max_starts_per_min"
 	KeyWebhookAgentPerMin   = "webhook.agent_per_min"
+	KeyKeeperJudgeProbe     = "keeper.judge_probe_per_min"
 )
 
 // hardMax is a generous shared ceiling. It exists only to reject absurd
@@ -155,6 +156,15 @@ var registry = []Meta{
 	{KeyProvMaxConcurrentWS, "Provisioning", "Concurrent provisions / workspace", "How many crew provisioning jobs a single workspace may run at once. Setting this below the number of crews a fresh seed creates (currently 4) can make `crewship seed` block on its own trigger requests.", "jobs", 32, 1, hardMax},
 	{KeyProvMaxStartsPerMin, "Provisioning", "Provision starts / minute", "How many crew provisioning jobs a workspace may START per minute.", "starts/min", 120, 1, hardMax},
 	{KeyWebhookAgentPerMin, "Webhooks", "Agent webhook fires", "Default cap on agent-webhook triggers per agent per minute.", "req/min", 600, 1, hardMax},
+	// The judge connection test and model discovery dial an address the CALLER
+	// supplies. That is deliberate — an operator configuring a local model server
+	// has to be able to point at it, and private/loopback addresses are allowed
+	// because that is where Ollama runs. This bucket is what keeps a legitimate
+	// configuration tool from doubling as an internal port scanner: a handful of
+	// probes a minute is ample for setting a judge up, and far too few to sweep a
+	// subnet. Instance-wide rather than per IP — the capability being rationed is
+	// the daemon's outbound dial, not a client's share of it.
+	{KeyKeeperJudgeProbe, "Keeper", "Judge probe", "Judge connection tests + model discovery, instance-wide. Both dial an operator-supplied address, so the cap is what stops the tool being used to sweep a network.", "req/min", 6, 1, 600},
 }
 
 var byKey = func() map[string]Meta {
