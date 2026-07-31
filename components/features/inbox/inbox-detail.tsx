@@ -50,6 +50,25 @@ const SECRET_KEY_RE =
   /(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|auth|bearer|credential)/i
 const SECRET_VAL_RE = /:\/\/[^/@\s]+:[^/@\s]+@/
 
+/**
+ * Does anything inside this value look like a credential?
+ *
+ * Walks a nested object rather than trusting the top-level key: the masking
+ * rule keys off the NAME, and a name like "metadata" or "inputs" says nothing
+ * about what is underneath it.
+ */
+function looksSecretNested(value: unknown, depth = 0): boolean {
+  if (depth > 4) return false
+  if (typeof value === "string") return SECRET_VAL_RE.test(value)
+  if (Array.isArray(value)) return value.some((v) => looksSecretNested(v, depth + 1))
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).some(
+      ([k, v]) => SECRET_KEY_RE.test(k) || looksSecretNested(v, depth + 1),
+    )
+  }
+  return false
+}
+
 function looksSecret(key: string, value: string): boolean {
   return SECRET_KEY_RE.test(key) || SECRET_VAL_RE.test(value)
 }
@@ -119,6 +138,12 @@ function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
                 ) : (
                   <span>{v}</span>
                 )
+              ) : looksSecretNested(v) ? (
+                // A nested object was stringified whole, so an api_key one
+                // level down printed in full while the top-level key check —
+                // which only sees "metadata" — waved it through. Anything that
+                // contains something secret-looking is masked as a unit.
+                <RevealableValue value={JSON.stringify(v)} />
               ) : (
                 <span className="font-mono text-[10px]">{JSON.stringify(v)}</span>
               )}
@@ -157,13 +182,20 @@ export function DecisionCard({
           <span className={cn("type-section", meta.tone === "warn" ? "text-warn" : "text-foreground/70")}>
             {meta.heading}
           </span>
-          {mins != null && mins > 0 && (
-            <span className="type-meta ml-auto font-mono text-destructive">
-              expires {absolute(payloadString(item, "timeout_at"))} · in {remainingLabel(mins)}
+          {mins != null && (
+            <span
+              className={cn(
+                "type-meta ml-auto font-mono",
+                // Expired is not a quieter state than expiring; it is the loud
+                // one. It used to render muted, below the pill for a gate that
+                // still had time.
+                mins > 0 ? "text-destructive" : "font-semibold text-destructive",
+              )}
+            >
+              {mins > 0
+                ? `expires ${absolute(payloadString(item, "timeout_at"))} · in ${remainingLabel(mins)}`
+                : `expired ${absolute(payloadString(item, "timeout_at"))}`}
             </span>
-          )}
-          {mins != null && mins <= 0 && (
-            <span className="type-meta ml-auto font-mono text-muted-foreground-soft">expired</span>
           )}
         </div>
 

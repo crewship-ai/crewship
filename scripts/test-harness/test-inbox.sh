@@ -30,7 +30,17 @@ preflight
 # count taken off the default page would be a count of the first fifty rows
 # wearing the name of the whole state.
 inbox_json() {
-  cs inbox list --state "${1:-all}" --limit 500 -f json 2>/dev/null || printf '[]'
+  local out rc
+  out="$(cs inbox list --state "${1:-all}" --limit 500 -f json 2>&1)"; rc=$?
+  if (( rc != 0 )); then
+    # Do NOT fall back to "[]". An auth or transport failure would then read as
+    # "the workspace is empty", every assertion below would skip, and the run
+    # would go green while proving nothing.
+    _fail "inbox list (${1:-all})" "CLI exited $rc: $(printf '%s' "$out" | head -c 200)"
+    printf '[]'
+    return 1
+  fi
+  printf '%s' "$out"
 }
 
 # item_field <id> <jq-path> — one field off one row, empty when absent.
@@ -125,13 +135,20 @@ fi
 
 section "Dismissal reaches the server, not just the screen"
 
-# A plain message is the one kind the inbox may close itself. Find one that is
-# still open; skip rather than invent state if the workspace has none.
-MSG_ID="$(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | head -1)"
+# A plain message is the one kind the inbox may close itself — but picking an
+# arbitrary one would close a real notification belonging to whoever is using
+# this instance. Mint one instead, by running a routine whose notify step
+# addresses the caller, and dismiss only that.
+BEFORE_IDS="$(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | sort)"
+cs routine run "${NOTIFY_ROUTINE:-demo-fetch-and-report}" >/dev/null 2>&1
+sleep "$POLL_INTERVAL"
+MSG_ID="$(comm -13 <(printf '%s\n' "$BEFORE_IDS") \
+  <(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | sort) | head -1)"
 
 if [[ -z "$MSG_ID" ]]; then
-  skip "no open message to dismiss (workspace has none right now)"
+  skip "could not mint a message to dismiss (is ${NOTIFY_ROUTINE:-demo-fetch-and-report} seeded?)"
 else
+  info "dismissing only the row this run created: $MSG_ID"
   cs inbox resolve "$MSG_ID" --action dismissed >/dev/null 2>&1
 
   poll_until "dismissing a message removes it from the active list" 20 \
@@ -191,8 +208,11 @@ fi
 # The known ceiling: the list endpoint is LIMIT 100 with no cursor, so a
 # workspace past that silently truncates. Say so loudly rather than let a green
 # run imply the archive is complete.
-if (( RESOLVED_N >= 100 )); then
-  info "NOTE: resolved list returned $RESOLVED_N — the endpoint caps at 100 with no cursor, so this is a window, not the archive"
+# The request asks for 500, which is the server's own maximum; hitting it means
+# the page IS truncated. (The endpoint's default is 100 — that is what the UI
+# gets, and why its archive is a window either way.)
+if (( RESOLVED_N >= 500 )); then
+  info "NOTE: resolved list returned $RESOLVED_N — that is the 500-row ceiling and there is no cursor, so this is a window, not the archive"
 fi
 
 finish

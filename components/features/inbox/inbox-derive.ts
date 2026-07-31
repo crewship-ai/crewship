@@ -42,7 +42,19 @@ export function payloadNumber(item: InboxItem, key: string): number | null {
   return typeof v === "number" ? v : null
 }
 
+/**
+ * Mirrors internal/notify.CategoryForItem, not just the flat kind map.
+ *
+ * A chat reply and a routine's progress notice are both kind=message, and only
+ * payload.subkind separates them. The backend reads it; if this did not, the
+ * category shown on a row would disagree with the category that actually
+ * routed its notification — and the delivery settings link under it would send
+ * the reader to the wrong switch.
+ */
 export function categoryOf(item: InboxItem): string {
+  if (item.kind === "message" && payloadString(item, "subkind") === "routine_update") {
+    return "routines.completed"
+  }
   return CATEGORY_BY_KIND[item.kind] ?? item.kind
 }
 
@@ -92,7 +104,12 @@ export function since(iso?: string): string {
   if (mins < 60) return `${mins}m ago`
   const hrs = Math.round(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
-  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+  // The archive's "all time" window reaches past a year, where a bare
+  // day/month makes two different years look like the same date.
+  const then = new Date(iso)
+  const sameYear = then.getFullYear() === new Date().getFullYear()
+  return then.toLocaleDateString("en-GB",
+    sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" })
 }
 
 export function absolute(iso?: string): string {
@@ -110,6 +127,9 @@ export function absolute(iso?: string): string {
  * obvious, and minutes stop doing that within the hour.
  */
 export function remainingLabel(minutes: number): string {
+  // Past the deadline is the most urgent state there is; the callers used to
+  // guard on `> 0` and so rendered nothing at all for it.
+  if (minutes <= 0) return "expired"
   if (minutes < 60) return `${minutes}m`
   if (minutes < 48 * 60) return `${Math.round(minutes / 60)}h`
   return `${Math.round(minutes / (24 * 60))}d`
@@ -231,6 +251,7 @@ export const OUTCOME_TONE: Record<string, "success" | "destructive" | "warn" | "
   approved: "success",
   rejected: "destructive",
   archived: "default",
+  dismissed: "default",
   retried: "blue",
   expired: "warn",
 }

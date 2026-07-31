@@ -38,16 +38,21 @@ export function InboxBell() {
         // Chunked to the backend's 500-id cap, same as the list's bulk bar.
         const CHUNK = 500
         let updated = 0
+        let failure: string | null = null
         for (let i = 0; i < ids.length; i += CHUNK) {
           const res = await inboxBulk(workspaceId, ids.slice(i, i + CHUNK), "read")
           if (!res.ok) {
-            toast.error(res.error)
-            return
+            failure = res.error
+            break
           }
           updated += res.result.updated
         }
-        toast.success(`${updated} marked read`)
-        await refresh()
+        // Refresh whatever landed. Returning early on a mid-loop failure left
+        // the server ahead of the screen: the first chunk was read, the badge
+        // still counted it, and nothing corrected that until the next event.
+        if (updated > 0) await refresh()
+        if (failure) toast.error(updated > 0 ? `${updated} marked read, then: ${failure}` : failure)
+        else toast.success(`${updated} marked read`)
       }}
     />
   )

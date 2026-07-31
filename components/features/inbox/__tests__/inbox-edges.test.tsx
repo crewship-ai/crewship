@@ -34,9 +34,17 @@ vi.mock("@/lib/api-fetch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api-fetch")>()),
   apiFetch: (...a: unknown[]) => apiFetch(...a),
 }))
-vi.mock("@/lib/api/waitpoints", () => ({ waitpointDecide: (...a: unknown[]) => waitpointDecide(...a) }))
+// Partial: kind-actions also imports isAlreadyDecidedError from here, and the
+// tests want the REAL predicate — it is the thing under test when a 409 has to
+// read as somebody else finishing rather than as a failure.
+vi.mock("@/lib/api/waitpoints", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/waitpoints")>()),
+  waitpointDecide: (...a: unknown[]) => waitpointDecide(...a),
+}))
 vi.mock("@/lib/api/escalations", () => ({ escalationResolve: (...a: unknown[]) => escalationResolve(...a) }))
-vi.mock("sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn() } }))
+vi.mock("sonner", () => ({
+  toast: { error: (...a: unknown[]) => toastError(...a), success: vi.fn(), info: vi.fn() },
+}))
 vi.mock("../waitpoint-run-detail", () => ({ WaitpointRunDetail: () => null }))
 vi.mock("@/hooks/use-inbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/use-inbox")>()
@@ -72,12 +80,12 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("failure paths that would otherwise pass silently", () => {
-  it("reports a refused waitpoint approval", async () => {
-    waitpointDecide.mockResolvedValueOnce({ ok: false, error: "already decided" })
+  it("reports a waitpoint approval the server genuinely refused", async () => {
+    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 503, error: "waitpoint store unavailable" })
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("already decided"))
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable"))
     expect(onRefresh).not.toHaveBeenCalled()
   })
 

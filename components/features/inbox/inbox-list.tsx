@@ -234,18 +234,26 @@ export function InboxList() {
     const CHUNK = 500
     let updated = 0
     let skipped = 0
+    let failure: string | null = null
     for (let i = 0; i < ids.length; i += CHUNK) {
       const res = await inboxBulk(workspaceId, ids.slice(i, i + CHUNK), state, action)
       if (!res.ok) {
-        toast.error(res.error)
-        return
+        failure = res.error
+        break
       }
       updated += res.result.updated
       skipped += res.result.skipped
     }
     const verb = state === "resolved" ? "resolved" : "marked read"
+    // Refresh whatever landed rather than returning early: a mid-loop failure
+    // leaves the earlier chunks applied on the server, and abandoning the
+    // refresh leaves the screen claiming they were not.
+    if (updated > 0) await refresh()
+    if (failure) {
+      toast.error(updated > 0 ? `${updated} ${verb}, then: ${failure}` : failure)
+      return
+    }
     toast.success(skipped > 0 ? `${updated} ${verb} · ${skipped} left open (need a decision)` : `${updated} ${verb}`)
-    await refresh()
   }
 
   return (
@@ -308,7 +316,15 @@ export function InboxList() {
             item={selected}
             role={(role as WorkspaceRole | null) ?? null}
             onResolve={async (action) => {
-              await patch(selected.id, "resolved", action)
+              // patch() rejects on a 409 (source-managed kinds) and on any
+              // transport failure. Unhandled, that produced no toast and an
+              // unhandled rejection — the click simply did nothing, visibly.
+              try {
+                await patch(selected.id, "resolved", action)
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not close this item")
+                return
+              }
               toast.success(`Marked as ${action}`)
               advance()
               await refresh()
@@ -316,7 +332,12 @@ export function InboxList() {
             onArchive={async () => {
               const prev = selected.state
               const id = selected.id
-              await patch(id, "resolved", "archived")
+              try {
+                await patch(id, "resolved", "archived")
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not archive this item")
+                return
+              }
               advance()
               toast.success("Archived", {
                 action: {

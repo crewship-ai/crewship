@@ -55,7 +55,9 @@ const ITEMS: InboxItem[] = [
     payload: {
       pipeline_run_id: "run1",
       step_id: "promote",
-      timeout_at: new Date(now + 11 * 60_000).toISOString(),
+      // 30s of slack so the label cannot flip to 10m on a slow machine: the
+      // fixture is built at module load and read several tests later.
+      timeout_at: new Date(now + 11 * 60_000 + 30_000).toISOString(),
     },
   }),
   base({

@@ -206,7 +206,16 @@ export function InboxListPanel(props: InboxListPanelProps) {
         const [from, to] = anchor < index ? [anchor, index] : [index, anchor]
         // A shift range ADDS; it never clears what is already ticked, which is
         // what makes "pick a block, then another block" work.
-        for (let i = from; i <= to; i++) next.add(flat[i].id)
+        //
+        // Bounded because the anchor can outlive the row it pointed at: a
+        // group collapses, or a realtime refresh drops a row, and the stored
+        // index now reaches past the end of the visible order.
+        const lo = Math.max(0, from)
+        const hi = Math.min(to, flat.length - 1)
+        for (let i = lo; i <= hi; i++) {
+          const row = flat[i]
+          if (row) next.add(row.id)
+        }
         return next
       }
       if (next.has(item.id)) next.delete(item.id)
@@ -660,8 +669,10 @@ function MailRow({
           <span className="truncate">{subject.label}</span>
           <span>·</span>
           <span className="truncate font-mono">{categoryOf(item)}</span>
-          {mins != null && mins > 0 && (
-            <span className="shrink-0 font-medium text-destructive">· expires in {remainingLabel(mins)}</span>
+          {mins != null && (
+            <span className="shrink-0 font-medium text-destructive">
+              {mins > 0 ? `· expires in ${remainingLabel(mins)}` : "· expired"}
+            </span>
           )}
           {blocked && <span className="shrink-0">· admin decides</span>}
         </span>

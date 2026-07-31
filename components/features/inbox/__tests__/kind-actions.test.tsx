@@ -20,10 +20,20 @@ vi.mock("@/lib/api-fetch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api-fetch")>()),
   apiFetch: (...a: unknown[]) => apiFetch(...a),
 }))
-vi.mock("@/lib/api/waitpoints", () => ({ waitpointDecide: (...a: unknown[]) => waitpointDecide(...a) }))
+// Partial: kind-actions also imports isAlreadyDecidedError from here, and the
+// tests want the REAL predicate — it is the thing under test when a 409 has to
+// read as somebody else finishing rather than as a failure.
+vi.mock("@/lib/api/waitpoints", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/waitpoints")>()),
+  waitpointDecide: (...a: unknown[]) => waitpointDecide(...a),
+}))
 vi.mock("@/lib/api/escalations", () => ({ escalationResolve: (...a: unknown[]) => escalationResolve(...a) }))
 vi.mock("sonner", () => ({
-  toast: { error: (...a: unknown[]) => toastError(...a), success: (...a: unknown[]) => toastSuccess(...a) },
+  toast: {
+    error: (...a: unknown[]) => toastError(...a),
+    success: (...a: unknown[]) => toastSuccess(...a),
+    info: vi.fn(),
+  },
 }))
 
 import { KindActions } from "../kind-actions"
@@ -155,12 +165,24 @@ describe("waitpoints are source-managed", () => {
     expect(onResolve).not.toHaveBeenCalled()
   })
 
-  it("reports a decision the server would not take", async () => {
-    waitpointDecide.mockResolvedValueOnce({ ok: false, error: "already decided or expired" })
+  it("treats 'already decided' as somebody else finishing, not as a failure", async () => {
+    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 409, error: "already decided or expired" })
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
 
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith("already decided or expired"))
+    // The gate was closed from /activity, or it timed out. Both are outcomes.
+    // A red toast for one made the button look broken; the trace surface has
+    // always shown this as a graceful resolution, and now both agree.
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled())
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("still reports a decision that genuinely failed", async () => {
+    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 500, error: "waitpoint store unavailable" })
+    mount(item({ kind: "waitpoint", source_id: "tok" }))
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("waitpoint store unavailable"))
     expect(onRefresh).not.toHaveBeenCalled()
   })
 })
@@ -215,7 +237,10 @@ describe("schedule kinds", () => {
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith("dismissed"))
   })
 
-  it("falls back to Dismiss when a consolidation carries no proposal id", async () => {
+})
+
+describe("memory consolidation", () => {
+  it("falls back to Dismiss when it carries no proposal id", async () => {
     mount(item({ kind: "memory_consolidation", payload: {} }))
     fireEvent.click(screen.getByRole("button", { name: /Dismiss/ }))
 

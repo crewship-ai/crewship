@@ -25,7 +25,13 @@ vi.mock("@/lib/api-fetch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api-fetch")>()),
   apiFetch: (...a: unknown[]) => apiFetch(...a),
 }))
-vi.mock("@/lib/api/waitpoints", () => ({ waitpointDecide: (...a: unknown[]) => waitpointDecide(...a) }))
+// Partial: kind-actions also imports isAlreadyDecidedError from here, and the
+// tests want the REAL predicate — it is the thing under test when a 409 has to
+// read as somebody else finishing rather than as a failure.
+vi.mock("@/lib/api/waitpoints", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/waitpoints")>()),
+  waitpointDecide: (...a: unknown[]) => waitpointDecide(...a),
+}))
 vi.mock("@/lib/api/escalations", () => ({ escalationResolve: (...a: unknown[]) => escalationResolve(...a) }))
 vi.mock("@/lib/api/inbox", () => ({ inboxBulk: (...a: unknown[]) => inboxBulk(...a) }))
 vi.mock("../waitpoint-run-detail", () => ({ WaitpointRunDetail: () => null }))

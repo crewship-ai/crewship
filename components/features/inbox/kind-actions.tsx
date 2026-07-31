@@ -7,14 +7,25 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"
-import { waitpointDecide } from "@/lib/api/waitpoints"
+import { isAlreadyDecidedError, waitpointDecide } from "@/lib/api/waitpoints"
 import { escalationResolve } from "@/lib/api/escalations"
 import type { InboxItem } from "@/hooks/use-inbox"
 
-/** Valid in-app chat deep link from a reply notification's payload. */
+/**
+ * Valid in-app chat deep link from a reply notification's payload.
+ *
+ * The guard has to reject "//evil.example/x" as well as "https://…": a
+ * protocol-relative URL starts with "/" and the browser resolves it against
+ * the current scheme, so a payload an agent controls could navigate a manager
+ * off-origin from a link that looks internal. One leading slash, not two, and
+ * no backslash either — some parsers fold "/\" onto "//".
+ */
 function chatUrlOf(item: InboxItem): string | null {
   const v = item.payload?.chat_url
-  return typeof v === "string" && v.startsWith("/") ? v : null
+  if (typeof v !== "string") return null
+  if (!v.startsWith("/")) return null
+  if (v.startsWith("//") || v.startsWith("/\\")) return null
+  return v
 }
 
 // =============================================================================
@@ -130,6 +141,15 @@ export function KindActions({
               wrap("approved", async () => {
                 const res = await waitpointDecide(item.workspace_id, item.source_id, true)
                 if (!res.ok) {
+                  // Somebody approved it from /activity, or it timed out. That
+                  // is a resolution, not an error — the trace surface has
+                  // always shown it as one, and a red toast here made the same
+                  // outcome look like a broken button.
+                  if (isAlreadyDecidedError(res.status, res.error)) {
+                    toast.info("Already decided elsewhere — refreshing")
+                    await onRefresh()
+                    return
+                  }
                   toast.error(res.error)
                   return
                 }
@@ -156,6 +176,11 @@ export function KindActions({
               wrap("denied", async () => {
                 const res = await waitpointDecide(item.workspace_id, item.source_id, false)
                 if (!res.ok) {
+                  if (isAlreadyDecidedError(res.status, res.error)) {
+                    toast.info("Already decided elsewhere — refreshing")
+                    await onRefresh()
+                    return
+                  }
                   toast.error(res.error)
                   return
                 }

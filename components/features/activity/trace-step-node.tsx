@@ -29,7 +29,7 @@ import type {
   TraceStepNodeData,
   TraceTriggerNodeData,
 } from "@/lib/trace/types"
-import { waitpointDecide } from "@/lib/api/waitpoints"
+import { isAlreadyDecidedError, waitpointDecide } from "@/lib/api/waitpoints"
 import { HEATMAP_BORDER_CLASS } from "@/lib/trace/percentile-heatmap"
 import { StepHoverCard } from "./step-hover-card"
 
@@ -341,15 +341,6 @@ function TraceStepNodeBase({ data }: NodeProps) {
 //   3. the API answered "already decided or expired" → graceful
 //      recovery, not an error loop.
 type WaitpointResolution = "approved" | "denied" | "decided"
-
-// isAlreadyDecidedError — the decide endpoint's "somebody beat you to
-// it" answers: a 409/410-style conflict status, or the canonical
-// error string for callers that didn't get a status (transport
-// wrappers, older servers).
-function isAlreadyDecidedError(status: number | undefined, error: string): boolean {
-  if (status === 409 || status === 410) return true
-  return /already decided|expired/i.test(error)
-}
 
 function WaitpointActions({
   waitpoint,
