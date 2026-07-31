@@ -444,9 +444,7 @@ func TestCLICallsHitRegisteredRoutes(t *testing.T) {
 // branch. An entry here is a promise, not an excuse: the test fails if one
 // stops matching, so a merged fix forces the entry out instead of leaving a
 // permanent hole. Never add an entry for a bug nobody is fixing.
-var knownWorkspaceClearingDrift = map[string]string{
-	"GET /api/v1/system/aux-status": "#1514, fixed by PR #1564 (fix/cli-aux-status-subsystems) — delete this entry when it merges",
-}
+var knownWorkspaceClearingDrift = map[string]string{}
 
 func TestCLIDoesNotClearWorkspaceOnWorkspaceGatedRoutes(t *testing.T) {
 	routes := collectAPIRoutes(t)
