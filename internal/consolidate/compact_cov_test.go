@@ -276,13 +276,21 @@ func TestCompactor_SelectError(t *testing.T) {
 
 // --- direct helper error branches -----------------------------------------------------
 
-func TestDeleteBucket_BeginError(t *testing.T) {
+// A dead DB must make deleteBucket fail, and fail BEFORE it opens a
+// transaction. Since #1572 the first thing it does is ask the journal which of
+// these rows may be destroyed; on a closed DB that question cannot be answered,
+// and "cannot answer" has to mean "delete nothing" rather than falling through
+// to the DELETE. The error therefore names the fence, not BeginTx.
+func TestDeleteBucket_FailsClosedOnADeadDB(t *testing.T) {
 	db := openDB(t)
 	db.Close()
 	c := &Compactor{DB: db}
 	_, _, err := c.deleteBucket(context.Background(), "ws_test", []string{"a"})
-	if err == nil || !strings.Contains(err.Error(), "begin") {
-		t.Errorf("expected begin error, got %v", err)
+	if err == nil {
+		t.Fatal("deleteBucket succeeded against a closed DB")
+	}
+	if !strings.Contains(err.Error(), "integrity fence") {
+		t.Errorf("expected the integrity fence to refuse first, got %v", err)
 	}
 }
 

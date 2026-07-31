@@ -290,8 +290,16 @@ The endpoint takes no parameters; the workspace comes from request context (`X-W
 | `broken_seq` | integer | `seq` of the first bad entry (omitted when `ok`) |
 | `broken_id` | string | `id` of the first bad entry (omitted when `ok`) |
 | `reason` | string | Human-readable cause of the break (omitted when `ok`) |
+| `breaks` | array | Every per-row failure (`seq`, `id`, `kind`, `reason`), capped at 100 |
+| `break_count` | integer | Exact number of failures, even when `breaks` is trimmed |
+| `repairable` | array | Rows whose content is proven authentic but whose live priority is unaccounted for: `seq`, `id`, `stored_priority`, `emit_priority` (the value the keyed hash proves) |
+| `repairable_count` | integer | Exact number of such rows, even when the list is trimmed |
 
-CLI parity: `crewship journal verify` (exits non-zero on a broken chain).
+A non-empty `repairable` also produces a `priority` break, so `ok` is `false`
+— see [Audit Log → Recovered is not resolved](/security/audit#recovered-is-not-resolved).
+
+CLI parity: `crewship journal verify` (exits non-zero on a broken chain **or**
+when any entry has an unresolved priority).
 
 ## Audit log
 

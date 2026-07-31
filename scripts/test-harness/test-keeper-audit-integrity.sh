@@ -191,11 +191,31 @@ if have jq; then
     _fail "journal chain verifies OK" "verify did not report ok=true: $(printf '%s' "$verify_json" | head -c 200)"
   fi
 
-  # Exit-code contract: verify must exit 0 on a clean chain.
-  if cs journal verify >/dev/null 2>&1; then
-    _pass "journal verify exits 0 on a clean chain"
+  # Exit-code contract. "Clean" now means two things, not one: the chain
+  # verifies AND nothing is left unresolved. A repairable row is content the
+  # verifier could authenticate but whose live priority no ledger row explains
+  # — the state #1572 showed an attacker can manufacture and then have quietly
+  # compacted away. So verify exits non-zero on a non-empty `repairable` even
+  # though `ok` is true, and asserting "exit 0 whenever ok=true" would pin
+  # exactly the silence that bug relied on.
+  #
+  # A freshly seeded instance has no pre-v166 pins, so `repairable` is empty
+  # and this is the same assertion it always was. On an upgraded install that
+  # genuinely carries them, the non-zero exit is the point.
+  n_repairable="$(printf '%s' "$verify_json" | jq -r '(.repairable // []) | length')"
+  if [[ "$n_repairable" == "0" ]]; then
+    if cs journal verify >/dev/null 2>&1; then
+      _pass "journal verify exits 0 on a clean chain with nothing unresolved"
+    else
+      _fail "journal verify exit 0 on clean chain" "non-zero exit with no tamper applied and no repairable rows"
+    fi
   else
-    _fail "journal verify exit 0 on clean chain" "non-zero exit with no tamper applied"
+    if ! cs journal verify >/dev/null 2>&1; then
+      _pass "journal verify exits non-zero while $n_repairable row(s) are unresolved"
+    else
+      _fail "journal verify non-zero on unresolved rows" \
+        "exited 0 with $n_repairable repairable row(s) — an unresolved integrity state must not read as success"
+    fi
   fi
 
   # Tamper leg — needs direct DB access to play the attacker. Only runs when a
