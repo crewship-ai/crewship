@@ -129,6 +129,21 @@ expect_not_contains "throttled and reviewed do not collapse" \
 
 expect_contains "throttled carries the wait the notice quoted" \
   "$(classify "$THROTTLED_IN")" "37m"
+
+# Three phrasings each match a rate-limit notice, and the real fixture above
+# happens to carry all three — so a test built only on it cannot tell whether
+# two of the three were deleted. Pin each shape on its own, or the redundancy
+# quietly decays to one and the next wording change reads as "absent".
+throttled_by() { # <body>
+  state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "" \
+    "$(cmt 2026-07-30T21:20:00Z "$1")" "$NONE")"
+}
+expect_eq "the rate-limited marker alone is throttled" "throttled" \
+  "$(throttled_by '<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->')"
+expect_eq "the «Review limit reached» heading alone is throttled" "throttled" \
+  "$(throttled_by '> ## Review limit reached')"
+expect_eq "the «reached your PR review limit» prose alone is throttled" "throttled" \
+  "$(throttled_by "you've reached your PR review limit, so we couldn't start this review.")"
 expect_contains "reviewed carries the actionable count" \
   "$(classify "$THROTTLED_IN" >/dev/null; classify "$REVIEWED_IN")" "2 actionable"
 
@@ -285,6 +300,81 @@ sum2="$(printf '%s\n%s\n' \
   | "$RS" --classify-checks)"
 expect_eq "paginated pages are merged, not overwritten" "2" \
   "$(printf '%s' "$sum2" | jq -r '.skipped | length')"
+
+echo "== the API failing is its own state, never a benign one =="
+
+# Everything above drives the pure classifier, which is the part that can be
+# subtly wrong. But the part that can be *catastrophically* wrong lives in
+# fetch_pr/examine: turning "the API did not answer" into "nothing was posted"
+# is the exact substitution this whole script exists to catch, and no
+# pure-stdin test can reach that branch. So drive the real script with a `gh`
+# that fails. Still network-free — the stub is the only `gh` on PATH.
+STUB_DIR="$(mktemp -d)"
+trap 'rm -rf "$STUB_DIR"' EXIT
+stub_gh() { printf '%s\n' '#!/bin/sh' "$@" > "$STUB_DIR/gh"; chmod +x "$STUB_DIR/gh"; }
+with_stub() { PATH="$STUB_DIR:$PATH" "$RS" "$@" 2>&1; }
+
+stub_gh 'exit 1'
+out="$(with_stub 1234)"; rc=$?
+expect_contains "a failed API call reports 'unknown'" "$out" "? unknown"
+expect_contains "…and refuses to call it 'no review'" "$out" 'NOT "no review"'
+expect_eq "…and exits 3, never 0" "3" "$rc"
+expect_not_contains "…and never claims the PR was reviewed" "$out" "✓ reviewed"
+
+# `gh` exiting 0 with a body jq cannot read is the same hazard wearing a
+# success code, and it is the shape an auth or proxy interstitial arrives in.
+stub_gh 'echo not-json'
+expect_contains "a malformed API body is 'unknown', not 'absent'" \
+  "$(with_stub 1234)" "? unknown"
+
+stub_gh 'echo "{}"'
+expect_contains "valid JSON with no head SHA is 'unknown'" \
+  "$(with_stub 1234)" "? unknown"
+
+stub_gh 'exit 1'
+expect_contains "--json reports the unknown state too" \
+  "$(with_stub --json 1234)" '"state":"unknown"'
+
+# The realistic failure is partial, not total: the PR call succeeds and one of
+# the paginated calls behind it trips GitHub's secondary rate limit. Losing the
+# comments is losing exactly the throttle notice, so a half-read PR must stay
+# `unknown` rather than settle into whatever the surviving half implies.
+stub_gh \
+  'case "$*" in' \
+  '  *"/issues/"*"/comments"*) exit 1 ;;' \
+  '  *"/pulls/"*"/reviews"*)   echo "[]" ;;' \
+  '  *"/pulls/"*) echo "{\"number\":1234,\"title\":\"t\",\"head\":{\"sha\":\"abc1234\",\"ref\":\"b\"},\"created_at\":\"2020-01-01T00:00:00Z\"}" ;;' \
+  '  *) echo "{}" ;;' \
+  'esac'
+out="$(with_stub 1234)"; rc=$?
+expect_contains "a half-fetched PR is 'unknown', not 'absent'" "$out" "? unknown"
+expect_eq "…and still exits 3" "3" "$rc"
+
+# Same again with the other half missing, so neither call can be quietly
+# defaulted to an empty list without a test noticing.
+stub_gh \
+  'case "$*" in' \
+  '  *"/pulls/"*"/reviews"*)   exit 1 ;;' \
+  '  *"/issues/"*"/comments"*) echo "[]" ;;' \
+  '  *"/pulls/"*) echo "{\"number\":1234,\"title\":\"t\",\"head\":{\"sha\":\"abc1234\",\"ref\":\"b\"},\"created_at\":\"2020-01-01T00:00:00Z\"}" ;;' \
+  '  *) echo "{}" ;;' \
+  'esac'
+expect_contains "a PR whose reviews call failed is 'unknown' too" \
+  "$(with_stub 1234)" "? unknown"
+
+# With no PR arguments the listing is the first call. A failed listing must
+# not degrade into examining zero PRs and printing the all-clear.
+stub_gh 'exit 1'
+out="$(with_stub)"; rc=$?
+expect_eq "a failed PR listing exits 2" "2" "$rc"
+expect_not_contains "…and does not print an all-clear" "$out" "carry a real review"
+
+# Missing tooling is a usage error, never a clean run over nothing. Invoked
+# through "$BASH" rather than the shebang, because with gh gone the PATH is
+# empty and `/usr/bin/env bash` would fail to resolve bash itself.
+out="$(PATH="$STUB_DIR/nonexistent" "$BASH" "$RS" 1234 2>&1)"; rc=$?
+expect_eq "gh missing exits 2" "2" "$rc"
+expect_contains "…and says gh is missing" "$out" "gh CLI not found"
 
 echo "== usage =="
 
