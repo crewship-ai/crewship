@@ -197,16 +197,32 @@ var missionCloneCmd = &cobra.Command{
 			return err
 		}
 
+		// The clone handler answers {"id": …, "status": "PLANNING"} and
+		// nothing else (MissionHandler.Clone, internal/api/task_state.go).
+		// This used to decode a `title` the server has never sent and print
+		// it, so every successful clone reported `Mission cloned: <id> ()` —
+		// an empty parenthesis that reads like a mission with no title
+		// rather than a field the CLI could not see. Report what the server
+		// actually told us, and nothing else.
+		//
+		// In particular do NOT echo the --title the caller passed. The
+		// handler never reads the request body: it titles the clone
+		// "<original title> (copy)" unconditionally, so `--title Foo` is a
+		// no-op server-side and printing `— titled "Foo"` would trade the
+		// old empty parenthesis for a different confident falsehood. The
+		// flag being ignored is its own bug (CLI flag + the documented
+		// example in docs/cli/mission.mdx both advertise it); it needs an
+		// API change to honour, so it is tracked separately rather than
+		// papered over here.
 		var result struct {
 			ID     string `json:"id"`
-			Title  string `json:"title"`
 			Status string `json:"status"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Mission cloned: %s (%s)", result.ID, result.Title))
+		cli.PrintSuccess(fmt.Sprintf("Mission cloned: %s (%s)", result.ID, result.Status))
 		return nil
 	},
 }
