@@ -336,3 +336,75 @@ func TestAdminKeeperReview_UnconfiguredEvaluatorSaysSo(t *testing.T) {
 		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// Every press of this button spends one evaluator call on a paid model, and
+// until #1575 nothing bounded how often it could be pressed. The neighbouring
+// aux probe has been metered since it shipped — it delegates to the judge
+// handler's instance-wide bucket precisely so a status surface cannot be
+// refreshed into an invoice — while this route, which spends strictly MORE per
+// press (a full evaluation against real subject material, not a reachability
+// dial), inherited only the general authed-mutation limiter. roleManage bounds
+// who, not how often.
+//
+// The burst is deliberately one full pass over the four evaluators, because
+// "run everything now" is the operator flow #1555 shipped for. What must not be
+// possible is a fifth run in the same instant — a held-down button, a retry
+// loop, or a routine wired to `crewship keeper review run`.
+func TestAdminKeeperReview_RunsAreRateLimited(t *testing.T) {
+	h, _ := newReviewTestHandler(t)
+
+	for i, slot := range keeperReviewSlots {
+		rr := httptest.NewRecorder()
+		h.Run(rr, reviewReq(slot, ""))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("run %d (%s) got %d, want 200 — one full pass over the evaluators must fit in the burst; body=%s",
+				i+1, slot, rr.Code, rr.Body.String())
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	h.Run(rr, reviewReq("behavior", ""))
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("run %d got %d, want 429 — the button can outrun any cadence",
+			len(keeperReviewSlots)+1, rr.Code)
+	}
+
+	// A bare 429 tells an operator their tool is broken. The refusal has to say
+	// what tripped and when the next attempt will be taken, the way the judge
+	// probe's does.
+	body := rr.Body.String()
+	if !strings.Contains(body, "rate limited") {
+		t.Errorf("the refusal does not explain itself: %s", body)
+	}
+	if !strings.Contains(body, "Try again in") {
+		t.Errorf("the refusal does not say when to retry: %s", body)
+	}
+	if got := rr.Header().Get("Retry-After"); got == "" {
+		t.Errorf("429 carries no Retry-After header, so a script cannot back off intelligently")
+	}
+}
+
+// A token buys a model call, so a request that never reaches a model must not
+// spend one. Otherwise the cheapest way to lock an operator out of their own
+// evaluators is a loop of typos.
+func TestAdminKeeperReview_RefusedRunsDoNotSpendTheBudget(t *testing.T) {
+	h, _ := newReviewTestHandler(t)
+
+	for i := 0; i < 20; i++ {
+		rr := httptest.NewRecorder()
+		h.Run(rr, reviewReq("skills", "")) // not a slot: 400, no model called
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("rejected run %d got %d, want 400", i+1, rr.Code)
+		}
+	}
+
+	for i, slot := range keeperReviewSlots {
+		rr := httptest.NewRecorder()
+		h.Run(rr, reviewReq(slot, ""))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("run %d (%s) got %d after 20 rejected requests, want 200 — "+
+				"requests that never reached a model spent the run budget; body=%s",
+				i+1, slot, rr.Code, rr.Body.String())
+		}
+	}
+}

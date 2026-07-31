@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
@@ -17,7 +16,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/llm/endpoint"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
-	"golang.org/x/time/rate"
 )
 
 // AdminKeeperJudgeHandler is the two things that turn "paste a URL and hope"
@@ -59,33 +57,27 @@ type AdminKeeperJudgeHandler struct {
 	// capability being rationed is the daemon's outbound dial, not a client's
 	// share of it. The rate is read from the ratelimitcfg registry on every call
 	// so an operator override applies without a restart.
-	probeMu sync.Mutex
-	probes  *rate.Limiter
+	//
+	// The bucket itself lives in keeper_spend_limiter.go, shared with the manual
+	// Reviews trigger (#1575) — the other admin route that spends a model call
+	// because somebody pressed something. Burst 0 = the configured value, which
+	// is the shape this route has always had (6/min, burst 6).
+	probes *spendLimiter
 }
 
 func NewAdminKeeperJudgeHandler(store *keepercfg.Store, logger *slog.Logger) *AdminKeeperJudgeHandler {
-	perMin := ratelimitcfg.Int(ratelimitcfg.KeyKeeperJudgeProbe)
 	return &AdminKeeperJudgeHandler{
 		store:  store,
 		logger: logger,
-		probes: rate.NewLimiter(rate.Limit(float64(perMin)/60.0), perMin),
+		probes: newSpendLimiter(ratelimitcfg.KeyKeeperJudgeProbe, time.Minute, 0),
 	}
 }
 
 // allowProbe consumes one token, retuning the bucket from the registry first so
 // a live override is honoured. Returns false when the caller should get a 429.
 func (h *AdminKeeperJudgeHandler) allowProbe() bool {
-	perMin := ratelimitcfg.Int(ratelimitcfg.KeyKeeperJudgeProbe)
-	h.probeMu.Lock()
-	if h.probes == nil {
-		h.probes = rate.NewLimiter(rate.Limit(float64(perMin)/60.0), perMin)
-	} else {
-		h.probes.SetLimit(rate.Limit(float64(perMin) / 60.0))
-		h.probes.SetBurst(perMin)
-	}
-	limiter := h.probes
-	h.probeMu.Unlock()
-	return limiter.Allow()
+	ok, _ := h.probes.take()
+	return ok
 }
 
 // judgeProbeTimeout bounds one stage. Generous enough for a cold model load on a

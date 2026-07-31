@@ -30,7 +30,10 @@ The decision lands in the same audit trail a scheduled sweep writes to
 ('crewship keeper history'), and escalations reach the same inbox.
 
 Each run calls a model, so it costs what that evaluator's model costs — see
-'crewship keeper aux list' for which model each slot resolves to.`,
+'crewship keeper aux list' for which model each slot resolves to. Runs are
+rate limited instance-wide (60/hour, bursting to one pass over the four
+evaluators) so a loop cannot outspend the sweep it stands in for; raise it with
+'crewship admin ratelimits set keeper.review_run_per_hour <n>'.`,
 }
 
 var (

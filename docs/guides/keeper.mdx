@@ -1132,6 +1132,41 @@ inbox escalation on DENY/ESCALATE, same realtime push. The response carries the
   invented one to reason about.
 </Warning>
 
+#### The run budget
+
+Because a run spends money, the route is metered — the same way the evaluator
+probe on the Judge models card is, and by the same code. The cap is
+**instance-wide**, not per user or per IP: what is being rationed is the
+instance's evaluator spend, not one operator's share of it.
+
+It ships at **60 runs/hour with a burst of four**, which reads as: one full pass
+over the four evaluators goes through immediately, then one run a minute. That
+is well above running things by hand and well below what a held-down button, a
+retry loop, or a routine wired to `crewship keeper review run` would do.
+
+Over the cap you get a `429` that says when to come back, plus a `Retry-After`
+header for anything that isn't a person:
+
+```
+API error (429): Too many manual review runs — each one spends a full evaluation
+on this instance's evaluator model, so they are rate limited instance-wide. Try
+again in 43s.
+```
+
+Requests that never reach a model — an unknown slot, a crew from another
+workspace, a workspace with no failure to learn from — do not spend the budget.
+
+Tune it like any other limiter:
+
+```bash
+crewship admin ratelimits list                              # keeper.review_run_per_hour
+crewship admin ratelimits set keeper.review_run_per_hour 300
+crewship admin ratelimits reset keeper.review_run_per_hour
+```
+
+The burst stays at one pass over the four evaluators whatever you set, so
+"check everything now" is never the thing that trips the limit.
+
 ## Audit Trail
 
 Every Keeper decision is audited with:
