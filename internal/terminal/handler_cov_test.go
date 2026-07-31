@@ -9,15 +9,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/gorilla/websocket"
 )
 
@@ -137,15 +136,7 @@ func (i *covInteractive) resizes() [][2]uint16 {
 // workspace w1 owning crew c1 (slug crew-a).
 func seedTerminalDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "termcov.db"))
-	if err != nil {
-		t.Fatalf("db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := database.Migrate(context.Background(), db.DB, silentLogger()); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := testutil.MigratedDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u1@x',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','WS','ws',?,?)`, now, now)

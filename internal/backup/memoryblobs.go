@@ -1,0 +1,405 @@
+package backup
+
+// Memory-version blob collection + restore.
+//
+// memory_versions rides every workspace-scope bundle (see intent.go
+// and dbdump.go's BackupTables), but the row is only an audit-trail
+// pointer: `payload_ref` names a content-addressed blob file on disk
+// at {MemoryRoot}/versions/<sha[:2]>/<sha> (internal/memory/versions.go
+// RecordVersion). Before this file existed, CreateBackup never
+// collected those blob files, so a restore landed memory_versions rows
+// whose payload_ref pointed at files that do not exist on the target —
+// memory history / HITL review / memory restore silently break because
+// the DB row is present and looks fine until something tries to read
+// the content.
+//
+// The fix mirrors the pattern the collector already uses for per-crew
+// filesystem sections (collector.go / restorer.go): a dedicated
+// top-level entry in the SAME payload tar (so it rides through the
+// SAME AGE-encryption boundary as everything else — see bundle.go
+// SealPayload, which seals the whole payload stream, not per-section),
+// extracted back out on restore via ExtractedPayload the same way
+// workspace/volumes/memory/system sections are.
+//
+// Unlike those per-crew sections, memory-version blobs are host-side
+// (BlobRoot is a Crewship-instance-wide directory, never inside a crew
+// container — see cmd_start.go wiring cfg.Storage.MemoryRoot), so the
+// restore side writes directly to the local filesystem instead of
+// going through DockerOps.
+
+import (
+	"archive/tar"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"time"
+)
+
+// memoryBlobsSectionPrefix is the top-level payload-tar prefix used by
+// WriteMemoryBlobsSection / ExtractPayload / RestoreMemoryBlobs.
+const memoryBlobsSectionPrefix = "memory-blobs/"
+
+// memoryBlobsSinkKey is the ExtractPayload sink bucket name for the
+// memory-blobs section. Unlike workspace/volumes/memory/system, this
+// section carries no per-crew slug (memory_versions is workspace-scoped,
+// not per-crew), so it gets a single fixed key instead of one per slug.
+const memoryBlobsSinkKey = "memory-blobs"
+
+// MemoryBlobsResult reports what WriteMemoryBlobsSection did.
+type MemoryBlobsResult struct {
+	// Included is the number of blobs actually written into the bundle.
+	Included int
+	// Missing carries the sha256 of every memory_versions row whose
+	// blob did not exist on disk at backup time. Not a hard failure —
+	// see the WriteMemoryBlobsSection doc comment.
+	Missing []string
+}
+
+// distinctMemoryVersionShas extracts the set of sha256 values referenced
+// by dump's memory_versions rows, in first-seen order. Returns nil when
+// the dump carries no such table — crew-scope bundles never do (DumpCrew
+// does not export memory_versions), so this is the normal, non-error
+// case for that scope.
+func distinctMemoryVersionShas(dump *DBDump) []string {
+	if dump == nil {
+		return nil
+	}
+	rows, ok := dump.Tables["memory_versions"]
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(rows))
+	var out []string
+	for _, row := range rows {
+		sha, _ := row["sha256"].(string)
+		if sha == "" {
+			continue
+		}
+		if _, dup := seen[sha]; dup {
+			continue
+		}
+		seen[sha] = struct{}{}
+		out = append(out, sha)
+	}
+	return out
+}
+
+// memoryVersionShaSet returns the sha256 values referenced by dump's
+// memory_versions rows as a map from sha to itself, so a caller can
+// look up an archive-derived candidate string against values that
+// originated from the DB dump — never from the archive entry being
+// restored. RestoreMemoryBlobs uses this to derive its write
+// destination from "what memory_versions rows are actually being
+// restored" instead of from an arbitrary tar entry name: an entry
+// whose name is not in this set is skipped, full stop, regardless of
+// whether it happens to look like a valid sha256.
+//
+// Invalid-shaped values (defence against a tampered dump.json) are
+// excluded here rather than left for the caller to filter, so the
+// returned set is unconditionally safe to feed into filepath.Join.
+func memoryVersionShaSet(dump *DBDump) map[string]string {
+	shas := distinctMemoryVersionShas(dump)
+	out := make(map[string]string, len(shas))
+	for _, sha := range shas {
+		if !validSha256Hex(sha) {
+			continue
+		}
+		out[sha] = sha
+	}
+	return out
+}
+
+// validSha256Hex reports whether s looks like a lowercase-hex sha256
+// digest (64 chars) — the format RecordVersion produces via
+// hex.EncodeToString(sha256.Sum256(...)). Guards every place a sha
+// from bundle content (dump rows or tar entry names) gets joined onto
+// a filesystem path, so a corrupted or tampered value cannot become a
+// path-traversal vector.
+func validSha256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// WriteMemoryBlobsSection copies the content-addressed memory-version
+// blobs referenced by dump's memory_versions rows into dst, under
+// memory-blobs/<sha[:2]>/<sha>. blobRoot is the SOURCE instance's
+// configured blob root ({MemoryRoot}/versions) — the same value
+// RecordVersion used when it wrote the blob. Empty blobRoot means
+// memory versioning was never enabled on this instance; the section is
+// skipped entirely (matches the rest of the memory subsystem's "empty
+// BlobRoot disables versioning" convention).
+//
+// Blobs stream via WriteStream (not buffered into memory) so this
+// scales the same way the per-crew sections do; individual memory
+// version blobs are markdown-scale (KB), but the set referenced by a
+// busy workspace's audit trail is not bounded.
+//
+// A referenced sha with no blob on disk is NOT a hard failure — it can
+// legitimately happen after a retention sweep, or (the scenario that
+// motivated this fix) a prior restore that dropped blobs while keeping
+// rows. Missing shas are collected into the result so the caller can
+// warn the operator; backup creation proceeds with what it CAN find
+// rather than aborting the whole bundle over one stale row.
+func WriteMemoryBlobsSection(dst *TarZstWriter, blobRoot string, dump *DBDump, now time.Time) (*MemoryBlobsResult, error) {
+	res := &MemoryBlobsResult{}
+	if blobRoot == "" {
+		return res, nil
+	}
+	for _, sha := range distinctMemoryVersionShas(dump) {
+		if !validSha256Hex(sha) {
+			res.Missing = append(res.Missing, sha)
+			continue
+		}
+		blobPath := filepath.Join(blobRoot, sha[:2], sha)
+		info, err := os.Stat(blobPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				res.Missing = append(res.Missing, sha)
+				continue
+			}
+			return res, fmt.Errorf("backup: stat memory blob %s: %w", sha, err)
+		}
+		if info.IsDir() {
+			res.Missing = append(res.Missing, sha)
+			continue
+		}
+		if err := writeMemoryBlobEntry(dst, blobPath, sha, info.Size(), now); err != nil {
+			return res, err
+		}
+		res.Included++
+	}
+	return res, nil
+}
+
+func writeMemoryBlobEntry(dst *TarZstWriter, blobPath, sha string, size int64, now time.Time) error {
+	f, err := os.Open(blobPath)
+	if err != nil {
+		return fmt.Errorf("backup: open memory blob %s: %w", sha, err)
+	}
+	defer func() { _ = f.Close() }()
+	name := memoryBlobsSectionPrefix + sha[:2] + "/" + sha
+	if err := dst.WriteStream(name, 0o600, now, size, f); err != nil {
+		return fmt.Errorf("backup: write memory blob %s: %w", sha, err)
+	}
+	return nil
+}
+
+// rewriteMemoryVersionsPayloadRef updates every memory_versions row's
+// payload_ref to point at the TARGET instance's blob root instead of
+// the source's. payload_ref is an absolute filesystem path baked in at
+// RecordVersion time; restoring the row verbatim onto a different
+// instance (a different host, or the same host with MemoryRoot
+// configured under a different path) would otherwise leave it pointing
+// at a path that never existed there — even after this same restore
+// writes the actual blob bytes under blobRoot. Content-addressing makes
+// the fix mechanical: the new payload_ref is always
+// {blobRoot}/{sha[:2]}/{sha}, recomputed from the row's own sha256
+// column rather than trusted from the bundle.
+//
+// Runs unconditionally whenever blobRoot is configured on the target —
+// not gated on --as-workspace/--as-crew like the slug/ID rewrites,
+// because the path problem exists on every restore, including a
+// same-slug disaster-recovery restore onto a fresh instance.
+func rewriteMemoryVersionsPayloadRef(dump *DBDump, blobRoot string) {
+	if dump == nil || blobRoot == "" {
+		return
+	}
+	rows, ok := dump.Tables["memory_versions"]
+	if !ok {
+		return
+	}
+	for _, row := range rows {
+		sha, _ := row["sha256"].(string)
+		if !validSha256Hex(sha) {
+			continue
+		}
+		row["payload_ref"] = filepath.Join(blobRoot, sha[:2], sha)
+	}
+}
+
+// RestoreMemoryBlobs writes the content-addressed memory-version blobs
+// carried in payload's memory-blobs section back onto the target
+// host's blobRoot. Mirrors RestoreCrew's per-crew docker restore, but
+// this section is host-side (memory_versions blobs never lived inside
+// a crew container) so it writes directly to the local filesystem
+// instead of going through DockerOps.
+//
+// expectedShas gates which archive entries actually get written: it
+// must come from memoryVersionShaSet(extracted.DBDump) — the sha256
+// values referenced by the memory_versions rows THIS restore is
+// landing, sourced from the DB dump, not from the tar archive being
+// walked below. An archive entry whose name isn't a key in this map is
+// skipped, whatever it's named. This is deliberate on two levels:
+//
+//  1. Security: the write destination for every blob this function
+//     ever touches is built from expectedShas' VALUE (DB-derived), never
+//     from the tar header name (archive-derived) — hdr.Name is used only
+//     as a lookup key. A tampered bundle cannot smuggle an extra file
+//     into blobRoot via a crafted entry name, validly-shaped sha or not,
+//     because nothing about the write path is ever constructed from
+//     that name.
+//  2. Correctness: restore only ever repopulates blobs some row being
+//     restored actually points at — an orphan blob nobody references
+//     doesn't get resurrected just because it happened to ride the
+//     bundle.
+//
+// Idempotent per blob: content-addressed means the same sha always
+// carries the same bytes, so an existing file at the destination is
+// left untouched rather than rewritten — safe to re-run restore
+// against a target that already has some blobs.
+func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *ExtractedPayload, expectedShas map[string]string) (int, error) {
+	if payload == nil || blobRoot == "" {
+		return 0, nil
+	}
+	r, ok, err := payload.OpenMemoryBlobs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, nil
+	}
+	defer func() { _ = r.Close() }()
+
+	tr := tar.NewReader(r)
+	written := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return written, ctx.Err()
+		default:
+		}
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return written, fmt.Errorf("backup: read memory blob section: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		// hdr.Name ("<sha[:2]>/<sha>") is archive-controlled input. It is
+		// used ONLY as a lookup key into expectedShas below — never to
+		// build a filesystem path directly. The actual destination comes
+		// from the map's VALUE, which is sourced from the DB dump (see
+		// memoryVersionShaSet), not from this tar entry.
+		archiveSha := path.Base(hdr.Name)
+		canonicalSha, known := expectedShas[archiveSha]
+		if !known {
+			// Not referenced by any memory_versions row this restore is
+			// landing — drain and skip. Covers both a merely-unreferenced
+			// (but validly named) blob and a malformed/traversal-shaped
+			// entry name in one check, since expectedShas only ever
+			// contains values memoryVersionShaSet already validated.
+			if _, err := io.Copy(io.Discard, tr); err != nil {
+				return written, fmt.Errorf("backup: drain unreferenced memory blob entry %q: %w", hdr.Name, err)
+			}
+			continue
+		}
+		dst := filepath.Join(blobRoot, canonicalSha[:2], canonicalSha)
+		if _, statErr := os.Stat(dst); statErr == nil {
+			if _, err := io.Copy(io.Discard, tr); err != nil {
+				return written, fmt.Errorf("backup: drain existing memory blob %s: %w", canonicalSha, err)
+			}
+			continue
+		}
+		if err := restoreMemoryBlobFile(dst, tr); err != nil {
+			return written, fmt.Errorf("backup: restore memory blob %s: %w", canonicalSha, err)
+		}
+		written++
+	}
+	return written, nil
+}
+
+// restoreMemoryBlobFile durably writes r's remaining bytes to dst:
+// tempfile in the same directory (O_EXCL so we never adopt a crashed
+// restore's leftover tempfile), fsync the tempfile's content, atomic
+// rename over the destination, then fsync the parent directory so the
+// rename's directory-entry update is itself durable before we return.
+//
+// This is the same write-temp + fsync + atomic-rename + fsync-parent-
+// dir discipline as internal/memory's writeFileDurable /
+// WriteFileDurable (crash-safety audit, 2026-07-30) — a crash between
+// "restore reported success" and the next flush must not leave a blob
+// partially written, or worse, silently reverted to a torn directory
+// entry, while its memory_versions row already points at it. That is
+// exactly the class of bug this PR fixes; landing it via an un-synced
+// restore write instead of a missing collection step would be the
+// same defect wearing a different hat.
+//
+// Deliberately NOT delegated to memory.WriteFileDurable: that helper
+// takes the full content as []byte, but this call site streams a blob
+// straight out of the bundle's tar reader without knowing (or wanting
+// to hold) the whole thing in memory at once — buffering every blob
+// fully just to reuse a []byte-shaped helper would trade one
+// regression for another. Once WriteFileDurable grows a streaming
+// (io.Reader-based) variant, this function should be replaced by a
+// call to it so the two packages share one durability primitive
+// instead of two copies of the same sequence.
+func restoreMemoryBlobFile(dst string, r io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	var randBuf [8]byte
+	if _, rerr := rand.Read(randBuf[:]); rerr != nil {
+		return fmt.Errorf("rand for tempname: %w", rerr)
+	}
+	tmp := dst + ".restore.tmp." + hex.EncodeToString(randBuf[:])
+
+	// O_EXCL so a leftover tempfile from a previous crashed restore
+	// (same dst, different random suffix — so this can only collide on
+	// an astronomically unlikely rand repeat) is never silently adopted.
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	cleanup := func() { _ = os.Remove(tmp) }
+
+	if _, err = io.Copy(out, r); err != nil {
+		_ = out.Close()
+		cleanup()
+		return fmt.Errorf("write: %w", err)
+	}
+	if err = out.Sync(); err != nil {
+		_ = out.Close()
+		cleanup()
+		return fmt.Errorf("fsync temp: %w", err)
+	}
+	if err = out.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err = os.Rename(tmp, dst); err != nil {
+		cleanup()
+		return fmt.Errorf("rename: %w", err)
+	}
+	// fsync the parent dir so the rename's directory-entry update is
+	// durable — on ext4/xfs a crash between rename and the next flush
+	// can otherwise revive the prior entry. The blob's own bytes are
+	// already at dst, so we do not roll back on dir-fsync failure.
+	dir, openErr := os.Open(filepath.Dir(dst))
+	if openErr != nil {
+		return fmt.Errorf("open parent dir for fsync: %w", openErr)
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil {
+		return fmt.Errorf("fsync parent dir: %w", syncErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close parent dir: %w", closeErr)
+	}
+	return nil
+}

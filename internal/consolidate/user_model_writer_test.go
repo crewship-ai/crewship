@@ -10,24 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // userModelTestDB spins up a fully-migrated SQLite DB and seeds the
 // minimum FK targets (workspace, user) the SyncUserModel path needs.
 func userModelTestDB(t *testing.T) (*sql.DB, string, string) {
 	t.Helper()
-	dir := t.TempDir()
-	dbh, err := database.Open("file:" + dir + "/usermodel.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), dbh.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = dbh.Close() })
+	dbh := testutil.MigratedDB(t)
 
 	if _, err := dbh.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w')`); err != nil {
 		t.Fatalf("seed ws: %v", err)

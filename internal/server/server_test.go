@@ -1,26 +1,19 @@
 package server
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/net/websocket"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // openTestDB returns a freshly-migrated SQLite DB in a temp dir. The
@@ -32,51 +25,30 @@ import (
 // When called with a non-nil *testing.T the cleanup is registered;
 // the bare-package newTestServer() helper passes nil, which is fine
 // for unit tests that exit immediately.
+//
+// The schema comes from testutil's process-wide migrated template
+// (one migration run per test binary, then a ~1ms file copy per call)
+// rather than from a per-call database.Migrate. This helper is invoked
+// ~80 times in this package and the migration chain was the single
+// largest contributor to its wall-clock. The template is produced by
+// database.Migrate and opened with database.Open, so the schema and
+// the pragmas (foreign_keys ON, WAL, busy_timeout) are the same ones
+// production runs — including the busy_timeout that keeps the
+// lifecycle boot tests from flaking on a transient writer lock when
+// recoverOrphanedRuns writes while a test polls a row.
 func openTestDB(t *testing.T) *sql.DB {
-	// File-backed SQLite per call so multiple goroutines see a stable
-	// schema. Each invocation gets a unique path — the helper is
-	// called from many parallel tests and the previous shared
-	// `/tmp/test-auth-lifecycle.db` made them stomp each other when
-	// run with `-count=1`.
-	var path string
-	if t != nil {
-		path = filepath.Join(t.TempDir(), "test-auth-lifecycle.db")
-	} else {
-		// No t.Cleanup hook is available — use a process-unique name
-		// in the OS temp dir so collisions between bare newTestServer()
-		// callers can't happen. Files are tiny and the OS reaps temp
-		// on shutdown anyway.
-		path = filepath.Join(os.TempDir(), fmt.Sprintf("test-auth-lifecycle-%d-%d.db", os.Getpid(), atomic.AddInt64(&testDBCounter, 1)))
-	}
-	// busy_timeout matches production (internal/database/database.go) so a
-	// transient writer lock during concurrent boot (e.g. recoverOrphanedRuns
-	// writing while a test polls a row) retries instead of returning an
-	// immediate SQLITE_BUSY — the lifecycle boot tests are otherwise flaky
-	// under slow/contended CI runners.
-	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL&_pragma=busy_timeout(5000)")
-	if err != nil {
-		if t != nil {
-			t.Fatalf("open: %v", err)
+	if t == nil {
+		// No t.Cleanup hook is available. Same contract as before: the
+		// per-call temp file leaks until the process exits, which for
+		// bare newTestServer() callers means "immediately after".
+		db, _, err := testutil.NewMigratedDB()
+		if err != nil {
+			panic(err)
 		}
-		panic(err)
+		return db.DB
 	}
-	if t != nil {
-		t.Cleanup(func() { db.Close() })
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		if t != nil {
-			t.Fatalf("migrate: %v", err)
-		}
-		panic(err)
-	}
-	return db
+	return testutil.MigratedSQLDB(t)
 }
-
-// testDBCounter is the per-process counter that gives each bare
-// (no-*testing.T) openTestDB call a unique filename. Incremented
-// atomically so concurrent table-driven tests don't collide.
-var testDBCounter int64
 
 func newTestServer() *Server {
 	return newTestServerForT(nil)

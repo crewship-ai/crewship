@@ -42,6 +42,7 @@ func covSetupCLI(t *testing.T, s *clitest.StubServer) {
 // returns whatever was printed plus fn's error.
 func covCaptureStdoutCli7(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

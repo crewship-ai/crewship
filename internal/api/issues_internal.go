@@ -279,6 +279,13 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// along when the sidecar has it (v108 columns). All issue creation goes
 	// through insertIssueTx — the single chokepoint shared with the
 	// recurring-issue dispatcher.
+	//
+	// req.AssigneeID/req.AssigneeType are request-body-supplied and were NOT
+	// validated against req.WorkspaceID anywhere on this path until this
+	// endpoint was flagged as the 6th unguarded assignee_id write by
+	// assignee_write_invariant_test.go — insertIssueTx now validates it (see
+	// that function's comment); this handler only maps the resulting sentinel
+	// errors below.
 	id, identifier, err := insertIssueTx(r.Context(), tx, h.logger, issueSpec{
 		WorkspaceID:   req.WorkspaceID,
 		CrewID:        req.CrewID,
@@ -300,6 +307,9 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errIssueNoLeadAgent):
 		h.logger.Error("find lead agent", "crew_id", req.CrewID)
 		writeProblem(w, r, http.StatusBadRequest, "Crew has no LEAD agent")
+		return
+	case errors.Is(err, errIssueAssigneeTypeInvalid), errors.Is(err, errIssueAssigneeNotInWorkspace):
+		writeProblem(w, r, http.StatusBadRequest, err.Error())
 		return
 	case err != nil:
 		internalError(w, r, h.logger, "insert issue", err)
@@ -405,7 +415,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		}
 		ub.Set("status", req.Status)
 		statusChanged = true
-		if req.Status == "DONE" || req.Status == "CANCELLED" {
+		if req.Status == "DONE" || req.Status == "CANCELLED" || req.Status == "DUPLICATE" {
 			ub.Set("completed_at", time.Now().UTC().Format(time.RFC3339))
 		}
 	}

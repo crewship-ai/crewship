@@ -19,8 +19,12 @@ import (
 // config these tests set, and the token-host guard then fails every RunE
 // with a mismatch error. os.Unsetenv + Cleanup instead of t.Setenv so tests
 // that opt into t.Parallel() elsewhere in the same file don't panic.
+// The snapshot/restore below is kept for readability at the call sites, but the
+// state that actually has to be pristine for the NEXT test is guaranteed by
+// guardCLIState — see clistate_test.go for why restore-to-entry is not enough.
 func saveCLIState(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	origCfg := cliCfg
 	origServer := flagServer
 	origWorkspace := flagWorkspace

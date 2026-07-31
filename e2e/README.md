@@ -3,6 +3,37 @@
 Playwright suite covering the dashboard, agent surfaces, and the six
 Crew Journal pages shipped in PR #204 + PR #205.
 
+## What runs in CI
+
+Three configs, three owners — do not cross-wire them:
+
+| Config | Specs | Where it runs |
+|---|---|---|
+| `playwright.fresh.config.ts` | `onboarding-wizard.spec.ts` only | `e2e-devcontainer.yml`, nightly 02:30 UTC |
+| `playwright.nightly.config.ts` | everything except `visual` + `onboarding-wizard`, split into a gate bucket and a drift bucket | `nightly-e2e.yml`, nightly 03:50 UTC |
+| `playwright.config.ts` | the main suite minus its `testIgnore` list | local `pnpm test:e2e` |
+
+Before `nightly-e2e.yml` landed, **6 of ~84 tests ran automatically** — the
+onboarding wizard, and nothing else. A full sweep of the main config against a
+freshly seeded instance then found **24 of 78 passing**: the application was
+healthy and the specs had drifted. So the nightly splits them:
+
+- **gate bucket** (`GATE_SPECS` in the workflow) — verified green, hard-fails
+  the nightly. Today that is `create-crew-wizard.spec.ts`.
+- **drift bucket** (`DRIFT_SPECS`) — run every night, never fatal, summarised
+  into one auto-refreshed `e2e-drift` tracking issue with per-spec failure
+  counts. Repair a spec, move it to `GATE_SPECS`, and it starts gating.
+
+A `coverage-guard` job fails if any `e2e/*.spec.ts` belongs to neither bucket,
+so a new spec cannot silently skip nightly coverage.
+
+`visual.spec.ts` is in neither: every baseline in `visual.spec.ts-snapshots` is
+`*-chromium-darwin.png`, and Playwright resolves snapshots per platform — on a
+Linux runner it looks for `*-chromium-linux.png`, finds nothing and fails with
+"snapshot missing". Three of its five surfaces are also on route trees the
+/crews redesign deleted, so committing Linux baselines would pin pictures of
+pages that no longer exist. Regenerating them belongs with rewriting the spec.
+
 ## Running locally (macOS)
 
 ```bash

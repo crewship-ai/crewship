@@ -122,6 +122,16 @@ jobs:
       - name: test-harness lib (binary resolution + preflight)
         run: bash scripts/test-harness-lib-test.sh
 
+      # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
+      # every test called t.Skip, so a skip is indistinguishable from a pass
+      # in CI output — and nothing counted them, which made "skip it for now"
+      # free and invisible. This fails only when the count RISES above
+      # scripts/skip-budget.txt. Lives in the `shell` job because it is a
+      # 2-second grep and this is where the other script gates already run;
+      # no Go toolchain needed.
+      - name: Skip budget (t.Skip ratchet)
+        run: bash scripts/skip-budget.sh
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     needs: [merge-conflict-markers]
@@ -206,13 +216,38 @@ jobs:
     needs: [merge-conflict-markers]
     name: Go
     runs-on: ubuntu-latest
-    # 15 min: GitHub-hosted ubuntu-latest setup-go is consistently
-    # fast (cached module download via the action's built-in cache,
-    # which we now re-enable in setup-go-embed). Real work
-    # (vet+build+test) is ~75s on this codebase; the rest of the
-    # budget is buffer for first-run cache miss + Go SDK download
-    # (one-time per runner image cycle).
-    timeout-minutes: 15
+    #
+    # ⚠ INVARIANT: timeout-minutes MUST stay comfortably ABOVE
+    #   (pre-test step time) + (the `go test -timeout` below).
+    # Do not "tidy" these two numbers back into agreement.
+    #
+    # They used to both be 15, and the arithmetic never worked. Measured
+    # on run 30540606982 (a job that PASSED, at 14m39s of a 15m budget):
+    #
+    #   setup (job + checkout + setup-go)   9s
+    #   Go vet                             66s
+    #   Go build                            6s
+    #   windows clionly cross-compile      59s
+    #   clionly host-OS build               5s
+    #   windows full-daemon cross-compile   8s
+    #   ---------------------------------------
+    #   pre-test overhead              2m 33s
+    #   Go test                       12m 02s
+    #
+    # So the job cap left only 12m27s of usable test time while
+    # `go test -timeout 15m` promised 15m. The Go timeout was
+    # arithmetically unreachable: GitHub's cancel always fired first.
+    # That is the worst possible failure mode, because GitHub's cancel
+    # prints `##[error]The operation was canceled.` with every package
+    # already showing `ok` and NO indication of which test was still
+    # running — whereas Go's own timeout panics with a full goroutine
+    # dump naming the culprit. PRs #1531 (15m07s) and #1537 (15m15s)
+    # both died this way with nothing actionable in the log.
+    #
+    # Whoever wins the race decides how debuggable the failure is, so
+    # Go must always win. Budget below keeps ≥5 min of daylight between
+    # (overhead + go test -timeout) and this cap.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -247,17 +282,333 @@ jobs:
       - name: Go build (windows full-daemon cross-compile)
         run: GOOS=windows GOARCH=amd64 go build ./...
 
+      # Used to exclude internal/api and run it as its own job (`go-api`),
+      # because it was the single slowest package and floored this step's
+      # wall clock — `go test` parallelises across packages up to -p (= 4
+      # here), so the wall clock is floored by the slowest single package.
+      # Measured per-package times from run 30540606982 (ubuntu-latest, 4
+      # vCPU, 12m02s wall for this step, 104 packages with tests, 1988.7s of
+      # CPU in total):
+      #
+      #   internal/api          378.7s   ← 52% of the wall clock on its own
+      #   internal/backup       269.1s
+      #   internal/server       266.0s
+      #   internal/database     237.6s
+      #   cmd/crewship          168.0s
+      #   internal/consolidate   99.0s
+      #
+      # PR #1547 (perf/shared-migrated-test-db) removed the cause at its
+      # source: hoisting migratedTemplateOnce into internal/testutil across
+      # 23 packages so they stop re-running all 155 migrations per test.
+      # Measured there: 1205.6s → 195.3s (6.2x) for the packages it touches;
+      # internal/api specifically 378.7s → 62.2s.
+      #
+      # RE-MEASURED on this branch after #1547 (GOMAXPROCS=4, -p=4, to
+      # emulate this job's 4-vCPU runner; local Apple Silicon box under real
+      # contention from other concurrent agents — load average 5.5-9.3
+      # across these runs, so treat as a range, not a single number; the
+      # comparison that matters is relative, not absolute):
+      #
+      #   internal/api alone            64-77s   (3 back-to-back runs)
+      #   everything else (107 pkgs)    83-87s   (2 back-to-back runs)
+      #
+      # internal/api is no longer the floor — the rest of the suite now
+      # matches or exceeds it on its own. The entire reason to shard it out
+      # is gone, so `go-api` is deleted and internal/api runs here again,
+      # saving a full job's worth of checkout+setup-go overhead per run. If
+      # a future package regresses to where it re-floors the suite,
+      # re-measure with this same method (isolate the candidate vs. the
+      # rest, back-to-back, noting load average) before re-splitting.
+      #
+      # Execution order stays SOURCE ORDER here, deliberately. -shuffle=on
+      # lives in the non-blocking `go-shuffle` job below; see that job for
+      # why it is not on the blocking gate yet.
       - name: Go test
-        # -timeout 15m: the internal/api package suite has grown past
-        # the Go default 10m (PR-A native memory tools + PR-D ephemeral
-        # lifecycle + PR-E PERSONA all landed test fixtures). Three
-        # consecutive runs on 290b8606 hit the 10m panic on different
-        # tests (TestAuthGoogle_*, TestRequireWorkspace_*,
-        # TestSweepStuckQueued), indicating cumulative-time pressure
-        # rather than a single slow test. Job-level timeout-minutes:15
-        # already gives the runner enough wall-clock; this aligns the
-        # go test -timeout to match.
-        run: go test ./... -count=1 -timeout 15m
+        run: go test ./... -count=1 -timeout 12m
+
+  # ── Go: shuffled execution order ──
+  #
+  # -shuffle=on randomises test order within each package. This suite has
+  # ~206 time.Sleep calls in tests, a lot of shared on-disk SQLite fixtures,
+  # and — the real problem — package-level globals that outlive a single
+  # test. Fixed source order hides all of that permanently.
+  #
+  # SCOPE IS NOW THE WHOLE SUITE. The two packages this job used to exclude —
+  # cmd/crewship and internal/api — were fixed and the skip list is empty, so
+  # a red X here means a NEW order dependency, never known wallpaper.
+  #
+  # What was excluded, and what it turned out to be (kept because the shapes
+  # recur, and because "the failing test is never the guilty one" is the whole
+  # lesson of this job):
+  #
+  #  A. cmd/crewship — up to 58 failing top-level tests per seed. Cobra binds
+  #     --format & co. to package-level variables and the root PersistentPreRun
+  #     blanks internal/cli's colour palette; a CLI process runs one command and
+  #     exits, a test binary runs ~3,000 in one process. Fix: every test is
+  #     handed the process's start-of-day state back — CLI globals, the colour
+  #     palette, and every Cobra flag's value AND its Changed bit (144 places
+  #     branch on Changed, and putting a flag back with Flags().Set leaves
+  #     Changed=true forever). See cmd/crewship/clistate_test.go.
+  #
+  #  B. internal/api — two separate ones. ENCRYPTION_KEY was installed by
+  #     whichever test called setTestEncryptionKeyParallelSafe first, so
+  #     fixtures that encrypt without asking (webhook signing secrets,
+  #     crew-template deploy) worked only when they sorted after it; TestMain
+  #     now installs it before any test. And defaultCapabilityCache is a
+  #     process-wide singleton keyed on the CONSTANT ids seedTestUser /
+  #     seedTestWorkspace hand every test, so a capability answer computed
+  #     against one test's database was served to the next one's router;
+  #     setupTestDB now clears it, since a fresh database deserves a cache that
+  #     knows nothing about the previous one.
+  #
+  # Verified before the exclusions were dropped: cmd/crewship green on 13
+  # distinct seeds (including 1785429252149193000, which failed 15 tests
+  # before), internal/api green on 10 (including 11 and 22, which failed
+  # before). Order-dependence is not proven absent by any number of seeds —
+  # which is exactly why this job runs a fresh random one every push.
+  #
+  # Still `continue-on-error`, and the reason is honest rather than convenient:
+  # a randomised gate earns "blocking" by being green over time, not by being
+  # green in the PR that fixed it. The known findings are closed, so this is
+  # now a soak, not a workaround.
+  #
+  # ➜ TO PROMOTE TO BLOCKING: after a handful of consecutive green runs on
+  #   main, delete `continue-on-error`. The end state is -shuffle=on folded
+  #   back into `go` and this job deleted, since shuffling costs no extra
+  #   wall-clock.
+  go-shuffle:
+    needs: [merge-conflict-markers]
+    name: Go Shuffle
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # Same invariant as `go`: cap MUST exceed overhead + `go test -timeout`
+    # so Go's goroutine dump wins over GitHub's opaque cancel. Measured at
+    # 11m52s for the full suite (job 90889450094) back when internal/api and
+    # cmd/crewship were excluded AND still cost 379s/168s; #1547 cut both, and
+    # they are back in scope, so the headroom is roughly unchanged.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go test (shuffled)
+        # go test prints the chosen seed per package as `-test.shuffle N`.
+        # To reproduce a failure from this job's log:
+        #   go test ./internal/<pkg> -count=1 -shuffle=<seed>
+        # Reproducing needs the WHOLE package — the dependency is on other
+        # tests in it, so narrowing with -run will make it pass. That is the
+        # tell that you are looking at shared state, not a broken assertion.
+        run: |
+          set -euo pipefail
+          # No skip list any more: every package is shuffled. Resist adding
+          # one back. A package parked here silently loses order-dependence
+          # coverage, and the state that caused it goes on leaking into
+          # whichever test is unlucky — which is the failure mode this job
+          # exists to surface, not to route around.
+          n="$(go list ./... | grep -c .)"
+          # Guard against the list collapsing, same as the `go` job: `go test`
+          # with zero packages exits 0, so a truncated list would look like a
+          # full green run.
+          if [ "$n" -lt 90 ]; then
+            echo "::error::go list returned only $n packages — expected ~108. Refusing to report a pass on a truncated package list."
+            exit 1
+          fi
+          echo "Shuffling all $n packages."
+          go test ./... -count=1 -shuffle=on -timeout 15m
+
+  # ── Go: race detector ──
+  #
+  # Deliberately a SEPARATE job rather than a -race flag bolted onto the `go`
+  # job above: the race build is much slower, and when a race does fire you
+  # want to see "Go Race red, Go green" in the checks list, not one ambiguous
+  # red Go job that might be a compile error, a logic failure, or a race.
+  #
+  # Why this gate at all: Crewship is an orchestrator. Concurrent state is
+  # not incidental to it — the WS hub fans out to subscribers, the keeper
+  # dedups across goroutines behind a mutex, lease acquisition races a SQL
+  # UPDATE, and routines spawn detached background workers that outlive the
+  # request. The test suite calls t.Parallel() ~2434 times, so it already
+  # generates the concurrency a detector needs. Sixteen Go files even carry
+  # a "run with -race" comment — the discipline existed, but only as a
+  # habit, and habits do not block merges. Nothing in CI passed -race, so
+  # any race that landed stayed landed until it flaked in production.
+  #
+  # ── Why this now runs a DENY-list, not an allow-list ──
+  #
+  # It used not to fit. `go test ./... -race` on this suite was tried twice
+  # pre-#1547, both cancelled at their cap with most packages unreported:
+  #
+  #   40m cap, all 108 packages (job 90877558841): 14 packages reported.
+  #     cmd/crewship, internal/api, internal/auth/sessions and
+  #     internal/backup had each burned the full 25m per-binary timeout in
+  #     parallel — `panic: test timed out after 25m0s` x4.
+  #   25m cap, 101 packages (job 90889450207): 31 reported, 0 races, still
+  #     running inbox/governance/notifyroute/pipeline when cancelled.
+  #
+  # The cause was not the race detector being "2-3x slower" — that estimate
+  # was wrong. The real multiplier on DB-fixture packages was 10-30x, because
+  # every test re-ran all 155 migrations and instrumentation compounded it.
+  # Measured pairs, CI non-race (run 30540606982) vs local -race:
+  #
+  #   internal/keeper/governance    31.5s  →   962.5s   (30x)
+  #   internal/inbox                35.9s  →   789.8s   (22x)
+  #   internal/notifyroute          79.5s  →  1111.2s   (14x)
+  #
+  # A deny-list could not work at those numbers: the default (everything
+  # runs unless excluded) was "too slow", full stop. That is why this job
+  # first shipped as a hand-picked 19-package ALLOW-list instead.
+  #
+  # PR #1547 (perf/shared-migrated-test-db) removed the multiplier at its
+  # source: hoisting the migration-template build into internal/testutil so
+  # 23 packages stop re-running all 155 migrations per test. RE-MEASURED on
+  # this branch (GOMAXPROCS=4, -p=4, to emulate this job's 4-vCPU runner;
+  # local box under real contention from other concurrent agents — treat as
+  # an upper bound, not a precise figure):
+  #
+  #   internal/keeper/governance    26.8s   (was 962.5s — multiplier gone)
+  #   internal/inbox                27.2s   (was 789.8s)
+  #   internal/notifyroute          29.8s   (was 1111.2s)
+  #   internal/auth/sessions      29-33s    (was ~1500s per the original PR)
+  #
+  # With the multiplier gone, `go test ./... -race` was re-tried in full —
+  # 105 of 108 packages, the 3 exclusions below — and it PASSES, 0 races,
+  # locally in 322s wall clock under heavy contention. So the polarity
+  # flips: a short, justified deny-list is now affordable, and it closes the
+  # allow-list's real weakness — a new package silently getting NO coverage.
+  #
+  # ⚠ THE LOCAL NUMBER WAS WRONG FOR internal/backup, and CI is what caught
+  # it. This job's own first run on this PR timed out at -timeout 10m with
+  # internal/backup still running (goroutine dump: TestBackupRestore_
+  # MemoryBlobsRoundTrip, deep in age.Encrypt → scrypt.Key), against a local
+  # measurement of 240.4s. Two packages measured on both sides bracket the
+  # gap: internal/server 51.0s local → 183.7s on CI (3.6x); internal/
+  # auth/sessions 23.4s local → 73.3s on CI (3.1x). backup is disproportionate
+  # even by that ratio, because it is not mutex/goroutine-bound like those
+  # two — the passphrase path runs scrypt (age.NewScryptRecipient, N=2^18,
+  # a ~256MiB working set by design), and -race's shadow-memory check on a
+  # memory-hard, cache-hostile KDF is a worse tax than on typical code. At
+  # 3.1-3.6x, backup should need roughly 600-660s of CI wall clock — right at
+  # the 10m boundary it hit — but that ratio is calibrated on different code
+  # shapes, so treat it as a floor, not a promise.
+  #
+  # -timeout bumped to 20m (below) on that estimate: roughly 2x the
+  # extrapolated need, not a guess pulled from nowhere, but still provisional
+  # until a CI run actually clears it. If 20m is not enough either, the next
+  # step is a 4th deny-list entry for internal/backup with whatever real
+  # number that run reports — not a further bump, since a package whose
+  # -race cost is dominated by a fixed-cost KDF rather than fixture setup
+  # doesn't get faster with more retries the way the #1547 packages did.
+  #
+  # ── The 3 exclusions ──
+  #
+  # internal/database is excluded STRUCTURALLY, not temporarily. It is the
+  # package containing the migration engine that internal/testutil wraps, so
+  # it cannot import internal/testutil without a cycle — #1547's fix cannot
+  # reach it. Its ~190 top-level tests each run a real (often full-chain)
+  # Migrate(), which under -race is exactly the per-migration cost #1547
+  # eliminated everywhere else. Measured directly: with -timeout 10m it times
+  # out mid-suite (stuck on TestMigrateV102_KeeperPhase2); given 20 minutes
+  # instead, it only reaches TestMigrateV144 before timing out again — each
+  # later migration test replays a longer prefix chain, so the per-test cost
+  # is super-linear and full completion is a 30+ minute package on its own.
+  # Not a fit for a per-PR gate; a dedicated long-budget job would be a
+  # separate, deliberate follow-up, not a default inclusion here.
+  #
+  # internal/api and cmd/crewship are excluded because they fail with REAL
+  # data races, not slowness or flakiness. #1551 (merged) fixed both packages'
+  # ORDER-DEPENDENCE — defaultCapabilityCache and the CLI's package-level
+  # globals now reset per test, which is why `go-shuffle` below runs both with
+  # an empty skip list. That is a different bug class from what -race catches
+  # here: two tests can reset shared state correctly between runs and still
+  # race each other when they execute CONCURRENTLY under t.Parallel(). RE-
+  # VERIFIED on this branch, after rebasing onto #1551 — both races are still
+  # present, unchanged:
+  #   internal/api: writes race inside TestCovMRSyncAcceptedThenCooldown
+  #     (mcp_registry_cov_test.go:370), TestCovMTBRegistrySyncAcceptedThenCooldown
+  #     (mcp_tool_bindings_cov_test.go:645), and TestRecurringIssueCreate_NextRunIsUTC
+  #     (recurring_issue_hardening_test.go:101).
+  #   cmd/crewship: reads race in internal/cli.(*Client) (client.go:307,315,
+  #     called from resolveWorkspaceID) from a *Client instance shared across
+  #     parallel tests — 7 separate warnings across two runs.
+  # A parallel PR is fixing both (test-only: t.Cleanup writes to package-level
+  # variables in the two internal/api cov-test files above; a per-test client
+  # instead of a shared one in cmd/crewship). Do not add either package here
+  # until that lands, or this gate goes red on the next PR that touches either
+  # file. Lift this exclusion in that PR, not here.
+  #
+  # A deny-list still rots silently if unchecked — a renamed or removed
+  # package would just vanish from its effect. The step below fails if any
+  # of the 3 entries stops resolving against `go list ./...`.
+  go-race:
+    needs: [merge-conflict-markers]
+    name: Go Race
+    runs-on: ubuntu-latest
+    # BLOCKING, with no continue-on-error. A red run means a race landed —
+    # or a package belongs on the exclusion list above, held to the same
+    # justification bar as the 3 already there (structural incompatibility
+    # or a tracked pre-existing bug, not "it's slow").
+    #
+    # Same invariant as the `go` job: cap MUST exceed overhead + the
+    # `go test -timeout` below, so Go's goroutine-dumping panic wins the
+    # race against GitHub's opaque cancel. -timeout is 20m (see the job
+    # comment for why internal/backup needs that much on THIS runner, not
+    # the local box); overhead here is ~70-80s of checkout + setup-go +
+    # race-compiling the dependency graph (measured on this PR's own CI
+    # run). 30m leaves comfortable daylight over 20m + overhead.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Go test (race)
+        # No -shuffle here on purpose: `go-shuffle` owns order-dependence
+        # detection. Keeping this job's ordering fixed means a race report
+        # is reproducible from the log without also having to replay a seed.
+        run: |
+          set -euo pipefail
+          # The 3 exclusions, each justified in the job comment above. A
+          # stale entry (renamed/removed package) fails loudly rather than
+          # silently covering less than this comment claims.
+          denyfile="${RUNNER_TEMP:-/tmp}/race-deny.txt"
+          cat > "$denyfile" <<'DENY'
+          github.com/crewship-ai/crewship/internal/database
+          github.com/crewship-ai/crewship/internal/api
+          github.com/crewship-ai/crewship/cmd/crewship
+          DENY
+          ndeny="$(grep -c . "$denyfile")"
+          total="$(go list ./... | grep -c .)"
+          pkgs="$(go list ./... | grep -Fxv -f "$denyfile")"
+          n="$(printf '%s\n' "$pkgs" | grep -c .)"
+          # Each entry must remove exactly one real package. If it doesn't,
+          # either an entry is stale (a rename silently re-includes a
+          # known-bad package) or `go list` collapsed (which would otherwise
+          # look like a truncated-but-green run — the uncounted-t.Skip
+          # failure mode again).
+          if [ "$((total - n))" -ne "$ndeny" ]; then
+            echo "::error::race deny-list removed $((total - n)) packages but has $ndeny entries. An entry is stale — reconcile it against 'go list ./...'."
+            cat "$denyfile"
+            exit 1
+          fi
+          echo "Race-testing $n of $total packages ($ndeny excluded, see job comment)."
+          # -timeout 20m per test binary. Was 10m; this job's own first CI
+          # run timed out with internal/backup still running (see the job
+          # comment for the local-vs-CI measurement behind this number).
+          # Every other package finishes in well under a minute, so 20m is
+          # generosity for one package's KDF cost, not a general bump — it
+          # only ever bounds a hang, and a hang here should produce Go's
+          # goroutine dump rather than a GitHub cancel.
+          # shellcheck disable=SC2086
+          go test $pkgs -race -count=1 -timeout 20m
 
   # ── Go: cross-platform test matrix ──
   #
@@ -404,7 +755,11 @@ jobs:
     # would usually do, but we keep a small buffer for first-run
     # cache miss on the Go SDK download.
     timeout-minutes: 15
-    needs: [frontend, go]
+    # go-api is gone — internal/api now runs inside `go` again (see that
+    # job's comment). go-race is listed because it is blocking (no
+    # continue-on-error); go-shuffle is deliberately NOT listed — it is
+    # still advisory while its two known findings are fixed elsewhere.
+    needs: [frontend, go, go-race]
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

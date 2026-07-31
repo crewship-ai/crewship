@@ -19,6 +19,7 @@ import (
 // TestSeedTargetServerHonoursProfileOverEnv); streamServerURL is the shared
 // resolver all streaming call sites must use.
 func TestStreamServerURLHonoursProfileOverEnv(t *testing.T) {
+	guardCLIState(t)
 	origProfile, origServer, origCfg := flagProfile, flagServer, cliCfg
 	t.Cleanup(func() { flagProfile, flagServer, cliCfg = origProfile, origServer, origCfg })
 

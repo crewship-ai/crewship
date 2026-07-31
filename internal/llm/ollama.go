@@ -365,6 +365,13 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 	// chain of thought into chat output. They are kept so the final response can
 	// explain an empty completion the same way the non-streaming path does.
 	var thinkingParts []string
+	// sawDone tracks whether the terminal NDJSON line ("done":true) ever
+	// arrived. A connection can close cleanly (plain io.EOF, scanner.Err() ==
+	// nil) mid-generation — a network blip or load-shedding event — and
+	// without this flag that looked identical to a normal completion, so the
+	// caller got nil error with truncated (or, before this fix, even fully
+	// dropped — see below) content. See the check after the scan loop.
+	var sawDone bool
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -389,10 +396,9 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 		}
 
 		if chunk.Done {
+			sawDone = true
 			final.InputToks = chunk.PromptEvalCount
 			final.OutputToks = chunk.EvalCount
-			final.Content = strings.Join(textParts, "")
-			final.Thinking = strings.Join(thinkingParts, "")
 
 			switch {
 			case len(chunk.Message.ToolCalls) > 0:
@@ -416,8 +422,32 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 		}
 	}
 
+	// Assembled unconditionally (not just inside the chunk.Done branch above)
+	// so a caller that gets an error below still sees whatever partial
+	// content did arrive, instead of the pre-fix behavior where a truncated
+	// stream silently dropped Content/Thinking to "" on top of reporting
+	// success.
+	final.Content = strings.Join(textParts, "")
+	final.Thinking = strings.Join(thinkingParts, "")
+
+	scanErr := scanner.Err()
+	// The scan loop ended. If it also ended without a real scanner error,
+	// that normally means a clean io.EOF -- which is exactly what a
+	// legitimate finish looks like AND exactly what a mid-generation
+	// connection drop looks like. sawDone is what tells them apart: a real
+	// completion always emits a final line with "done":true. Without this, a
+	// cut stream silently returned nil error with truncated content as if it
+	// were a full response.
+	//
+	// A genuine scanErr (including context.Canceled from a caller-initiated
+	// cancellation) is left untouched here and returned as-is below, so
+	// cancellation semantics are unchanged.
+	if scanErr == nil && !sawDone {
+		scanErr = fmt.Errorf("ollama stream ended without a done:true event (connection closed unexpectedly after %d bytes of content): %w", len(final.Content), io.ErrUnexpectedEOF)
+	}
+
 	if err := handler(StreamEvent{Type: "done", Response: final}); err != nil {
 		return final, err
 	}
-	return final, scanner.Err()
+	return final, scanErr
 }

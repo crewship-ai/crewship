@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	_ "modernc.org/sqlite"
 )
 
@@ -21,45 +19,26 @@ import (
 // without requiring `cache=shared` query-string gymnastics.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	// modernc.org/sqlite ONLY honours pragmas via the `_pragma=` DSN form;
-	// the mattn-style `_busy_timeout=` / `_journal=` / `_foreign_keys=` params
-	// this used to pass are silently ignored, so the DB actually ran with
-	// busy_timeout=0 and DEFERRED transactions. Under the 10-goroutine CAS in
-	// TestRotateRefreshJti_ConcurrentSafety that meant every writer opened as a
-	// reader and raced to upgrade to the write lock at once → a write-write
-	// deadlock where ALL of them got an immediate "database is locked" and
-	// nobody committed (the `got 0 successful rotations` flake, #892).
-	//
-	// Match production (internal/database.Open): real busy_timeout + WAL +
-	// `_txlock=immediate` so each write transaction grabs the write lock up
-	// front instead of deadlocking on the read→write upgrade. Now exactly one
-	// writer wins the CAS and the losers see a clean jti-mismatch (or, at worst
-	// under contention, a real busy-timeout) rather than the whole batch dying.
-	db, err := sql.Open("sqlite", "file:"+dir+"/sessions.db"+
-		"?_pragma=busy_timeout(5000)"+
-		"&_pragma=journal_mode(WAL)"+
-		"&_pragma=foreign_keys(ON)"+
-		"&_txlock=immediate")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	// WAL mode + busy-timeout lets multiple connections attempt
-	// concurrent UPDATEs and serialise at the SQLite layer rather
-	// than collapsing onto one Go connection. The previous
-	// SetMaxOpenConns(1) effectively serialised RotateRefreshJti
-	// at the Go layer, which made TestRotateRefreshJti_ConcurrentSafety
-	// pass even for a non-atomic SELECT-then-UPDATE implementation.
-	// Several connections + WAL forces real DB-level CAS contention.
+	// The fixture goes through database.Open, which is what this helper's
+	// hand-rolled DSN was painstakingly reproducing: real busy_timeout, WAL,
+	// foreign_keys(ON) and `_txlock=immediate` so each write transaction grabs
+	// the write lock up front instead of deadlocking on the read→write upgrade.
+	// (The original DSN used mattn-style `_busy_timeout=` / `_journal=` /
+	// `_foreign_keys=` params, which modernc.org/sqlite silently ignores; the
+	// resulting busy_timeout=0 + DEFERRED transactions are what made the
+	// 10-goroutine CAS in TestRotateRefreshJti_ConcurrentSafety deadlock with
+	// "got 0 successful rotations", #892. Depending on database.Open means this
+	// can no longer drift from production.)
+	db := testutil.MigratedSQLDB(t)
+	// Several connections + WAL forces real DB-level CAS contention. The
+	// previous SetMaxOpenConns(1) serialised RotateRefreshJti at the Go layer,
+	// which made TestRotateRefreshJti_ConcurrentSafety pass even for a
+	// non-atomic SELECT-then-UPDATE implementation. database.Open's pool cap of
+	// 5 is >1 but 8 is what this test was tuned against.
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(8)
-	t.Cleanup(func() { db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	// Sessions reference users(id); insert a synthetic row.
-	_, err = db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES (?, ?, ?, ?)`,
+	_, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES (?, ?, ?, ?)`,
 		"u1", "u1@example.com", "User One", "$2a$10$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 	if err != nil {
 		t.Fatalf("insert user: %v", err)

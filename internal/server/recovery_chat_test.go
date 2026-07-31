@@ -11,30 +11,24 @@ package server
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func TestRecoverOrphanedRuns_SurfacesInterruptedChatReply(t *testing.T) {
 	t.Parallel()
+	db := testutil.MigratedDB(t)
+	// Separate from the DB fixture's directory: this one only backs the
+	// conversation store (cfg.Storage.BasePath below).
 	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "rec-chat.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
 	logger := logging.New("error", "json", nil)
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatal(err)
-	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)
@@ -143,16 +137,11 @@ func TestRecoverOrphanedRuns_SurfacesInterruptedChatReply(t *testing.T) {
 // orphan and appends nothing.
 func TestRecoverOrphanedRuns_InterruptedChatTurnIsIdempotent(t *testing.T) {
 	t.Parallel()
+	db := testutil.MigratedDB(t)
+	// Separate from the DB fixture's directory: this one only backs the
+	// conversation store (cfg.Storage.BasePath below).
 	dir := t.TempDir()
-	db, err := database.Open("file:" + filepath.Join(dir, "rec-chat2.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
 	logger := logging.New("error", "json", nil)
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatal(err)
-	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	mustExec(t, db.DB, `INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1','u@x',?,?)`, now, now)

@@ -30,6 +30,10 @@ import (
 //
 // When NOT to reach for these helpers:
 //
+//   - You need the real, fully-migrated schema rather than a hand-written
+//     subset. Use MigratedDB / MigratedSQLDB from migrateddb.go — they cost
+//     about a millisecond, so "the schema is big" is no longer a reason to
+//     hand-roll three tables and hope they match production.
 //   - You need a FILE-backed SQLite (e.g. testing the WAL recovery
 //     path or the data-dir provisioning). Use os.CreateTemp and
 //     sql.Open directly; the file path matters and the auto-cleanup

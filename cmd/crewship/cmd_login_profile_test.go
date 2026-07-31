@@ -7,6 +7,7 @@ import (
 )
 
 func TestPersistCredentialLegacy(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	t.Setenv("CREWSHIP_PROFILE", "")
 	old := flagProfile
@@ -58,6 +59,7 @@ func TestPersistCredentialProfile(t *testing.T) {
 }
 
 func TestPersistCredentialPreservesProfileWorkspace(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	t.Setenv("CREWSHIP_PROFILE", "")
 	old := flagProfile

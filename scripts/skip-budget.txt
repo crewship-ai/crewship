@@ -1,0 +1,26 @@
+# Skip budget baseline — the maximum number of `t.Skip` / `t.Skipf` /
+# `t.SkipNow` calls allowed in tracked *_test.go files.
+#
+# Enforced by scripts/skip-budget.sh, which runs in the `shell` job of
+# .github/workflows/ci.yml. The gate fails when the count RISES above this
+# number; lowering it is always allowed and the script nudges you to record
+# the win here.
+#
+# To raise this number legitimately, see the failure message the script
+# prints: tracking issue + `// SKIP-WAIVER(#NNNN):` comment above the skip +
+# the bump in the same commit.
+#
+# History
+#   119  2026-07-30  Initial measurement at 225bf153 (80 test files). Roughly:
+#                    ~28 Docker-daemon guards, ~26 runtime.GOOS guards, ~9
+#                    testing.Short guards, a handful for missing binaries and
+#                    live-provider credentials. No waiver comments existed
+#                    when the gate landed; these are grandfathered.
+#   120  2026-07-30  +1 from #1546's durable-write regression guard
+#                    (internal/memory/persona_writefailure_test.go). It injects
+#                    failure via a read-only directory, which cannot deny root,
+#                    so it guards on euid. Permanent platform guard, not debt —
+#                    carries a SKIP-WAIVER comment but deliberately no tracking
+#                    issue, because there is nothing to come back and fix.
+
+120

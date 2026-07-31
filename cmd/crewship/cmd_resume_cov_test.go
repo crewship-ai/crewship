@@ -164,6 +164,7 @@ func TestFindChatForPR_Found(t *testing.T) {
 // mutates (--chat / --interactive) so later tests see defaults.
 func covResetRunCmdFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	t.Cleanup(func() {
 		for _, name := range []string{"chat", "interactive"} {
 			if fl := runCmd.Flags().Lookup(name); fl != nil {

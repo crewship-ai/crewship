@@ -5,11 +5,17 @@ package statuses
 
 // ValidIssueTransitions defines allowed status transitions for issues.
 // Issue statuses are a superset of the existing mission statuses.
+// DUPLICATE mirrors CANCELLED's reachability: both are ways to close an
+// issue without shipping it, so any status that can be cancelled can also
+// be marked a duplicate. DUPLICATE itself has no outgoing transitions — it
+// is a deliberate terminal sink (see docs/api-reference/issues.mdx's Issue
+// Statuses table: "no transitions out"). A reopen path (DUPLICATE → BACKLOG)
+// was considered but is a separate product decision, not shipped here.
 var ValidIssueTransitions = map[string][]string{
-	"BACKLOG":     {"TODO", "IN_PROGRESS", "CANCELLED"},
-	"TODO":        {"IN_PROGRESS", "BACKLOG", "CANCELLED"},
-	"IN_PROGRESS": {"REVIEW", "DONE", "FAILED", "CANCELLED", "TODO"},
-	"REVIEW":      {"DONE", "TODO", "IN_PROGRESS", "FAILED", "CANCELLED"},
+	"BACKLOG":     {"TODO", "IN_PROGRESS", "CANCELLED", "DUPLICATE"},
+	"TODO":        {"IN_PROGRESS", "BACKLOG", "CANCELLED", "DUPLICATE"},
+	"IN_PROGRESS": {"REVIEW", "DONE", "FAILED", "CANCELLED", "TODO", "DUPLICATE"},
+	"REVIEW":      {"DONE", "TODO", "IN_PROGRESS", "FAILED", "CANCELLED", "DUPLICATE"},
 	"DONE":        {"BACKLOG"},
 	"FAILED":      {"BACKLOG", "TODO", "IN_PROGRESS"},
 	"CANCELLED":   {"BACKLOG", "TODO"},

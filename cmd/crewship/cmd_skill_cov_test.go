@@ -40,6 +40,7 @@ const (
 // cliCfg at it with a valid token + CUID workspace. Returns the stub.
 func covSetup(t *testing.T) *clitest.StubServer {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	t.Setenv("CREWSHIP_SERVER", "")
 	t.Setenv("CREWSHIP_WORKSPACE", "")
@@ -58,6 +59,7 @@ func covSetup(t *testing.T) *clitest.StubServer {
 // appends rather than replaces, which would corrupt later tests.
 func covSetFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
+	guardCLIState(t)
 	f := cmd.Flags().Lookup(name)
 	if f == nil {
 		t.Fatalf("flag --%s not found on %q", name, cmd.Name())
@@ -96,6 +98,7 @@ func covSetFlag(t *testing.T, cmd *cobra.Command, name, value string) {
 // Serial-only (swaps process globals).
 func covCaptureStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	oldOut, oldErr := os.Stdout, os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {

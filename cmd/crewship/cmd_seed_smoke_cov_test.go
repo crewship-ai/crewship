@@ -42,6 +42,10 @@ func TestMain(m *testing.M) {
 	// The developer's shell may export CREWSHIP_* for their own dev instance;
 	// those beat the config a test just wrote (#1305). See testenv_test.go.
 	scrubAmbientCrewshipEnv()
+	// Record the CLI globals and the whole Cobra flag tree while they are still
+	// untouched, so every test can be handed back the same starting state.
+	// See clistate_test.go.
+	snapshotPristineCLIState()
 	os.Exit(m.Run())
 }
 

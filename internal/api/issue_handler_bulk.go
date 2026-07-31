@@ -63,14 +63,63 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 				continue // skip invalid transitions
 			}
 			ub.Set("status", newStatus)
-			if newStatus == "DONE" || newStatus == "CANCELLED" {
+			if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
 				ub.Set("completed_at", now)
 			}
 		}
 		if req.Updates.Priority != nil {
 			ub.Set("priority", *req.Updates.Priority)
 		}
-		if req.Updates.AssigneeType != nil {
+		// assigneeTypeSet tracks whether the assignee_id branch below already
+		// queued an assignee_type SET clause, so the plain pass-through
+		// further down doesn't also queue one — see issue_handler_update.go's
+		// Update for the same guard and the reason it's needed
+		// (updateBuilder.Set has no dedup).
+		assigneeTypeSet := false
+		if req.Updates.AssigneeID != nil && *req.Updates.AssigneeID != "" {
+			// Same workspace-scoping as Create/Update (issue_handler_create.go,
+			// issue_handler_update.go): pre-fix this went straight into the
+			// UPDATE, so a bulk request could assign issues to a guessed or
+			// enumerated cross-workspace user/agent ID.
+			var assigneeType string
+			if req.Updates.AssigneeType != nil {
+				assigneeType = *req.Updates.AssigneeType
+				if assigneeType != "user" && assigneeType != "agent" {
+					continue // skip: invalid/unrecognized assignee_type, same as any other bad per-item field
+				}
+				ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.Updates.AssigneeID, wsID)
+				if vErr != nil {
+					h.logger.Error("bulk validate assignee_id", "error", vErr, "issue_id", issueID)
+					continue
+				}
+				if !ok {
+					continue // skip: cross-workspace assignee_id, consistent with the invalid-transition skip above
+				}
+			} else {
+				// assignee_type omitted: resolve it instead of trusting the
+				// row's stale type — see issue_handler_update.go's Update for
+				// the false-reject this used to cause (same shape, same
+				// fix). In bulk, the old behavior didn't just misreport the
+				// error: it silently skipped the ENTIRE item (assignee,
+				// status, everything) via this same `continue`, and the
+				// caller only ever saw the aggregate `{"updated": N}` count
+				// — no way to tell a wrong-table miss apart from a real
+				// cross-workspace rejection.
+				var ok bool
+				var rErr error
+				assigneeType, ok, rErr = resolveAssigneeType(r.Context(), h.db, *req.Updates.AssigneeID, wsID)
+				if rErr != nil {
+					h.logger.Error("bulk resolve assignee_type", "error", rErr, "issue_id", issueID)
+					continue
+				}
+				if !ok {
+					continue // skip: assignee_id doesn't exist in this workspace under either type
+				}
+			}
+			ub.Set("assignee_type", assigneeType)
+			assigneeTypeSet = true
+		}
+		if req.Updates.AssigneeType != nil && !assigneeTypeSet {
 			ub.Set("assignee_type", *req.Updates.AssigneeType)
 		}
 		if req.Updates.AssigneeID != nil {

@@ -175,6 +175,31 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same workspace-scoping for assignee_id as issue Create/Update
+	// (issue_handler_create.go, issue_handler_update.go): pre-fix this went
+	// straight into the INSERT, so a member could point a recurring template
+	// at a guessed or enumerated cross-workspace user/agent ID, and every
+	// fired issue would carry that foreign assignee_id forward.
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		assigneeType := ""
+		if req.AssigneeType != nil {
+			assigneeType = *req.AssigneeType
+		}
+		if assigneeType != "user" && assigneeType != "agent" {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
+			return
+		}
+		ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.AssigneeID, wsID)
+		if vErr != nil {
+			internalError(w, r, h.logger, "validate assignee_id", vErr)
+			return
+		}
+		if !ok {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+			return
+		}
+	}
+
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -233,7 +258,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	riID := r.PathValue("recurringId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	// Verify record exists
+	// Verify record exists.
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT id FROM recurring_issues WHERE id = ? AND workspace_id = ?`,
@@ -306,7 +331,53 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set("milestone_id", *req.MilestoneID)
 		}
 	}
-	if req.AssigneeType != nil {
+	// assigneeTypeSet tracks whether the assignee_id branch below already
+	// queued an assignee_type SET clause, so the plain pass-through further
+	// down doesn't also queue one — see issue_handler_update.go's Update for
+	// the same guard and the reason it's needed (updateBuilder.Set has no
+	// dedup).
+	assigneeTypeSet := false
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		// Same workspace-scoping as issue Update (issue_handler_update.go):
+		// pre-fix a caller could PATCH assignee_id to point a recurring
+		// template at another workspace's user/agent, and every future
+		// fired issue would carry that foreign assignee_id forward.
+		var assigneeType string
+		if req.AssigneeType != nil {
+			assigneeType = *req.AssigneeType
+			if assigneeType != "user" && assigneeType != "agent" {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
+				return
+			}
+			ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.AssigneeID, wsID)
+			if vErr != nil {
+				internalError(w, r, h.logger, "validate assignee_id", vErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+				return
+			}
+		} else {
+			// assignee_type omitted: resolve it instead of trusting the row's
+			// stale type — see issue_handler_update.go's Update for the
+			// false-reject this used to cause (same shape, same fix).
+			var ok bool
+			var rErr error
+			assigneeType, ok, rErr = resolveAssigneeType(r.Context(), h.db, *req.AssigneeID, wsID)
+			if rErr != nil {
+				internalError(w, r, h.logger, "resolve assignee_type", rErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+				return
+			}
+		}
+		ub.Set("assignee_type", assigneeType)
+		assigneeTypeSet = true
+	}
+	if req.AssigneeType != nil && !assigneeTypeSet {
 		ub.Set("assignee_type", *req.AssigneeType)
 	}
 	if req.AssigneeID != nil {

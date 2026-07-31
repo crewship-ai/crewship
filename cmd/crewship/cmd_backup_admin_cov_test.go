@@ -37,6 +37,7 @@ const (
 // workspace-scoped config. Restores everything via saveCLIState.
 func covSetupCli6(t *testing.T, stub *clitest.StubServer) {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	flagServer = ""
 	flagWorkspace = ""
@@ -58,6 +59,7 @@ func covRestoreFlag(f *pflag.Flag) {
 // default (value + Changed) at cleanup.
 func covSetFlagCli6(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
+	guardCLIState(t)
 	f := cmd.Flags().Lookup(name)
 	if f == nil {
 		t.Fatalf("command %s has no --%s flag", cmd.Name(), name)
@@ -72,6 +74,7 @@ func covSetFlagCli6(t *testing.T, cmd *cobra.Command, name, value string) {
 // cleanup — used by tests that need "flag never touched" semantics.
 func covResetFlagsCli6(t *testing.T, cmd *cobra.Command, names ...string) {
 	t.Helper()
+	guardCLIState(t)
 	for _, name := range names {
 		f := cmd.Flags().Lookup(name)
 		if f == nil {
@@ -86,17 +89,20 @@ func covResetFlagsCli6(t *testing.T, cmd *cobra.Command, names ...string) {
 // everything written plus fn's error.
 func covCaptureStdoutCli6(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	return covCaptureFD(t, &os.Stdout, fn)
 }
 
 // covCaptureStderrCli6 is covCaptureStdoutCli6 for os.Stderr.
 func covCaptureStderrCli6(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	return covCaptureFD(t, &os.Stderr, fn)
 }
 
 func covCaptureFD(t *testing.T, target **os.File, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	old := *target
 	r, w, err := os.Pipe()
 	if err != nil {
