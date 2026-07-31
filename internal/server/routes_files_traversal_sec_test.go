@@ -11,16 +11,32 @@ package server
 // crew id already goes through safeCrewID before any join, and every
 // client-supplied path goes through resolveCrewFileKey.
 //
-// A clean audit is only worth as much as the test that keeps it clean, so
-// this file pins the behaviour by EFFECT rather than by status code alone:
-// nothing outside the storage base may be read, listed, written, or
-// removed, whatever the crew id, agent_slug, or subdir says. The escape
-// target is a sibling of the storage base, so "outside" is unambiguous.
+// A clean audit is only worth as much as the test that keeps it clean.
+// This file asserts two different things, and it is worth being precise
+// about which one does the work, because the original version of this
+// header got it backwards (corrected under #1595):
+//
+//   - The ESCAPE assertions — nothing outside the storage base may be
+//     read, listed, written or removed — are a BACKSTOP. Under the
+//     strongest available mutation of the gate they exist to pin
+//     (safeCrewID → `return true`) not one of them fires, because
+//     localfs refuses the resulting key underneath. They would only ever
+//     go red if the storage layer lost containment as well. That is
+//     worth keeping, and it is not what keeps safeCrewID honest.
+//   - The STATUS assertions are what keep safeCrewID honest, and only
+//     since #1595: they now require 400 from the gate rather than merely
+//     "not 200". With the gate deleted every unsafe id answers 404 from
+//     storage, which the old assertion accepted — so this file passed in
+//     full with safeCrewID removed. See assertGateRefused.
+//
+// The escape target is a sibling of the storage base, so "outside" is
+// unambiguous.
 //
 // Note on layering: localfs would also refuse most of these keys, so
-// several assertions hold twice over. That is the point — the handler gate
-// is the one that turns them into a 400 instead of a silent empty result,
-// and it is the one a refactor of the storage backend cannot take away.
+// several assertions hold twice over. The handler gate is the one that
+// turns them into a 400 instead of a silent empty result, and it is the
+// one a refactor of the storage backend cannot take away — which is
+// precisely why the pin has to name the 400.
 
 import (
 	"net/http"
@@ -81,6 +97,32 @@ var unsafeCrewIDs = []string{
 	"crews/other",
 }
 
+// assertGateRefused pins that the REFUSAL CAME FROM safeCrewID, not from
+// the storage layer behind it.
+//
+// This distinction is the whole sensitivity of these tests, and the
+// original version missed it (#1595). Mutating safeCrewID to `return
+// true` leaves every unsafe id answering 404 "file not found" — localfs
+// refuses the key underneath — while the pins only rejected 200. So a
+// suite that existed to keep safeCrewID honest passed with safeCrewID
+// deleted, and the file header's claim that it pins "by EFFECT rather
+// than by status code alone" was backwards: the ESCAPE assertions never
+// fired at all, and the status assertion was too weak to fire either.
+//
+// 400 "invalid path" is the gate's own answer; 404 is the storage
+// layer's. Asserting the gate's status is what makes removing the gate
+// visible, and it is exactly the property the header already claimed:
+// "the handler gate is the one that turns them into a 400 instead of a
+// silent empty result".
+func assertGateRefused(t *testing.T, rec *httptest.ResponseRecorder, id string) {
+	t.Helper()
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d for crew id %q; want 400 from the safeCrewID gate.\n"+
+			"A 404 here means the storage layer refused the key and the gate did not run — "+
+			"the pin would survive deleting safeCrewID entirely (#1595).", rec.Code, id)
+	}
+}
+
 // Download must never stream bytes from outside the storage base, whatever
 // the crew id. Asserted on the response body, not just the status.
 func TestSecCrewFiles_DownloadUnsafeCrewIDCannotLeakOutsideStorage(t *testing.T) {
@@ -95,9 +137,7 @@ func TestSecCrewFiles_DownloadUnsafeCrewIDCannotLeakOutsideStorage(t *testing.T)
 			if strings.Contains(rec.Body.String(), "TOP-SECRET") {
 				t.Fatalf("ESCAPE: crew id %q served a file outside the storage base (status %d)", id, rec.Code)
 			}
-			if rec.Code == http.StatusOK {
-				t.Errorf("status = 200 for crew id %q; want a refusal", id)
-			}
+			assertGateRefused(t, rec, id)
 		})
 	}
 }
@@ -116,9 +156,7 @@ func TestSecCrewFiles_SaveUnsafeCrewIDCannotWriteOutsideStorage(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(outside, "planted.txt")); err == nil {
 				t.Fatalf("ESCAPE: crew id %q wrote outside the storage base (status %d)", id, rec.Code)
 			}
-			if rec.Code == http.StatusOK {
-				t.Errorf("status = 200 for crew id %q; want a refusal", id)
-			}
+			assertGateRefused(t, rec, id)
 		})
 	}
 }
@@ -138,9 +176,7 @@ func TestSecCrewFiles_DeleteUnsafeCrewIDCannotRemoveOutsideStorage(t *testing.T)
 			if _, err := os.Stat(filepath.Join(outside, "secret.txt")); err != nil {
 				t.Fatalf("ESCAPE: crew id %q removed a file outside the storage base: %v (status %d)", id, err, rec.Code)
 			}
-			if rec.Code == http.StatusOK {
-				t.Errorf("status = 200 for crew id %q; want a refusal", id)
-			}
+			assertGateRefused(t, rec, id)
 		})
 	}
 }
