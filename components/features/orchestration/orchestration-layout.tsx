@@ -58,8 +58,8 @@ import { UnifiedExplorer } from "@/components/features/orchestration/unified-exp
 import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 
-import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { runTaskAction } from "@/components/features/orchestration/task-actions"
 import { useAppStore } from "@/lib/store"
 import type { BreadcrumbItem } from "@/lib/store"
 import { ActivityTab } from "@/components/features/crews/bottom-panel/activity-tab"
@@ -477,28 +477,11 @@ export function OrchestrationLayout({
   }, [])
 
   const handleTaskAction = useCallback(async (action: "edit" | "retry" | "skip", taskId: string, missionId: string) => {
-    const mission = missions.find(m => m.id === missionId)
-    if (!mission) return
-    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-
-    if (action === "retry") {
-      await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "PENDING" }),
-      })
-      toast.success("Task queued for retry")
-      onRefresh()
-    } else if (action === "skip") {
-      await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "SKIPPED" }),
-      })
-      toast.success("Task skipped")
-      onRefresh()
-    }
-    // "edit" — detail panel is already visible
+    // Resolving the crew, deciding that "edit" writes nothing and mapping the
+    // action onto a status all live in task-actions, where a test can reach
+    // them: this component is 1000 lines of layout that no unit test renders,
+    // so anything decided here would be decided unwatched.
+    if (await runTaskAction(action, taskId, missionId, { missions, workspaceId })) onRefresh()
   }, [missions, workspaceId, onRefresh])
 
   const handleDrawerTabClick = useCallback((tab: DrawerTab) => {

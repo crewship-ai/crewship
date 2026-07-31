@@ -98,6 +98,9 @@ export interface KeeperStatus {
   ollama_url: string
   model: string
   ollama_online: boolean
+  /** Whether the endpoint was actually dialled. false + ollama_online false is
+   *  "not checked", which is a different thing to say than "offline". */
+  ollama_probed?: boolean
   gatekeeper_configured: boolean
   total_requests: number
   allow_count: number

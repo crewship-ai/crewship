@@ -182,7 +182,7 @@ func (e *SkillReviewEvaluator) Evaluate(ctx context.Context, req SkillReviewRequ
 	//   b) the raw LLM response containing a decision value outside
 	//      the closed set {ALLOW, DENY, ESCALATE}.
 	if resp.Decision == string(keeper.DecisionDeny) &&
-		(isLLMFailureDeny(resp.Reason) || isUnknownDecisionInRaw(resp.RawLLMResponse)) {
+		(infraFailed(resp) || isUnknownDecisionInRaw(resp.RawLLMResponse)) {
 		e.logger.Warn("skill_evaluator: widening fail-closed DENY → ESCALATE for audit path",
 			"skill_id", req.SkillID, "underlying_reason", resp.Reason)
 		out.Decision = keeper.DecisionEscalate
@@ -217,8 +217,20 @@ func (e *SkillReviewEvaluator) Evaluate(ctx context.Context, req SkillReviewRequ
 // gatekeeper.Evaluate — if those change, this matcher must too.
 func isLLMFailureDeny(reason string) bool {
 	return strings.Contains(reason, "Keeper LLM unavailable") ||
+		strings.Contains(reason, "Keeper judge did not answer within") ||
 		strings.Contains(reason, "Keeper LLM returned unparseable response") ||
 		strings.Contains(reason, "Keeper LLM not configured")
+}
+
+// infraFailed is the fail-soft test the audit paths should use: the flag the
+// producer set, or — for a response that predates it or came from a stub — the
+// legacy reason match.
+//
+// The string form alone was a latent trap: rewording a user-facing reason flipped
+// a fail-SOFT path into a blocking one, which is how a slow model went from
+// "escalate for review" to "block the agent's tool call".
+func infraFailed(resp keeper.GatekeeperResponse) bool {
+	return resp.InfraFailure || isLLMFailureDeny(resp.Reason)
 }
 
 // isUnknownDecisionInRaw detects the case where the LLM returned a

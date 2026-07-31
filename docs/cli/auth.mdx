@@ -37,6 +37,12 @@ Changing your password **signs out your other active sessions** — the
 session you run this from stays logged in. It calls
 [`POST /api/v1/users/me/password`](/api-reference/auth#post-api-v1-users-me-password).
 
+Wrong current-password guesses count against the **same account lockout as
+sign-in**, and the route sits on the strict per-IP auth bucket (a CLI token
+does not exempt it). Enough consecutive misses and the command fails with
+`API error (423): too many failed attempts…` until the lockout window
+expires — an admin can clear it with `crewship admin reset-password`.
+
 ```bash
 # Interactive (recommended) — prompts for current + new, no echo:
 crewship auth passwd

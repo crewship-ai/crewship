@@ -5,7 +5,7 @@
  * Keep this file in sync with the Go side: adding a capability
  * server-side means appending here too (and adding the
  * corresponding label / icon entry in CAPABILITY_LABELS below so
- * the Members grid renders the new column). Removing a capability
+ * Settings → Members renders the new toggle). Removing a capability
  * is intentionally not supported — keep the constant for
  * backwards-compat with existing rows and stop emitting it from
  * new defaults.
@@ -34,9 +34,11 @@ export const Capability = {
 
 export type CapabilityValue = (typeof Capability)[keyof typeof Capability]
 
-/** The full ordered list — Members grid column order goes low-stakes
- *  → high-stakes (left to right). Matches how admins think about
- *  delegation risk; see /tmp/wireframes/members-capabilities.html. */
+/** The full ordered list — low-stakes → high-stakes, which is how admins
+ *  think about delegation risk. Settings → Members relies on the order
+ *  being stable: the pip summary in a collapsed row puts each capability
+ *  at the same x-position in every row, so a single grant stays comparable
+ *  down the roster. Inserting in the middle re-sorts that column. */
 export const ALL_CAPABILITIES: CapabilityValue[] = [
   Capability.Chat,
   Capability.RoutineCreate,
@@ -51,9 +53,12 @@ export const ALL_CAPABILITIES: CapabilityValue[] = [
   Capability.CredentialReveal,
 ]
 
-/** Human-readable labels for the Members grid column headers and
- *  any tooltip/confirm copy. EN + CS so the dashboard can pick by
- *  locale without a translation step. */
+/** Human-readable labels for the Settings → Members capability toggles
+ *  and any tooltip/confirm copy. The `description` is rendered inline
+ *  next to each toggle — it used to hide in a column header's `title`,
+ *  which is exactly where nobody looks before handing out
+ *  `credentials:reveal`. EN + CS so the dashboard can pick by locale
+ *  without a translation step. */
 export const CAPABILITY_LABELS: Record<
   CapabilityValue,
   { en: string; cs: string; description: string }

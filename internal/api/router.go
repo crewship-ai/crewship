@@ -21,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -56,7 +57,10 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	mux    *http.ServeMux
+	// mux is a recording wrapper around http.ServeMux (router_mux.go).
+	// Same Handle/HandleFunc surface, plus the registered route table —
+	// which the method guards and the spec-drift test both need.
+	mux    *routeMux
 	db     *sql.DB
 	logger *slog.Logger
 	authMw *AuthMiddleware
@@ -96,19 +100,24 @@ type Router struct {
 	keeperSecrets       SecretGetter
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
+	keeperSettings      *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
 	govModelStatus      GovModelStatusProvider
-	composioConfig      *config.ComposioConfig
-	keeperConvReader    ConversationReader
-	convSearcher        ConversationSearcher
-	missionCallback     MissionCallback
-	scheduleUpdater     ScheduleUpdater
-	logWriter           *logcollector.Writer
-	allowSignup         bool
-	googleClientID      string
-	googleSecret        string
-	authBaseURL         string
-	license             *license.License
-	agentHandler        *AgentHandler
+	// govModelJudge is the same resolver as govModelStatus, concretely typed so
+	// the admin judge routes can build a candidate hosted judge. nil → those
+	// routes 503.
+	govModelJudge    *GovModelResolver
+	composioConfig   *config.ComposioConfig
+	keeperConvReader ConversationReader
+	convSearcher     ConversationSearcher
+	missionCallback  MissionCallback
+	scheduleUpdater  ScheduleUpdater
+	logWriter        *logcollector.Writer
+	allowSignup      bool
+	googleClientID   string
+	googleSecret     string
+	authBaseURL      string
+	license          *license.License
+	agentHandler     *AgentHandler
 	// credentialHandler and skillGenHandler are stashed at
 	// registerCrewsRoutes time so the registerInternalRoutes step
 	// can wire the matching /api/v1/internal/credentials and
@@ -226,6 +235,10 @@ type Router struct {
 	// useful in dev / test builds that haven't wired explicit config.
 	auxModels    llm.AuxiliaryModels
 	auxModelsSet bool
+
+	// keeperAuxSettings layers the runtime per-slot overrides over auxModels.
+	// nil → boot-time values only (CLI processes, most tests).
+	keeperAuxSettings *keepercfg.AuxStore
 
 	// Keeper Phase 2 (PR-C / PRD §6 F4) evaluators. Optional — the
 	// router_internal route registration passes whichever are non-nil
@@ -349,11 +362,27 @@ func (r *Router) PolicyResolver() *policy.Resolver {
 // from blowing up on a zero-valued struct (every Provider would be
 // "" → ResolveAux would error). Production wires the real config via
 // WithAuxiliaryModels.
+//
+// When the runtime override store is wired it wins: it holds the same boot-time
+// values as its inherited layer, so this returns the config in force rather than
+// the one captured at construction. Every caller goes through here, which is why
+// an admin edit reaches the aux-status surface and the run-verdict provider
+// without a restart.
 func (r *Router) AuxModels() llm.AuxiliaryModels {
+	if r.keeperAuxSettings != nil {
+		return r.keeperAuxSettings.Resolved()
+	}
 	if !r.auxModelsSet {
 		return llm.DefaultAuxiliaryModels()
 	}
 	return r.auxModels
+}
+
+// KeeperAuxSettings exposes the runtime evaluator-override store for the admin
+// handlers. nil when unwired — callers must surface that as 503 rather than
+// silently pretending the write landed.
+func (r *Router) KeeperAuxSettings() *keepercfg.AuxStore {
+	return r.keeperAuxSettings
 }
 
 // SetVersion records the binary version for the version-info endpoint.
@@ -453,7 +482,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authMw := NewAuthMiddleware(validator, sessionsStore, db, logger)
 
 	r := &Router{
-		mux:           http.NewServeMux(),
+		mux:           newRouteMux(),
 		db:            db,
 		logger:        logger,
 		authMw:        authMw,
@@ -482,6 +511,13 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
 	r.registerRoutes()
+
+	// Close the method-routing hole every Go 1.22 ServeMux has: a request
+	// whose method is not registered for a literal path falls through to a
+	// sibling wildcard pattern instead of answering 405 (#1489). Must run
+	// after every registrar and before the first request. See
+	// router_mux.go.
+	r.mux.sealMethodGuards()
 
 	// Bound the request body on the public API surface (P3). The cap
 	// wraps the mux beneath the rate limiters so it applies to every
@@ -598,6 +634,14 @@ var credTestStoredPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/test$`
 // settings writes and belong on the general bucket.
 var credRevealPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/reveal$`)
 
+// changePasswordPath is POST /api/v1/users/me/password — the one route
+// outside /api/v1/auth/ that verifies a caller-supplied CURRENT password
+// and answers differently when it is wrong (#1513). It lives under
+// /api/v1/users/ for URL reasons, not security ones, so it has to be named
+// here rather than caught by the prefix. Matched as an exact path so the
+// other /users/me/* routes (profile, avatar) stay on the general bucket.
+const changePasswordPath = "/api/v1/users/me/password"
+
 // isSelfServiceAuthPath reports whether path is an authenticated caller
 // listing or revoking their OWN sessions / CLI tokens, as opposed to the
 // credential-guessing surface (login, bootstrap, minting) the strict
@@ -619,9 +663,19 @@ func isSelfServiceAuthPath(path string) bool {
 func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
-	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
-	if strings.HasPrefix(path, "/api/v1/internal/") {
-		r.mux.ServeHTTP(w, req)
+	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token
+	// auth). serveInternal — not r.mux directly — is the single door onto that
+	// surface; see its doc comment for why (#1501).
+	//
+	// The prefix is tested against the CLEANED path as well as the raw one.
+	// `//api/v1/internal/credentials` does not literally start with
+	// "/api/v1/internal/", so a raw-path-only test drops it out of this branch
+	// and into the mux, which answers a non-canonical path with a 307 to the
+	// cleaned one — handing back the very path the fence exists to keep quiet,
+	// and reaching the internal surface by a door that is not serveInternal.
+	// Cleaning first puts every spelling of the prefix through the same door.
+	if isInternalPath(path) {
+		r.serveInternal(w, req)
 		return
 	}
 
@@ -662,8 +716,15 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	// Stricter rate limiting for auth endpoints
-	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
+	// Stricter rate limiting for auth endpoints — plus the password change,
+	// which is a credential-verification surface wearing a /users/me/ URL.
+	// It has to be matched HERE, above the general branch: that branch
+	// exempts authenticated CLI tokens from the per-IP bucket entirely
+	// (#1333), and the attacker this limiter is for is holding exactly such
+	// a credential. Changing your own password ten times a minute is not a
+	// workflow, so nobody legitimate notices.
+	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") ||
+		path == "/api/v1/bootstrap" || path == changePasswordPath {
 		r.authRateLimitedMux.ServeHTTP(w, req)
 		return
 	}

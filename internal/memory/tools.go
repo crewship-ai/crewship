@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/pathsafe"
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // AgentContext carries the per-call routing data the dispatcher needs
@@ -830,13 +830,17 @@ func (d *Dispatcher) resolvePath(tier, key string) (string, error) {
 		if key == "" {
 			key = d.now().Format("2006-01-02")
 		}
-		// key must be a single path segment; the pathsafe.Join below
-		// then confines the result under AgentMemoryDir (rejects any
-		// residual traversal / NUL / absolute smuggling in one place).
+		// key is one path segment, so it goes through the component form
+		// of the guard: safepath.JoinUnder validates "daily" and the
+		// key'd filename and confines the join under AgentMemoryDir
+		// (rejecting residual traversal / NUL / separator smuggling in
+		// one place). The ContainsAny check above is the tier's own key
+		// policy — it also refuses ".." *inside* a name, which is
+		// stricter than a path guard needs to be and is kept as-is.
 		if strings.ContainsAny(key, `/\`) || strings.Contains(key, "..") {
 			return "", fmt.Errorf("invalid daily key %q", key)
 		}
-		p, err := pathsafe.Join(d.ctx.AgentMemoryDir, filepath.Join("daily", key+".md"))
+		p, err := safepath.JoinUnder(d.ctx.AgentMemoryDir, "daily", key+".md")
 		if err != nil {
 			return "", fmt.Errorf("invalid daily key %q: %w", key, err)
 		}
@@ -848,7 +852,7 @@ func (d *Dispatcher) resolvePath(tier, key string) (string, error) {
 		if strings.ContainsAny(key, `/\`) || strings.Contains(key, "..") {
 			return "", fmt.Errorf("invalid peer key %q", key)
 		}
-		p, err := pathsafe.Join(d.ctx.AgentMemoryDir, filepath.Join("peers", key+".md"))
+		p, err := safepath.JoinUnder(d.ctx.AgentMemoryDir, "peers", key+".md")
 		if err != nil {
 			return "", fmt.Errorf("invalid peer key %q: %w", key, err)
 		}

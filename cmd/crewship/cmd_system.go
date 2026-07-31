@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -428,42 +429,137 @@ welcome banner is still showing.`,
 	},
 }
 
-// systemAuxStatusCmd renders the PR-B F3 auxiliary-model assignment
-// reported by GET /api/v1/system/aux-status. Same diagnostic surface
-// the future web UI badge in Settings → Models will read — exposing
-// it through the CLI first means operators can confirm a YAML
-// override landed before the next eval call has a chance to silently
-// fall back to cfg.auxiliary.fallback.
+// auxSubsystem is one row of GET /api/v1/system/aux-status as the server
+// has shaped it since #1506, which replaced the flat `slots` list with
+// `subsystems` and added the two verdicts this command exists to relay:
+//
+//   - Healthy — the slot resolved to a provider that BUILDS. Construction
+//     only; it proves configuration, not liveness.
+//   - Reachable — the model server ANSWERED just now. A nil pointer is an
+//     honest third state ("not probed"): only self-hosted providers are
+//     dialled, because rendering a status table must not bill an operator
+//     for a paid API call.
+//
+// Keeping them apart is the whole point. llm.NewOllama never dials, so a
+// box with no Ollama running used to report a perfectly healthy judge.
+type auxSubsystem struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	TimeoutMS   int64  `json:"timeout_ms,omitempty"`
+	Source      string `json:"source"`
+	Healthy     bool   `json:"healthy"`
+	Detail      string `json:"detail,omitempty"`
+	Reachable   *bool  `json:"reachable,omitempty"`
+	ReachDetail string `json:"reach_detail,omitempty"`
+}
+
+// auxStatusPayload is what --format json/yaml emits: the current server
+// envelope, verbatim, so `jq '.subsystems[]'` works against CLI output and
+// against curl alike.
+type auxStatusPayload struct {
+	Subsystems []auxSubsystem `json:"subsystems"`
+}
+
+// auxStatusWire adds the pre-#1506 `slots` key purely so a stale server can
+// be NAMED rather than silently rendered as an empty table. It never reaches
+// the formatter — see auxStatusPayload.
+type auxStatusWire struct {
+	Subsystems []auxSubsystem    `json:"subsystems"`
+	Slots      []json.RawMessage `json:"slots"`
+}
+
+// auxVerdict collapses healthy + reachable into the single word an operator
+// scans the STATUS column for. The four states are distinct on purpose:
+// "unreachable" (configured, silent) must not read like "ok", and
+// "ok (unprobed)" must not read like a confirmed green.
+func auxVerdict(s auxSubsystem) string {
+	switch {
+	case !s.Healthy:
+		return "unhealthy"
+	case s.Reachable == nil:
+		return "ok (unprobed)"
+	case !*s.Reachable:
+		return "unreachable"
+	default:
+		return "ok"
+	}
+}
+
+// auxUsable mirrors the admin console's isUsable: a judge works only if it
+// is both buildable and — where we can check — answering.
+func auxUsable(s auxSubsystem) bool {
+	return s.Healthy && (s.Reachable == nil || *s.Reachable)
+}
+
+// auxTimeout renders in seconds when >=1s, else ms — keeps the column
+// human-readable across the 3s–30s span the MVP defaults use without
+// forcing operators to mental-arithmetic milliseconds for the common case.
+func auxTimeout(ms int64) string {
+	if ms <= 0 {
+		return "—"
+	}
+	if ms >= 1000 {
+		return fmt.Sprintf("%.1fs", float64(ms)/1000.0)
+	}
+	return fmt.Sprintf("%dms", ms)
+}
+
+// systemAuxStatusCmd renders the auxiliary-evaluator status reported by
+// GET /api/v1/system/aux-status — the same surface the admin console's
+// "Judge models" card reads. It answers two questions per subsystem: which
+// model judges it, and can that model actually run right now.
 //
 // Output formats:
-//   - table (default): {SLOT, PROVIDER, MODEL, TIMEOUT, SOURCE}
+//   - table (default): {SUBSYSTEM, ROLE, PROVIDER, MODEL, TIMEOUT, SOURCE,
+//     STATUS}, followed by the server's own reason for every subsystem that
+//     cannot run — a red dot with no reason is not actionable
 //   - json / yaml: pass-through of the API envelope so jq/yq pipelines work
 //
 // Source column values: "explicit" (slot was configured directly),
 // "fallback" (slot was empty so cfg.Fallback was used), "unconfigured"
-// (neither path resolved — operator misconfiguration).
+// (neither path resolved — operator misconfiguration), "keeper_config"
+// (the credential-access judge, built from cfg.Keeper on its own path).
 var systemAuxStatusCmd = &cobra.Command{
 	Use:   "aux-status",
-	Short: "Show auxiliary model assignment per slot (PR-B F3)",
-	Long: `Show the resolved provider, model, timeout and source for every
-auxiliary-model slot (Curator, Keeper, Behavior, MemoryHealth, Negative).
+	Short: "Show auxiliary model assignment and health per subsystem",
+	Long: `Show which model judges each auxiliary subsystem (credential access,
+skill review, behaviour monitoring, memory health, negative lessons, run
+summaries) — and whether that model can actually run.
 
-The source column distinguishes how each slot was resolved:
-  explicit     — cfg.auxiliary.<slot> was set directly
-  fallback     — cfg.auxiliary.<slot> was empty; cfg.auxiliary.fallback used
-  unconfigured — neither the slot nor fallback had a provider (operator gap)
+The source column distinguishes how each subsystem was resolved:
+  explicit      — cfg.auxiliary.<slot> was set directly
+  fallback      — cfg.auxiliary.<slot> was empty; cfg.auxiliary.fallback used
+  unconfigured  — neither the slot nor fallback had a provider (operator gap)
+  keeper_config — the credential-access judge, built from cfg.keeper
+
+The status column answers a different question from source — not "is this
+configured" but "can it run":
+  ok             — buildable, and the model server answered
+  ok (unprobed)  — buildable; a paid API is not dialled to render a status page
+  unreachable    — buildable, but nothing answered at the model server
+  unhealthy      — not configured, or its provider cannot be built
+
+Requires ADMIN or OWNER in the active workspace.
 
 Examples:
   crewship system aux-status
-  crewship system aux-status --format json | jq '.slots[] | select(.source=="fallback")'
+  crewship system aux-status --format json | jq '.subsystems[] | select(.reachable == false)'
   crewship system aux-status --format yaml`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
 		}
+		// The route sits behind authedAdmin (#868) — RequireWorkspace →
+		// ADMIN+ — so it is workspace-scoped like `system keeper`. Clearing
+		// the workspace here, as this command used to for the old
+		// instance-wide route, hard-400s every call (#896).
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
 
 		client := newAPIClient()
-		client.WorkspaceID = ""
 
 		resp, err := client.Get("/api/v1/system/aux-status")
 		if err != nil {
@@ -473,44 +569,88 @@ Examples:
 			return err
 		}
 
-		var body struct {
-			Slots []struct {
-				Slot      string `json:"slot"`
-				Provider  string `json:"provider"`
-				Model     string `json:"model"`
-				TimeoutMS int64  `json:"timeout_ms"`
-				Source    string `json:"source"`
-			} `json:"slots"`
-		}
-		if err := cli.ReadJSON(resp, &body); err != nil {
+		var wire auxStatusWire
+		if err := cli.ReadJSON(resp, &wire); err != nil {
 			return err
 		}
-
-		headers := []string{"SLOT", "PROVIDER", "MODEL", "TIMEOUT", "SOURCE"}
-		rows := make([][]string, 0, len(body.Slots))
-		for _, s := range body.Slots {
-			timeout := "—"
-			if s.TimeoutMS > 0 {
-				// Render in seconds when ≥1s, else ms — keeps the
-				// column human-readable across the 3s–30s span the
-				// MVP defaults use without forcing operators to
-				// mental-arithmetic milliseconds for the common case.
-				if s.TimeoutMS >= 1000 {
-					timeout = fmt.Sprintf("%.1fs", float64(s.TimeoutMS)/1000.0)
-				} else {
-					timeout = fmt.Sprintf("%dms", s.TimeoutMS)
-				}
+		// A missing `subsystems` key is a server we do not understand — most
+		// likely one predating the #1506 reshape, which still answers 200
+		// with the old `slots` list. Rendering "(no results)" off it would
+		// read as "nothing configured", which is the opposite of the truth
+		// and exactly the failure this command was reported for. Decoding
+		// distinguishes an absent key (nil) from an empty list (non-nil).
+		if wire.Subsystems == nil {
+			if wire.Slots != nil {
+				return fmt.Errorf(
+					"server returned the old aux-status shape ({\"slots\": …}); this CLI reads {\"subsystems\": …}. " +
+						"Upgrade the server, or run a CLI from the same release — refusing to print an empty table")
 			}
+			return fmt.Errorf("server response carried no \"subsystems\" list — cannot report auxiliary subsystem status")
+		}
+
+		payload := auxStatusPayload{Subsystems: wire.Subsystems}
+
+		headers := []string{"SUBSYSTEM", "ROLE", "PROVIDER", "MODEL", "TIMEOUT", "SOURCE", "STATUS"}
+		rows := make([][]string, 0, len(payload.Subsystems))
+		for _, s := range payload.Subsystems {
 			rows = append(rows, []string{
-				s.Slot,
+				s.ID,
+				dashIfEmpty(s.Label),
 				dashIfEmpty(s.Provider),
 				dashIfEmpty(s.Model),
-				timeout,
-				s.Source,
+				auxTimeout(s.TimeoutMS),
+				dashIfEmpty(s.Source),
+				auxVerdict(s),
 			})
 		}
 
-		return newFormatter().Auto(body, headers, rows)
+		f := newFormatter()
+		if err := f.Auto(payload, headers, rows); err != nil {
+			return err
+		}
+		// Machine and quiet formats are consumed by scripts; the annotation
+		// below is for a human reading the table.
+		switch f.Format {
+		case "json", "yaml", "ndjson", "quiet":
+			return nil
+		}
+
+		broken := 0
+		for _, s := range payload.Subsystems {
+			if !auxUsable(s) {
+				broken++
+			}
+		}
+		if broken > 0 {
+			fmt.Printf("\n%s%d of %d subsystems cannot run right now — evaluations that need them fail closed.%s\n",
+				cli.Red, broken, len(payload.Subsystems), cli.Reset)
+		}
+		// Verbatim server reasons, for the rows that have a problem.
+		//
+		// reach_detail only counts as a reason when a probe actually ran.
+		// The server stamps the standing policy note ("not probed — …") into
+		// reach_detail on EVERY non-self-hosted row, healthy or not, so a
+		// paid-API slot that simply failed to build — the everyday missing
+		// ANTHROPIC_API_KEY case — would otherwise print that note directly
+		// beneath its real error, reading as a second fault and sending the
+		// operator after a probe that was never the problem. A nil
+		// `reachable` is "not probed", and that state is already carried by
+		// the status word.
+		for _, s := range payload.Subsystems {
+			if auxUsable(s) {
+				continue
+			}
+			reasons := []string{s.Detail}
+			if s.Reachable != nil {
+				reasons = append(reasons, s.ReachDetail)
+			}
+			for _, reason := range reasons {
+				if reason != "" {
+					fmt.Printf("  %s%s%s: %s\n", cli.Bold, s.ID, cli.Reset, reason)
+				}
+			}
+		}
+		return nil
 	},
 }
 

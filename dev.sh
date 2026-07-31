@@ -285,8 +285,8 @@ start_postgres() {
 }
 
 # The Go binary embeds web/out/ via //go:embed. Running `go build` without
-# a fresh `pnpm build && cp -r out web/out` silently bakes a stale UI into
-# the new binary -- exactly the "make build piecemeal" trap documented in
+# a fresh `pnpm build && scripts/embed-web-out.sh sync` silently bakes a stale
+# UI into the new binary -- exactly the "make build piecemeal" trap documented in
 # CLAUDE.md. Detect frontend source changes against a marker file and run
 # the Next.js pipeline only when needed (idempotent; warm runs are ~0.1 s).
 ensure_web_build_fresh() {
@@ -332,8 +332,12 @@ ensure_web_build_fresh() {
     err "pnpm build failed -- web/out/ left untouched"
     return 1
   fi
-  rm -rf "$PROJECT_DIR/web/out"
-  cp -r "$PROJECT_DIR/out" "$PROJECT_DIR/web/out"
+  # Preserves the tracked web/out/.placeholder.html and verifies a real
+  # export landed — see scripts/embed-web-out.sh (#1567).
+  if ! "$PROJECT_DIR/scripts/embed-web-out.sh" sync; then
+    err "failed to stage the static export into web/out/"
+    return 1
+  fi
   printf '%s\n' "$head_now" > "$marker"
   ok "Frontend build refreshed -> web/out/ (HEAD $head_now)"
 }

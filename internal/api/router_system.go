@@ -70,7 +70,9 @@ func (r *Router) registerSystemRoutes() {
 	// per-workspace request stats, so it carries the same floor as the rest of
 	// the admin console instead of the old auth-only gate that leaked
 	// instance-wide data to any member.
-	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger).WithGovModelStatus(r.govModelStatus)
+	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger).
+		WithGovModelStatus(r.govModelStatus).
+		WithKeeperSettings(r.keeperSettings)
 	r.authedAdmin("GET", "/api/v1/system/keeper", keeperStatus.Status)
 
 	// PR-B F3 aux-status (auth required). Diagnostic read of the

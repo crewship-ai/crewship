@@ -550,6 +550,26 @@ have no browser session to preserve, so all browser sessions are revoked.
 |---|---|
 | `400` | `new_password` shorter than 8 chars, or the account has no password set (OAuth-only — use recovery) |
 | `401` | Not authenticated, or `current_password` is incorrect |
+| `423` | The account is locked — too many consecutive wrong `current_password` guesses |
+| `429` | Per-IP rate limit; this route sits on the strict auth bucket, not the general one |
+
+<Note>
+  **This route is treated as an auth endpoint even though its URL isn't one.**
+  Checking `current_password` answers differently for a right and a wrong
+  guess, so a stolen session could otherwise be spent recovering the password
+  itself — which buys persistence past session revocation, and whatever else
+  the person reused it on. Two controls, both shared with sign-in:
+
+  - it rides the **strict per-IP bucket** (`/api/v1/auth/*`, `/api/v1/bootstrap`)
+    rather than the general API bucket, and unlike the general bucket that one
+    does **not** exempt authenticated CLI tokens;
+  - wrong guesses advance the **same per-account lockout counter** as sign-in
+    (`users.failed_login_count`), so once they cross `login.lockout_threshold`
+    the account freezes for `login.lockout_duration_sec` and this endpoint
+    returns `423` — even for the correct password. A successful change clears
+    the counter. Both values are tunable (`crewship admin ratelimits`); an
+    operator can unlock an account with `crewship admin reset-password`.
+</Note>
 
 Drive it from the CLI with [`crewship auth passwd`](/cli/auth).
 

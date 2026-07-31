@@ -1,18 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MembersSection } from "../sections/members-section"
 
 // #867.2 — the per-member role dropdown appears only for members the
 // caller strictly outranks (and never on the caller's own row); everyone
 // else shows a static badge.
 
-vi.mock("@/components/admin/capability-grid", () => ({
-  CapabilityGrid: () => <div data-testid="capability-grid" />,
-}))
+const apiFetch = vi.fn()
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a) }))
 vi.mock("@/components/features/members/invite-member-dialog", () => ({
   InviteMemberDialog: () => <div data-testid="invite-dialog" />,
 }))
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
+}))
 
 function member(id: string, role: string, userId: string) {
   return {
@@ -29,19 +31,26 @@ function renderWith(callerRole: string | undefined, currentUserId: string) {
     member("m-admin", "ADMIN", "u-admin"),
     member("m-member", "MEMBER", "u-member"),
   ]
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MembersSection
-      members={members}
-      workspaceId="ws1"
-      currentUserId={currentUserId}
-      callerRole={callerRole}
-      onRefresh={vi.fn()}
-    />,
+    <QueryClientProvider client={qc}>
+      <MembersSection
+        members={members}
+        workspaceId="ws1"
+        currentUserId={currentUserId}
+        callerRole={callerRole}
+        onRefresh={vi.fn()}
+      />
+    </QueryClientProvider>,
   )
 }
 
 describe("MemberRoleControl gating (#867.2)", () => {
-  beforeEach(() => cleanup())
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ members: [] }) })
+  })
 
   it("shows a role dropdown for members the OWNER caller outranks", () => {
     renderWith("OWNER", "u-owner")

@@ -280,6 +280,15 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		ollamaURL = r.keeperConfig.OllamaURL
 	}
 	models := NewModelsHandler(r.db, r.logger, ollamaURL)
+	// OLLAMA discovery follows the judge's CURRENT endpoint rather than the URL
+	// the process booted with: an operator who repoints the judge at a LAN box
+	// would otherwise keep getting the old server's model list in every picker,
+	// which offers models that do not exist where the request will go.
+	if r.keeperSettings != nil {
+		models = models.WithJudgeEndpoint(func() string {
+			return r.keeperSettings.Effective().EndpointURL.Value
+		})
+	}
 	r.mux.Handle("GET /api/v1/models", authed(wsCtx(http.HandlerFunc(models.List))))
 	agents.SetModelValidator(models)
 

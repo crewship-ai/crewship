@@ -50,4 +50,93 @@ describe("ScheduleEditor", () => {
     expect(screen.getByRole("button", { pressed: false })).toBeTruthy()
     expect(screen.queryByRole("button", { pressed: true })).toBeNull()
   })
+
+  // Open the editor and type a new cron expression. Returns the input so the
+  // assertions can read back what survived the save attempt.
+  function startEditing(nextCron: string) {
+    fireEvent.click(screen.getByRole("button", { name: "edit" }))
+    const input = screen.getByPlaceholderText("0 9 * * 1-5") as HTMLInputElement
+    fireEvent.change(input, { target: { value: nextCron } })
+    return input
+  }
+
+  it("leaves edit mode and reports success when the save lands", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ScheduleEditor cron="0 9 * * 1-5" prompt="do things" enabled onSave={onSave} />,
+    )
+
+    startEditing("30 6 * * *")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ cron: "30 6 * * *", prompt: "do things", enabled: true }),
+    )
+    // Back to the read-only view: the "edit" affordance is the tell.
+    await waitFor(() => expect(screen.getByRole("button", { name: "edit" })).toBeTruthy())
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("does not claim success when the save is rejected: it surfaces the server's message and keeps the draft", async () => {
+    // What a 500 (or a 403) arrives as once the caller checks res.ok — the
+    // server's own wording, which distinguishes validation from permission.
+    const onSave = vi.fn().mockRejectedValue(new Error("cron expression has 6 fields, expected 5"))
+    render(
+      <ScheduleEditor cron="0 9 * * 1-5" prompt="do things" enabled onSave={onSave} />,
+    )
+
+    const input = startEditing("0 9 * * 1-5 7")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+
+    // 1. The failure is stated, in the server's words — not swallowed, not
+    //    replaced by a generic "something went wrong".
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("cron expression has 6 fields, expected 5"),
+    )
+    expect(toastSuccess).not.toHaveBeenCalled()
+
+    // 2. Nothing anywhere in the editor says the save worked.
+    expect(screen.queryByText("Saved")).toBeNull()
+
+    // 2b. And the reason stays on screen after the toast has faded — the
+    //     inline alert next to the button you retry with, not only the toast.
+    const alert = screen.getByRole("alert")
+    expect(alert.textContent).toBe("cron expression has 6 fields, expected 5")
+
+    // 3. The edit is still there to retry — the editor stays open with the
+    //    typed value intact, and the read-only view (which would show the
+    //    stale server value as if it were current) is not rendered.
+    expect(screen.queryByRole("button", { name: "edit" })).toBeNull()
+    expect((screen.getByPlaceholderText("0 9 * * 1-5") as HTMLInputElement).value).toBe("0 9 * * 1-5 7")
+    expect(input.value).toBe("0 9 * * 1-5 7")
+
+    // 4. And it is re-submittable: Save is not left stuck in "Saving…".
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+  })
+
+  it("saves the schedule as the switch currently shows it, not as the not-yet-refetched prop does", async () => {
+    // The switch writes on its own and the parent only learns about it when
+    // its refetch lands. Saving a cron edit inside that window must not send
+    // the stale `enabled` back and undo a toggle the server already accepted.
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <ScheduleEditor cron="0 9 * * 1-5" prompt="do things" enabled={false} onSave={onSave} />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { pressed: false }))
+    await waitFor(() => expect(screen.getByRole("button", { pressed: true })).toBeTruthy())
+    onSave.mockClear()
+
+    // The `enabled` prop is deliberately left at false: this is the window
+    // before the parent has re-rendered with the value it just wrote.
+    startEditing("30 6 * * *")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith({ cron: "30 6 * * *", prompt: "do things", enabled: true }),
+    )
+  })
 })
