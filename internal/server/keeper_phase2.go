@@ -14,6 +14,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -75,9 +76,10 @@ type phase2Evaluators struct {
 //
 // auxSettings is the runtime per-slot override store (nil in test/embedded
 // wirings, which then behave exactly as before): each evaluator's gov-model
-// resolver is wrapped so an override applies at request time instead of
-// requiring these evaluators to be rebuilt — see keeper_aux_live.go. judge
-// resolves the current instance judge endpoint for a slot pointed at "ollama",
+// resolver AND its per-call budget are wrapped so an override applies at request
+// time instead of requiring these evaluators to be rebuilt — see
+// keeper_aux_live.go. judge resolves the current instance judge endpoint for a
+// slot pointed at "ollama",
 // and creds resolves the vault key a hosted slot spends (#1554; nil = the
 // pre-existing process-env key).
 func buildPhase2Evaluators(
@@ -96,29 +98,34 @@ func buildPhase2Evaluators(
 	live := func(slot llm.Slot) gatekeeper.GovModelResolver {
 		return newAuxLiveResolver(string(slot), auxSettings, govModel, judge, creds, j, db, logger)
 	}
+	// The slot's configured per-call budget, read at call time for the same
+	// reason its model is (#1601): these evaluators are never rebuilt.
+	budget := func(slot llm.Slot) gatekeeper.CallTimeoutResolver {
+		return auxCallTimeout(auxSettings, string(slot))
+	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, live(llm.SlotCurator), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, live(llm.SlotCurator), budget(llm.SlotCurator), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.skillReview = gatekeeper.NewSkillReviewEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: skill_review evaluator unavailable (curator aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/skill-review will return 503")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotBehavior, live(llm.SlotBehavior), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotBehavior, live(llm.SlotBehavior), budget(llm.SlotBehavior), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.behavior = gatekeeper.NewBehaviorEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: behavior evaluator unavailable (behavior aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/behavior will return 503; F4.2 sampling hook will no-op")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotMemoryHealth, live(llm.SlotMemoryHealth), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotMemoryHealth, live(llm.SlotMemoryHealth), budget(llm.SlotMemoryHealth), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.memoryHealth = gatekeeper.NewMemoryHealthEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: memory_health evaluator unavailable (memory_health aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/memory-health will return 503")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotNegative, live(llm.SlotNegative), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotNegative, live(llm.SlotNegative), budget(llm.SlotNegative), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.negative = gatekeeper.NewNegativeLearningEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: negative_learning evaluator unavailable (negative aux slot not configured and no local default judge)",
@@ -134,6 +141,9 @@ func buildPhase2Evaluators(
 // resolver (M1) and the gov-model resolver (M2a) — so a workspace's vault-backed
 // governance model overrides this slot's construction-time default at request
 // time.
+//
+// budget is the slot's per-call deadline, read at call time (#1601). nil keeps
+// the gatekeeper's built-in bound, which is what test and embedded wirings get.
 //
 // Construction-time provider selection (fully-local, M2, #1001):
 //   - Build the slot's configured provider (DefaultAuxiliaryModels puts every
@@ -151,6 +161,7 @@ func buildAuxGatekeeper(
 	aux llm.AuxiliaryModels,
 	slot llm.Slot,
 	govModel gatekeeper.GovModelResolver,
+	budget gatekeeper.CallTimeoutResolver,
 	dfltOllamaURL, dfltOllamaModel string,
 	j journal.Emitter,
 	db *sql.DB,
@@ -187,7 +198,17 @@ func buildAuxGatekeeper(
 	wrapped := llm.Middleware(base, j, db)
 	return gatekeeper.New(wrapped, modelName, logger,
 		gatekeeper.WithWatchSpecResolver(watchSpecResolver(db, logger)),
-		gatekeeper.WithGovModelResolver(govModel))
+		gatekeeper.WithGovModelResolver(govModel),
+		// The operator's per-slot budget, not the gatekeeper's built-in constant.
+		// A resolver rather than a captured value because this evaluator is built
+		// once at boot and never rebuilt (#1601); a nil one keeps the built-in
+		// bound, so nothing is ever unbounded.
+		gatekeeper.WithCallTimeoutResolver(budget),
+		// …and the command that raises THIS budget. The default names the
+		// credential judge's setting, which for an evaluator would send the
+		// operator to change a number governing a different model.
+		gatekeeper.WithTimeoutRemedy(
+			fmt.Sprintf("crewship keeper aux set %s --timeout 40s", slot)))
 }
 
 // buildLLMProvider maps an AuxModel.Provider string to a concrete

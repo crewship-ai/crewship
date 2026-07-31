@@ -987,6 +987,33 @@ crewship keeper aux reset behavior                          # back to the server
 crewship keeper aux reset --all
 ```
 
+### How long an evaluator may take
+
+Each slot carries a per-call budget — the `--timeout` above, and the seconds
+figure on each row of the Judge models card. It bounds one model call for that
+evaluator, the way `--judge-timeout` bounds one credential decision:
+
+```bash
+crewship keeper aux set behavior --timeout 40s   # a slower local model needs longer
+crewship keeper aux set behavior --timeout ""    # back to the inherited budget
+```
+
+The budget resolves the way the model does: the slot's own setting, else the
+`fallback` slot's, else the built-in 20s. Clearing it inherits again — it never
+means "no deadline", because an evaluator that can hang would hold an agent's
+tool call open behind it. When a call does run out of budget the verdict widens
+to ESCALATE rather than passing silently, so a budget set too low shows up as
+sweeps that keep asking for review.
+
+<Note>
+  This is what the card had been *showing* since the slots became settable, and
+  what nothing enforced: the number was stored, validated and displayed while
+  every evaluator call ran under the built-in bound, so raising a slow evaluator's
+  budget changed nothing. It is live now. The shipped defaults are 20s — the bound
+  those calls were already running under — so an instance nobody has configured
+  behaves exactly as it did.
+</Note>
+
 ### Which key an evaluator spends
 
 A hosted evaluator bills a key. By default that is the one in the server's own

@@ -52,22 +52,44 @@ const (
 	SlotRunSummary   Slot = "run_summary"
 )
 
+// auxDefaultTimeout is the shipped per-call budget for the slots whose evaluators
+// enforce one (curator, behavior, memory_health, negative, and the fallback
+// behind them — internal/server/keeper_phase2.go).
+//
+// It is 20s because that is the bound those calls have ACTUALLY been running
+// under: the field reached no evaluator until #1601, so every one of them was
+// capped by the gatekeeper's built-in 20s. The PRD's original per-slot numbers
+// (behavior 8s, negative 5s) were written for haiku and were never enforced;
+// making the field live at those values would have TIGHTENED three slots the
+// moment it started working — and the fully-local wiring, where a slot with no
+// API key degrades to a 7B judge that takes ~12s, is exactly where that bites.
+// That is the #1530 failure (a budget too small for the model, surfacing as a
+// fail-closed verdict) re-introduced by the fix for it.
+//
+// So: the wiring changes nothing for an operator who never configured a budget,
+// and the number is theirs to lower — per slot, at runtime, from the Judge models
+// card or `crewship keeper aux set <slot> --timeout`.
+const auxDefaultTimeout = 20 * time.Second
+
 // DefaultAuxiliaryModels returns the MVP-default config: every slot
-// on claude-haiku-4-5. PRD §6 F3 specifies per-slot timeouts
-// (Keeper 5s for hot path, MemoryHealth 15s for daily sweep);
-// reflected here.
+// on claude-haiku-4-5, with the per-call budget each evaluator enforces.
+//
+// Keeper and RunSummary keep their PRD §6 F3 numbers: nothing resolves
+// SlotKeeper (see keepercfg.AuxSlots, which deliberately omits it), and the
+// run_summary path bounds its call by the caller's context rather than by this
+// field — neither is a budget an evaluator reads.
 func DefaultAuxiliaryModels() AuxiliaryModels {
 	haiku := func(timeout time.Duration) AuxModel {
 		return AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: timeout}
 	}
 	return AuxiliaryModels{
-		Curator:      haiku(30 * time.Second),
+		Curator:      haiku(auxDefaultTimeout),
 		Keeper:       haiku(5 * time.Second),
-		Behavior:     haiku(8 * time.Second),
-		MemoryHealth: haiku(15 * time.Second),
-		Negative:     haiku(5 * time.Second),
+		Behavior:     haiku(auxDefaultTimeout),
+		MemoryHealth: haiku(auxDefaultTimeout),
+		Negative:     haiku(auxDefaultTimeout),
 		RunSummary:   haiku(15 * time.Second),
-		Fallback:     haiku(10 * time.Second),
+		Fallback:     haiku(auxDefaultTimeout),
 	}
 }
 
@@ -142,8 +164,9 @@ func ResolveAux(cfg AuxiliaryModels, slot Slot) (AuxModel, error) {
 		// caller's LLM call run without a deadline (an operator
 		// forgetting `timeout:` in YAML shouldn't translate to "no
 		// budget at all"). Borrow from Fallback if it has one, else
-		// fall back to a sane hard default matching the longest
-		// per-slot default in DefaultAuxiliaryModels.
+		// fall back to a sane hard default — 30s, deliberately no
+		// tighter than any shipped per-slot budget, because this is
+		// the branch where nobody stated one.
 		if picked.Timeout <= 0 {
 			if cfg.Fallback.Timeout > 0 {
 				picked.Timeout = cfg.Fallback.Timeout

@@ -226,7 +226,18 @@ type Gatekeeper struct {
 	govModel  GovModelResolver  // nil-safe: a nil resolver keeps the default provider
 	// callTimeout bounds one model call. Zero means llmCallTimeout.
 	callTimeout time.Duration
+	// callTimeoutFn is callTimeout for an evaluator that is never rebuilt: it is
+	// consulted per call. Nil-safe, and a non-positive answer falls through to
+	// callTimeout — see WithCallTimeoutResolver.
+	callTimeoutFn CallTimeoutResolver
+	// remedy is the command a timed-out call tells the operator to run. Empty
+	// means the credential judge's — see WithTimeoutRemedy.
+	remedy string
 }
+
+// CallTimeoutResolver returns the per-call budget in force right now, or a
+// non-positive duration for "nothing configured — keep the bound you have".
+type CallTimeoutResolver func() time.Duration
 
 // Option configures a Gatekeeper at construction. Kept as functional options
 // so the two production wiring sites can supply a WatchSpecResolver without
@@ -266,12 +277,63 @@ func WithCallTimeout(d time.Duration) Option {
 	}
 }
 
+// WithCallTimeoutResolver is WithCallTimeout for an evaluator that is built once
+// and never rebuilt.
+//
+// The access judge rebuilds itself whenever its configuration changes
+// (keeper_lazy.go), so a duration captured at construction is always current.
+// The four Keeper Reviews evaluators are constructed at boot and their pointers
+// are captured by the route handler, so a budget captured there would be the
+// boot-time one for the life of the process — the trap the aux slots' MODEL fell
+// into before #1556. This reads the operator's setting per call instead.
+//
+// A nil resolver, or one that answers non-positive, leaves the bound alone: the
+// captured WithCallTimeout value if there is one, else llmCallTimeout. An
+// unbounded model call is the failure audit M4 added the timeout for, and no
+// resolver may produce one.
+func WithCallTimeoutResolver(r CallTimeoutResolver) Option {
+	return func(g *Gatekeeper) { g.callTimeoutFn = r }
+}
+
 // timeout returns the effective per-call budget.
 func (g *Gatekeeper) timeout() time.Duration {
+	if g.callTimeoutFn != nil {
+		if d := g.callTimeoutFn(); d > 0 {
+			return d
+		}
+	}
 	if g.callTimeout > 0 {
 		return g.callTimeout
 	}
 	return llmCallTimeout
+}
+
+// CallTimeout reports the budget the next model call will be bounded by. Exported
+// so a wiring can be asserted without a live model: "the operator's setting
+// reaches the call" is otherwise only observable by waiting out a deadline.
+func (g *Gatekeeper) CallTimeout() time.Duration { return g.timeout() }
+
+// defaultTimeoutRemedy is the command that raises the CREDENTIAL judge's budget —
+// the right answer for the access path, and the only one this package knew about
+// while the aux evaluators had no budget of their own.
+const defaultTimeoutRemedy = "crewship keeper config set --judge-timeout 40s"
+
+// WithTimeoutRemedy names the command that raises THIS evaluator's budget, for
+// the reason the budget is settable at all: a timeout DENY that tells the
+// operator to run a command governing a different model sends them to change a
+// setting that cannot affect what they just saw. The Keeper Reviews slots have
+// their own per-slot budget (`crewship keeper aux set <slot> --timeout`), so they
+// pass theirs; unset keeps the credential judge's.
+func WithTimeoutRemedy(cmd string) Option {
+	return func(g *Gatekeeper) { g.remedy = cmd }
+}
+
+// timeoutRemedy returns the command a timed-out call should suggest.
+func (g *Gatekeeper) timeoutRemedy() string {
+	if g.remedy != "" {
+		return g.remedy
+	}
+	return defaultTimeoutRemedy
 }
 
 // New creates a Gatekeeper that uses an LLM provider for decisions.
@@ -457,8 +519,8 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		// everything because the budget was a 5s constant.
 		if errors.Is(err, context.DeadlineExceeded) {
 			reason = fmt.Sprintf(
-				"Keeper judge did not answer within %s — deny by default. If the model is simply slow, raise the budget: crewship keeper config set --judge-timeout 40s",
-				g.timeout())
+				"Keeper judge did not answer within %s — deny by default. If the model is simply slow, raise the budget: %s",
+				g.timeout(), g.timeoutRemedy())
 		}
 		return keeper.GatekeeperResponse{
 			Decision:     string(keeper.DecisionDeny),
