@@ -142,16 +142,11 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
 
       # For Go, we build the main binary so CodeQL sees the actual code
-      # paths the release artifact will compile. web/out is empty in this
-      # workflow (no `pnpm build`), so we stub it just enough for the
-      # embed directive to resolve — CodeQL analyzes Go source, not the
-      # embedded JS bundle.
-      - if: matrix.language == 'go'
-        name: Stub web/out for embed
-        run: |
-          mkdir -p web/out
-          : > web/out/index.html
-
+      # paths the release artifact will compile. This workflow runs no
+      # `pnpm build`, so web/out/ holds only the tracked placeholder —
+      # enough for `//go:embed all:out` to resolve (#1567), and CodeQL
+      # analyzes Go source, not the embedded JS bundle. No stub step
+      # needed; the checkout already satisfies the embed.
       - if: matrix.language == 'go'
         name: Build for CodeQL
         run: go build ./cmd/crewship

@@ -284,12 +284,19 @@ path. Other subcommands: `stop`, `restart`, `status`, `seed`, `nuke`, `logs`.
 Single-binary production build:
 
 ```bash
-make build            # pnpm build → cp -r out web/out → go build -o crewship
+make build            # pnpm build → scripts/embed-web-out.sh sync → go build
 ./crewship start
 ```
 
 `make build` is end-to-end. **Don't** run `pnpm build` then `go build` directly
-— the `cp -r out web/out` step in between keeps the embedded UI in sync.
+— the `scripts/embed-web-out.sh sync` step in between stages the export into
+`web/out/`, which is what `//go:embed all:out` bakes into the binary.
+
+A plain `go build ./...` always works, including in a fresh clone or
+`git worktree add`, because `web/out/.placeholder.html` is tracked. The
+resulting binary has **no UI**: every UI route answers `503` with a page
+saying the web UI was not built. That is deliberate — see
+[CONTRIBUTING.md](CONTRIBUTING.md#the-webout-embed).
 
 ## Stack
 

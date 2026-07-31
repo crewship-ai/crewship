@@ -46,6 +46,15 @@ COPY internal/ ./internal/
 COPY schemas/ ./schemas/
 COPY web/ ./web/
 COPY --from=frontend /app/out ./web/out
+# Release gate (#1567). web/out/ now always compiles — a tracked placeholder
+# keeps `//go:embed all:out` resolvable in a bare checkout — so the image
+# build has to prove the frontend stage actually delivered a real export
+# instead of letting a UI-less crewship image ship quietly. scripts/ is not
+# copied into this stage, so the check is inlined rather than calling
+# scripts/embed-web-out.sh; _next/ is what a Next.js export always emits and
+# a placeholder or hand-rolled stub never does.
+RUN test -f ./web/out/index.html && test -d ./web/out/_next \
+    || (echo "ERROR: web/out/ has no Next.js static export — refusing to build an image with no web UI" >&2; exit 1)
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown

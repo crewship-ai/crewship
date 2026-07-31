@@ -72,7 +72,7 @@ dev\:go-once:
 
 build: build\:sidecar
 	pnpm build
-	rm -rf web/out && cp -r out web/out
+	./scripts/embed-web-out.sh sync
 	$(GO_BUILD) -o crewship ./cmd/crewship
 
 build\:go: build\:sidecar
