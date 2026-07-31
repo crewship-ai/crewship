@@ -171,6 +171,26 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// crew_id and project_id got no such check, and on a triage rule they are
+	// worse than a name leak: Process() applies the rule to incoming issues, so
+	// a foreign crew_id routes this tenant's issues into another tenant's crew
+	// on every match, unattended.
+	for _, fk := range []struct {
+		field string
+		table string
+		value *string
+	}{
+		{"crew_id", "crews", req.CrewID},
+		{"project_id", "projects", req.ProjectID},
+	} {
+		if fk.value == nil || *fk.value == "" {
+			continue
+		}
+		if !fkInWorkspaceOrReject(w, r, h.db, h.logger, fk.table, fk.field, *fk.value, wsID) {
+			return
+		}
+	}
+
 	// Get next position
 	var maxPos int
 	if err := h.db.QueryRowContext(r.Context(),
@@ -288,6 +308,9 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		if *req.CrewID == "" {
 			ub.SetNull("crew_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "crews", "crew_id", *req.CrewID, wsID) {
+				return
+			}
 			ub.Set("crew_id", *req.CrewID)
 		}
 	}
@@ -316,6 +339,9 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		if *req.ProjectID == "" {
 			ub.SetNull("project_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "projects", "project_id", *req.ProjectID, wsID) {
+				return
+			}
 			ub.Set("project_id", *req.ProjectID)
 		}
 	}
