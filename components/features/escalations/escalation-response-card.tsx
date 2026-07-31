@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import type { Escalation } from "@/lib/types/escalation"
 import { parseEvidencePack } from "@/lib/types/escalation"
 import { apiFetch } from "@/lib/api-fetch"
+import { FourEyesNotice } from "./four-eyes-notice"
 
 interface EscalationResponseCardProps {
   escalation: Escalation
@@ -74,55 +75,6 @@ function ConfidenceIndicator({ confidence }: { confidence: number }) {
           {labels[level]} ({Math.round(confidence * 100)}%)
         </span>
       </div>
-    </div>
-  )
-}
-
-/**
- * Why a second approver is required for THIS escalation (#1559).
- *
- * The rule has two independent sources and the row showed neither, so an
- * operator learned it existed from a 403 on their own approval. The two are
- * worth naming separately: the workspace toggle is something an OWNER/ADMIN can
- * turn off, and the credential's tier is not — it can only tighten the toggle,
- * never loosen it, so "turn the setting off" is not a fix for the tier case.
- *
- * Rendered only when the server says the rule applies. It also decides that the
- * agent has a recorded owner to compare the approver against; without one the
- * rule cannot be enforced and the server reports required=false, which is why
- * this component never re-derives the answer.
- */
-function FourEyesNotice({ escalation }: { escalation: Escalation }) {
-  if (!escalation.second_approver_required) return null
-
-  const byTier = escalation.second_approver_by_tier
-  const byWorkspace = escalation.second_approver_by_workspace
-  const tier = escalation.security_level_label
-
-  let why: string
-  if (byTier && byWorkspace) {
-    why = `This workspace requires a second approver, and ${tier ?? "this credential's"} credentials require one regardless of that setting.`
-  } else if (byTier) {
-    why = `This workspace's second-approver setting is off, but ${tier ?? "this credential's tier"} credentials require one anyway — a credential's tier can only tighten this rule, never loosen it.`
-  } else {
-    why = "This workspace requires a second approver on every credential escalation."
-  }
-
-  return (
-    <div
-      className="rounded-md border border-warn/30 bg-warn/5 dark:bg-warn/20 p-2.5 space-y-1"
-      data-testid="escalation-four-eyes"
-    >
-      <div className="flex items-start gap-2">
-        <AlertTriangle className="h-3.5 w-3.5 text-warn mt-0.5 shrink-0" />
-        <span className="text-body font-medium">Needs a second approver</span>
-      </div>
-      <p className="text-body text-muted-foreground">
-        Whoever owns @{escalation.from_slug} can&rsquo;t approve, reject or redirect this
-        request — it is refused for them, whichever button they press. Someone else has to
-        resolve it.
-      </p>
-      <p className="text-label text-muted-foreground">{why}</p>
     </div>
   )
 }
@@ -209,7 +161,13 @@ export function EscalationResponseCard({
     <div className="space-y-4 p-4">
       {/* Ahead of the evidence: whether this person can resolve it at all
           decides whether the rest is worth reading. */}
-      <FourEyesNotice escalation={escalation} />
+      <FourEyesNotice
+        required={escalation.second_approver_required}
+        byWorkspace={escalation.second_approver_by_workspace}
+        byTier={escalation.second_approver_by_tier}
+        securityLevelLabel={escalation.security_level_label}
+        agentSlug={escalation.from_slug}
+      />
 
       {/* Evidence Pack */}
       {evidencePack && (

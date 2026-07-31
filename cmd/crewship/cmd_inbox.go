@@ -222,6 +222,17 @@ Examples:
 	},
 }
 
+// tierReason names the credential tier that forces a second approver, using
+// the label the SERVER sent. The CLI deliberately keeps no copy of which tier
+// that is: against a server whose tier table has moved, a locally-derived "L4"
+// would be a confident wrong answer.
+func tierReason(label string) string {
+	if label == "" {
+		return "the credential's tier"
+	}
+	return label + " credentials"
+}
+
 // inboxGetCmd is the read-detail counterpart of `inbox list`: it fetches
 // ONE item with its full body + payload (the context the list view
 // omits), giving the CLI parity with the web detail pane. An agent
@@ -282,6 +293,14 @@ Examples:
 			TargetRole string `json:"target_role,omitempty" yaml:"target_role,omitempty"`
 			ResolvedBy string `json:"resolved_by_user_id,omitempty" yaml:"resolved_by_user_id,omitempty"`
 			ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
+			// Four-eyes on a credential escalation (#1574), as the server
+			// computes it at read time. The CLI is the third surface offering a
+			// resolve on this row, and it was the third one saying nothing about
+			// the refusal that resolve would answer with.
+			SecondApproverRequired    bool   `json:"second_approver_required,omitempty" yaml:"second_approver_required,omitempty"`
+			SecondApproverByWorkspace bool   `json:"second_approver_by_workspace,omitempty" yaml:"second_approver_by_workspace,omitempty"`
+			SecondApproverByTier      bool   `json:"second_approver_by_tier,omitempty" yaml:"second_approver_by_tier,omitempty"`
+			SecurityLevelLabel        string `json:"security_level_label,omitempty" yaml:"security_level_label,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &item); err != nil {
 			return err
@@ -305,6 +324,25 @@ Examples:
 			fmt.Printf("%sid %s%s\n", cli.Dim, item.ID, cli.Reset)
 			if item.ResolvedAction != "" {
 				fmt.Printf("%sresolved · %s%s\n", cli.Green, item.ResolvedAction, cli.Reset)
+			}
+			// Before the body, because it decides whether resolving this from
+			// here will work at all. Silent against a pre-#1574 server rather
+			// than guessing — the CLI has no copy of the rule to guess with.
+			if item.SecondApproverRequired {
+				why := "workspace policy"
+				switch {
+				case item.SecondApproverByTier && item.SecondApproverByWorkspace:
+					why = "workspace policy + " + tierReason(item.SecurityLevelLabel)
+				case item.SecondApproverByTier:
+					why = tierReason(item.SecurityLevelLabel)
+				}
+				who := from
+				if who == "" {
+					who = "the agent that raised this"
+				}
+				fmt.Printf("%s2nd approver required · %s%s\n", cli.Yellow, why, cli.Reset)
+				fmt.Printf("%swhoever owns %s cannot resolve it — someone else has to%s\n",
+					cli.Dim, who, cli.Reset)
 			}
 			if item.BodyMD != "" {
 				fmt.Printf("\n%s\n", item.BodyMD)

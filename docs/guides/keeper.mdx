@@ -701,14 +701,24 @@ raised the escalation** (`agents.created_by_user_id`). An agent with no recorded
 owner (a legacy row) has no identity to compare against, so the rule cannot be
 enforced for its escalations and resolution proceeds as before.
 
-Three places tell you which of the two applies, so you find out before you are
-refused rather than from the `403`:
+Every surface that offers you a resolve tells you which of the two applies, so
+you find out before you are refused rather than from the `403`:
 
 - **Admin → Keeper**, under the switch, while it is off: names the tier that
   still requires a second approver.
 - **The escalation row** in the crew's escalations panel: says whether the
   workspace setting, the tier, or both apply to *that* request.
+- **The inbox reading pane**, above Approve / Reject: the same notice, in the
+  same words — it is the same component, so the two cannot end up describing
+  one rule differently.
+- **`crewship inbox get <id>`**, on the `2nd approver required` line.
 - **`crewship keeper status`**, on the `In force:` line under `2nd approver:`.
+
+All of them read the answer the server computes **when the row is read**, not
+when the escalation was raised — both inputs move afterwards (an admin flips
+the toggle; a credential is re-tiered), and an answer frozen at raise time would
+go stale in the direction that matters: a one-click Approve still offered for a
+credential somebody has since marked critical.
 
 ```text
   2nd approver: off

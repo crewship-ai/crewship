@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -117,6 +119,25 @@ type inboxItemResponse struct {
 	ResolvedAction   string                 `json:"resolved_action,omitempty"`
 	CreatedAt        string                 `json:"created_at"`
 	UpdatedAt        string                 `json:"updated_at"`
+
+	// The four-eyes rule as it will be applied to THIS row (issue #1574),
+	// carrying the same field names and meaning the crew escalations list uses
+	// (#1559) so the two surfaces cannot describe one rule differently.
+	//
+	// Filled at READ time by enrichEscalationFourEyes, never from Payload:
+	// Payload is written when the escalation is raised, and both inputs to the
+	// answer — the workspace toggle and the linked credential's tier — change
+	// afterwards. A stored answer would go stale in the direction that matters,
+	// leaving a one-click Approve on a row whose resolve now 403s.
+	//
+	// omitempty: only escalation rows can carry these, and every other kind in
+	// the inbox would otherwise pay for them on every page.
+	SecondApproverRequired    bool `json:"second_approver_required,omitempty"`
+	SecondApproverByWorkspace bool `json:"second_approver_by_workspace,omitempty"`
+	SecondApproverByTier      bool `json:"second_approver_by_tier,omitempty"`
+	// SecurityLevelLabel is the linked credential's tier ("L4 · critical"), from
+	// keeper's own table. Empty when the escalation has no credential behind it.
+	SecurityLevelLabel string `json:"security_level_label,omitempty"`
 }
 
 // inboxListResponse keeps the count + cursor metadata next to the
@@ -222,6 +243,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		out = append(out, item)
 	}
 	h.enrichAgentAvatars(r.Context(), out)
+	h.enrichEscalationFourEyes(r.Context(), workspaceID, out)
 
 	// Bell badge fetched in the same response so the UI doesn't need
 	// a second round-trip on every poll. Cheap because it's a partial-
@@ -327,6 +349,7 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	batch := []inboxItemResponse{item}
 	h.enrichAgentAvatars(r.Context(), batch)
+	h.enrichEscalationFourEyes(r.Context(), workspaceID, batch)
 	writeJSON(w, http.StatusOK, batch[0])
 }
 
@@ -376,6 +399,122 @@ func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemR
 				rows[i].AvatarURL = *u
 			}
 		}
+	}
+}
+
+// enrichEscalationFourEyes fills the four-eyes fields on kind=escalation rows,
+// mirroring ResolveEscalation's own reasoning exactly (issue #1574):
+//
+//   - CREDENTIAL escalations only.
+//   - The rule compares the approver against the agent's recorded owner, so an
+//     agent with no owner (legacy pre-v99 row) cannot have it enforced — and a
+//     row claiming otherwise would threaten a 403 that will not happen, which
+//     is worse than saying nothing.
+//   - The workspace toggle opts every tier in; the credential's own tier forces
+//     it on the top tier regardless. Either is sufficient.
+//
+// Why here and not on the stored payload, which is where the inbox gets
+// everything else it renders: the payload is written when the escalation is
+// raised, and BOTH inputs move afterwards — the workspace toggle is a switch an
+// admin flips, and a credential can be re-tiered from L2 to L4 long after the
+// row landed. A snapshot would keep offering an unguarded one-click Approve for
+// a credential somebody has since marked critical.
+//
+// Cost is bounded per page, not per item: one batched join keyed by source_id,
+// and the governance row read once — and only when at least one row could
+// actually be subject to the rule. Best-effort, like enrichAgentAvatars: a
+// lookup failure leaves the fields unset (the row claims nothing) rather than
+// failing the list, because the enforcement is server-side either way and the
+// operator meeting the 403 is strictly better than an empty inbox.
+func (h *InboxHandler) enrichEscalationFourEyes(ctx context.Context, workspaceID string, rows []inboxItemResponse) {
+	ids := make([]interface{}, 0)
+	seen := make(map[string]bool)
+	for i := range rows {
+		if rows[i].Kind == "escalation" && rows[i].SourceID != "" && !seen[rows[i].SourceID] {
+			seen[rows[i].SourceID] = true
+			ids = append(ids, rows[i].SourceID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	// LEFT JOIN on credentials, not JOIN: a CREDENTIAL escalation may carry no
+	// credential row (the legacy flow where the human supplies the secret), and
+	// a credential_id can dangle. Both mean "no tier to read", which is what
+	// ResolveEscalation concludes from sql.ErrNoRows.
+	//
+	// The agents JOIN is deliberately inner: no agent row means no recorded
+	// owner to compare against, which is the case where the rule cannot be
+	// enforced — such a row drops out of this map and claims nothing.
+	args := append([]interface{}{workspaceID}, ids...)
+	q, err := h.db.QueryContext(ctx, `
+		SELECT e.id, e.type, COALESCE(a.created_by_user_id, ''), c.security_level
+		FROM escalations e
+		JOIN agents a ON a.id = e.from_agent_id
+		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
+		WHERE e.workspace_id = ? AND e.id IN (`+sqlPlaceholders(len(ids))+`)`,
+		args...)
+	if err != nil {
+		h.logger.Warn("inbox four-eyes enrich", "error", err)
+		return
+	}
+	defer q.Close()
+
+	type escFacts struct {
+		escType       string
+		initiatorUser string
+		securityLevel sql.NullInt64
+	}
+	bySource := make(map[string]escFacts, len(ids))
+	for q.Next() {
+		var id string
+		var f escFacts
+		if err := q.Scan(&id, &f.escType, &f.initiatorUser, &f.securityLevel); err != nil {
+			continue
+		}
+		bySource[id] = f
+	}
+	if err := q.Err(); err != nil {
+		h.logger.Warn("inbox four-eyes enrich", "error", err)
+		return
+	}
+
+	// The governance row is read once for the whole page, and only if some row
+	// on it could be subject to the rule at all.
+	needsGovernance := false
+	for _, f := range bySource {
+		if f.escType == "CREDENTIAL" && f.initiatorUser != "" {
+			needsGovernance = true
+			break
+		}
+	}
+	var gov governance.Settings
+	if needsGovernance {
+		gov = governance.Resolve(ctx, h.db, h.logger, workspaceID)
+	}
+
+	for i := range rows {
+		// Kind first: another kind's source_id is a waitpoint token or a run id,
+		// and one colliding with an escalation id must not inherit its answer.
+		if rows[i].Kind != "escalation" {
+			continue
+		}
+		f, ok := bySource[rows[i].SourceID]
+		if !ok {
+			continue
+		}
+		if f.securityLevel.Valid {
+			rows[i].SecurityLevelLabel = keeper.SecurityLevel(f.securityLevel.Int64).Label()
+		}
+		if f.escType != "CREDENTIAL" || f.initiatorUser == "" {
+			continue
+		}
+		rows[i].SecondApproverByWorkspace = gov.RequireSecondApprover
+		if f.securityLevel.Valid {
+			rows[i].SecondApproverByTier = keeper.SecurityLevel(f.securityLevel.Int64).Tier().SecondApprover
+		}
+		rows[i].SecondApproverRequired = rows[i].SecondApproverByWorkspace || rows[i].SecondApproverByTier
 	}
 }
 

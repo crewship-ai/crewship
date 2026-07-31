@@ -64,6 +64,21 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
 | `resolved_action` | string \| omitted | `approved`, `rejected`, `retried`, `cancelled` — what the human did. |
 | `created_at` | RFC3339 | |
 | `updated_at` | RFC3339 | |
+| `second_approver_required` | bool \| omitted | `kind=escalation` only. Whether resolving this needs someone other than the owner of the agent that raised it. |
+| `second_approver_by_workspace` | bool \| omitted | Because the workspace `require_second_approver` toggle is on. |
+| `second_approver_by_tier` | bool \| omitted | Because the linked credential's tier forces it, whatever the toggle says. |
+| `security_level_label` | string \| omitted | The linked credential's tier, e.g. `"L4 · critical"`. |
+
+<Note>
+  The four `second_approver_*` / `security_level_label` fields are the same ones
+  `GET /api/v1/crews/{id}/escalations` carries, and they are computed
+  **when the row is read** — not stored on the item at raise time. Both inputs change
+  afterwards (the workspace toggle, and the credential's tier), so a stored answer would
+  promise a resolve that then `403`s. Omitted means the server said nothing, not that a
+  single approver will do: an agent with **no recorded owner** has no identity for the rule
+  to compare against, so it cannot be enforced and nothing is claimed. See
+  [Keeper → The switch is a floor, not a master switch](/guides/keeper#the-switch-is-a-floor-not-a-master-switch).
+</Note>
 
 ## Reading the inbox
 
