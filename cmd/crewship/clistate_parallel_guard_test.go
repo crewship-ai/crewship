@@ -162,6 +162,13 @@ func TestCLIStateGuard_HelperListIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob test files: %v", err)
 	}
+	// Same vacuous-pass guard as the sibling test, for a sharper reason
+	// here: with nothing to read, every name below fails to match and the
+	// test reports 52 renamed-helper errors instead of the one real
+	// problem. Naming the cause beats fifty wrong ones.
+	if len(files) == 0 {
+		t.Fatal("no test files found — the helper-list check has nothing to read")
+	}
 	var all strings.Builder
 	for _, file := range files {
 		src, err := os.ReadFile(file)
