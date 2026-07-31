@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
-	"github.com/crewship-ai/crewship/internal/pathsafe"
+	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -316,12 +316,13 @@ func (s *Server) memoryScrubber() *scrubber.Scrubber {
 // caller passing `foo/../../etc/passwd` doesn't slip through by
 // normalising "foo/.." away in isolation.
 func safeJoinUnder(base, rel string) (string, error) {
-	// Lexical confinement: pathsafe.Join rejects absolute paths, NUL
-	// bytes, and any "../" traversal, and guarantees the returned value
-	// is base or a descendant of base. This is the single shared guard
-	// (also used by the in-process memory dispatcher) so the read/write
-	// HTTP surface and the tool surface stay byte-for-byte consistent.
-	cleaned, err := pathsafe.Join(base, rel)
+	// Lexical confinement: safepath.JoinRel rejects absolute paths, NUL
+	// bytes, embedded separators, and any "../" traversal, and guarantees
+	// the returned value is base or a descendant of base. This is the
+	// single shared guard (also used by the in-process memory dispatcher)
+	// so the read/write HTTP surface and the tool surface stay
+	// byte-for-byte consistent.
+	cleaned, err := safepath.JoinRel(base, rel)
 	if err != nil {
 		return "", errIllegalPath
 	}

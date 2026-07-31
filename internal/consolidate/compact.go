@@ -95,6 +95,17 @@ func (c *Compactor) Run(ctx context.Context, workspaceID string, olderThan time.
 		return CompactResult{}, err
 	}
 
+	// #1572: age and type decide what compaction WANTS to delete; the chain
+	// decides what it MAY. Drop every candidate whose integrity is unresolved
+	// before it can reach a bucket, so it is neither summarised, archived, nor
+	// deleted. See journal.UnresolvedIntegrity for the rule set — the short
+	// version is that a keyed hash which does not reproduce, or a `permanent`
+	// at emit, is not something a timer gets to act on.
+	rows, err = c.fenceUnresolved(ctx, workspaceID, rows, logger)
+	if err != nil {
+		return CompactResult{}, err
+	}
+
 	buckets := groupIntoBuckets(rows)
 	var result CompactResult
 
@@ -257,6 +268,50 @@ func (c *Compactor) selectAged(ctx context.Context, workspaceID string, cutoff t
 	return out, nil
 }
 
+// fenceUnresolved removes candidates the journal refuses to have destroyed.
+//
+// This is the load-bearing half of #1572 on the compaction side. The attack it
+// blocks is not "delete a row" — it is "delete a row AND get a valid signed
+// checkpoint over the deletion", which leaves a chain that verifies perfectly
+// clean with the audit record gone and no residue. That signature is the
+// compactor's to give, so the compactor is where the refusal belongs.
+//
+// Refused rows are logged, not fatal: one unprovable row must not stop the
+// workspace's whole retention pass, exactly as one unrepairable row must not
+// stop VerifyChain's walk. They stay on disk and stay visible to
+// `crewship journal verify`, which is where an operator resolves them.
+func (c *Compactor) fenceUnresolved(
+	ctx context.Context, workspaceID string, rows []agedRow, logger *slog.Logger,
+) ([]agedRow, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	blocked, err := journal.UnresolvedIntegrity(ctx, c.DB, workspaceID, ids)
+	if err != nil {
+		// Fail CLOSED. If we cannot establish what may be deleted, we delete
+		// nothing: a compaction pass skipped is a disk-space problem, a
+		// compaction pass run blind is an audit-integrity one.
+		return nil, fmt.Errorf("compact: integrity fence: %w", err)
+	}
+	if len(blocked) == 0 {
+		return rows, nil
+	}
+	kept := rows[:0:0]
+	for _, r := range rows {
+		if reason, ok := blocked[r.ID]; ok {
+			logger.Warn("compact: refusing to delete an entry with unresolved integrity",
+				"workspace_id", workspaceID, "entry_id", r.ID, "reason", reason)
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept, nil
+}
+
 // bucketKey is the composite key that defines a compaction bucket. Using
 // a value type (not a pointer) means it can be a map key directly.
 type bucketKey struct {
@@ -354,6 +409,31 @@ func (c *Compactor) emitBucketSummary(ctx context.Context, workspaceID string, b
 // number of host parameters per statement (typically 999). Using a
 // transaction makes the delete atomic against concurrent reads.
 func (c *Compactor) deleteBucket(ctx context.Context, workspaceID string, ids []string) (int64, int64, error) {
+	// #1572 chokepoint. Run already fenced its candidates, so reaching this
+	// with a blocked id means either a row changed under us mid-pass or a
+	// future caller found another way in. Both answer the same way: this is the
+	// function that issues the DELETE and signs the checkpoint covering it, so
+	// the last word on what may be destroyed has to be spoken here. Re-checking
+	// costs one HMAC per row against a mistake that is, by construction,
+	// unrecoverable and self-certifying.
+	blocked, err := journal.UnresolvedIntegrity(ctx, c.DB, workspaceID, ids)
+	if err != nil {
+		return 0, 0, fmt.Errorf("integrity fence: %w", err)
+	}
+	if len(blocked) > 0 {
+		// Deterministic message: report the lowest id so the same bucket
+		// reports the same way on every pass.
+		first := ""
+		for id := range blocked {
+			if first == "" || id < first {
+				first = id
+			}
+		}
+		return 0, 0, fmt.Errorf(
+			"refusing to delete a bucket containing %d entr(y|ies) with unresolved integrity (e.g. %s: %s)",
+			len(blocked), first, blocked[first])
+	}
+
 	const chunk = 500
 	tx, err := c.DB.BeginTx(ctx, nil)
 	if err != nil {

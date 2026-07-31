@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -103,23 +104,37 @@ func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ub := newUpdate()
+	// NOT newUpdate(): that builder always emits "updated_at = ?" as its first
+	// clause, and the labels table has no updated_at column — it carries only
+	// created_at. Every PATCH therefore died on "no such column: updated_at"
+	// and renaming or recolouring a label was a hard 500 for every caller.
+	// Found by the cross-workspace fence matrix, which could not test this
+	// route's tenancy at all while the statement never executed.
+	var sets []string
+	var args []any
 	if req.Name != nil {
-		ub.Set("name", *req.Name)
+		sets = append(sets, "name = ?")
+		args = append(args, *req.Name)
 	}
 	if req.Color != nil {
-		ub.Set("color", *req.Color)
+		sets = append(sets, "color = ?")
+		args = append(args, *req.Color)
 	}
 	if req.LabelGroup != nil {
-		ub.Set("label_group", *req.LabelGroup)
+		sets = append(sets, "label_group = ?")
+		args = append(args, *req.LabelGroup)
 	}
 
-	if ub.Empty() {
+	if len(sets) == 0 {
 		writeProblem(w, r, http.StatusBadRequest, "No fields to update")
 		return
 	}
 
-	query, args := ub.Build("labels", "id = ? AND workspace_id = ?", labelID, wsID)
+	// The workspace_id predicate is the fence: a label id from another tenant
+	// affects zero rows and falls through to the 404 below.
+	// #nosec G202 -- sets is built from the fixed column list above, never from input.
+	query := "UPDATE labels SET " + strings.Join(sets, ", ") + " WHERE id = ? AND workspace_id = ?"
+	args = append(args, labelID, wsID)
 	res, err := h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		internalError(w, r, h.logger, "update label", err)

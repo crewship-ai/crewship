@@ -92,13 +92,13 @@ func TestRateLimit_CredentialGuessingSurface_StaysStrict(t *testing.T) {
 		{"login callback", http.MethodPost, "/api/auth/callback/credentials"},
 		{"bootstrap", http.MethodPost, "/api/v1/bootstrap"},
 		{"mint a CLI token", http.MethodPost, "/api/v1/auth/cli-token"},
+		// Lives under /api/v1/users/, so the /api/v1/auth/ prefix never
+		// caught it and it sat on the general bucket until #1513. It
+		// verifies the CURRENT password, which makes it a guessing surface
+		// for anyone holding a stolen session — the URL is the only thing
+		// about it that was ever not auth.
+		{"change own password", http.MethodPost, "/api/v1/users/me/password"},
 	}
-	// NOT listed: POST /api/v1/users/me/password. It lives under
-	// /api/v1/users/, so it has always been on the general 120/min bucket
-	// rather than this one — it verifies the CURRENT password, which makes
-	// it a guessing surface for anyone holding a stolen session. Left as
-	// found: tightening it is a security change on its own terms, not a
-	// side effect of unblocking token cleanup.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRateLimitRouter(t)
@@ -107,5 +107,51 @@ func TestRateLimit_CredentialGuessingSurface_StaysStrict(t *testing.T) {
 					tc.method, tc.path, authBucketProbes)
 			}
 		})
+	}
+}
+
+// The other half of #1513: putting the password change on the strict bucket
+// must not put it behind a budget that ordinary browsing has already spent.
+// That is exactly what #1506 fixed — session polls and self-service token
+// management used to drain the login bucket — so a change that quietly moved
+// any of it back would 429 a legitimate password change with no attacker
+// anywhere in the picture. A fix that locks out real users is worse than the
+// oracle it closes.
+func TestRateLimit_PasswordChange_SurvivesAnOrdinarySessionBurst(t *testing.T) {
+	r := newRateLimitRouter(t)
+	const ip = "203.0.113.9:5555"
+
+	// A dashboard session's normal chatter: the NextAuth probes fired on
+	// every page load, plus a round of Settings → sessions / CLI tokens.
+	burst := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/auth/session"},
+		{http.MethodGet, "/api/auth/csrf"},
+		{http.MethodGet, "/api/v1/auth/sessions"},
+		{http.MethodGet, "/api/v1/auth/cli-tokens"},
+		{http.MethodPost, "/api/v1/auth/sessions/s_abc/revoke"},
+	}
+	for i := 0; i < authBucketProbes; i++ {
+		e := burst[i%len(burst)]
+		req := httptest.NewRequest(e.method, e.path, nil)
+		req.RemoteAddr = ip
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		if rr.Code == http.StatusTooManyRequests {
+			t.Fatalf("%s %s hit 429 after %d ordinary requests — it drifted back onto the strict bucket",
+				e.method, e.path, i+1)
+		}
+	}
+
+	// Now the one request the user actually came to make.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/password", nil)
+	req.RemoteAddr = ip
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	if rr.Code == http.StatusTooManyRequests {
+		t.Fatalf("legitimate password change 429'd after %d ordinary session requests from the same IP",
+			authBucketProbes)
 	}
 }

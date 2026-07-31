@@ -1,8 +1,11 @@
-name: Setup Go + embed stub
+name: Setup Go + embed guard
 description: >
-  Installs Go with module cache and creates the `web/out/index.html` stub
-  required by `web/embed.go`'s `go:embed` directive. Every Go-touching job
-  needs both; consolidating avoids drift across workflows.
+  Installs Go with module cache and asserts the tracked
+  `web/out/.placeholder.html` is present, which is what satisfies
+  `web/embed.go`'s `go:embed all:out` directive on a plain checkout.
+  This used to CREATE a `web/out/index.html` stub; the placeholder is
+  tracked in git now (#1567), so the job's only remaining interest is
+  that nobody deleted it.
 
 inputs:
   go-version:
@@ -33,7 +36,12 @@ runs:
         go-version: ${{ inputs.go-version }}
         cache: true
 
+    # Fail with a sentence instead of `pattern all:out: no matching files
+    # found`, which points at web/embed.go and reads like a compile error
+    # in whatever the PR actually changed.
     - shell: bash
       run: |
-        mkdir -p web/out
-        [ -f web/out/index.html ] || echo '<!doctype html>' > web/out/index.html
+        if [ ! -f web/out/.placeholder.html ]; then
+          echo "::error file=.gitignore::web/out/.placeholder.html is missing. It is tracked in git and is what makes web/embed.go's //go:embed all:out resolve on a bare checkout (#1567). It was probably deleted by a 'git add -A' after a build that wiped web/out/ — restore it with 'git checkout -- web/out/.placeholder.html'."
+          exit 1
+        fi

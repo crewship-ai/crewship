@@ -48,9 +48,51 @@ func isSensitiveSPAFallbackPath(p string) bool {
 	return false
 }
 
+// webPlaceholderFile mirrors web.PlaceholderFile — the tracked stub that
+// keeps web/out/ non-empty so `//go:embed all:out` resolves in a fresh
+// clone or worktree (#1567). Duplicated rather than imported because the
+// web package is `//go:build !clionly` and internal/api is not.
+const webPlaceholderFile = ".placeholder.html"
+
+// placeholderHandler serves the "web UI was not built" page on every
+// route with 503.
+//
+// The point is that the degraded binary ANNOUNCES itself. Before the
+// tracked placeholder existed, contributors unblocked the embed by hand
+// with `echo '<!doctype html>' > web/out/index.html`; the resulting
+// binary served a blank HTTP 200, which reads as a broken frontend
+// rather than a skipped build step. A 503 plus a page that names the
+// command to run cannot be mistaken for a working UI — by a human or by
+// an uptime check.
+func placeholderHandler(body []byte) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		// Machine-readable twin of the 503, so a deploy check or a
+		// smoke test can assert "this binary has a real UI" without
+		// scraping the HTML.
+		w.Header().Set("X-Crewship-Web-Build", "placeholder")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if r.Method == http.MethodHead {
+			return
+		}
+		w.Write(body)
+	})
+}
+
 // StaticFileHandler returns an HTTP handler that serves the Next.js static export from the given filesystem.
 // It handles .html extension resolution, directory indexes, and SPA client-side routing fallback.
 func StaticFileHandler(webFS fs.FS) http.Handler {
+	// Degraded mode: web/out/ holds only the tracked placeholder, i.e.
+	// `pnpm build` + the embed sync never ran for this binary. There is
+	// no export to serve, so serve the explanation instead of letting
+	// every route fall through to a missing index.html.
+	if _, err := fs.Stat(webFS, "index.html"); err != nil {
+		if body, readErr := fs.ReadFile(webFS, webPlaceholderFile); readErr == nil {
+			return placeholderHandler(body)
+		}
+	}
+
 	fileServer := http.FileServer(http.FS(webFS))
 
 	// serveFile reads a file from webFS and writes it to the response.

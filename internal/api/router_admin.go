@@ -79,11 +79,81 @@ func (r *Router) registerAdminRoutes() {
 	r.authedMut("PUT", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Set)
 	r.authedMut("DELETE", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Reset)
 
+	// Keeper instance judge configuration. Read ADMIN+, write OWNER/ADMIN. This
+	// is the INSTANCE layer (keeper_runtime_settings) that the per-workspace
+	// governance model below overrides: whether Keeper runs, and what the
+	// credential-access judge is wired to. Before it, all three values were
+	// boot-time env — the console could diagnose a dead judge but not fix it,
+	// and an operator with no shell access could not turn Keeper on at all.
+	// A change takes effect on the next credential request; no restart.
+	keeperCfg := NewAdminKeeperConfigHandler(r.keeperSettings, r.Journal(), r.logger)
+	r.authedAdmin("GET", "/api/v1/admin/keeper/config", keeperCfg.Get)
+	r.authedMut("PUT", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Put)
+	r.authedMut("DELETE", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Reset)
+
+	// Judge verification + model discovery. The pair that makes configuring a
+	// local judge a one-minute job: paste an address, see what it serves, prove
+	// it can actually return a verdict. OWNER/ADMIN on both — they dial an
+	// address the caller can supply, which is a write-class capability even
+	// though one of them only returns a model list.
+	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger).WithGovJudge(r.govModelJudge)
+	r.authedMut("POST", "/api/v1/admin/keeper/judge/test", roleManage, keeperJudge.Test)
+	r.authedMut("GET", "/api/v1/admin/keeper/judge/models", roleManage, keeperJudge.Models)
+	// The same check for a HOSTED judge (Anthropic / OpenAI-compatible built from
+	// a vault key). Separate route rather than a mode flag on /test: the stages
+	// differ because the failure modes do — there is no endpoint to reach and no
+	// model to pull, but there IS a key that can be missing, revoked or of the
+	// wrong type.
+	r.authedMut("POST", "/api/v1/admin/keeper/judge/test-hosted", roleManage, keeperJudge.TestHosted)
+
+	// Keeper evaluator models. Same instance layer, for the OTHER half of the
+	// Keeper model stack: the five aux slots behind the watchdog and the Reviews
+	// sweeps. They bill per token where the judge does not, so this is where the
+	// cost decision gets made — including pointing them all at the local judge.
+	keeperAux := NewAdminKeeperAuxHandler(r.keeperAuxSettings, r.keeperSettings, r.Journal(), r.logger).
+		WithProbe(keeperJudge.ProbeModel)
+	r.authedAdmin("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
+	r.authedMut("PUT", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Put)
+	r.authedMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Reset)
+	// The collection-scoped DELETE is "reset every slot"; {slot} is empty there,
+	// which is exactly what AuxStore.Reset("") means.
+	r.authedMut("DELETE", "/api/v1/admin/keeper/aux", roleManage, keeperAux.Reset)
+	r.authedMut("POST", "/api/v1/admin/keeper/aux/use-judge", roleManage, keeperAux.UseJudge)
+	// One real evaluation against a slot's model, on request. The card's default
+	// stays "not probed" — rendering a status page must not spend money — but an
+	// operator who asks explicitly should be able to find out.
+	r.authedMut("POST", "/api/v1/admin/keeper/aux/{slot}/probe", roleManage, keeperAux.Probe)
+
+	// Manual runs for the four Reviews evaluators (issue #1555). The
+	// evaluators were reachable only by the scheduler and by sidecars holding
+	// an internal token — both machine paths — so "check my agents' skills
+	// now" was not expressible, and the behaviour watchdog (which only fires
+	// on a tool call) had never run outside its unit tests. This is the
+	// operator's trigger; it calls the same Phase 2 handler the internal
+	// routes do, so a manual run writes the same audit row a scheduled one
+	// does. OWNER/ADMIN: it spends model tokens and can escalate to the inbox.
+	keeperReview := NewAdminKeeperReviewHandler(r.db, r.keeperPhase2Handler(), r.logger)
+	r.authedMut("POST", "/api/v1/admin/keeper/review/{slot}/run", roleManage, keeperReview.Run)
+
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())
 	r.authedAdmin("GET", "/api/v1/admin/keeper/governance", keeperGov.Get)
 	r.authedMut("PUT", "/api/v1/admin/keeper/governance", roleManage, keeperGov.Put)
+
+	// Findings routing check. Sends ONE synthetic finding through the real inbox
+	// writer with real target resolution and returns who it reached. Whether a
+	// security control can actually reach a human is not something to discover
+	// during the incident it was bought for. Costs nothing — no model is called.
+	// The hub may be absent in a bare test router; the handler is nil-safe about
+	// the broadcast, so the write still happens and only the live badge push is
+	// skipped.
+	var keeperBcast KeeperBroadcaster
+	if r.hub != nil {
+		keeperBcast = &keeperWSBroadcaster{hub: r.hub}
+	}
+	keeperFindings := NewAdminKeeperFindingsHandler(r.db, r.Journal(), keeperBcast, r.logger)
+	r.authedMut("POST", "/api/v1/admin/keeper/findings/test", roleManage, keeperFindings.SendTest)
 
 	// PR-F F6: Admin GDPR cascade endpoints — Art. 15 access +
 	// Art. 17 erasure across the four cascadable tables

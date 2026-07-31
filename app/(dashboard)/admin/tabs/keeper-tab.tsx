@@ -7,11 +7,12 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard } from "@/components/features/settings/shared"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
+import { KeeperJudgeCard } from "@/components/features/admin/keeper-judge-card"
 import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
 import { cn } from "@/lib/utils"
-import { redactSecrets, redactUrl } from "../utils"
+import { redactSecrets } from "../utils"
 import type { KeeperStatus, KeeperLogEntry } from "../types"
 import type { KeeperLiveEvent, KeeperWsStatus } from "../hooks/use-admin-websocket"
 
@@ -51,104 +52,72 @@ export const KeeperTab = React.memo(function KeeperTab({
 }: KeeperTabProps) {
   return (
     <div className="space-y-5">
-      {/* ── Intro ── */}
-      <div>
-        <h3 className="text-body font-medium text-foreground/80 leading-none">
-          Keeper — credential access control
-        </h3>
-        <p className="text-[11px] text-muted-foreground mt-1 leading-snug max-w-2xl">
-          Keeper evaluates credential access requests using a local AI model (Ollama).
-          Agents never see raw credentials — Keeper decides ALLOW, DENY, or ESCALATE.
-        </p>
-      </div>
+      {/* Order: what is happening → what has happened → how it is configured.
+          It used to be the reverse, so an operator opening this page to check
+          whether Keeper had denied anything overnight scrolled past six
+          settings cards to find out. Configuration is the rarer visit; it now
+          lives under a divider, below the monitoring it explains. */}
 
-      {/* Which model each judge actually uses, and whether it can run.
-          Deliberately OUTSIDE the `keeperStatus &&` guard below: a null
-          status means the keeper status endpoint failed, which is exactly
-          when an operator needs to know whether the judges can run — hiding
-          it then removes the diagnosis along with the symptom. Sits under
-          the governance panel conceptually; that panel is what overrides
-          these per workspace. */}
-      <JudgeModelsCard workspaceId={workspaceId} />
-
-      {keeperLoading && <Skeleton className="h-[240px] rounded-xl" />}
+      {keeperLoading && <Skeleton className="h-[92px] rounded-xl" />}
 
       {!keeperLoading && keeperStatus && (
         <>
-          {/* ── Watchdog governance (issue #1001 M0) ── */}
-          <KeeperGovernancePanel
-            workspaceId={workspaceId}
-            serverEnabled={keeperStatus.enabled}
-          />
-
-
-          {/* ── System status card ── */}
-          <SettingsCard
-            title="System status"
-            description="Keeper subsystem health"
-            actions={
+          {/* ── Live state: three facts, one line each ──
+              Engine, judge reachability, gatekeeper. The endpoint and model
+              used to be repeated here as rows; they belong to the judge card
+              below, which is also where they can be changed. */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+              <StatusFact
+                label="Engine"
+                ok={keeperStatus.enabled}
+                text={keeperStatus.enabled ? "Running" : "Off"}
+              />
+              {/* Three states. "Not answering" for an endpoint the server never
+                  dialled is the most misleading thing this strip can say to
+                  somebody configuring Keeper before switching it on — which is
+                  the normal order, since the engine ships off. */}
+              <StatusFact
+                label="Judge"
+                ok={keeperStatus.ollama_online}
+                text={
+                  keeperStatus.ollama_online
+                    ? `Answering · ${keeperStatus.model || "no model"}`
+                    : !keeperStatus.ollama_url
+                      ? "No endpoint set"
+                      : keeperStatus.ollama_probed === false
+                        ? "Not checked yet"
+                        : `Not answering · ${keeperStatus.ollama_url}`
+                }
+              />
+              <StatusFact
+                label="Gatekeeper"
+                ok={keeperStatus.gatekeeper_configured}
+                text={keeperStatus.gatekeeper_configured ? "In the credential path" : "Not enforcing"}
+              />
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 px-2.5 text-xs"
+                className="h-7 px-2.5 text-xs ml-auto"
                 onClick={onRefresh}
                 disabled={keeperLoading}
               >
                 <RefreshCw className={cn("mr-1.5 h-3 w-3", keeperLoading && "animate-spin")} />
                 Refresh
               </Button>
-            }
-          >
-            <SettingsRow label="Keeper">
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <StatusDot status={keeperStatus.enabled ? "COMPLETED" : "BLOCKED"} />
-                {keeperStatus.enabled ? "Enabled" : "Disabled"}
-              </span>
-            </SettingsRow>
-            <SettingsRow label="Gatekeeper">
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <StatusDot status={keeperStatus.gatekeeper_configured ? "COMPLETED" : "FAILED"} />
-                {keeperStatus.gatekeeper_configured ? "Configured" : "Not configured"}
-              </span>
-            </SettingsRow>
-            <SettingsRow label="Ollama LLM" border={keeperStatus.enabled}>
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <StatusDot status={keeperStatus.ollama_online ? "COMPLETED" : "FAILED"} />
-                {keeperStatus.ollama_online
-                  ? `Online · ${keeperStatus.model}`
-                  : keeperStatus.enabled ? "Offline" : "Not configured"}
-              </span>
-            </SettingsRow>
-            {keeperStatus.enabled && (
-              <>
-                <SettingsRow label="Ollama URL">
-                  <span className="text-[11px] font-mono text-muted-foreground truncate">
-                    {redactUrl(keeperStatus.ollama_url)}
-                  </span>
-                </SettingsRow>
-                <SettingsRow label="Model" border={false}>
-                  <span className="text-[11px] font-mono text-muted-foreground">
-                    {keeperStatus.model}
-                  </span>
-                </SettingsRow>
-              </>
-            )}
+            </div>
             {!keeperStatus.enabled && (
               <div className="px-4 py-2.5 bg-warn/[0.04] border-t border-warn/20">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                  To enable Keeper, set{" "}
-                  <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
-                    KEEPER_OLLAMA_URL=http://localhost:11434
-                  </code>{" "}
-                  in your{" "}
-                  <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
-                    .env.local
-                  </code>{" "}
-                  and restart the server.
+                  Keeper is off, so SECRET credentials are injected into agents directly and no
+                  credential request is judged. Turn it on under{" "}
+                  <span className="text-foreground/80">Configuration → Credential access judge</span>{" "}
+                  below — no restart, no env editing. A local Ollama judge costs nothing per
+                  decision.
                 </p>
               </div>
             )}
-          </SettingsCard>
+          </div>
 
           {/* ── Decision stats KPIs ── */}
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
@@ -306,6 +275,46 @@ export const KeeperTab = React.memo(function KeeperTab({
               </>
             )}
           </SettingsCard>
+        </>
+      )}
+
+      {/* ── Configuration ──
+          One subject per card, and the cards for ONE subject adjacent. What
+          decides about credentials used to be asked in three places at opposite
+          ends of the page — the instance judge here, an overview in the middle,
+          and the workspace override (the only place an Anthropic key could be
+          chosen) at the very bottom under a name nobody connected to it. An
+          operator reasonably concluded there was no way to pick a model or a
+          key. Now: the judge, then its per-workspace override, then the
+          background checks that are a different subject, then policy. */}
+      <div className="flex items-center gap-3 pt-2">
+        <h3 className="text-body font-medium text-foreground/80 leading-none shrink-0">Configuration</h3>
+        <div className="h-px flex-1 bg-border/60" />
+      </div>
+
+      <KeeperJudgeCard workspaceId={workspaceId} />
+
+      {/* The same question at the narrower scope, directly beneath the answer it
+          overrides — including the hosted-provider + vault-key choice. */}
+      <KeeperGovernancePanel
+        workspaceId={workspaceId}
+        serverEnabled={keeperStatus?.enabled ?? false}
+        section="judge"
+      />
+
+      {/* The scheduled evaluators. Deliberately OUTSIDE the `keeperStatus &&`
+          guard below: a null status means the keeper status endpoint failed,
+          which is exactly when an operator needs to know whether these can run —
+          hiding it then removes the diagnosis along with the symptom. */}
+      <JudgeModelsCard workspaceId={workspaceId} />
+
+      {!keeperLoading && keeperStatus && (
+        <>
+          {/* ── Watchdog / findings / leases (#1001 M0) ── */}
+          <KeeperGovernancePanel
+            workspaceId={workspaceId}
+            serverEnabled={keeperStatus.enabled}
+          />
 
           {/* ── Detail sheet ── */}
           <Sheet
@@ -410,6 +419,26 @@ export const KeeperTab = React.memo(function KeeperTab({
 })
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * StatusFact is one fact in the top strip: a dot, a label, a short value.
+ *
+ * It replaces five SettingsRows in a "System status" card that sat below the
+ * settings. Three facts an operator checks at a glance do not need five rows
+ * and their own heading — and two of those rows (endpoint, model) were the
+ * judge card's values repeated where they could not be edited.
+ */
+function StatusFact({ label, ok, text }: { label: string; ok: boolean; text: string }) {
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      <StatusDot status={ok ? "COMPLETED" : "FAILED"} />
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-xs text-foreground/80 truncate">{text}</span>
+    </span>
+  )
+}
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (

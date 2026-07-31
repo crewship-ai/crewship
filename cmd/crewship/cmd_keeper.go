@@ -57,6 +57,12 @@ type keeperGovernance struct {
 	// is not exempt. Rides on this same governance row/endpoint but is a
 	// distinct concern from the behavioral watchdog above it.
 	RequireSecondApprover bool `json:"require_second_approver"`
+	// EffectiveSecondApprover is the same rule as ENFORCED (issue #1559).
+	// The toggle above is only half of it: the credential's own tier forces
+	// four-eyes on the top tier whatever the toggle says, so printing the
+	// toggle alone told operators the opposite of what the server would do.
+	// Absent (Source == "") when talking to a server older than #1559.
+	EffectiveSecondApprover keeperEffectiveSecondApprover `json:"effective_second_approver"`
 	// AutoLeaseSeconds is the credential-lease auto-issuance TTL (issue #1373):
 	// 0 = off (grants stay standing), positive = a Keeper ALLOW / escalation
 	// approve re-issues an L3/L4 grant as a lease of that length. Managed by
@@ -72,12 +78,52 @@ type keeperGovernance struct {
 	GovModelCredentialID string `json:"gov_model_credential_id"`
 }
 
+// keeperEffectiveSecondApprover mirrors the effective_second_approver block of
+// GET/PUT /api/v1/admin/keeper/governance (internal/api/keeper_governance.go).
+// The rule is a FLOOR — it applies from MinSecurityLevel upward — because that
+// is the shape the server enforces: the workspace toggle covers every tier, and
+// the tier table forces the rule on the top one regardless.
+type keeperEffectiveSecondApprover struct {
+	MinSecurityLevel      int    `json:"min_security_level"`
+	MinSecurityLevelLabel string `json:"min_security_level_label"`
+	// Source is "workspace", "tier" or "none" — empty from a pre-#1559 server.
+	Source string `json:"source"`
+	// TierFloor* is where the tier table forces the rule on its own, reported
+	// whatever the toggle says. Carried so `--format json` stays faithful to
+	// the endpoint; the human line below is built from Source.
+	TierFloorSecurityLevel int    `json:"tier_floor_security_level,omitempty"`
+	TierFloorLabel         string `json:"tier_floor_label,omitempty"`
+}
+
+// describe renders the one line an operator needs: what actually needs a second
+// approver, and which of the two controls is responsible. Empty when the server
+// said nothing — a CLI newer than its server must not guess from its own copy
+// of the tier table.
+func (e keeperEffectiveSecondApprover) describe() string {
+	label := e.MinSecurityLevelLabel
+	if label == "" && e.MinSecurityLevel > 0 {
+		label = fmt.Sprintf("L%d", e.MinSecurityLevel)
+	}
+	switch e.Source {
+	case "workspace":
+		return "every credential escalation (workspace policy)"
+	case "tier":
+		return fmt.Sprintf("%s credentials and above (tier floor — the workspace toggle is off, "+
+			"but a tier can only tighten this rule, never loosen it)", label)
+	case "none":
+		return "nothing — a single approver can resolve any credential escalation"
+	default:
+		return ""
+	}
+}
+
 // keeperServerStatus mirrors GET /api/v1/system/keeper.
 type keeperServerStatus struct {
 	Enabled      bool   `json:"enabled"`
 	OllamaURL    string `json:"ollama_url"`
 	Model        string `json:"model"`
 	OllamaOnline bool   `json:"ollama_online"`
+	OllamaProbed bool   `json:"ollama_probed"`
 	SecretCount  int    `json:"secret_count"`
 
 	// Governance model (M2a, #1001). Configured=false → the server default
@@ -145,6 +191,11 @@ func printKeeperGovernance(gov keeperGovernance) {
 	fmt.Printf("  Contact:      %s\n", contact)
 	fmt.Printf("  DENY-notify:  risk >= %d\n", gov.DenyNotifyMinRisk)
 	fmt.Printf("  2nd approver: %s\n", secondApprover)
+	// The stored toggle is not the rule. Printing it alone is what let an
+	// operator read "off" and then be refused on their own approval (#1559).
+	if effective := gov.EffectiveSecondApprover.describe(); effective != "" {
+		fmt.Printf("  In force:     %s\n", effective)
+	}
 	fmt.Printf("  Auto-lease:   %s\n", formatAutoLease(gov.AutoLeaseSeconds))
 }
 
@@ -181,9 +232,17 @@ Examples:
 			if server.Enabled {
 				status = cli.Green + "enabled" + cli.Reset
 			}
-			ollamaStatus := cli.Red + "offline" + cli.Reset
-			if server.OllamaOnline {
+			// Three states, not two. "offline" for an endpoint nobody dialled reads
+			// as a broken model server, which is what sent the last configuration
+			// session looking for a problem that did not exist.
+			ollamaStatus := cli.Yellow + "not checked" + cli.Reset
+			switch {
+			case server.OllamaURL == "":
+				ollamaStatus = cli.Yellow + "no endpoint configured" + cli.Reset
+			case server.OllamaProbed && server.OllamaOnline:
 				ollamaStatus = cli.Green + "online" + cli.Reset
+			case server.OllamaProbed:
+				ollamaStatus = cli.Red + "offline" + cli.Reset
 			}
 
 			fmt.Printf("%sKeeper Security (server)%s\n", cli.Bold, cli.Reset)

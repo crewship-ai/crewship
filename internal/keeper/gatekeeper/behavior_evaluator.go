@@ -169,7 +169,7 @@ func (e *BehaviorEvaluator) Evaluate(ctx context.Context, req BehaviorReviewRequ
 		}, nil
 	}
 
-	dec := classifyBehaviorDecision(resp.Decision, resp.Reason, resp.RawLLMResponse)
+	dec := classifyBehaviorDecision(resp.Decision, resp.Reason, resp.RawLLMResponse, resp.InfraFailure)
 	out := BehaviorReviewResult{
 		Decision:       dec,
 		Reason:         resp.Reason,
@@ -190,7 +190,7 @@ func (e *BehaviorEvaluator) Evaluate(ctx context.Context, req BehaviorReviewRequ
 	// returns BehaviorEscalate when isLLMFailureDeny(resp.Reason) is true,
 	// but defense-in-depth so a future divergence between the two checks
 	// can never leak a DENY through the fail-soft branch.
-	if isLLMFailureDeny(resp.Reason) {
+	if infraFailed(resp) {
 		out.Decision = BehaviorEscalate
 		out.PolicyDecision = policy.DecisionAutoLogInbox
 		out.ShouldBlock = false
@@ -207,7 +207,7 @@ func (e *BehaviorEvaluator) Evaluate(ctx context.Context, req BehaviorReviewRequ
 // Gatekeeper normalises non-ALLOW/DENY/ESCALATE values to DENY (its
 // closed set) — we widen WARN back here by scanning the raw response
 // before falling through to the normalised value.
-func classifyBehaviorDecision(normalised, reason, raw string) BehaviorDecision {
+func classifyBehaviorDecision(normalised, reason, raw string, infra bool) BehaviorDecision {
 	// Recover WARN by parsing the response's `decision` field — NOT by scanning
 	// the raw body for the substring `"WARN"`. A substring scan downgrades a
 	// genuine DENY/ESCALATE whose reason or surrounding prose merely mentions
@@ -234,7 +234,7 @@ func classifyBehaviorDecision(normalised, reason, raw string) BehaviorDecision {
 		// not the raw LLM response (which on infra failure is empty).
 		// isUnknownDecisionInRaw stays keyed by raw because that's where
 		// a hallucinated decision verb would appear.
-		if isLLMFailureDeny(reason) || isUnknownDecisionInRaw(raw) || raw == "" {
+		if infra || isLLMFailureDeny(reason) || isUnknownDecisionInRaw(raw) || raw == "" {
 			return BehaviorEscalate
 		}
 		return BehaviorDeny

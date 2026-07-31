@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
@@ -407,7 +408,47 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// four-eyes control keyed on ownership, which covers the common case.
 	if escalationType == "CREDENTIAL" && initiatorUserID.Valid && initiatorUserID.String != "" {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
-		if gov.RequireSecondApprover {
+		// The workspace toggle is the opt-in. The credential's tier can also demand
+		// it: an L4 credential is one an operator marked as production-critical, and
+		// "one person can close out a request their own agent raised" is exactly the
+		// hole four-eyes exists to close — so the tier forces the rule on whether or
+		// not the workspace opted in. A workspace that has NOT opted in still gets
+		// the rule for L4 only, which is the narrowest reading of what the level
+		// means (internal/keeper/tier.go).
+		// The tier is read here and the escalation is resolved by the
+		// compare-and-swap UPDATE further down, so a tier change committed in
+		// between would be decided against. Left as a read rather than folded into
+		// a transaction spanning the resolve, deliberately:
+		//
+		// changing a credential's tier needs roleManage — the same right this
+		// handler already requires — so an admin who wanted to escape their own
+		// four-eyes requirement can lower the tier and approve SERIALLY. The race
+		// grants nothing the actor cannot do without it, and the workspace toggle
+		// is unaffected either way. Making it atomic means a transaction around
+		// the resolve, the credential activation and the lease mint; worth doing,
+		// not worth doing inside this branch.
+		tierForces := false
+		if credentialID.Valid && credentialID.String != "" {
+			var lvl int
+			if err := h.db.QueryRowContext(r.Context(),
+				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
+				credentialID.String, workspaceID).Scan(&lvl); err == nil {
+				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				// A read failure must not silently drop a security control: treat an
+				// unreadable tier as the strict case, the same fail-closed default the
+				// tier table itself takes for an unknown level.
+				h.logger.Warn("resolve escalation: credential tier unreadable; enforcing four-eyes",
+					"error", err, "credential_id", credentialID.String)
+				tierForces = true
+			}
+		}
+		if gov.RequireSecondApprover || tierForces {
+			forcedBy := "workspace policy"
+			if tierForces {
+				// The tier is the more specific reason, so it is the one named.
+				forcedBy = "critical credential tier"
+			}
 			approverID := ""
 			if user := UserFromContext(r.Context()); user != nil {
 				approverID = user.ID
@@ -429,16 +470,20 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 						"blocked self-approval: user tried to %s a credential escalation raised by agent %s they own",
 						body.Action, fromSlug),
 					Payload: map[string]any{
-						"rule":              "segregation_of_duties",
-						"action":            body.Action,
-						"escalation_type":   escalationType,
-						"from_slug":         fromSlug,
+						"rule":            "segregation_of_duties",
+						"action":          body.Action,
+						"escalation_type": escalationType,
+						"from_slug":       fromSlug,
+						// Which of the two rules fired. An incident review asking "why
+						// was this blocked" should not have to infer it from the
+						// workspace settings as they stand weeks later.
+						"forced_by":         forcedBy,
 						"initiator_user_id": initiatorUserID.String,
 					},
 					Refs: map[string]any{"escalation_id": escalationID, "chat_id": chatID},
 				})
 				replyError(w, http.StatusForbidden,
-					"a second approver is required: you cannot resolve a credential escalation raised by an agent you own")
+					"a second approver is required ("+forcedBy+"): you cannot resolve a credential escalation raised by an agent you own")
 				return
 			}
 		}
@@ -639,14 +684,43 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		// PENDING_APPROVAL credential it created; non-null means "approve here
 		// activates it" (no secret to type).
 		CredentialID *string `json:"credential_id"`
+
+		// The four-eyes rule as it will be applied to THIS row (issue #1559).
+		// ResolveEscalation decides it from two inputs the console could not
+		// see — the workspace toggle and the tier of the linked credential —
+		// so an Approve button that was going to 403 looked exactly like one
+		// that was not, and the refusal was the first anyone heard of it.
+		//
+		// SecondApproverRequired is the answer; the two `By` flags are the
+		// reason, and they are independent: a workspace can have the rule on
+		// while the tier would have forced it anyway. Read live rather than
+		// stored, because both inputs can change after the escalation is
+		// raised.
+		SecondApproverRequired    bool `json:"second_approver_required"`
+		SecondApproverByWorkspace bool `json:"second_approver_by_workspace"`
+		SecondApproverByTier      bool `json:"second_approver_by_tier"`
+		// SecurityLevelLabel is the linked credential's tier ("L4 · critical"),
+		// from keeper's table so the console does not keep its own copy. Empty
+		// when the escalation has no credential behind it.
+		SecurityLevelLabel string `json:"security_level_label,omitempty"`
+
+		// initiatorUserID / securityLevel back the fields above and are not
+		// serialised: the owning user id is not the console's business, and
+		// the raw level is already carried as its label.
+		initiatorUserID sql.NullString
+		securityLevel   sql.NullInt64
 	}
 
+	// LEFT JOIN, not JOIN: a CREDENTIAL escalation may carry no credential row
+	// (the legacy flow where the human supplies the secret), and those rows
+	// must still list.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
 		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
-		       e.credential_id, from_a.name, from_a.slug
+		       e.credential_id, from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
+		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
 		WHERE e.crew_id = ? AND e.workspace_id = ?
 		ORDER BY e.created_at DESC
 		LIMIT ? OFFSET ?
@@ -665,6 +739,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.PeerConversationID, &item.Status, &item.Resolution, &item.Action,
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
 			&item.CredentialID, &item.FromName, &item.FromSlug,
+			&item.initiatorUserID, &item.securityLevel,
 		); err != nil {
 			replyInternalError(w, h.logger, "scan escalation", err)
 			return
@@ -674,11 +749,46 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			masked := "[credential submitted]"
 			item.Resolution = &masked
 		}
+		if item.securityLevel.Valid {
+			item.SecurityLevelLabel = keeper.SecurityLevel(item.securityLevel.Int64).Label()
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "rows iteration", err)
 		return
+	}
+
+	// Four-eyes (#1559), mirroring ResolveEscalation's own reasoning:
+	//
+	//   - CREDENTIAL escalations only.
+	//   - The rule compares the approver against the agent's recorded owner, so
+	//     an agent with no owner (legacy pre-v99 row) cannot have it enforced —
+	//     and a row that claimed otherwise would be worse than saying nothing.
+	//   - The workspace toggle opts every tier in; the credential's own tier
+	//     forces it on the top tier regardless. Either is sufficient.
+	//
+	// The governance row is read once for the whole page, not once per item.
+	needsGovernance := false
+	for i := range items {
+		if items[i].Type == "CREDENTIAL" && items[i].initiatorUserID.Valid && items[i].initiatorUserID.String != "" {
+			needsGovernance = true
+			break
+		}
+	}
+	if needsGovernance {
+		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
+		for i := range items {
+			it := &items[i]
+			if it.Type != "CREDENTIAL" || !it.initiatorUserID.Valid || it.initiatorUserID.String == "" {
+				continue
+			}
+			it.SecondApproverByWorkspace = gov.RequireSecondApprover
+			if it.securityLevel.Valid {
+				it.SecondApproverByTier = keeper.SecurityLevel(it.securityLevel.Int64).Tier().SecondApprover
+			}
+			it.SecondApproverRequired = it.SecondApproverByWorkspace || it.SecondApproverByTier
+		}
 	}
 
 	writeJSON(w, http.StatusOK, items)

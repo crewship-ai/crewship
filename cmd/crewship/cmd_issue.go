@@ -81,11 +81,23 @@ type issueComment struct {
 	CreatedAt string  `json:"created_at"`
 }
 
+// labelItem decodes one row of the label surface — GET /api/v1/labels and
+// the 201 body of POST /api/v1/labels. The tags MUST match api.labelResponse
+// (internal/api/issue_handler.go), which is the only thing the server sends.
+//
+// Group carries `label_group`, not `group`. The grouping column is stored as
+// `labels.label_group` and the server has never renamed it on the wire; the
+// CLI simply asked for a key that does not exist, so encoding/json left the
+// pointer nil and every GROUP cell rendered as "-" — including for labels
+// that do have a group. `--format json` re-emitted the same wrong key with a
+// null value, so a jq pipeline could not recover the truth either. A silently
+// absent field is a zero value, and a zero value here reads as "ungrouped":
+// confidently wrong, never an error.
 type labelItem struct {
 	ID    string  `json:"id"`
 	Name  string  `json:"name"`
 	Color string  `json:"color"`
-	Group *string `json:"group"`
+	Group *string `json:"label_group"`
 }
 
 // ---------- helpers ----------

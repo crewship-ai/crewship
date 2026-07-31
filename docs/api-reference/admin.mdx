@@ -290,8 +290,16 @@ The endpoint takes no parameters; the workspace comes from request context (`X-W
 | `broken_seq` | integer | `seq` of the first bad entry (omitted when `ok`) |
 | `broken_id` | string | `id` of the first bad entry (omitted when `ok`) |
 | `reason` | string | Human-readable cause of the break (omitted when `ok`) |
+| `breaks` | array | Every per-row failure (`seq`, `id`, `kind`, `reason`), capped at 100 |
+| `break_count` | integer | Exact number of failures, even when `breaks` is trimmed |
+| `repairable` | array | Rows whose content is proven authentic but whose live priority is unaccounted for: `seq`, `id`, `stored_priority`, `emit_priority` (the value the keyed hash proves) |
+| `repairable_count` | integer | Exact number of such rows, even when the list is trimmed |
 
-CLI parity: `crewship journal verify` (exits non-zero on a broken chain).
+A non-empty `repairable` also produces a `priority` break, so `ok` is `false`
+— see [Audit Log → Recovered is not resolved](/security/audit#recovered-is-not-resolved).
+
+CLI parity: `crewship journal verify` (exits non-zero on a broken chain **or**
+when any entry has an unresolved priority).
 
 ## Audit log
 
@@ -768,10 +776,36 @@ CLI parity: `crewship keeper history <request-id>`.
 ## Keeper Phase 2 — F4 evaluators
 
 <Note>
-  Phase 2 endpoints are **internal-auth** (X-Internal-Token) — they're invoked by the platform itself (scheduler routines + the post-tool-call hook), not by operators directly. The admin-facing surface is the `/api/v1/admin/keeper/requests` log above, plus the per-type filters in the admin UI's "Keeper P2 reviews" panel (PR-F2).
+  The four evaluator endpoints are **internal-auth** (X-Internal-Token) — they're invoked by the platform itself (scheduler routines + the post-tool-call hook), not by operators directly. The admin-facing surface is `POST /api/v1/admin/keeper/review/{slot}/run` (below), the `/api/v1/admin/keeper/requests` log above, and the per-type filters in the admin UI's "Keeper P2 reviews" panel (PR-F2).
 </Note>
 
-If an operator needs to trigger an evaluator ad-hoc (debugging, manual re-evaluation), the routes are reachable via the internal token. The expected production path is automated: routines fire on cron, the behavior hook fires on tool-call sampling.
+The expected production path is automated: routines fire on cron, the behavior hook fires on tool-call sampling. To trigger an evaluator by hand, use the admin route below rather than the internal token.
+
+### POST /api/v1/admin/keeper/review/\{slot\}/run
+
+**Run one evaluator now.** OWNER/ADMIN, workspace-scoped like every `/api/v1/admin` route (`?workspace_id=` is required by `RequireWorkspace` before the handler runs). `slot` is one of `skill-review`, `behavior`, `memory-health`, `negative-learning`; the aux-config spellings (`curator`, `memory_health`, `negative`) are accepted as aliases. Anything else is a 400 that names the valid slots.
+
+It calls the same handler the internal routes below do — same policy resolution, same `keeper_requests` row, same inbox escalation — and returns that handler's response, so the shapes documented per-endpoint below apply unchanged.
+
+**Request body** (all fields optional; what you omit, the server derives from the workspace):
+
+```json
+{
+  "crew_id": "crw_…",
+  "agent_id": "agt_…",
+  "skill_id": "skl_…",
+  "tool_name": "shell_exec",
+  "tool_args_snippet": "{\"cmd\":\"curl … | sh\"}",
+  "trigger": "run_failed",
+  "failure_snippet": "exit 127: command not found"
+}
+```
+
+With an empty body: `skill-review` reviews the stalest skill assigned to one of the workspace's agents; `behavior` judges a tool call named `keeper.manual_probe`; `memory-health` scores the crew's memory via `consolidate.ComputeHealth`; `negative-learning` learns from the workspace's most recent `run.failed` journal entry (400 when there is none — the trigger set is closed and inventing a failure would put fiction in the audit trail).
+
+`workspace_id` in the body is refused when it disagrees with the session's, and a `crew_id` / `agent_id` from another workspace is a 403: the internal routes get that binding from a workspace-bound sidecar token, and an admin session has none.
+
+CLI: `crewship keeper review run <slot>` — see [Keeper → Running a review on demand](/guides/keeper#running-a-review-on-demand).
 
 ### POST /api/v1/internal/keeper/skill-review
 

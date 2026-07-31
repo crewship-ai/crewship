@@ -65,8 +65,19 @@ Examples:
 
 // backtestSourceRun is one corpus entry selected for replay — the
 // recorded original a candidate run is graded against.
+//
+// RunID reads `id`, which is what GET …/pipelines/{slug}/run-records
+// actually sends (runRecordDTO in internal/api/pipelines_exec.go). It used
+// to read `run_id` — a key that endpoint has never emitted — so every corpus
+// entry decoded with an empty RunID. The replay POST then went to
+// `…/pipelines/runs//replay` (note the empty segment), the server answered
+// 404, and the row was absorbed as Verdict=ERROR by design: one bad replay
+// must not sink the batch. The result was a full backtest report of ERROR
+// rows that reads as "this routine version regressed everywhere" when
+// nothing was ever replayed. That is the failure mode this whole family is
+// about — a zero value rendered as a finding.
 type backtestSourceRun struct {
-	RunID     string `json:"run_id"`
+	RunID     string `json:"id"`
 	Status    string `json:"status"`
 	Output    string `json:"output"`
 	StartedAt string `json:"started_at"`
@@ -204,6 +215,16 @@ func replayBacktestRun(client *cli.Client, ws string, against int, src backtestS
 		SourceRunID:     src.RunID,
 		SourceStartedAt: src.StartedAt,
 		SourceOutput:    src.Output,
+	}
+	// An empty source id means the run-records response did not carry the
+	// key this struct decodes — the CLI is reading a shape the server no
+	// longer sends. Say so. Without this the request goes out with an empty
+	// path segment, comes back 404, and lands in the report as an ordinary
+	// ERROR row: a decode bug wearing a regression's clothes.
+	if src.RunID == "" {
+		row.Error = "run-records entry carried no run id — this CLI is reading a stale response shape; upgrade the CLI or the server"
+		row.Verdict = "ERROR"
+		return row
 	}
 	// Synchronous /replay blocks until the run finishes — same
 	// generous cap the eval/bench/compare surfaces use for a live

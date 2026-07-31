@@ -145,7 +145,7 @@ fi
 ```
 
 `--format json` emits the raw result (`ok`, `count`, `broken_seq`,
-`broken_id`, `reason`) for machine consumers. See the
+`broken_id`, `reason`, `breaks`, `repairable`) for machine consumers. See the
 [Audit Log](/security/audit#tamper-evidence-the-journal-hash-chain) page for
 the guarantee and what it does (and does not) cover.
 
@@ -163,6 +163,34 @@ time anyone pinned an entry, `journal verify` started reporting that workspace a
 tampered forever. If you have been ignoring a persistent break, re-run after
 upgrading: a false positive from a legitimate pin is now impossible.
 </Note>
+
+### Entries with an unresolved priority
+
+Some rows come back in a separate, non-green block:
+
+```
+3 entr(y|ies) with an unresolved priority (content authentic, live priority unaccounted for):
+SEQ    ENTRY               STORED  EMITTED (proven by the keyed hash)
+86657  j_9f21…             normal  permanent
+```
+
+These are rows whose **content** the keyed hash proves authentic, but whose live
+priority the record cannot account for. The `EMITTED` column is what the entry
+was actually written with — recovered by finding the priority that reproduces
+the stored HMAC, which requires no guessing and cannot be faked without the key.
+
+There are two ways to arrive here and **the row cannot tell you which**:
+
+- the schema-v166 upgrade backfilled `priority_at_emit` on an entry that had
+  already been pinned, so a legitimate old pin now looks wrong; or
+- someone with database write access downgraded a `permanent` entry so
+  compaction would delete it, writing both columns to keep them consistent.
+
+Because the two are byte-identical, `journal verify` reports rather than
+resolves, and **exits non-zero** — the same as for a break. Compare the emitted
+value with what you expect the entry to have been marked, and treat a
+`permanent → normal` downgrade you cannot account for as an incident. Compaction
+will not delete these rows in the meantime.
 
 ## `crewship keeper history`
 

@@ -30,6 +30,14 @@ key, or points at Anthropic / an OpenAI-compatible endpoint via a vault credenti
   - credential (optional): a vault ENDPOINT_URL or API_KEY credential id the
       provider sources its endpoint/key from
 
+SCOPE. This setting is per workspace and overrides the instance judge
+('crewship keeper config') for this workspace only. It is also the only place the
+CREDENTIAL-ACCESS judge can be HOSTED: the instance judge speaks the native
+Ollama API only, because an Anthropic / OpenAI-compatible judge needs an endpoint
+or API key from the vault and the vault is workspace-scoped. If the credential
+named here is revoked the Keeper degrades back to the instance judge as it is
+configured at that moment, rather than failing.
+
 Choosing a model does not enable the watchdog — run 'crewship keeper enable' for
 that. OWNER/ADMIN only.
 
@@ -45,7 +53,10 @@ Examples:
 func printKeeperModel(gov keeperGovernance) {
 	fmt.Printf("%sGovernance model (workspace)%s\n", cli.Bold, cli.Reset)
 	if strings.TrimSpace(gov.GovModelProvider) == "" {
-		fmt.Printf("  Provider:   — (server/env default)\n")
+		// Name what "unset" actually resolves to. "server/env default" is true
+		// but unhelpful: the thing deciding is the instance judge, and that is
+		// the row 'crewship keeper config get' prints (#1558).
+		fmt.Printf("  Provider:   — (unset — this workspace uses the instance judge; see 'crewship keeper config get')\n")
 		return
 	}
 	fmt.Printf("  Provider:   %s\n", gov.GovModelProvider)

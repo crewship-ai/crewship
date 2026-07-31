@@ -121,6 +121,8 @@ jobs:
         run: bash scripts/deploy-dev-test.sh
       - name: test-harness lib (binary resolution + preflight)
         run: bash scripts/test-harness-lib-test.sh
+      - name: claim-issue.sh (claim parsing + clone detection)
+        run: bash scripts/claim-issue-test.sh
 
       # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
       # every test called t.Skip, so a skip is indistinguishable from a pass
@@ -131,6 +133,17 @@ jobs:
       # no Go toolchain needed.
       - name: Skip budget (t.Skip ratchet)
         run: bash scripts/skip-budget.sh
+
+      # The same shape as the ratchet above, one layer out: a green check that
+      # never ran. CodeRabbit reports through a commit status, and when it hits
+      # its review limit that status is `pass / Review rate limited` — visually
+      # identical to `pass / Review completed` (#1580). scripts/review-status.sh
+      # answers "was this actually reviewed?" from the posted bodies; this step
+      # runs only its network-free classifier tests. It deliberately does NOT
+      # gate the merge on a real review — whether a green CodeRabbit status may
+      # block a merge is branch-protection policy and the repo owner's call.
+      - name: review-status.sh (throttled vs reviewed classifier)
+        run: bash scripts/review-status-test.sh
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
@@ -264,8 +277,8 @@ jobs:
         run: go build ./cmd/crewship
 
       # #945/#946 — Windows port regression gates: the clionly CLI and the
-      # full daemon must both stay windows-clean. The embed placeholder from
-      # setup-go-embed satisfies web/out for the full build.
+      # full daemon must both stay windows-clean. The tracked
+      # web/out/.placeholder.html satisfies the embed for the full build (#1567).
       - name: Go build (windows clionly cross-compile)
         run: GOOS=windows GOARCH=amd64 go build -tags clionly ./cmd/crewship
 
@@ -277,8 +290,8 @@ jobs:
         run: go build -tags clionly ./cmd/crewship
 
       # #946 — the full daemon must stay windows-clean too (IPC/hooks/docker
-      # detection/self-update all have OS branches). The embed placeholder
-      # from setup-go-embed satisfies web/out for the full build.
+      # detection/self-update all have OS branches). The tracked
+      # web/out/.placeholder.html satisfies the embed for the full build (#1567).
       - name: Go build (windows full-daemon cross-compile)
         run: GOOS=windows GOARCH=amd64 go build ./...
 
@@ -911,6 +924,12 @@ jobs:
         with:
           name: nextjs-static-export
           path: web/out
+
+      # Same gate the release path uses: prove the artifact that landed in
+      # web/out/ is a real Next.js export before compiling it in, so this
+      # job cannot go green over an empty or placeholder embed (#1567).
+      - name: Verify a real export is staged for embedding
+        run: ./scripts/embed-web-out.sh verify
 
       - name: Build single binary with embedded frontend
         run: go build -o crewship ./cmd/crewship

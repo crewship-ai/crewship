@@ -1,11 +1,47 @@
-// Package safepath centralises path-component validation so other
-// packages can join user-supplied identifiers (crew IDs, slugs,
-// workspace IDs, etc.) into filesystem paths without risking traversal
-// out of the intended root.
+// Package safepath is the one place in this repo that answers "is this
+// path safe?". It turns untrusted input — crew IDs, slugs, workspace
+// IDs, agent-supplied memory paths, tar entries, CLI arguments — into a
+// filesystem path that provably cannot escape the root it was meant to
+// stay under.
 //
-// Callers wanting "is this whole path inside that root?" should use
-// EnsureInside; callers wanting "is this single token safe as a path
-// component?" should use ValidateComponent.
+// There is deliberately no second package for this. internal/pathsafe
+// used to answer the same question for whole relative paths, and two
+// plausible answers is how call sites end up on the weaker one without
+// anybody noticing: that is the shape of the traversal bugs fixed in
+// #1569 and #1581/#1582. pathsafe.Join now lives here as JoinRel.
+//
+// Pick by what you hold:
+//
+//	one untrusted token (id, slug, filename)  → ValidateComponent
+//	root + N untrusted tokens                 → JoinUnder
+//	root + one untrusted relative subpath     → JoinRel
+//	a path you already built, re-check it     → EnsureInside
+//	a CLI arg that may be absolute or relative→ CleanAbs
+//
+// Every helper fails closed and returns an error wrapping ErrUnsafe.
+// Segment validation is shared: JoinUnder and JoinRel both run each
+// component through ValidateComponent, so the package has exactly one
+// notion of a safe path component.
+//
+// SECURITY NOTE — this package is *lexical*. It does not touch the
+// filesystem, so it cannot see a symlink. It closes the textual
+// traversal hole only. Any caller that writes into a directory another
+// uid can also write to must add the filesystem layers on top, in the
+// shape the recent security fixes established:
+//
+//   - lexical confinement here (JoinRel / JoinUnder / EnsureInside),
+//   - filepath.EvalSymlinks containment as the DIAGNOSIS (it produces
+//     the error the client sees, and it is blind to a leaf that does not
+//     exist yet),
+//   - an *os.Root as the ENFORCEMENT (one openat per component, refuses
+//     any symlink leaving the root — this is what closes the create
+//     path).
+//
+// See internal/sidecar/memory_write.go safeJoinUnder and
+// internal/memory/tools.go assertMemoryFile for the composed use.
+//
+// If a call site needs something this package does not do, that is a gap
+// to fill here — not a reason to grow a second helper elsewhere.
 package safepath
 
 import (
@@ -61,6 +97,66 @@ func JoinUnder(base string, components ...string) (string, error) {
 	cleanBase := filepath.Clean(base)
 	if !strings.HasPrefix(joined, cleanBase+string(filepath.Separator)) && joined != cleanBase {
 		return "", fmt.Errorf("%w: %q escapes base %q", ErrUnsafe, joined, cleanBase)
+	}
+	return joined, nil
+}
+
+// JoinRel confines a single untrusted *relative subpath* under base and
+// returns the cleaned, confined absolute-or-base-relative result. Use it
+// where the untrusted value is a whole path ("daily/2026-07-09.md")
+// rather than a list of tokens; use JoinUnder when you hold the tokens
+// separately, because that form makes the segment boundaries explicit.
+//
+// Rejected, all with an error wrapping ErrUnsafe:
+//
+//   - empty base or empty rel
+//   - rel containing a NUL byte (C-string truncation defence against a
+//     downstream Linux syscall)
+//   - absolute rel
+//   - any segment of the cleaned rel that ValidateComponent refuses —
+//     which covers "..", "." smuggled past Clean, embedded separators
+//     (forward AND back slash, on every OS), and non-local components
+//   - a joined path that is not base or a descendant of base
+//
+// rel is Cleaned first, so "./AGENT.md" and "daily/./x.md" are accepted
+// and normalised; "daily/../../etc/passwd" cleans to "../etc/passwd"
+// and is refused on its first segment.
+//
+// A rel of "." returns base itself, which is intentional and matches
+// EnsureInside (base is inside base) and JoinUnder with no components. A
+// caller that needs a *file* must reject that case itself.
+func JoinRel(base, rel string) (string, error) {
+	if base == "" {
+		return "", fmt.Errorf("%w: empty base", ErrUnsafe)
+	}
+	if rel == "" {
+		return "", fmt.Errorf("%w: empty path", ErrUnsafe)
+	}
+	if strings.ContainsRune(rel, '\x00') {
+		return "", fmt.Errorf("%w: path contains NUL", ErrUnsafe)
+	}
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: absolute path", ErrUnsafe)
+	}
+
+	cleanBase := filepath.Clean(base)
+	cleanRel := filepath.Clean(rel)
+	if cleanRel == "." {
+		return cleanBase, nil
+	}
+	// Validate the cleaned relative value segment by segment. Checking the
+	// tainted input itself (rather than only the join) is what makes the
+	// traversal provably rejected before it can influence the join.
+	for _, seg := range strings.Split(cleanRel, string(filepath.Separator)) {
+		if _, err := ValidateComponent(seg); err != nil {
+			return "", err
+		}
+	}
+
+	// Belt-and-suspenders: confirm the join really landed under base.
+	joined := filepath.Join(cleanBase, cleanRel)
+	if err := EnsureInside(cleanBase, joined); err != nil {
+		return "", err
 	}
 	return joined, nil
 }

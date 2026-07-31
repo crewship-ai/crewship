@@ -26,12 +26,20 @@ var credentialCmd = &cobra.Command{
 
 // credRow is a single credential row as rendered by `credential list`.
 type credRow struct {
-	ID                    string  `json:"id"`
-	Name                  string  `json:"name"`
-	Type                  string  `json:"type"`
-	Provider              string  `json:"provider"`
-	Status                string  `json:"status"`
-	AgentCount            int     `json:"_count_agent_credentials"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Provider   string `json:"provider"`
+	Status     string `json:"status"`
+	AgentCount int    `json:"_count_agent_credentials"`
+	// SecurityLevel is the Keeper tier. Listed because it is the property that
+	// decides what happens when an agent asks for the credential — at L4 every
+	// read becomes a human approval — and it was invisible in every listing, so an
+	// operator had no way to notice that a production credential was filed as L1
+	// (which, until the create path was fixed, is exactly what happened to
+	// anything marked 4).
+	SecurityLevel         int     `json:"security_level"`
+	SecurityLevelLabel    *string `json:"security_level_label"`
 	CreatedByActorType    *string `json:"created_by_actor_type"`
 	ProvisionedForService *string `json:"provisioned_for_service"`
 }
@@ -160,7 +168,7 @@ every page. --search and --tag filter server-side.`,
 		// the service slug so operators see *what* the auto-managed
 		// row belongs to without a second `crewship credential get`.
 		f := newFormatter()
-		headers := []string{"ID", "NAME", "TYPE", "PROVIDER", "STATUS", "AGENTS", "SOURCE"}
+		headers := []string{"ID", "NAME", "TYPE", "TIER", "STATUS", "AGENTS", "SOURCE"}
 		var rows [][]string
 		for _, c := range creds {
 			actor := "user"
@@ -171,7 +179,18 @@ every page. --search and --tag filter server-side.`,
 			if c.ProvisionedForService != nil && *c.ProvisionedForService != "" {
 				source = actor + " (" + *c.ProvisionedForService + ")"
 			}
-			rows = append(rows, []string{c.ID, c.Name, c.Type, c.Provider, c.Status, fmt.Sprintf("%d", c.AgentCount), source})
+			// TIER replaces PROVIDER in the table: the provider of a credential is
+			// on `credential get` and rarely the question, while the tier changes
+			// whether an agent can read it at all. Falls back to the bare level for
+			// a server that does not send the label.
+			tier := fmt.Sprintf("L%d", c.SecurityLevel)
+			if c.SecurityLevelLabel != nil && *c.SecurityLevelLabel != "" {
+				tier = *c.SecurityLevelLabel
+			}
+			if c.SecurityLevel == 0 {
+				tier = "—"
+			}
+			rows = append(rows, []string{c.ID, c.Name, c.Type, tier, c.Status, fmt.Sprintf("%d", c.AgentCount), source})
 		}
 		if err := f.Auto(creds, headers, rows); err != nil {
 			return err
@@ -605,14 +624,14 @@ func init() {
 	credCreateCmd.Flags().String("auth-token", "", "ENDPOINT_URL only: bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed")
 	credCreateCmd.Flags().StringArray("header", nil, "ENDPOINT_URL only: extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
-	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read.")
 	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
 	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
-	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
+	credUpdateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+". L4 requires a human to approve every read.")
 	credUpdateCmd.Flags().StringSlice("crews", nil, "Replace the crew scoping with these crew slugs or IDs (repeatable/comma-separated); pass an empty value to clear crews and make it workspace-wide")
 	credUpdateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE or CREW. Usually inferred from --crews; set explicitly to override")
 

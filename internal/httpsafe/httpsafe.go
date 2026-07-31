@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -351,6 +352,54 @@ func (rt *RewriteRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	r.URL.Scheme = rt.Target.Scheme
 	r.URL.Host = rt.Target.Host
 	return http.DefaultTransport.RoundTrip(r)
+}
+
+// TrustedEndpointClient returns a client for dialling an OPERATOR-AUTHORED
+// endpoint — the Keeper judge URL and the status probe of that same URL, today.
+//
+// It is deliberately more permissive than SafeClient: RFC1918, loopback and ULA
+// stay reachable, because operators run a model server on localhost or a LAN box
+// and a judge that cannot reach it is a fail-closed outage dressed up as a
+// security verdict. The HARD tier still applies — IsHardBlockedIP keeps cloud
+// metadata and link-local (169.254/16 and its IPv6 forms), multicast and the
+// unspecified address unreachable. That two-tier shape is the same one crew
+// endpoints already use.
+//
+// Redirects are not followed: a permissive host must not be able to bounce the
+// dial into a blocked one, and no caller here needs a 3xx.
+//
+// Both call sites share this constructor on purpose. Two copies of a trust
+// decision about the same stored value is how they drift, and the read path
+// (a reachability probe whose answer is a boolean an admin can see) is the one
+// that would be quietly weaker.
+func TrustedEndpointClient(timeout time.Duration) *http.Client {
+	dialTimeout := 10 * time.Second
+	if timeout < dialTimeout {
+		dialTimeout = timeout
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: dialTimeout,
+				Control: func(_, address string, _ syscall.RawConn) error {
+					host, _, err := net.SplitHostPort(address)
+					if err != nil {
+						return err
+					}
+					ip := ParseIPStripZone(host)
+					if ip == nil {
+						return nil
+					}
+					if IsHardBlockedIP(ip) {
+						return fmt.Errorf("httpsafe: endpoint resolves to a blocked address (%s)", ip)
+					}
+					return nil
+				},
+			}).DialContext,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 // SafeClient returns an http.Client with SafeTransport and the given

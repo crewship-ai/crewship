@@ -37,6 +37,14 @@ Backend reads from one source of truth — `GET /api/v1/admin/keeper/requests?li
 
 ## The four sub-tabs
 
+<Note>
+  The cadences below are when each evaluator fires **on its own**. Any of the
+  four can also be run on demand — `crewship keeper review run <slot>`, or the
+  **run now** link on the evaluator's row in Admin → Keeper. A manual run lands
+  in this panel like any other: same evaluator, same `keeper_requests` row, same
+  escalation. See [Running a review on demand](/guides/keeper#running-a-review-on-demand).
+</Note>
+
 ### F4.1 Skill Review
 
 Cron-fires daily 03:00 UTC. Every skill **with at least one enabled

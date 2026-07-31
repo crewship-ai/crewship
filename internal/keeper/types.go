@@ -47,11 +47,18 @@ const (
 	RequestTypeNegativeLearning RequestType = "negative_learning"
 )
 
-// SecurityLevel classifies how sensitive a credential is.
-// L1 = low (npm tokens, read-only APIs)
-// L2 = medium (GitHub write, DB read)
-// L3 = high (SSH, DB admin, AWS)
-// L4 = critical (production admin, payment) — human approval, future work
+// SecurityLevel classifies how sensitive a credential is, and — since
+// tier.go — what Keeper actually does about it. Tier() is the policy; this is
+// just the key.
+//
+//	L1 = low      (npm tokens, read-only APIs)
+//	L2 = medium   (GitHub write, DB read)
+//	L3 = high     (SSH, DB admin, AWS)
+//	L4 = critical (production admin, payment) — a human approves every read
+//
+// The L4 line said "human approval, future work" for three milestones. It is
+// enforced now: ApplyTierFloor turns an ALLOW into an ESCALATE at that tier, and
+// the escalation cannot be resolved by whoever owns the asking agent.
 type SecurityLevel int
 
 const (
@@ -99,6 +106,18 @@ type GatekeeperResponse struct {
 	Prompt string `json:"-"`
 	// RawLLMResponse is the verbatim text returned by Ollama before JSON parsing.
 	RawLLMResponse string `json:"-"`
+	// InfraFailure marks a DENY the gatekeeper produced ITSELF because the judge
+	// could not be reached, timed out, or returned something unparseable — as
+	// opposed to a DENY the judge actually chose.
+	//
+	// The audit evaluators (skill review, behaviour, memory health, negative
+	// learning) widen the first kind to ESCALATE, because a model outage must not
+	// silently unverify a skill or block an agent's tool call. They detected it by
+	// substring-matching the reason text against three sentinel prefixes, which
+	// meant editing a user-facing message could flip a fail-SOFT path into a
+	// blocking one — and did, when the timeout message was reworded to name the
+	// budget. A flag the producer sets cannot be broken by rewording.
+	InfraFailure bool `json:"-"`
 }
 
 // ExecuteResult is returned by /keeper/execute after the command has been

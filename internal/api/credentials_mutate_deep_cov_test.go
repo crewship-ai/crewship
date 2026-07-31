@@ -212,19 +212,25 @@ func TestCovCMDCreate_UnknownTypeRejected(t *testing.T) {
 
 // ---- Create: security_level clamping ----
 
-func TestCovCMDCreate_SecurityLevelClamp(t *testing.T) {
+func TestCovCMDCreate_SecurityLevelStoredOrRefused(t *testing.T) {
 	t.Parallel()
 
+	// wantStatus 400 replaces the old "clamps to the default" rows. Silently
+	// filing an out-of-range level as 1 is what made `security_level: 4` — the
+	// tier that requires a human to approve every read — resolve to the LOWEST
+	// tier while the API answered 201.
 	cases := []struct {
-		name  string
-		level string // raw JSON for security_level (or "" to omit)
-		want  int
+		name       string
+		level      string // raw JSON for security_level (or "" to omit)
+		want       int
+		wantStatus int
 	}{
-		{"omitted_defaults_1", "", 1},
-		{"below_range_clamps_to_default_1", "0", 1},
-		{"valid_2", "2", 2},
-		{"valid_3", "3", 3},
-		{"above_range_clamps_to_default_1", "9", 1},
+		{"omitted_defaults_1", "", 1, http.StatusCreated},
+		{"below_range_refused", "0", 0, http.StatusBadRequest},
+		{"valid_2", "2", 2, http.StatusCreated},
+		{"valid_3", "3", 3, http.StatusCreated},
+		{"valid_4_critical", "4", 4, http.StatusCreated},
+		{"above_range_refused", "9", 0, http.StatusBadRequest},
 	}
 	for i, tc := range cases {
 		tc := tc
@@ -243,8 +249,20 @@ func TestCovCMDCreate_SecurityLevelClamp(t *testing.T) {
 			body += `}`
 
 			rr, resp := covCMDcreate(t, h, userID, wsID, body)
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d, body: %s", rr.Code, tc.wantStatus, rr.Body.String())
+			}
+			if tc.wantStatus != http.StatusCreated {
+				// A refused tier must not have written a row at all — otherwise the
+				// operator gets a credential at a level they did not choose.
+				var n int
+				if err := db.QueryRow("SELECT COUNT(*) FROM credentials WHERE name = ?", name).Scan(&n); err != nil {
+					t.Fatalf("count credentials: %v", err)
+				}
+				if n != 0 {
+					t.Errorf("a refused create wrote %d row(s)", n)
+				}
+				return
 			}
 			var got int
 			if err := db.QueryRow("SELECT security_level FROM credentials WHERE id = ?", resp.ID).Scan(&got); err != nil {
@@ -674,7 +692,7 @@ func TestCovCMDUpdate_SecurityLevelOutOfRange(t *testing.T) {
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400, body: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "security_level must be 1, 2, or 3") {
+	if !strings.Contains(rr.Body.String(), "security_level must be one of") {
 		t.Errorf("body = %s", rr.Body.String())
 	}
 }

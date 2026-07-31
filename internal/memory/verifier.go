@@ -53,7 +53,7 @@ const (
 // against its root before the stat/open. The CodeQL alerts on those two
 // lines are therefore dismissed as not-reachable / false-positive; if
 // this field is ever wired to an agent-influenced value, route the
-// citation join through internal/pathsafe.Join first.
+// citation join through internal/safepath.JoinRel first.
 type VerifierConfig struct {
 	Mode                VerifierMode
 	CitationSearchRoots []string

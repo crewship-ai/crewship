@@ -12,6 +12,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -132,6 +133,18 @@ func WithGovModelStatus(s GovModelStatusProvider) RouterOption {
 	}
 }
 
+// WithGovModelJudge attaches the CONCRETE governance-model resolver, so the
+// admin judge routes can build and probe a hosted judge configuration (provider +
+// model + vault key) before it is saved. WithGovModelStatus carries the same
+// object behind a read-only interface for the status card; this one is the write/
+// probe capability and is deliberately a separate option, so a router that only
+// wants the status surface does not get the dialling one.
+func WithGovModelJudge(g *GovModelResolver) RouterOption {
+	return func(r *Router) {
+		r.govModelJudge = g
+	}
+}
+
 // WithKeeperSecrets attaches a SecretGetter to the router for the keeper execute handler.
 // If not set, /keeper/execute will return 500 on ALLOW decisions (execute not configured).
 func WithKeeperSecrets(sg SecretGetter) RouterOption {
@@ -152,6 +165,31 @@ func WithKeeperContainer(cp provider.ContainerProvider) RouterOption {
 func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 	return func(r *Router) {
 		r.keeperConfig = cfg
+	}
+}
+
+// WithKeeperSettings attaches the runtime-tunable instance judge configuration.
+// It supersedes WithKeeperConfig as the source of truth for what the judge is
+// wired to: the store layers keeper_runtime_settings over the same
+// cfg.KeeperConfig, so the status card reports what is in force rather than
+// what the process booted with, and the admin console can change it without a
+// restart. Unset (CLI processes, most tests) leaves the status endpoint reading
+// cfg.Keeper directly and the config endpoint reporting 503.
+func WithKeeperSettings(store *keepercfg.Store) RouterOption {
+	return func(r *Router) {
+		r.keeperSettings = store
+	}
+}
+
+// WithKeeperAuxSettings attaches the runtime-tunable per-slot evaluator
+// overrides. Like WithKeeperSettings it supersedes the boot-time value as the
+// source of truth: AuxModels() reads through it, so the aux-status surface and
+// the run-verdict wiring report and use what is in force rather than what the
+// process booted with. Unset leaves both reading the WithAuxiliaryModels value,
+// and the admin aux endpoints reporting 503.
+func WithKeeperAuxSettings(store *keepercfg.AuxStore) RouterOption {
+	return func(r *Router) {
+		r.keeperAuxSettings = store
 	}
 }
 

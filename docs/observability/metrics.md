@@ -18,6 +18,11 @@ an operator alerts on.
 - Remote scrapers must send `Authorization: Bearer <token>` matching the
   `CREWSHIP_METRICS_TOKEN` environment variable.
 - With no token configured, non-loopback requests get a `404`.
+- The `404` is the answer for **every** method, not just `GET` — an
+  unauthorized `POST /metrics` looks exactly like an unauthorized `GET`, so a
+  scanner cannot use a method probe to confirm the endpoint exists. Authorized
+  callers still get an honest `405 Method Not Allowed` (with `Allow: GET, HEAD`)
+  for anything other than `GET`/`HEAD`.
 
 ```yaml
 # prometheus.yml

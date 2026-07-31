@@ -77,17 +77,28 @@ func NewOllama(baseURL, model string) *Ollama {
 	}
 }
 
-// NewOllamaWithClient builds an Ollama provider whose non-streaming requests
-// (Complete + ListModels) use the supplied http.Client. Used for a workspace
-// (tenant-configured) endpoint where the dial must be SSRF-guarded — the
-// caller passes a client with an SSRF-aware transport. The streaming client
-// keeps the standard proxy-aware transport (streaming isn't used for the
-// server-side discovery/validation path). A nil client falls back to the
-// default 300s-timeout client.
+// NewOllamaWithClient builds an Ollama provider whose requests use the supplied
+// http.Client. Used for an endpoint whose address did not come from this
+// process — a workspace-configured one, or the runtime-settable Keeper judge —
+// where the dial must go through a guarded transport.
+//
+// The supplied client's TRANSPORT is applied to the streaming path as well, its
+// timeout deliberately not: a 300s request timeout is right for Complete and
+// wrong for a stream. Only the non-streaming half used to be guarded, on the
+// reasoning that "streaming isn't used for the server-side discovery/validation
+// path" — true of the callers at the time, and not a property of the object. A
+// provider that is fenced for one method and open for another is one refactor
+// away from dialling an arbitrary address, and the caller that did it would have
+// no way to know: it asked for a guarded client and got one.
+//
+// A nil client falls back to the default 300s-timeout client.
 func NewOllamaWithClient(baseURL, model string, client *http.Client) *Ollama {
 	o := NewOllama(baseURL, model)
 	if client != nil {
 		o.client = client
+		if client.Transport != nil {
+			o.stream = &http.Client{Transport: client.Transport}
+		}
 	}
 	return o
 }

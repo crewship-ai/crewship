@@ -487,7 +487,7 @@ Empty arrays are **rejected** (a `400`, not treated as a no-op) -- to reset a me
 GET /api/v1/workspaces/{workspaceId}/members/capabilities
 ```
 
-Returns the resolved capabilities for **every** member of the workspace in one round-trip -- this drives the Members capability grid without an N+1 fan-out across the per-member endpoint. Rows are ordered by membership `created_at` ASC so the grid renders stably between page loads.
+Returns the resolved capabilities for **every** member of the workspace in one round-trip -- this drives Settings → Members without an N+1 fan-out across the per-member endpoint. The roster fetches it once on load, whether or not any row is expanded, because each collapsed row summarises that member's grants. Rows are ordered by membership `created_at` ASC so the roster renders stably between page loads.
 
 **Auth:** `ADMIN` or `OWNER`.
 

@@ -12,6 +12,45 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// projectLeadInWorkspaceOrReject validates the polymorphic lead_type/lead_id
+// pair against the caller's workspace, writing the error response and returning
+// false when it does not hold.
+//
+// Polymorphic references cannot carry a foreign key — lead_id points into
+// `users` or into `agents` depending on lead_type — so the database cannot
+// catch this and the application is the only guard. That is the same root cause
+// the audit recorded for issues' assignee_type/assignee_id, where the missing
+// guard turned up in seven separate write paths.
+//
+// A lead_id with no resolvable lead_type is rejected rather than waved through:
+// an unvalidatable reference is the state this whole class of bug lives in.
+func projectLeadInWorkspaceOrReject(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger,
+	leadType, leadID *string, wsID string) bool {
+	// The enum is checked first and independently of lead_id, so a request that
+	// moves only lead_type cannot store a value neither read-path branch
+	// resolves. Empty means "clearing", which is allowed.
+	var table string
+	if leadType != nil && *leadType != "" {
+		switch *leadType {
+		case "user":
+			table = "users"
+		case "agent":
+			table = "agents"
+		default:
+			writeProblem(w, r, http.StatusBadRequest, "lead_type must be 'user' or 'agent'")
+			return false
+		}
+	}
+	if leadID == nil || *leadID == "" {
+		return true // no reference to resolve
+	}
+	if table == "" {
+		writeProblem(w, r, http.StatusBadRequest, "lead_type is required when lead_id is set")
+		return false
+	}
+	return fkInWorkspaceOrReject(w, r, db, logger, table, "lead_id", *leadID, wsID)
+}
+
 // ProjectHandler implements CRUD endpoints for projects.
 type ProjectHandler struct {
 	db     *sql.DB
@@ -167,6 +206,14 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority == "" {
 		req.Priority = "none"
+	}
+
+	// lead_type/lead_id is a polymorphic reference — the same shape as
+	// assignee_type/assignee_id on issues, which #1471 had to fix seven times.
+	// It was unvalidated here, so a project could name a lead from another
+	// tenant and the project read path would resolve that person's name.
+	if !projectLeadInWorkspaceOrReject(w, r, h.db, h.logger, req.LeadType, req.LeadID, wsID) {
+		return
 	}
 
 	id := generateCUID()
@@ -331,11 +378,42 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Health != nil {
 		ub.Set("health", *req.Health)
 	}
-	if req.LeadType != nil {
-		ub.Set("lead_type", *req.LeadType)
-	}
-	if req.LeadID != nil {
-		ub.Set("lead_id", *req.LeadID)
+	// lead_type and lead_id are one polymorphic reference, so the pair is
+	// validated whenever EITHER half moves — validating only on lead_id would
+	// let `{"lead_type":"agent"}` alone re-point a stored user id at the agents
+	// table (or set an arbitrary string that neither read-path branch resolves),
+	// leaving the pair desynced without ever failing a check.
+	//
+	// Whichever half the request omits is read back from the stored row, so the
+	// check always runs against the pair the row will actually hold. Validating
+	// a moved id against the wrong table would be worse than not validating: it
+	// would 400 legitimate edits.
+	if req.LeadType != nil || req.LeadID != nil {
+		leadType, leadID := req.LeadType, req.LeadID
+		if leadType == nil || leadID == nil {
+			var storedType, storedID sql.NullString
+			if err := h.db.QueryRowContext(r.Context(),
+				`SELECT lead_type, lead_id FROM projects WHERE id = ? AND workspace_id = ?`,
+				projectID, wsID).Scan(&storedType, &storedID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				internalError(w, r, h.logger, "read project lead pair", err)
+				return
+			}
+			if leadType == nil && storedType.Valid {
+				leadType = &storedType.String
+			}
+			if leadID == nil && storedID.Valid {
+				leadID = &storedID.String
+			}
+		}
+		if !projectLeadInWorkspaceOrReject(w, r, h.db, h.logger, leadType, leadID, wsID) {
+			return
+		}
+		if req.LeadType != nil {
+			ub.Set("lead_type", *req.LeadType)
+		}
+		if req.LeadID != nil {
+			ub.Set("lead_id", *req.LeadID)
+		}
 	}
 	if req.StartDate != nil {
 		ub.Set("start_date", *req.StartDate)

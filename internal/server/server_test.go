@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +51,81 @@ func openTestDB(t *testing.T) *sql.DB {
 		return db.DB
 	}
 	return testutil.MigratedSQLDB(t)
+}
+
+// TestOpenTestDB_EnforcesForeignKeys pins the property issue #1550 was filed
+// about: every connection this package's fixtures hand out enforces foreign
+// keys, so a row production could never write is rejected in tests too.
+//
+// The regression it guards against is silent, which is the whole reason it is
+// worth a test. openTestDB used to build its own DSN:
+//
+//	file:<path>?_foreign_keys=on&_journal=WAL&_pragma=busy_timeout(5000)
+//
+// `_foreign_keys=` and `_journal=` are mattn/go-sqlite3 spellings. This repo
+// drives modernc.org/sqlite, which ignores parameters it does not recognise
+// rather than erroring — so the helper read as "foreign keys on" while
+// enforcement was left to whatever a pooled connection happened to inherit.
+// Nothing announced it: three TestLazyGatekeeper_* tests went red on -shuffle
+// only, and nine other tests in this package were quietly seeding orphan rows
+// the API cannot produce. Routing the helper through testutil (and therefore
+// through database.Open) fixed it, but a fixture that goes back to a hand-built
+// DSN would break it again just as quietly.
+//
+// Enforcement is per-connection, not per-database, so a single PRAGMA read
+// proves nothing about the connection the next query lands on. Probe several.
+func TestOpenTestDB_EnforcesForeignKeys(t *testing.T) {
+	db := openTestDB(t)
+
+	// crews.workspace_id REFERENCES workspaces(id), and no workspace is seeded:
+	// exactly the orphan the API has no route to create.
+	const orphanCrew = `INSERT INTO crews (id, workspace_id, name, slug)
+		VALUES (?, 'ws-that-was-never-created', ?, ?)`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// database.Open caps the pool at 5. Eight probes therefore cover every
+	// connection the pool will ever open, and using goroutines without a
+	// rendezvous means a lower cap would slow the test down rather than
+	// deadlock it.
+	const probes = 8
+	var wg sync.WaitGroup
+	for i := 0; i < probes; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Errorf("probe %d: acquire connection: %v", i, err)
+				return
+			}
+			defer conn.Close()
+
+			var fk int
+			if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil {
+				t.Errorf("probe %d: read foreign_keys: %v", i, err)
+				return
+			}
+			if fk != 1 {
+				t.Errorf("probe %d: foreign_keys = %d, want 1", i, fk)
+			}
+
+			id := fmt.Sprintf("crew-orphan-%d", i)
+			switch _, err := conn.ExecContext(ctx, orphanCrew, id, id, id); {
+			case err == nil:
+				t.Errorf("probe %d: orphan crew ACCEPTED — foreign keys are not "+
+					"enforced on this connection", i)
+			case !strings.Contains(err.Error(), "FOREIGN KEY constraint failed"):
+				t.Errorf("probe %d: orphan crew rejected for the wrong reason: %v", i, err)
+			}
+
+			// Hold the connection open a moment so the pool has to hand the next
+			// probe a different one instead of recycling this one.
+			time.Sleep(20 * time.Millisecond)
+		}(i)
+	}
+	wg.Wait()
 }
 
 func newTestServer() *Server {

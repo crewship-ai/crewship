@@ -1,0 +1,69 @@
+<!doctype html>
+<!--
+  crewship:web-ui-not-built
+
+  This file is TRACKED IN GIT on purpose. `web/embed.go` declares
+  `//go:embed all:out`, so `web/out/` must exist at compile time or every
+  `go build` / `go test` in the repo fails with
+
+      pattern all:out: no matching files found
+
+  …which reads like a compile error in whatever you were actually editing.
+  `web/out/` is otherwise gitignored (it is a build artifact), so a fresh
+  clone or `git worktree add` had nothing there at all. This placeholder is
+  the one file that keeps the directory non-empty. Do not delete it, and do
+  not add anything else here — everything else under web/out/ is ignored.
+
+  It is deliberately NOT named index.html: the real Next.js export writes
+  index.html, and a same-named placeholder would show up as a modified
+  tracked file after every `make build` (and would fool dev.sh's
+  `-s web/out/index.html` freshness probe into skipping the frontend build).
+
+  When this file is the ONLY thing in web/out/, the binary knows the UI was
+  never built: internal/api.StaticFileHandler serves this page with HTTP 503
+  on every route instead of quietly returning a blank 200.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crewship — web UI not built</title>
+  </head>
+  <body>
+    <h1>The Crewship web UI was not built into this binary.</h1>
+
+    <p>
+      This is a placeholder page, not the application. The Go binary embeds
+      the Next.js static export from <code>web/out/</code>, and that export
+      was never produced for this build — so there is no UI to serve. The
+      HTTP API and the <code>crewship</code> CLI are unaffected.
+    </p>
+
+    <h2>Fix it</h2>
+
+    <p>From the repository root:</p>
+
+    <pre>make build        # pnpm build → scripts/embed-web-out.sh sync → go build</pre>
+
+    <p>or, if you only want the frontend refreshed into the embed directory:</p>
+
+    <pre>pnpm build
+./scripts/embed-web-out.sh sync</pre>
+
+    <p>
+      Then rebuild the binary. <code>./dev.sh start</code> does all of this
+      for you and is the normal way to run Crewship locally.
+    </p>
+
+    <h2>If you are seeing this from a released build</h2>
+
+    <p>
+      That is a packaging bug — a release is supposed to fail before it ships
+      a binary without the UI. Please report it at
+      <a href="https://github.com/crewship-ai/crewship/issues"
+        >github.com/crewship-ai/crewship/issues</a
+      >
+      and include the output of <code>crewship version</code>.
+    </p>
+  </body>
+</html>

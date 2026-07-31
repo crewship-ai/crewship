@@ -33,6 +33,21 @@ type ModelsHandler struct {
 	// configured OLLAMA ENDPOINT_URL (#988). Field so tests inject a fake
 	// without a real dial; the default is defaultWorkspaceOllamaLister.
 	workspaceOllamaLister func(baseURL string) (llm.ModelLister, bool)
+
+	// judgeEndpoint resolves the CURRENT instance judge endpoint. Without it,
+	// OLLAMA discovery fell back to the URL the process booted with — so an
+	// operator who repointed the judge at a LAN box still got the old server's
+	// model list in every picker, which is a silent way to offer models that do
+	// not exist where the request will actually go. nil → boot value only.
+	judgeEndpoint func() string
+}
+
+// WithJudgeEndpoint wires the runtime instance judge endpoint as the OLLAMA
+// discovery target, so "what models are available" follows the judge instead of
+// the value captured at startup.
+func (h *ModelsHandler) WithJudgeEndpoint(fn func() string) *ModelsHandler {
+	h.judgeEndpoint = fn
+	return h
 }
 
 // modelsListResponse is the GET /api/v1/models payload.
@@ -100,6 +115,16 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Deliberately NO caller-supplied endpoint here.
+	//
+	// This route is authed(wsCtx(…)) — every workspace member reaches it,
+	// VIEWER included — so a URL parameter would turn a fixed-target lookup into
+	// a dial of whatever address the caller names. The SSRF fence blocks private
+	// and metadata ranges, but public ones stay reachable and the reply
+	// distinguishes "listed" from "could not reach", which is a scanning oracle
+	// with a login. "Inventory an address I have typed but not saved" is a real
+	// need and it has a home: POST-class /admin/keeper/judge/models, behind
+	// roleManage and the instance-wide probe bucket. Every caller uses that one.
 	models, source := h.resolveModels(r.Context(), wsID, provider)
 
 	// OLLAMA has no curated fallback. An empty live result with no curated
@@ -123,6 +148,7 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 // The returned slice is always non-nil (CuratedModels may yield an empty set,
 // e.g. for OLLAMA — the caller distinguishes that case), so the response
 // always serializes "models" as a JSON array rather than null.
+// resolveModels lists a provider's models, live where possible.
 func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string) ([]llm.ModelInfo, string) {
 	apiKey, err := h.activeCredential(ctx, wsID, provider)
 	// OLLAMA needs no credential; everything else does to list live.
@@ -152,7 +178,15 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 		}
 	}
 
-	lister, ok := h.buildLister(provider, apiKey, h.ollamaURL)
+	// The judge's CURRENT endpoint before the boot-time one, so discovery follows
+	// a runtime repoint.
+	ollamaURL := h.ollamaURL
+	if provider == "OLLAMA" && h.judgeEndpoint != nil {
+		if live := strings.TrimSpace(h.judgeEndpoint()); live != "" {
+			ollamaURL = live
+		}
+	}
+	lister, ok := h.buildLister(provider, apiKey, ollamaURL)
 	if !ok {
 		return curatedOrEmpty(provider), "curated"
 	}

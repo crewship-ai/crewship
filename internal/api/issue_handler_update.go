@@ -139,6 +139,12 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.ProjectID == "" {
 			ub.SetNull("project_id")
 		} else {
+			// Same fence as parent_issue_id below: without it a caller could
+			// PATCH their own issue into another tenant's project, and the
+			// listing join then renders that project's name back to them.
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "projects", "project_id", *req.ProjectID, wsID) {
+				return
+			}
 			ub.Set("project_id", *req.ProjectID)
 		}
 	}
@@ -178,6 +184,9 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.MilestoneID == "" {
 			ub.SetNull("milestone_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "milestones", "milestone_id", *req.MilestoneID, wsID) {
+				return
+			}
 			ub.Set("milestone_id", *req.MilestoneID)
 		}
 	}

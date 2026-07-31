@@ -53,7 +53,15 @@ func TestCompactor_ChainStaysVerifiableAfterCompaction(t *testing.T) {
 	// Emit a real, chained sequence: two survivors, then a block of 12
 	// compactable chunks (one bucket), then a trailing survivor. Emitting via
 	// the Writer assigns seq/prev_hash/entry_hash the production way.
-	emit := func(kind journal.EntryType, summary string) string {
+	// The chunks are emitted ALREADY OLD rather than aged with a later UPDATE.
+	// `ts` is inside the hashed projection, so editing it after the fact is a
+	// content edit — and since #1572 the compactor refuses to delete a row
+	// whose hash does not reproduce, which means the old fixture was quietly
+	// asking the compactor to destroy twelve rows it could no longer vouch for.
+	// Emitting with the timestamp we want is both closer to production (rows
+	// get old by existing) and honest about what the chain commits to.
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	emit := func(kind journal.EntryType, summary string, ts time.Time) string {
 		id, err := w.Emit(ctx, journal.Entry{
 			WorkspaceID: "ws_test",
 			CrewID:      "crew_test",
@@ -61,19 +69,19 @@ func TestCompactor_ChainStaysVerifiableAfterCompaction(t *testing.T) {
 			ActorType:   journal.ActorAgent,
 			Summary:     summary,
 			Payload:     map[string]any{"s": summary},
+			TS:          ts,
 		})
 		if err != nil {
 			t.Fatalf("emit %s: %v", summary, err)
 		}
 		return id
 	}
-	emit(journal.EntryRunStarted, "survivor-1")
-	emit(journal.EntryRunStarted, "survivor-2")
-	var chunkIDs []string
+	emit(journal.EntryRunStarted, "survivor-1", time.Time{})
+	emit(journal.EntryRunStarted, "survivor-2", time.Time{})
 	for i := 0; i < 12; i++ {
-		chunkIDs = append(chunkIDs, emit(journal.EntryExecOutputChunk, "chunk"))
+		emit(journal.EntryExecOutputChunk, "chunk", old)
 	}
-	emit(journal.EntryRunStarted, "survivor-3")
+	emit(journal.EntryRunStarted, "survivor-3", time.Time{})
 	if err := w.Flush(ctx); err != nil {
 		t.Fatalf("flush: %v", err)
 	}
@@ -81,17 +89,6 @@ func TestCompactor_ChainStaysVerifiableAfterCompaction(t *testing.T) {
 	// Baseline: the honest chain verifies.
 	if res, err := journal.VerifyChain(ctx, db, "ws_test"); err != nil || !res.OK {
 		t.Fatalf("baseline verify failed: err=%v res=%+v", err, res)
-	}
-
-	// Age ONLY the chunk rows so compaction selects them. We touch just `ts`
-	// (never the hash columns) and only on rows that will be deleted, so the
-	// surviving rows' verification is unaffected and the checkpoint records the
-	// chunks' real stored entry_hash.
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Format("2006-01-02T15:04:05.000Z")
-	for _, id := range chunkIDs {
-		if _, err := db.Exec(`UPDATE journal_entries SET ts = ? WHERE id = ?`, old, id); err != nil {
-			t.Fatalf("age chunk: %v", err)
-		}
 	}
 
 	c := &Compactor{DB: db, Journal: w, Logger: quietLogger()}
