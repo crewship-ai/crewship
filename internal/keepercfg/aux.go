@@ -698,10 +698,10 @@ func (s *AuxStore) CredentialFor(slot string) string {
 	defer s.mu.RUnlock()
 
 	eff := s.effectiveSlotLocked(slot)
-	if eff.CredentialID.Value != "" || eff.Provider.Value != "" || slot == auxSlotFallback {
+	if eff.CredentialID.Value != "" || eff.Provider.Value != "" || slot == SlotFallback {
 		return eff.CredentialID.Value
 	}
-	return s.effectiveSlotLocked(auxSlotFallback).CredentialID.Value
+	return s.effectiveSlotLocked(SlotFallback).CredentialID.Value
 }
 
 // pickAux layers one string field: instance override, else the inherited value —

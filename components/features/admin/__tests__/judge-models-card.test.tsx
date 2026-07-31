@@ -309,7 +309,7 @@ describe("JudgeModelsCard — running an evaluator now", () => {
 
   function auxSlot(slot: string, label: string) {
     return {
-      slot, label, applies_at: "immediately",
+      slot, label,
       provider: { value: "anthropic", source: "default", editable: true },
       model: { value: "claude-haiku-4-5", source: "default", editable: true },
       timeout_ms: { value: 30000, source: "default", editable: true },
@@ -512,7 +512,7 @@ describe("JudgeModelsCard — which key an evaluator spends", () => {
 
   function slot(over: Record<string, unknown> = {}) {
     return {
-      slot: "curator", label: "Skill review + memory consolidation", applies_at: "immediately",
+      slot: "curator", label: "Skill review + memory consolidation",
       provider: { value: "anthropic", source: "default", editable: true },
       model: { value: "claude-haiku-4-5", source: "default", editable: true },
       timeout_ms: { value: 30000, source: "default", editable: true },

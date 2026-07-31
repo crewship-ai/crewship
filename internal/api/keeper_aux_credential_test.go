@@ -253,7 +253,7 @@ func TestAuxStatus_HonoursThePinnedKey(t *testing.T) {
 		}
 		return "sk-ant-from-the-vault", nil
 	})
-	h := NewAuxStatusHandler(store.Resolved(), nil, newTestLogger()).WithCredentials(store, vault)
+	h := NewAuxStatusHandler(store.Resolved, nil, newTestLogger()).WithCredentials(store, vault)
 
 	row := auxStatusRow(t, h, "curator")
 	if !row.Healthy {
@@ -265,7 +265,7 @@ func TestAuxStatus_HonoursThePinnedKey(t *testing.T) {
 	broken := keepercfg.AuxCredentialLookup(func(context.Context, string) (string, error) {
 		return "", fmt.Errorf("not found, inactive, or revoked")
 	})
-	h = NewAuxStatusHandler(store.Resolved(), nil, newTestLogger()).WithCredentials(store, broken)
+	h = NewAuxStatusHandler(store.Resolved, nil, newTestLogger()).WithCredentials(store, broken)
 	row = auxStatusRow(t, h, "curator")
 	if row.Healthy {
 		t.Fatal("a revoked key with no env key to fall back on reports healthy")

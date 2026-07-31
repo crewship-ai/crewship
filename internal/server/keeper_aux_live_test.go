@@ -127,7 +127,7 @@ func TestAuxLiveResolver_FallbackOverrideAppliesWithoutRestart(t *testing.T) {
 		Fallback: llm.AuxModel{Provider: "ollama", Model: "boot-fallback"},
 	})
 	resolve := newAuxLiveResolver("behavior", store, nil,
-		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 
 	// Nothing overridden yet: the evaluator keeps what it was built with.
 	if p, _ := resolve(context.Background(), "ws-1"); p != nil {
@@ -157,7 +157,7 @@ func TestAuxLiveResolver_FallbackDoesNotOverrideAConfiguredSlot(t *testing.T) {
 	}
 
 	resolve := newAuxLiveResolver("behavior", store, nil,
-		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 	if p, m := resolve(context.Background(), "ws-1"); p != nil {
 		t.Errorf("the fallback override hijacked a configured slot (model %q)", m)
 	}

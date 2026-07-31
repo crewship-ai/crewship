@@ -21,7 +21,7 @@ const covCredIDAux = "ccred0000000000000000aux"
 func auxStubConfig() map[string]any {
 	return map[string]any{
 		"slots": []map[string]any{{
-			"slot": "behavior", "label": "Tool-call behaviour monitor", "applies_at": "immediately",
+			"slot": "behavior", "label": "Tool-call behaviour monitor",
 			"provider":      map[string]any{"value": "anthropic", "source": "default", "editable": true},
 			"model":         map[string]any{"value": "claude-haiku-4-5", "source": "default", "editable": true},
 			"timeout_ms":    map[string]any{"value": 30000, "source": "default", "editable": true},
