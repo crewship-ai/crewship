@@ -95,7 +95,7 @@ func categoryForItem(item inbox.Item) string {
 	if item.Category != "" && notify.ValidCategory(item.Category) {
 		return item.Category
 	}
-	return notify.CategoryForKind(item.Kind)
+	return notify.CategoryForItem(item.Kind, item.Payload)
 }
 
 // notifyItem is the shared fan-out entry point for BOTH producers — the

@@ -45,7 +45,7 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
 |---|---|---|
 | `id` | string (CUID) | |
 | `workspace_id` | string | Always the current workspace. |
-| `kind` | string | `waitpoint`, `escalation`, `failed_run`, `message` (extensible). |
+| `kind` | string | `waitpoint`, `escalation`, `failed_run`, `message`, `memory_consolidation`, `schedule_missed`, `schedule_circuit_breaker_tripped`. `inbox.AllKinds` is the source of truth and is CI-checked against the DB CHECK. |
 | `source_id` | string | Source row id — e.g. waitpoint token, escalation id, pipeline run id. |
 | `target_user_id` | string \| omitted | Set when addressed to a specific user. |
 | `target_role` | string \| omitted | Set when addressed to a workspace role. |

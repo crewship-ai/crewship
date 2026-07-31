@@ -62,3 +62,18 @@ export async function listPendingWaitpoints(
   const data: unknown = await res.json()
   return Array.isArray(data) ? (data as PendingWaitpoint[]) : []
 }
+
+/**
+ * The decide endpoint's "somebody beat you to it" answers: a 409/410-style
+ * conflict, or the canonical error string for callers that did not get a
+ * status (transport wrappers, older servers).
+ *
+ * Both surfaces that can decide a waitpoint — the activity trace and the inbox
+ * — must treat this as a graceful resolution rather than a failure. A red
+ * "already decided or expired" toast for a gate someone else approved is an
+ * error message about success, and it made the buttons look broken.
+ */
+export function isAlreadyDecidedError(status: number | undefined, error: string): boolean {
+  if (status === 409 || status === 410) return true
+  return /already decided|expired/i.test(error)
+}

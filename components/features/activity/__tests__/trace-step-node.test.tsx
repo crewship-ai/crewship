@@ -31,7 +31,11 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
-vi.mock("@/lib/api/waitpoints", () => ({
+// Partial: isAlreadyDecidedError moved into this module so the inbox could
+// share it, and these tests want the real predicate — it is the rule under
+// test when a 409 has to read as a resolution rather than a failure.
+vi.mock("@/lib/api/waitpoints", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/waitpoints")>()),
   waitpointDecide: vi.fn(),
 }))
 

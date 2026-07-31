@@ -224,6 +224,33 @@ var categoryByKind = map[string]string{
 	"schedule_circuit_breaker_tripped": CategoryRoutinesMissed,
 }
 
+// SubkindRoutineUpdate is the payload discriminator a notify step writes so its
+// progress notices stay out of the approval lane. It is duplicated as a literal
+// in internal/pipeline (the producer) because inbox is a leaf package neither
+// side may import from the other; TestRoutineUpdateSubkindMatchesProducer keeps
+// the two spellings honest.
+const SubkindRoutineUpdate = "routine_update"
+
+// CategoryForItem resolves an inbox row to its notification category.
+//
+// Kind alone is not always enough. A chat reply and a routine's progress notice
+// are both kind=message, so mapping by kind put every "step build finished"
+// into chat.replies — the category a person tunes for "an agent answered me
+// while I was away". Muting one muted the other, and the routines.* rows they
+// thought they had subscribed to never arrived.
+//
+// The discriminator already exists: runner_notify writes subkind=routine_update
+// for exactly these. Reading it here keeps the vocabulary in the one file that
+// owns it rather than pushing a default back into the producer.
+func CategoryForItem(kind string, payload map[string]interface{}) string {
+	if kind == "message" {
+		if sub, _ := payload["subkind"].(string); sub == SubkindRoutineUpdate {
+			return CategoryRoutinesCompleted
+		}
+	}
+	return CategoryForKind(kind)
+}
+
 // CategoryForKind resolves an inbox kind to its notification category.
 // Returns "" for a kind with no mapping (nothing to route externally — still
 // lands in the in-product inbox as before).
