@@ -86,6 +86,14 @@ func (r *Router) registerSystemRoutes() {
 		// So a slot pinned to a vault key is not reported as a missing env var
 		// (#1554).
 		WithCredentials(r.keeperAuxSettings, NewAuxCredentialLookup(r.db))
+	// And so the reachability probe dials what a self-hosted slot dials (#1566),
+	// which since #1556 is the runtime judge endpoint rather than the process's
+	// KEEPER_OLLAMA_URL. Same accessor GET /api/v1/models already uses.
+	if r.keeperSettings != nil {
+		auxStatus = auxStatus.WithJudgeEndpoint(func() string {
+			return r.keeperSettings.Effective().EndpointURL.Value
+		})
+	}
 	// ADMIN+ floor (#868): aux-status enumerates provider + model id for every
 	// slot (incl. Keeper) — the same operational-metadata leak class #893
 	// closed for /system/keeper, so it sits behind the same admin floor.

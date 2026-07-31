@@ -153,3 +153,54 @@ func TestAuxReach_ProbeHasATimeout(t *testing.T) {
 		t.Error("a timed-out probe is not reachable")
 	}
 }
+
+// #1566: the probe must dial what the SLOT dials.
+//
+// It read KEEPER_OLLAMA_URL for aux-slot rows, which was already the wrong
+// address and became a worse one when the aux slots started resolving through
+// the instance judge endpoint (#1556) — a value settable at runtime. The failure
+// is confident and points the dangerous way: process model server up, the
+// slot's endpoint down, rendered "reachable".
+func TestAuxReach_ProbesTheSlotsEndpointNotTheProcessEnv(t *testing.T) {
+	// Alive — the address the process booted with.
+	env := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer env.Close()
+	t.Setenv("KEEPER_OLLAMA_URL", env.URL)
+
+	// Dead — the address the slot dials after an operator repoints the judge.
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{
+		Curator: llm.AuxModel{Provider: "ollama", Model: "qwen2.5:7b", Timeout: 5 * time.Second},
+	}), &config.KeeperConfig{Enabled: true, OllamaURL: env.URL, Model: "qwen2.5:7b"}, newTestLogger()).
+		WithJudgeEndpoint(func() string { return deadURL })
+
+	row := reachRow(t, h, "curator")
+	if row.Reachable == nil || *row.Reachable {
+		t.Errorf("reachable = %v, want false — the slot's endpoint is down, whatever KEEPER_OLLAMA_URL says",
+			row.Reachable)
+	}
+}
+
+// And with no accessor wired — older wirings, test routers — the previous
+// behaviour is exactly preserved rather than silently becoming localhost.
+func TestAuxReach_WithoutAJudgeEndpointFallsBackToTheEnv(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	t.Setenv("KEEPER_OLLAMA_URL", srv.URL)
+
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{
+		Curator: llm.AuxModel{Provider: "ollama", Model: "qwen2.5:7b", Timeout: 5 * time.Second},
+	}), &config.KeeperConfig{Enabled: true, OllamaURL: srv.URL, Model: "qwen2.5:7b"}, newTestLogger())
+
+	row := reachRow(t, h, "curator")
+	if row.Reachable == nil || !*row.Reachable {
+		t.Errorf("reachable = %v, want true — no accessor means the env value, as before", row.Reachable)
+	}
+}
