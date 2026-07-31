@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,13 +43,49 @@ type Client struct {
 	// Set via WithHeader — per-call metadata like Idempotency-Key that
 	// the JSON body deliberately doesn't carry.
 	extraHeaders http.Header
-	// resolvedWorkspaceID caches the resolved CUID after first lookup
-	resolvedWorkspaceID string
-	// wsNotFound caches a definitive slug-resolution miss so repeated
+	// wsResolve is the workspace-resolution memo, shared by pointer with
+	// every clone WithTimeout/WithHeader/WithContext hands out. See
+	// wsResolveState for why it is a pointer and not an inline struct.
+	wsResolve *wsResolveState
+}
+
+// wsResolveState memoises workspace resolution for a Client and everything
+// cloned from it.
+//
+// It is reached through a pointer for two reasons. WithTimeout, WithHeader
+// and WithContext all clone with `clone := *c`, so an inline sync.Mutex
+// would be copied — `go vet`'s copylocks rejects that, and a per-clone lock
+// would guard nothing anyway. And sharing the memo across clones is the
+// behaviour NewRequest's comment already describes as intended: a clone must
+// not throw the resolution away and re-run the preflight.
+//
+// Collapsing the fan-out matters as much as the safety. Commands like
+// `crewship diff` and `crewship me` fan out over a single client and every
+// request funnels through resolveWorkspaceID, so guarding only the field
+// writes would leave each goroutine firing its own GET /api/v1/workspaces
+// preflight. That is what inflight is for: one caller runs it, the rest wait
+// on the channel — no lock is held while the request is in the air.
+type wsResolveState struct {
+	mu sync.Mutex
+	// resolved is the resolved CUID, cached after the first lookup.
+	resolved string
+	// inflight is non-nil while one goroutine is running the preflight, and
+	// is closed when it finishes. Waiters park on it instead of on mu, so the
+	// mutex only ever guards the bookkeeping — never the round-trip.
+	//
+	// Holding mu across the HTTP call would collapse the fan-out to one
+	// preflight too, and that was the first shape of this fix. It trades the
+	// race for something worse: one slow /workspaces call blocks every other
+	// caller on the client, and a caller whose context is already cancelled
+	// cannot leave, because you cannot select on a mutex. The TUI shares one
+	// client across a tea.Batch that re-arms every 5s for the whole session,
+	// so that would have been a frozen UI rather than a rare bad read.
+	inflight chan struct{}
+	// notFound caches a definitive slug-resolution miss so repeated
 	// requests neither re-run the /workspaces preflight nor silently fall
 	// back to the raw slug (the pre-fix behavior that let a typo'd
 	// --workspace ride through and 404 confusingly downstream).
-	wsNotFound *WorkspaceNotFoundError
+	notFound *WorkspaceNotFoundError
 }
 
 // WorkspaceNotFoundError means the /workspaces preflight succeeded but the
@@ -87,6 +124,7 @@ func NewClient(baseURL, token, workspaceID string) *Client {
 		Token:       token,
 		WorkspaceID: workspaceID,
 		ctx:         context.Background(),
+		wsResolve:   &wsResolveState{},
 		HTTPClient: &http.Client{
 			Timeout: defaultHTTPTimeout(),
 		},
@@ -300,41 +338,100 @@ func (c *Client) getWorkspaceID(ctx context.Context) string {
 // workspaces and the slug wasn't there. A failed preflight (transport error,
 // non-200 on the list endpoint) keeps the historical fallback of returning
 // the raw slug — the real request then surfaces the real failure.
+// Safe to call concurrently: `crewship diff`, `me`, `today` and `now` all fan
+// out over one client, and this runs on every request.
 func (c *Client) resolveWorkspaceID(ctx context.Context) (string, error) {
 	if c.WorkspaceID == "" {
 		return "", nil
 	}
-	if c.resolvedWorkspaceID != "" {
-		return c.resolvedWorkspaceID, nil
-	}
-	if c.wsNotFound != nil {
-		return "", c.wsNotFound
-	}
-	// If it already looks like a CUID (starts with 'c', length >= 20), use directly
-	if looksLikeCUID(c.WorkspaceID) {
-		c.resolvedWorkspaceID = c.WorkspaceID
-		return c.WorkspaceID, nil
-	}
-	// Cross-process disk cache: skips the /workspaces preflight round-trip
-	// that every slug-configured invocation otherwise pays (see slugcache.go).
-	if id := lookupSlugCache(c.BaseURL, c.WorkspaceID); id != "" {
-		c.resolvedWorkspaceID = id
-		return id, nil
-	}
-	// Resolve slug to ID by calling workspaces list (without workspace_id param)
-	id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
-	if err != nil {
-		var nf *WorkspaceNotFoundError
-		if errors.As(err, &nf) {
-			c.wsNotFound = nf
+	st := c.wsState()
+	for {
+		st.mu.Lock()
+		if st.resolved != "" {
+			id := st.resolved
+			st.mu.Unlock()
+			return id, nil
+		}
+		if st.notFound != nil {
+			nf := st.notFound
+			st.mu.Unlock()
 			return "", nf
 		}
-		// Preflight itself failed — fall back to using the slug directly.
-		return c.WorkspaceID, nil
+		// If it already looks like a CUID (starts with 'c', length >= 20), use directly
+		if looksLikeCUID(c.WorkspaceID) {
+			st.resolved = c.WorkspaceID
+			st.mu.Unlock()
+			return c.WorkspaceID, nil
+		}
+		// Cross-process disk cache: skips the /workspaces preflight round-trip
+		// that every slug-configured invocation otherwise pays (see slugcache.go).
+		// Local file read, so it stays under the lock — it is the network call
+		// that must not.
+		if id := lookupSlugCache(c.BaseURL, c.WorkspaceID); id != "" {
+			st.resolved = id
+			st.mu.Unlock()
+			return id, nil
+		}
+		if ch := st.inflight; ch != nil {
+			// Someone else is already paying for the preflight. Wait for their
+			// answer rather than issuing a second one, but stay cancellable.
+			st.mu.Unlock()
+			select {
+			case <-ch:
+				// Re-read the memo: they may have resolved it, recorded a
+				// definitive miss, or failed transiently without memoising —
+				// in which case this iteration takes over as the resolver.
+				continue
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+		ch := make(chan struct{})
+		st.inflight = ch
+		st.mu.Unlock()
+
+		id, err := c.resolveWorkspaceSlug(ctx, c.WorkspaceID)
+
+		st.mu.Lock()
+		st.inflight = nil
+		var nf *WorkspaceNotFoundError
+		switch {
+		case err == nil:
+			st.resolved = id
+		case errors.As(err, &nf):
+			st.notFound = nf
+		}
+		st.mu.Unlock()
+		// Released only after the result is visible, so a waiter that wakes on
+		// it never re-reads a memo that is still empty and needlessly re-runs
+		// the preflight.
+		close(ch)
+
+		switch {
+		case err == nil:
+			storeSlugCache(c.BaseURL, c.WorkspaceID, id)
+			return id, nil
+		case nf != nil:
+			return "", nf
+		default:
+			// Preflight itself failed — fall back to using the slug directly.
+			// Deliberately not memoised: a transient failure must not pin the
+			// client to the raw slug for the rest of the process.
+			return c.WorkspaceID, nil
+		}
 	}
-	c.resolvedWorkspaceID = id
-	storeSlugCache(c.BaseURL, c.WorkspaceID, id)
-	return id, nil
+}
+
+// wsState returns the shared resolution memo. NewClient always installs one;
+// a Client assembled as a bare struct literal has none, and rather than nil-
+// panicking it gets a throwaway state — correct and race-free, it just does
+// not cache. Nothing in the tree builds a Client that way outside of tests,
+// but a released binary should not depend on that staying true.
+func (c *Client) wsState() *wsResolveState {
+	if c.wsResolve == nil {
+		return &wsResolveState{}
+	}
+	return c.wsResolve
 }
 
 func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string, error) {

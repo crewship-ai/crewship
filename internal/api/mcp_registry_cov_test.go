@@ -10,16 +10,97 @@ package api
 // The live remote-registry fetch inside Sync's accepted (202) path is NOT
 // exercised here: Sync spawns a detached goroutine that calls SyncMCPRegistry,
 // which is already covered by mcp_registry_test.go against an httptest fixture.
-// We assert only the synchronous 202 / 403 / 429 branches and never block on
-// the background fetch.
+// We assert only the synchronous 202 / 403 / 429 branches — but we do join
+// that goroutine before the test unwinds (see syncDoneLogger), because it
+// reads package state the test's cleanups put back.
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 )
+
+// syncDoneLogger returns a logger to hand MCPRegistryHandler plus a wait
+// function that blocks until the detached goroutine Sync spawns has run to
+// completion.
+//
+// Sync's accepted path is fire-and-forget: it starts a goroutine that calls
+// SyncMCPRegistry and returns 202 immediately, so the goroutine outlives the
+// test unless the test joins it. It reads the package-level mcpRegistryURL
+// (mcp_registry.go), which every registry test swaps and restores from
+// t.Cleanup — under -race that restore is a write concurrent with the
+// goroutine's read, and it also lets the goroutine write to a *sql.DB that
+// setupTestDB's own cleanup is closing.
+//
+// The goroutine has no exported join point, but it does have a terminal log
+// record on both outcomes: SyncMCPRegistry logs "MCP registry sync complete"
+// as its last statement on success, and Sync's closure logs "manual MCP
+// registry sync failed" after it returns an error. Neither is emitted before
+// the last read of mcpRegistryURL, so signalling on either one is a real
+// happens-before edge between the goroutine and the test's cleanups.
+func syncDoneLogger(t *testing.T) (*slog.Logger, func()) {
+	t.Helper()
+	signal := &syncDoneSignal{done: make(chan struct{})}
+	h := &syncDoneHandler{
+		Handler: slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}),
+		signal:  signal,
+	}
+	wait := func() {
+		t.Helper()
+		select {
+		case <-signal.done:
+		case <-time.After(30 * time.Second):
+			t.Fatal("background registry sync did not finish within 30s")
+		}
+	}
+	return slog.New(h), wait
+}
+
+// syncDoneSignal is the shared close-once channel behind every clone a
+// syncDoneHandler hands out from WithAttrs/WithGroup.
+type syncDoneSignal struct {
+	once sync.Once
+	done chan struct{}
+}
+
+// syncDoneHandler closes the signal the first time it sees a record marking
+// the end of a background registry sync, then discards the record. Handle
+// runs on the detached goroutine, hence the sync.Once.
+//
+// Enabled must say yes at every level: the terminal success record is logged
+// at Info, and the embedded discard handler is pinned to Error, so deferring
+// to it would drop the record before Handle ever saw it.
+type syncDoneHandler struct {
+	slog.Handler
+	signal *syncDoneSignal
+}
+
+func (h *syncDoneHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *syncDoneHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "MCP registry sync complete" || r.Message == "manual MCP registry sync failed" {
+		h.signal.once.Do(func() { close(h.signal.done) })
+	}
+	if !h.Handler.Enabled(ctx, r.Level) {
+		return nil
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h *syncDoneHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &syncDoneHandler{Handler: h.Handler.WithAttrs(attrs), signal: h.signal}
+}
+
+func (h *syncDoneHandler) WithGroup(name string) slog.Handler {
+	return &syncDoneHandler{Handler: h.Handler.WithGroup(name), signal: h.signal}
+}
 
 // covMRSeed inserts a single mcp_registry_servers row with the given id/name,
 // trust_tier and featured flag. Only the columns the handlers filter/sort on
@@ -357,7 +438,9 @@ func TestCovMRSyncForbiddenRole(t *testing.T) {
 }
 
 func TestCovMRSyncAcceptedThenCooldown(t *testing.T) {
-	h, db := covMRHandler(t)
+	db := setupTestDB(t)
+	logger, waitForSync := syncDoneLogger(t)
+	h := NewMCPRegistryHandler(db, logger)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
@@ -365,6 +448,7 @@ func TestCovMRSyncAcceptedThenCooldown(t *testing.T) {
 	// goroutine fails fast and never touches the live registry. We only
 	// assert the synchronous 202 here; the goroutine's error is logged and
 	// ignored.
+	//
 	prev := mcpRegistryURL
 	mcpRegistryURL = "http://127.0.0.1:0/never"
 	t.Cleanup(func() { mcpRegistryURL = prev })
@@ -375,6 +459,11 @@ func TestCovMRSyncAcceptedThenCooldown(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("first sync: got %d, want 202", rec.Code)
 	}
+	// The 202 means the detached goroutine is now live and reading
+	// mcpRegistryURL. Join it before anything else unwinds: cleanups run
+	// LIFO, so registering here puts the wait ahead of both the restore
+	// above and setupTestDB's db.Close.
+	t.Cleanup(waitForSync)
 	m := covMRDecode(t, rec.Body.Bytes())
 	if m["status"] != "sync_started" {
 		t.Errorf("status: got %v, want sync_started", m["status"])
