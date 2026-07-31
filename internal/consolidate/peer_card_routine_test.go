@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // staticExtractor lets tests pin the extractor output to a known
@@ -24,16 +24,9 @@ func (s staticExtractor) Extract(_ context.Context, _ PeerCandidate) (string, er
 
 func peerRoutineDB(t *testing.T) (*sql.DB, string) {
 	t.Helper()
+	dbh := testutil.MigratedDB(t)
+	// Output base path returned to the caller; unrelated to the DB file.
 	dir := t.TempDir()
-	dbh, err := database.Open("file:" + filepath.Join(dir, "r.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), dbh.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	t.Cleanup(func() { _ = dbh.Close() })
 	if _, err := dbh.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w')`); err != nil {
 		t.Fatalf("seed ws: %v", err)
 	}

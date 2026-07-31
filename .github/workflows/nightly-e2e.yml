@@ -1,0 +1,665 @@
+name: Nightly E2E
+
+# Runs the Playwright suite against a real, seeded, browser-driven instance.
+#
+# Why this workflow exists
+# ------------------------
+# Of the ~84 Playwright tests in `e2e/`, exactly 6 ran automatically before
+# this landed: `e2e-devcontainer.yml`'s onboarding job drives
+# `playwright.fresh.config.ts`, whose `testMatch` is
+# `["**/onboarding-wizard.spec.ts"]`. Everything else — the whole main
+# config — ran only when a human remembered to type `pnpm test:e2e` on a
+# machine with a seeded server. Nobody did, for long enough that the specs
+# drifted out from under the product.
+#
+# What "drift" means here, measured not guessed
+# ---------------------------------------------
+# A full main-config sweep was run against a freshly seeded instance before
+# this workflow was written: **24 of 78 tests passed**. The application was
+# healthy — login worked, the dashboard, the /crews roster, all three seeded
+# crews and all seven agents rendered — and 52 tests still failed, because
+# they assert UI that has since changed or moved:
+#
+#   * `crews-redesign.spec.ts` (5 pass / 11 fail) expects `Status:` / `Role:`
+#     filter buttons in the /crews sub-bar. Today's sub-bar has `+ Crew`,
+#     `+ Agent` and a search box, and no such filters.
+#   * `crew-privilege-controls.spec.ts` (0/6) and `crew-provisioning.spec.ts`
+#     (0/1) both locate the crew explorer as `aside button`. The explorer now
+#     renders inside `main`, so every test dies in its shared setup.
+#   * `connectors.spec.ts` (3/10) drives the legacy MCP "Add Connector"
+#     catalog on /integrations, which now sits behind
+#     `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` (default off) — the buttons it
+#     clicks are not rendered in a stock build at all.
+#   * `a11y.spec.ts` (1/8) reports live WCAG failures. Its own header says the
+#     historic violations were fixed; with nothing running the scan, they came
+#     back.
+#   * the seven specs in the main config's own `testIgnore` list
+#     (`smoke`, `manual-crews-walkthrough`, `crews-unification`,
+#     `full-integration`, `edge-cases`, `visual`, `mobile-crews`) walk the
+#     `/crews/agents/[id]/*` and `/crews/new` route trees that the
+#     selection-driven canvas deleted. They are ignored *because* they 404.
+#
+# So "turn the whole suite on and hard-fail" would produce a nightly that is
+# red every night for reasons that are true but not new — the exact failure
+# mode that got the suite ignored in the first place. Instead:
+#
+#   e2e-gate   the specs verified green against a seeded instance. HARD FAIL.
+#              A regression here is a real regression.
+#   e2e-drift  everything else, INCLUDING the main config's testIgnore list.
+#              Never fails the workflow; instead it files/refreshes ONE
+#              tracking issue naming the stale specs with their failure
+#              counts, so the rot has an owner and a thread instead of a
+#              `testIgnore` entry nobody reads.
+#
+# When a drift spec is repaired, move it from DRIFT_SPECS to GATE_SPECS and it
+# becomes a gate with no other change.
+#
+# NEXT STEP once this has run in CI once (deliberately not guessed here)
+# ---------------------------------------------------------------------
+# The numbers above were measured on a macOS dev box with no Docker daemon and
+# no provider credential. A GitHub runner has Docker, so a handful of counts
+# may differ. Take the per-spec table from the first real nightly (it is in the
+# job summary and in the tracking issue body) and turn the drift bucket into a
+# RATCHET: commit those counts as a baseline and fail the drift job when any
+# spec's failure count goes UP. That makes all ~140 currently-dead tests
+# protective immediately, without waiting for anyone to rewrite them. It is
+# left out of this PR on purpose — a baseline guessed from a different platform
+# would red the first night for the wrong reason, which is the failure mode
+# this whole workflow exists to stop.
+#
+# NOT run, and why
+# ----------------
+#   visual.spec.ts            every baseline in e2e/visual.spec.ts-snapshots is
+#                             named `*-chromium-darwin.png`. Playwright resolves
+#                             snapshots per platform, so on ubuntu-latest it
+#                             looks for `*-chromium-linux.png`, finds nothing,
+#                             and fails with "snapshot missing" — a red square
+#                             that says nothing about the UI. Three of its five
+#                             surfaces (agent-overview, agent-settings-runtime,
+#                             new-agent) are also on the deleted
+#                             /crews/agents/[id]/* routes. Committing Linux
+#                             baselines for surfaces that no longer exist would
+#                             be pinning the wrong picture; regenerating them
+#                             belongs to whoever rewrites the spec.
+#   onboarding-wizard.spec.ts owned by e2e-devcontainer.yml + the fresh config.
+#                             It needs a NEVER-bootstrapped DB, which is the
+#                             opposite of this workflow's seeded instance.
+#
+# a11y.spec.ts DOES run here. `e2e-devcontainer.yml` carries a TODO(a11y-ci)
+# saying it is blocked on three things: the real UI in the embed dir, an
+# onboarded + seeded workspace, and E2E_EMAIL/E2E_PASSWORD for globalSetup.
+# This workflow supplies all three, so the axe wcag2a+wcag2aa scan of the six
+# dashboard surfaces is wired in — see whichever bucket it sits in below.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # 03:50 UTC — after e2e-devcontainer (02:30) and nightly-harness (03:10),
+    # so the three heavy nightlies do not contend for runners.
+    - cron: "50 3 * * *"
+
+concurrency:
+  group: nightly-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.5"
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10"
+  # ── The buckets. Keep them in sync with the coverage guard below. ──
+  #
+  # GATE: verified green against a freshly seeded instance. Hard-fails the
+  # nightly. This list is SHORT on purpose — see the measured numbers under
+  # DRIFT. A one-spec gate that is true beats a seven-spec gate that is red
+  # every night for reasons nobody will read.
+  GATE_SPECS: >-
+    e2e/create-crew-wizard.spec.ts
+  #
+  # DRIFT: run, reported, never fatal. Measured locally against a seeded
+  # instance (main config, per spec: passed / failed):
+  #
+  #   create-crew-wizard          7 /  0   ← the whole gate bucket
+  #   feedback                    4 /  2
+  #   crews-redesign              5 / 11
+  #   crew-journal                3 /  1
+  #   connectors                  3 / 10
+  #   feedback-ui                 1 /  1
+  #   a11y                        1 /  8
+  #   crew-privilege-controls     0 /  6
+  #   crew-provisioning           0 /  1
+  #   crews-real-workflow         0 / 12
+  #                              ──────────
+  #                              24 / 52   of the 78 the main config runs
+  #
+  # plus crews-unification / edge-cases / full-integration /
+  # manual-crews-walkthrough / mobile-crews / smoke, which the main config
+  # does not even attempt (its `testIgnore`) because they walk deleted routes.
+  #
+  # a11y.spec.ts sits here, not in the gate, and that is a finding rather than
+  # a shortcut: its own header documents that every historic violation was
+  # fixed, and the scan now reports live aria-command-name, button-name,
+  # aria-allowed-attr, link-in-text-block and color-contrast failures on
+  # /crews, /routines, /credentials, /settings, /admin and the chat surface.
+  # Nothing has been running it, so the fixes silently regressed. The tracking
+  # issue this job files is where that gets an owner.
+  DRIFT_SPECS: >-
+    e2e/a11y.spec.ts
+    e2e/connectors.spec.ts
+    e2e/crew-journal.spec.ts
+    e2e/crew-privilege-controls.spec.ts
+    e2e/crew-provisioning.spec.ts
+    e2e/crews-real-workflow.spec.ts
+    e2e/crews-redesign.spec.ts
+    e2e/crews-unification.spec.ts
+    e2e/edge-cases.spec.ts
+    e2e/feedback.spec.ts
+    e2e/feedback-ui.spec.ts
+    e2e/full-integration.spec.ts
+    e2e/manual-crews-walkthrough.spec.ts
+    e2e/mobile-crews.spec.ts
+    e2e/smoke.spec.ts
+  # EXCLUDED: deliberately run by nobody here — see the header for each.
+  EXCLUDED_SPECS: >-
+    e2e/visual.spec.ts
+    e2e/onboarding-wizard.spec.ts
+
+jobs:
+  # ── Guard: no spec may silently belong to no bucket ──
+  coverage-guard:
+    name: Every spec is in a bucket
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert GATE + DRIFT + EXCLUDED covers e2e/*.spec.ts
+        # Without this, adding e2e/new-thing.spec.ts means it runs in the PR
+        # suite and in neither nightly bucket — i.e. it silently loses its
+        # nightly coverage, which is the failure mode this whole workflow
+        # exists to end. Fails loudly and names the offenders.
+        run: |
+          set -euo pipefail
+          declared=$(printf '%s\n%s\n%s\n' "$GATE_SPECS" "$DRIFT_SPECS" "$EXCLUDED_SPECS" \
+            | tr ' ' '\n' | sed 's/[[:space:]]//g' | grep -v '^$' | sort -u)
+          actual=$(find e2e -maxdepth 1 -name '*.spec.ts' | sort -u)
+          missing=$(comm -13 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual") || true)
+          phantom=$(comm -23 <(printf '%s\n' "$declared") <(printf '%s\n' "$actual") || true)
+          rc=0
+          if [ -n "$missing" ]; then
+            echo "::error::spec(s) in no nightly bucket — add to GATE_SPECS or DRIFT_SPECS (or EXCLUDED_SPECS with a reason in the header):"
+            printf '%s\n' "$missing" | sed 's/^/  /'
+            rc=1
+          fi
+          if [ -n "$phantom" ]; then
+            echo "::error::bucket names a spec that does not exist (renamed or deleted?):"
+            printf '%s\n' "$phantom" | sed 's/^/  /'
+            rc=1
+          fi
+          if [ "$rc" -eq 0 ]; then
+            echo "All $(printf '%s\n' "$actual" | wc -l | tr -d ' ') specs are accounted for."
+          fi
+          exit "$rc"
+
+  # ── Hard gate ──
+  e2e-gate:
+    name: E2E gate (verified specs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Build web UI into the embed dir
+        # A bare checkout carries only web/out/.placeholder.html, which lets
+        # `go:embed` compile (#1567) but makes every UI route answer 503:
+        # globalSetup's CSRF fetch would have nothing to talk to and every
+        # spec would die in setup. Export the real UI before the binary is
+        # compiled — same two steps as `make build`, and the same thing the
+        # onboarding job does.
+        run: |
+          set -euo pipefail
+          pnpm build
+          ./scripts/embed-web-out.sh sync
+
+      - name: Build CLI
+        run: go build -o crewship ./cmd/crewship
+
+      - name: Generate ephemeral instance secrets
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Playwright browsers
+        # --with-deps pulls the apt packages chromium needs on the hosted
+        # runner; without it the headless launch dies on .so lookups.
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start crewship server in background
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship.log 2>&1 &
+          echo $! > /tmp/crewship.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::server failed to start"
+          cat /tmp/crewship.log >&2
+          exit 1
+
+      - name: Seed the workspace
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        # FULL seed (no --skip-issues, unlike the harness jobs): the browser
+        # specs walk /issues, /missions/[id]/timeline and the journal surfaces,
+        # which only exist once issues/projects/missions are seeded. The
+        # measured pass/fail numbers in the env block above were taken against
+        # exactly this seed.
+        #
+        # Retried: crew creation validates each runtime_image against
+        # mcr.microsoft.com and a cold first call reproducibly exceeds the
+        # CLI's client timeout. Locally this took 3 attempts from cold.
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "--- seed attempt $attempt ---"
+            if ./crewship seed --server "$CREWSHIP_SERVER"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::seed failed after 3 attempts"
+          tail -100 /tmp/crewship.log >&2
+          exit 1
+
+      - name: Run gate specs
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+          # globalSetup throws without these; they are the documented dev-seed
+          # credentials `crewship seed` just created on this ephemeral DB.
+          E2E_EMAIL: demo@crewship.ai
+          E2E_PASSWORD: password123
+          CREWSHIP_INSTANCE_ID: nightly-e2e-gate
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086 # word-splitting the spec list is intended
+          pnpm exec playwright test --config=playwright.nightly.config.ts $GATE_SPECS
+
+      - name: Upload Playwright artifacts
+        # if: always() — a nightly nobody watched is undiagnosable without the
+        # report, the traces and the failure screenshots.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-nightly-gate
+          path: |
+            playwright-report/
+            playwright-nightly-report.json
+            test-results/
+          retention-days: 14
+
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+
+  # ── Drift report: run the stale specs, never fail on them ──
+  e2e-drift:
+    name: E2E drift report (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Build web UI into the embed dir
+        run: |
+          set -euo pipefail
+          pnpm build
+          ./scripts/embed-web-out.sh sync
+
+      - name: Build CLI
+        run: go build -o crewship ./cmd/crewship
+
+      - name: Generate ephemeral instance secrets
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start crewship server in background
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship.log 2>&1 &
+          echo $! > /tmp/crewship.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::server failed to start"
+          cat /tmp/crewship.log >&2
+          exit 1
+
+      - name: Seed the workspace
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "--- seed attempt $attempt ---"
+            if ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::seed failed after 3 attempts"
+          tail -100 /tmp/crewship.log >&2
+          exit 1
+
+      - name: Run drift specs
+        id: drift
+        # NOT continue-on-error on the job: that paints the square green-with-
+        # a-warning and the whole point is that these results are read, not
+        # ignored. The step swallows the exit code explicitly and hands the
+        # JSON report to the reporting step below.
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+          E2E_EMAIL: demo@crewship.ai
+          E2E_PASSWORD: password123
+          CREWSHIP_INSTANCE_ID: nightly-e2e-drift
+        run: |
+          set -uo pipefail
+          # --retries=0 overrides the config's 1: a spec that asserts a button
+          # which no longer exists does not become less broken on a second
+          # attempt, it just doubles a 15s timeout. The GATE job keeps its
+          # retry, where absorbing an ordinary flake is worth the minutes.
+          # shellcheck disable=SC2086 # word-splitting the spec list is intended
+          pnpm exec playwright test --config=playwright.nightly.config.ts \
+            --retries=0 $DRIFT_SPECS \
+            || echo "drift run exited non-zero (expected — these specs are known stale)"
+          exit 0
+
+      - name: Summarise drift and refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MARKER: "<!-- crewship:e2e-drift-report -->"
+          TITLE: "E2E specs drifted from the shipped UI (tracking)"
+        # Same containment contract as security.yml's scheduled-report: only an
+        # issue this job filed (bot author + our exact title or body marker) is
+        # ever commented on or closed, and a clean run closes it. One issue,
+        # refreshed nightly — never a new issue per run.
+        run: |
+          set -euo pipefail
+
+          report=playwright-nightly-report.json
+          if [ ! -f "$report" ]; then
+            echo "::error::no JSON report at $report — the drift run did not produce one, so this job cannot report a clean OR a dirty state."
+            exit 1
+          fi
+
+          # Per-spec failed/passed counts, markdown rows straight out of jq.
+          # `specs[]` is flattened because suites nest by file then describe.
+          summary=$(jq -r '
+            [ .suites[]? | .. | objects | select(has("tests") and has("title"))
+              | {file: (.file // "?"), ok: ([.tests[]?.status] | map(select(. == "expected")) | length),
+                 bad: ([.tests[]?.status] | map(select(. != "expected" and . != "skipped")) | length)} ]
+            | group_by(.file) | map({file: .[0].file,
+                                     ok: (map(.ok) | add),
+                                     bad: (map(.bad) | add)})
+            | sort_by(-.bad)
+            | .[] | "| `\(.file)` | \(.bad) | \(.ok) |"
+          ' "$report")
+          total_bad=$(jq '[ .suites[]? | .. | objects | select(has("tests"))
+                            | .tests[]?.status ] | map(select(. != "expected" and . != "skipped")) | length' "$report")
+          echo "drifted tests: ${total_bad}"
+
+          # Also land the table in the job summary. This is the input for the
+          # ratchet described in the workflow header — copy it from the first
+          # real nightly rather than guessing a baseline.
+          {
+            echo "## E2E drift bucket"
+            echo
+            echo "| spec | failing | passing |"
+            echo "|------|--------:|--------:|"
+            echo "$summary"
+            echo
+            echo "**${total_bad}** failing test(s)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          label="e2e-drift"
+          gh label create "$label" --repo "$REPO" \
+            --color FBCA04 \
+            --description "Automated: e2e specs failing against the shipped UI" \
+            --force
+
+          existing=$(gh issue list --repo "$REPO" --label "$label" \
+            --state open --json number,title,body,author \
+            --jq "[ .[]
+                    | select(.author.is_bot)
+                    | select(.title == \$ENV.TITLE
+                             or (.body // \"\" | contains(\$ENV.MARKER)))
+                  ] | .[0].number // empty")
+
+          if [ "$total_bad" -eq 0 ]; then
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" \
+                --body "✅ Every spec in the nightly DRIFT bucket passed as of $RUN_URL. Promote them to \`GATE_SPECS\` in \`.github/workflows/nightly-e2e.yml\` so they start hard-failing, then this issue can stay closed. Closing."
+              gh issue close "$existing" --repo "$REPO" --reason completed
+            else
+              echo "Drift bucket fully green and no tracking issue — nothing to do."
+            fi
+            exit 0
+          fi
+
+          body="$MARKER
+          **${total_bad}** test(s) in the nightly E2E *drift* bucket fail against the shipped UI. The application is up and seeded in that job — these are specs asserting surfaces that moved, were renamed, or now sit behind a feature flag.
+
+          | spec | failing | passing |
+          |------|--------:|--------:|
+          ${summary}
+
+          Run (traces, screenshots, HTML report attached): $RUN_URL
+
+          These specs are **not** gating anything: \`nightly-e2e.yml\` runs them non-blocking precisely so the rot is visible instead of hiding in \`playwright.config.ts\`'s \`testIgnore\`. Fixing one means updating its selectors against the current UI and moving it from \`DRIFT_SPECS\` to \`GATE_SPECS\` — from then on it hard-fails.
+
+          Known root causes at the time this job was added (24 of 78 main-config tests passed against a healthy seeded instance):
+          - the /crews selection-driven canvas deleted \`/crews/agents/[id]/*\` and \`/crews/new\`; the specs in the old \`testIgnore\` list still walk them
+          - \`/crews\` no longer has \`Status:\` / \`Role:\` filter buttons (\`crews-redesign\`)
+          - the crew explorer moved out of \`aside\` into \`main\`, so \`crew-privilege-controls\` and \`crew-provisioning\` die in shared setup
+          - the legacy MCP connector catalog on \`/integrations\` is behind \`NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS\` (default off) (\`connectors\`)
+          - \`a11y.spec.ts\` reports **live** wcag2a/wcag2aa violations (aria-command-name, button-name, aria-allowed-attr, link-in-text-block, color-contrast) on /crews, /routines, /credentials, /settings, /admin and chat. Its header documents these as fixed; nothing was running the scan, so they regressed. This one is a product bug, not a stale selector.
+          - \`POST /api/v1/feedback\` answers 404 for \`feedback\` / \`feedback-ui\` against a real seeded daemon even though the route is registered — worth its own look
+
+          This issue is refreshed by every nightly run and auto-closes when the whole drift bucket is green."
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated drift tracking issue #$existing"
+          else
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label "$label" \
+              --body "$body"
+          fi
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-nightly-drift
+          path: |
+            playwright-report/
+            playwright-nightly-report.json
+            test-results/
+          retention-days: 14
+
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+
+  # ── A nightly nobody notices is worth nothing ──
+  e2e-alert:
+    name: Nightly E2E alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [coverage-guard, e2e-gate, e2e-drift]
+    if: always() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: File, update, or close the alert issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MARKER: "<!-- crewship:nightly-e2e-alert -->"
+          TITLE: "Nightly E2E failed on main"
+          # One line per job for the green gate below. e2e-drift is included
+          # because the JOB failing means the harness around it broke (server
+          # never came up, report never written) — the stale SPECS inside it
+          # cannot fail the job by construction.
+          RESULTS: |
+            coverage-guard=${{ needs.coverage-guard.result }}
+            e2e-gate=${{ needs.e2e-gate.result }}
+            e2e-drift=${{ needs.e2e-drift.result }}
+        run: |
+          set -euo pipefail
+          # Fail SAFE: enumerate the GOOD status only. `skipped`, `cancelled`,
+          # `timed_out` all mean the gate did not run, which is not a pass —
+          # the security.yml lesson, where filtering for bad statuses let a
+          # skipped job close the tracking issue.
+          # gate:begin
+          results_clean=$(printf '%s\n' "$RESULTS" \
+            | sed 's/[[:space:]]*$//' \
+            | grep -v '^$' || true)
+          not_green=$(printf '%s\n' "$results_clean" \
+            | grep -vE '=success$' || true)
+          if [ -z "$results_clean" ]; then
+            not_green="(no job results were reported — the RESULTS block was empty)"
+          fi
+          # gate:end
+
+          gh label create nightly-e2e-alert --repo "$REPO" \
+            --color B60205 \
+            --description "Automated: nightly Playwright E2E failed on main" \
+            --force
+
+          existing=$(gh issue list --repo "$REPO" --label nightly-e2e-alert \
+            --state open --json number,title,body,author \
+            --jq "[ .[]
+                    | select(.author.is_bot)
+                    | select(.title == \$ENV.TITLE
+                             or (.body // \"\" | contains(\$ENV.MARKER)))
+                  ] | .[0].number // empty")
+
+          if [ -z "$not_green" ]; then
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" \
+                --body "✅ The nightly E2E gate is green again as of $RUN_URL. Closing."
+              gh issue close "$existing" --repo "$REPO" --reason completed
+              echo "Closed alert issue #$existing (E2E green)."
+            else
+              echo "E2E green and no alert issue — nothing to do."
+            fi
+            exit 0
+          fi
+
+          echo "Jobs that did not report success:"; echo "$not_green"
+          body="$MARKER
+          The nightly Playwright E2E run on \`main\` did not complete successfully.
+
+          Jobs below did not report \`success\` — a \`skipped\` or \`cancelled\` job means the gate never ran, which is **not** a green result:
+
+          \`\`\`
+          $not_green
+          \`\`\`
+
+          Run: $RUN_URL
+
+          - **e2e-gate** red = a real regression in a spec that was verified green. Download the \`playwright-nightly-gate\` artifact for the HTML report, traces and failure screenshots.
+          - **coverage-guard** red = a spec was added or renamed and now belongs to no nightly bucket. Add it to \`GATE_SPECS\` or \`DRIFT_SPECS\` in this workflow.
+          - **e2e-drift** red = the drift job's own scaffolding broke (server never came up, JSON report never written). The stale specs it runs cannot fail it; they are reported into the separate \`e2e-drift\` tracking issue.
+
+          This issue auto-closes when the nightly is green again."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated existing alert issue #$existing"
+          else
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label nightly-e2e-alert \
+              --body "$body"
+          fi

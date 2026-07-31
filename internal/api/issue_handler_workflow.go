@@ -84,11 +84,27 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		ub.Set("status", "TODO")
 
 		if req.ReassignTo != nil && *req.ReassignTo != "" {
-			// Resolve agent slug to ID
+			// Resolve agent slug to ID, scoped to this workspace.
+			//
+			// agents.slug is only UNIQUE(workspace_id, slug) (v01 schema), not
+			// globally unique, so a lookup without "AND workspace_id = ?" was a
+			// TWO-part bug, found by assignee_write_invariant_test.go (the 7th
+			// unguarded assignee_id write — #1532/#1541 covers the other 6):
+			//   - correctness: with LIMIT 1 and no workspace filter, two
+			//     workspaces that happen to both have an agent slugged "alex"
+			//     race on which one a plain, non-adversarial reassign hits —
+			//     nondeterministic cross-tenant assignment with no attacker
+			//     involved at all.
+			//   - security: an attacker only needs to guess a live agent slug
+			//     ("alex", "qa", "reviewer" — far cheaper than guessing a CUID)
+			//     in ANY workspace to reassign a REVIEW issue to it.
+			// Filtering by workspace_id fixes both in the same line: the
+			// UNIQUE(workspace_id, slug) constraint then makes the match
+			// unique, and it can no longer resolve outside wsID.
 			var agentID string
 			err := h.db.QueryRowContext(r.Context(),
-				`SELECT id FROM agents WHERE slug = ? AND deleted_at IS NULL LIMIT 1`,
-				*req.ReassignTo).Scan(&agentID)
+				`SELECT id FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL LIMIT 1`,
+				*req.ReassignTo, wsID).Scan(&agentID)
 			if err == nil {
 				ub.Set("assignee_type", "agent")
 				ub.Set("assignee_id", agentID)

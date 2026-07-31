@@ -87,7 +87,15 @@ export function subjectOf(item: InboxItem): Actor {
   if (item.sender_type === "crew" && item.sender_name) {
     return { kind: "crew", id: item.sender_name, label: item.sender_name }
   }
-  return { kind: "system", id: item.sender_name ?? "system", label: item.sender_name ?? "system" }
+  // seed carries the sender SLUG so the avatar can recognise Keeper without
+  // depending on the display name (see isKeeper in inbox-actor). The facet id
+  // stays the name, which is what the filter menu shows and groups by.
+  return {
+    kind: "system",
+    id: item.sender_name ?? "system",
+    label: item.sender_name ?? "system",
+    seed: item.sender_id,
+  }
 }
 
 /** The human who closed it — archive only. */

@@ -38,6 +38,34 @@ describe("ActorAvatar", () => {
     }
   })
 
+  // #1530 gave Keeper its own mark in the shipped inbox: it is the security
+  // gatekeeper, it wears a shield everywhere else in the product, and a cog made
+  // its notices look like a settings change. That rule lived in the file this
+  // release replaced, so it gets a test here — a rewrite is exactly how a
+  // shipped detail goes missing.
+  it("marks Keeper apart from the rest of the system senders", () => {
+    const keeper = render(<ActorAvatar actor={{ kind: "system", id: "keeper", label: "Keeper", seed: "keeper" }} />)
+    const keeperTile = keeper.container.firstElementChild as HTMLElement
+    expect(keeperTile.className).toContain("text-success")
+
+    const plain = render(<ActorAvatar actor={{ kind: "system", id: "consolidator", label: "consolidator" }} />)
+    const plainTile = plain.container.firstElementChild as HTMLElement
+    expect(plainTile.className).not.toContain("text-success")
+    // Same fixed tone in every workspace — Keeper looking like a different
+    // colour somewhere else is the opposite of recognisable.
+    expect(keeperTile.querySelector("svg")).not.toEqual(plainTile.querySelector("svg"))
+  })
+
+  it("recognises Keeper's sub-senders too, not only the bare slug", () => {
+    // keeper_skill_review, keeper_behavior, keeper_memory_health … are all
+    // Keeper writing; #1530 matched only the exact "keeper" and left the rest
+    // wearing the generic mark.
+    const { container } = render(
+      <ActorAvatar actor={{ kind: "system", id: "keeper_skill_review", label: "Keeper", seed: "keeper_skill_review" }} />,
+    )
+    expect((container.firstElementChild as HTMLElement).className).toContain("text-success")
+  })
+
   it("scales to the three sizes the surface uses", () => {
     for (const [size, cls] of [[20, "h-5"], [24, "h-6"], [32, "h-8"]] as const) {
       const { container, unmount } = render(<ActorAvatar actor={{ kind: "user", id: "p", label: "p" }} size={size} />)

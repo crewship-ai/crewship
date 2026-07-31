@@ -176,7 +176,7 @@ func (e *NegativeLearningEvaluator) Evaluate(ctx context.Context, req NegativeLe
 	// A fallback DENY (LLM unreachable / unparseable) must not silently
 	// drop a potentially valuable lesson.
 	if resp.Decision == string(keeper.DecisionDeny) &&
-		(isLLMFailureDeny(resp.Reason) || isUnknownDecisionInRaw(resp.RawLLMResponse)) {
+		(infraFailed(resp) || isUnknownDecisionInRaw(resp.RawLLMResponse)) {
 		out.Decision = keeper.DecisionEscalate
 		out.Reason = "Negative Curator unavailable or unparseable — operator review (underlying: " + resp.Reason + ")"
 		return out, nil

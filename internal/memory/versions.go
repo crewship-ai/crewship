@@ -160,8 +160,8 @@ func RecordVersion(ctx context.Context, db *sql.DB, rec VersionRecord) (*RecordR
 // path does not already exist. Returns (reused=true, nil) when the
 // blob was already on disk. Concurrent callers racing on the same
 // sha both succeed: one wins the rename, the other's tempfile is
-// dropped via os.IsExist on Rename retry semantics, but because we
-// use Stat-then-skip first the second caller usually short-circuits
+// dropped by writeFileDurable's own cleanup, but because we use
+// Stat-then-skip first the second caller usually short-circuits
 // before any I/O.
 func writeBlobIfMissing(blobPath string, content []byte) (bool, error) {
 	if _, err := os.Stat(blobPath); err == nil {
@@ -170,16 +170,11 @@ func writeBlobIfMissing(blobPath string, content []byte) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
 		return false, err
 	}
-	// Atomic write: tempfile in same dir → rename. Same pattern as
-	// WriteFile's canonical-write path; the lock isn't needed here
+	// writeFileDurable already does tempfile-in-same-dir + fsync +
+	// atomic rename + parent-dir fsync; the lock isn't needed here
 	// because the on-disk path is content-addressed (two writers with
 	// the same sha can race; the rename is the synchronisation point).
-	tmpPath := blobPath + ".tmp"
-	if err := os.WriteFile(tmpPath, content, 0o644); err != nil {
-		return false, err
-	}
-	if err := os.Rename(tmpPath, blobPath); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := writeFileDurable(blobPath, content, 0o644); err != nil {
 		// Rename can fail benignly if another goroutine got there
 		// first; re-check existence to decide whether to surface.
 		if _, statErr := os.Stat(blobPath); statErr == nil {
@@ -324,20 +319,14 @@ func Restore(
 // writer to canonicalPath at this point in the lifecycle (operator
 // command, not a background goroutine), and reusing WriteFile would
 // pull in scrubber+cap policy that defeats the "restore historical
-// content" intent.
+// content" intent. Durability (fsync + atomic rename + parent-dir
+// fsync) is delegated to writeFileDurable so a crash mid-restore
+// can't leave canonicalPath truncated or half-written.
 func atomicRestoreWrite(canonicalPath string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
 		return err
 	}
-	tmp := canonicalPath + ".restore.tmp"
-	if err := os.WriteFile(tmp, content, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, canonicalPath); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return writeFileDurable(canonicalPath, content, 0o644)
 }
 
 // ErrVersionNotFound is returned by ReadVersion when (workspaceID,

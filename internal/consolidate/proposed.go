@@ -76,7 +76,7 @@ func (c *Consolidator) writeProposal(
 	}
 	defer func() { _ = lk.Unlock() }()
 
-	if err := os.WriteFile(proposalPath, []byte(body), 0o644); err != nil {
+	if err := memory.WriteFileDurable(proposalPath, []byte(body), 0o644); err != nil {
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("write proposal: %w", err)
 	}
 

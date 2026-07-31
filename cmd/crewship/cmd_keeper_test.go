@@ -58,6 +58,12 @@ type keeperMock struct {
 	systemHits int
 	govGets    int
 	putBody    []byte
+
+	// Instance judge configuration (GET/PUT/DELETE /admin/keeper/config).
+	// cfgBody / cfgDeletes record what `keeper config set|reset` sent.
+	cfg        map[string]any
+	cfgBody    []byte
+	cfgDeletes int
 }
 
 func newKeeperMock(t *testing.T) *keeperMock {
@@ -70,6 +76,15 @@ func newKeeperMock(t *testing.T) *keeperMock {
 			"deny_notify_min_risk":     4,
 			"watch_spec":               "",
 			"watch_presets":            []any{"credentials"},
+		},
+		cfg: map[string]any{
+			"enabled":            map[string]any{"value": false, "source": "env", "editable": true},
+			"judge_provider":     map[string]any{"value": "ollama", "source": "default", "editable": false},
+			"judge_endpoint_url": map[string]any{"value": "http://ollama:11434", "source": "env", "editable": true},
+			"judge_wire":         map[string]any{"value": "ollama", "source": "default", "editable": false},
+			"judge_model":        map[string]any{"value": "qwen3:8b", "source": "env", "editable": true},
+			"overridden":         false,
+			"judge_configured":   true,
 		},
 		members: []map[string]any{
 			{"id": "wm-1", "user_id": "u-admin", "role": "ADMIN",
@@ -107,6 +122,21 @@ func (m *keeperMock) handler() http.Handler {
 			_ = json.Unmarshal(b, &body)
 			body["configured"] = true
 			_ = json.NewEncoder(w).Encode(body)
+		case r.URL.Path == "/api/v1/admin/keeper/config":
+			m.mu.Lock()
+			switch r.Method {
+			case http.MethodPut:
+				b, _ := io.ReadAll(r.Body)
+				m.cfgBody = b
+			case http.MethodDelete:
+				m.cfgDeletes++
+			}
+			cfg := m.cfg
+			m.mu.Unlock()
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusOK)
+			}
+			_ = json.NewEncoder(w).Encode(cfg)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/members"):
 			m.mu.Lock()
 			members := m.members

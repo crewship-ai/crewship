@@ -163,7 +163,7 @@ func (e *MemoryHealthEvaluator) Evaluate(ctx context.Context, req MemoryHealthRe
 	// DENY, ESCALATE wins when ContradictionCount > 0 so the
 	// consolidator can't destroy the evidence by collapsing rows.
 	if resp.Decision == string(keeper.DecisionDeny) &&
-		(isLLMFailureDeny(resp.Reason) || isUnknownDecisionInRaw(resp.RawLLMResponse)) {
+		(infraFailed(resp) || isUnknownDecisionInRaw(resp.RawLLMResponse)) {
 		out.Decision = keeper.DecisionEscalate
 		out.Reason = "MemoryHealth Curator unavailable or unparseable — operator review (underlying: " + resp.Reason + ")"
 		return out, nil

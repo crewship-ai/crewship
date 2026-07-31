@@ -195,6 +195,57 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
         </Button>
       </div>
 
+      {/* ── Counts first ──
+          The four counters are rendered even when they are all zero, and a zero
+          is the answer to a real question: these evaluators are not on-demand.
+          Without this the page opened on an empty tab with no way to tell "not
+          running" from "running and finding nothing". */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        {SUBTABS.map((tab) => {
+          const Icon = tab.icon
+          const count = byType[tab.key].length
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActive(tab.key)}
+              data-testid={`keeper-review-count-${tab.key}`}
+              className={cn(
+                "rounded-xl border bg-card px-3.5 py-3 text-left transition-colors",
+                tab.key === active
+                  ? "border-success/40"
+                  : "border-border/60 hover:border-border",
+              )}
+            >
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <Icon className="h-3 w-3" />
+                <span className="truncate">{tab.label}</span>
+              </div>
+              <div className="mt-1 text-xl font-semibold tabular-nums leading-none">{count}</div>
+              <div className="mt-1 text-[10px] text-muted-foreground">
+                {count === 0 ? "no entries" : count === 1 ? "entry" : "entries"} · {tab.prdRef}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Why an empty page is not necessarily a broken one. Both halves matter:
+          these run on a schedule rather than on demand, and they run on the
+          PAID aux models — an operator deciding whether to switch the watchdog
+          on is deciding to spend. */}
+      {entries.length === 0 && !loading && !err && (
+        <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Nothing recorded yet. These evaluators are not on-demand: behaviour reviews are sampled
+            from agent tool calls while the workspace <span className="text-foreground/80">watchdog</span> is
+            on (Admin → Keeper → Watchdog), and the skill / memory-health / negative-learning sweeps
+            run on their daily schedule. They use the instance&apos;s auxiliary models, which are
+            billed per token — unlike the local credential-access judge, which is free.
+          </p>
+        </div>
+      )}
+
       {/* ── Sub-tabs ──
           Keyboard nav per WAI-ARIA tabs pattern:
             ArrowLeft / ArrowRight cycle tabs

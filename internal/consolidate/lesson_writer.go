@@ -332,10 +332,11 @@ func loadLessonsLocked(ctx context.Context, path string) (lessonFile, error) {
 	return f, nil
 }
 
-// saveLessonsLocked writes the file atomically (write to temp +
-// rename). Caller must hold the flock. ctx is checked once at entry
-// — the marshal+rename is fast enough that finer-grained cancellation
-// would only add noise.
+// saveLessonsLocked writes the file atomically and durably via
+// memory.WriteFileDurable (write to temp + fsync + rename + fsync
+// parent dir). Caller must hold the flock. ctx is checked once at
+// entry — the marshal+write is fast enough that finer-grained
+// cancellation would only add noise.
 func saveLessonsLocked(ctx context.Context, path string, f lessonFile) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("lesson: save cancelled: %w", err)
@@ -352,13 +353,8 @@ func saveLessonsLocked(ctx context.Context, path string, f lessonFile) error {
 		"# Kind: positive (worth repeating) | negative (avoid) | neutral (factual).\n\n"
 	out := append([]byte(header), data...)
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o644); err != nil {
-		return fmt.Errorf("lesson: write %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("lesson: rename %s → %s: %w", tmp, path, err)
+	if err := memory.WriteFileDurable(path, out, 0o644); err != nil {
+		return fmt.Errorf("lesson: write %s: %w", path, err)
 	}
 	return nil
 }

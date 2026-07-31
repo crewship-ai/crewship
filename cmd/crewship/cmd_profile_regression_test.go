@@ -10,6 +10,7 @@ import (
 // `current` (or directory-bound) profile active, must write the token INTO that
 // profile — where reads look — not the top-level slot the overlay then masks.
 func TestLogin_NoFlag_WritesToActiveProfile(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	t.Setenv("CREWSHIP_PROFILE", "")
 	old := flagProfile
@@ -110,6 +111,7 @@ func TestMaskedToken(t *testing.T) {
 // profile must persist to the profile, not the top-level field the overlay
 // shadows on the next read.
 func TestConfigSet_UnderProfile_WritesToProfile(t *testing.T) {
+	guardCLIState(t)
 	path := redirectConfigHome(t)
 	t.Setenv("CREWSHIP_PROFILE", "")
 	old := flagProfile

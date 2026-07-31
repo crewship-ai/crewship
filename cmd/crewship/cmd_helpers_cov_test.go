@@ -26,6 +26,7 @@ const covWorkspaceIDCli10 = "cws1234567890abcdefghij"
 // parallel-safe by design — cmd/crewship tests mutate globals.
 func covSetupCli10(t *testing.T, serverURL string) {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	origFormat := flagFormat
 	t.Cleanup(func() { flagFormat = origFormat })
@@ -46,6 +47,7 @@ func covSetupCli10(t *testing.T, serverURL string) {
 // state at test end so global command vars don't leak across tests.
 func setFlagCovCli10(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
+	guardCLIState(t)
 	fl := cmd.Flags().Lookup(name)
 	if fl == nil {
 		t.Fatalf("flag --%s not found on %s", name, cmd.Name())
@@ -65,6 +67,7 @@ func setFlagCovCli10(t *testing.T, cmd *cobra.Command, name, value string) {
 // returns whatever was printed plus fn's error.
 func captureStdoutCovCli10(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

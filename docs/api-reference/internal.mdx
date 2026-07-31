@@ -108,6 +108,8 @@ Workspace / crew / agent / mission scope is **not** taken from request bodies in
 
 Before the token compare, a **network-origin gate** refuses `/api/v1/internal/*` from any peer that is not loopback or a private/RFC1918 range (Docker bridge, on-prem LAN), returning `404` so a public scanner can't even confirm the route exists. The intended boundary: only same-host processes and the sidecar (over the Docker bridge) reach this surface.
 
+**The whole prefix answers one 404 (#1501).** A request under `/api/v1/internal/` that the router would not dispatch gets the *same* `404 {"error":"Not Found"}` the origin gate returns — same body, same `Content-Type`, no `Allow` header — whether the path does not exist, or exists with a different method. `GET /api/v1/internal/keeper/request` (a `POST`-only route) is therefore **404, not 405**, for every caller including an authenticated one: the method check happens in `net/http`'s router, before any middleware could tell the two apart, so the only way to stop `405` from mapping the surface is to answer it uniformly. Build integration URLs from this page's method column rather than probing — a wrong method is indistinguishable from a wrong path by design. Path-cleaning redirects are likewise not served on this prefix: a non-canonical spelling that would clean onto an internal route — `//api/v1/internal/credentials`, `/api/v1//internal/credentials`, `/api/v1/./internal/credentials` — gets the same `404`, not the `307 Temporary Redirect` to the cleaned path that `net/http` would otherwise answer with. Send the canonical path; sidecars build theirs from constants.
+
 <Warning>
 **A public reverse proxy erases the origin gate.** If Caddy/nginx terminates public traffic and proxies `/api/v1/internal/*` to crewshipd, the *direct peer* crewshipd sees is the proxy (typically `127.0.0.1`), so every off-host request sails through the network gate and the shared `X-Internal-Token` becomes the only guard (#1020). **The real fix is to not expose the internal surface at all** — do one of:
 
@@ -244,7 +246,7 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `POST` | `/api/v1/internal/missions/{missionId}/start` | Transition mission to running. |
 | `GET` | `/api/v1/internal/issues` | List issues. |
 | `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
-| `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. |
+| `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. If `assignee_id` is set, `assignee_type` must be `user` or `agent` and the assignee must belong to `workspace_id` — otherwise `400` (`assignee_type must be 'user' or 'agent' when assignee_id is set` / `assignee_id does not exist in this workspace`). |
 | `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. |
 | `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. Requires `agent_id` — unattributed comments are rejected with `400`. |
 

@@ -174,7 +174,9 @@ Some older endpoints return a simpler format:
 | `402` | Payment Required -- license limit exceeded |
 | `403` | Forbidden -- insufficient role |
 | `404` | Not Found |
+| `405` | Method Not Allowed -- the path exists but not for this method; the `Allow` response header lists the ones it does support |
 | `409` | Conflict -- duplicate slug, relation already exists |
+| `429` | Too Many Requests -- per-IP rate limit; `Retry-After` and `X-RateLimit-*` say how long to back off |
 | `500` | Internal Server Error |
 
 ---
@@ -262,7 +264,7 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 | `GET /api/v1/system/license` | License status and limits |
 | `GET /api/v1/system/keeper` | Keeper (credential access control) status |
 | `GET /api/v1/crewshipd` | Crewshipd process health and status |
-| `GET /api/v1/system/aux-status` | Resolved auxiliary-model assignment per slot (provider, model, timeout, `explicit`/`fallback` source) |
+| `GET /api/v1/system/aux-status` | Auxiliary-model assignment per subsystem — `{"subsystems": […]}` with provider, model, timeout, `explicit`/`fallback`/`keeper_config` source, plus `healthy` (provider builds) and `reachable` (the model server answered; omitted when not probed) |
 
 ### Activity
 

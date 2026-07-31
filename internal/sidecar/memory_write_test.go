@@ -120,6 +120,27 @@ func TestHandleMemoryWrite_AbsolutePath_Blocked(t *testing.T) {
 	}
 }
 
+// TestHandleMemoryWrite_BackslashComponent_Blocked pins a deliberate behaviour
+// delta from collapsing internal/pathsafe into internal/safepath. The old
+// pathsafe.Join treated a backslash as an ordinary Linux filename byte, so this
+// request used to create a file literally named `a\b.md` inside the memory
+// tree. safepath.JoinRel validates every segment with ValidateComponent, which
+// refuses it — one component here is two on the other side of a Windows share
+// or an unpacked archive, and no memory file is ever legitimately named this.
+func TestHandleMemoryWrite_BackslashComponent_Blocked(t *testing.T) {
+	s, base := newWriteTestServer(t)
+	body, _ := json.Marshal(MemoryWriteRequest{File: `a\b.md`, Content: "x"})
+	req := httptest.NewRequest("POST", "http://localhost/memory/write", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	s.handleMemoryWrite(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rr.Code)
+	}
+	if _, err := os.Stat(filepath.Join(base, `a\b.md`)); !os.IsNotExist(err) {
+		t.Fatalf("backslash file should not exist, stat err = %v", err)
+	}
+}
+
 func TestHandleMemoryWrite_DailyLog(t *testing.T) {
 	s, base := newWriteTestServer(t)
 	body, _ := json.Marshal(MemoryWriteRequest{

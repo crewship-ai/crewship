@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -18,12 +19,21 @@ import (
 	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
-// llmCallTimeout caps how long we wait on the Keeper LLM provider before
-// failing closed (deny). Without a timeout, an unresponsive Ollama (the
-// default local provider) would block the keeper request goroutine
-// indefinitely — audit M4. 5s matches the budget operators expect for
-// a credential check; tune via SetLLMTimeout if a slower model is wired.
-const llmCallTimeout = 5 * time.Second
+// llmCallTimeout caps how long we wait on the Keeper LLM provider before failing
+// closed (deny). Without a timeout, an unresponsive Ollama (the default local
+// provider) would block the keeper request goroutine indefinitely — audit M4.
+//
+// This is the FALLBACK for a Gatekeeper constructed without WithCallTimeout
+// (tests, and any caller that has no configured budget). It is 20s rather than
+// the original 5s because 5s was only ever right for a 3B classifier: a 7B judge
+// on ordinary hardware takes ~12s, so every credential request failed closed with
+// "Keeper LLM unavailable: context deadline exceeded" while `keeper judge test`
+// — measuring with its own longer budget — reported that the judge worked. The
+// comment here used to say "tune via SetLLMTimeout"; no such function existed.
+//
+// Production passes the operator's setting (keepercfg, judge_timeout_ms), because
+// only they know what their model returns in on their machine.
+const llmCallTimeout = 20 * time.Second
 
 // hasMinDistinctChars reports whether s contains at least min unique
 // non-whitespace runes. Used by the L1 intent check below — `len >= 10`
@@ -214,6 +224,8 @@ type Gatekeeper struct {
 	logger    *slog.Logger
 	watchSpec WatchSpecResolver // nil-safe: a nil resolver injects no watch block
 	govModel  GovModelResolver  // nil-safe: a nil resolver keeps the default provider
+	// callTimeout bounds one model call. Zero means llmCallTimeout.
+	callTimeout time.Duration
 }
 
 // Option configures a Gatekeeper at construction. Kept as functional options
@@ -235,6 +247,31 @@ func WithWatchSpecResolver(r WatchSpecResolver) Option {
 // path while keeping every bare New(provider, model, logger) test call working.
 func WithGovModelResolver(r GovModelResolver) Option {
 	return func(g *Gatekeeper) { g.govModel = r }
+}
+
+// WithCallTimeout bounds one model call with the operator's configured budget
+// instead of the built-in fallback.
+//
+// It exists because the budget was a compile-time constant that did not survive
+// contact with a real model: a judge slower than the constant made every
+// credential request a fail-closed DENY, with a reason that reads like a security
+// verdict rather than "your model needs more than five seconds". A
+// non-positive duration is ignored so a zero value cannot disable the bound —
+// removing the timeout is exactly the failure mode audit M4 added it for.
+func WithCallTimeout(d time.Duration) Option {
+	return func(g *Gatekeeper) {
+		if d > 0 {
+			g.callTimeout = d
+		}
+	}
+}
+
+// timeout returns the effective per-call budget.
+func (g *Gatekeeper) timeout() time.Duration {
+	if g.callTimeout > 0 {
+		return g.callTimeout
+	}
+	return llmCallTimeout
 }
 
 // New creates a Gatekeeper that uses an LLM provider for decisions.
@@ -309,9 +346,16 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		watch = g.watchSpec(ctx, req.Request.WorkspaceID)
 	}
 
+	// The credential's tier policy (internal/keeper/tier.go). It decides whether
+	// the fast path is available at all, how much of an intent this tier demands,
+	// what extra questions the judge is asked, and what may be done with the
+	// answer. An unknown level resolves to L4, so a corrupt row is the strictest
+	// case rather than the cheapest bypass.
+	tier := req.SecurityLevel.Tier()
+
 	if isAccessFlow &&
 		req.Command == "" &&
-		req.SecurityLevel == keeper.SecurityLevelL1 &&
+		tier.AutoAllow &&
 		watch == "" &&
 		len(intent) >= minIntentLength &&
 		hasMinDistinctChars(intent, l1MinDistinctChars) &&
@@ -322,6 +366,31 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 			Decision:  string(keeper.DecisionAllow),
 			Reason:    "L1 credential with stated intent — auto-approved",
 			RiskScore: 1,
+		}, nil
+	}
+
+	// An intent shorter than the tier demands is refused here rather than sent to
+	// the judge. Two reasons, and the second is the one that matters: a model call
+	// for "need db access" on a production-admin credential is money spent to
+	// reach a foregone conclusion, and the refusal we can write ourselves says
+	// what would work — which is the difference between an agent that retries with
+	// a real justification and one that retries with the same four words.
+	//
+	// Access AND execute — both carry an agent-authored intent, and /execute is
+	// the stronger request of the two (the command RUNS with the credential), so
+	// holding it to a looser bar than a plain read would be backwards. The F4
+	// evaluators are excluded because they carry L1 as a placeholder and have no
+	// user-authored intent to measure.
+	if (isAccessFlow || rt == keeper.RequestTypeExecute) && tier.MinIntentChars > 0 && len(intent) < tier.MinIntentChars {
+		g.logger.Info("keeper: intent below the tier minimum — denied without a model call",
+			"agent", req.AgentName, "credential", req.CredentialName,
+			"tier", tier.Label, "intent_len", len(intent), "min", tier.MinIntentChars)
+		return keeper.GatekeeperResponse{
+			Decision: string(keeper.DecisionDeny),
+			Reason: fmt.Sprintf(
+				"%s credential (%s): the stated intent is %d characters, and this tier needs at least %d. Say what the credential is for, on what system, and why this one — a longer restatement of the credential's name will be denied again.",
+				tier.Label, tier.Blast, len(intent), tier.MinIntentChars),
+			RiskScore: tier.RefusalRisk(),
 		}, nil
 	}
 
@@ -342,9 +411,10 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		g.logger.Warn("keeper: no LLM provider configured — denying request",
 			"agent", req.AgentName, "credential", req.CredentialName)
 		return keeper.GatekeeperResponse{
-			Decision:  string(keeper.DecisionDeny),
-			Reason:    "Keeper LLM not configured — deny by default",
-			RiskScore: 10,
+			Decision:     string(keeper.DecisionDeny),
+			Reason:       "Keeper LLM not configured — deny by default",
+			RiskScore:    10,
+			InfraFailure: true,
 		}, nil
 	}
 
@@ -366,7 +436,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// Audit M4: bound the upstream call so an unresponsive provider can't
 	// pin a keeper goroutine. Caller's deadline (if any) still wins via
 	// the ctx tree; we just ensure we never wait longer than llmCallTimeout.
-	callCtx, cancelCall := context.WithTimeout(ctx, llmCallTimeout)
+	callCtx, cancelCall := context.WithTimeout(ctx, g.timeout())
 	defer cancelCall()
 
 	respLLM, err := provider.Complete(callCtx, llm.Request{
@@ -378,11 +448,23 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 
 	if err != nil {
 		g.logger.Error("keeper: LLM call failed, denying",
-			"error", err, "agent", req.AgentName)
+			"error", err, "agent", req.AgentName, "budget", g.timeout())
+		reason := fmt.Sprintf("Keeper LLM unavailable: %v — deny by default", err)
+		// A timeout is the one failure here an operator can fix in one command,
+		// and left as "unavailable: context deadline exceeded" it reads like a
+		// broken endpoint rather than a model that needs a longer budget. This
+		// was the actual dev1 symptom: a correctly configured 7B judge denying
+		// everything because the budget was a 5s constant.
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = fmt.Sprintf(
+				"Keeper judge did not answer within %s — deny by default. If the model is simply slow, raise the budget: crewship keeper config set --judge-timeout 40s",
+				g.timeout())
+		}
 		return keeper.GatekeeperResponse{
-			Decision:  string(keeper.DecisionDeny),
-			Reason:    fmt.Sprintf("Keeper LLM unavailable: %v — deny by default", err),
-			RiskScore: 10,
+			Decision:     string(keeper.DecisionDeny),
+			Reason:       reason,
+			RiskScore:    10,
+			InfraFailure: true,
 		}, nil
 	}
 
@@ -392,10 +474,32 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// M2a replay eval driver apply identical fail-closed rules (uppercase,
 	// unknown→DENY, risk clamped to [1,10]) and can never drift.
 	decision, risk, reason, perr := NormalizeRawResponse(raw)
-	if perr != nil {
+	unparseable := perr != nil
+	if unparseable {
 		g.logger.Error("keeper: parse LLM response failed, denying",
 			"error", perr, "raw_len", len(raw))
 		reason = "Keeper LLM returned unparseable response — deny by default"
+	}
+
+	// The tier floor is applied to the judge's answer, never before it: the model
+	// still gets to deny, and its reason is still what the human reads. What the
+	// floor adds is that a tier can only tighten — an ALLOW on a human-approval
+	// tier becomes an ESCALATE, and the risk score cannot land under the tier's
+	// floor (DENY-notify is a risk comparison, so a critical decision the model
+	// scored 2 would otherwise never reach anybody's inbox).
+	//
+	// Access AND execute flows. /execute is the stronger of the two — the command
+	// runs with the credential — so exempting it would leave the tier enforced on
+	// the safer path only.
+	if isAccessFlow || rt == keeper.RequestTypeExecute {
+		var note string
+		decision, risk, note = keeper.ApplyTierFloor(req.SecurityLevel, decision, risk)
+		if note != "" {
+			reason += note
+			g.logger.Info("keeper: tier floor applied to the judge's verdict",
+				"agent", req.AgentName, "credential", req.CredentialName,
+				"tier", tier.Label, "decision", decision)
+		}
 	}
 
 	return keeper.GatekeeperResponse{
@@ -404,7 +508,37 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		RiskScore:      risk,
 		Prompt:         truncateForAudit(prompt),
 		RawLLMResponse: truncateForAudit(raw),
+		InfraFailure:   unparseable,
 	}, nil
+}
+
+// tierPolicyBlock renders the credential's tier as an authoritative instruction:
+// what the tier means, what to check at it, and — where it applies — that the
+// judge's approval alone does not grant the read.
+//
+// Same trust class as the watch spec (see watchPolicyBlock): this is our own
+// policy text derived from an operator-set level, not agent-controlled data, so it
+// instructs rather than being escaped as a literal. It is placed above the
+// untrusted conversation fence for the same reason.
+//
+// Why the tier gets its own block instead of one more line in the request header:
+// the level used to be exactly that — "(Security Level: L4)" — and a bare number
+// tells a 3B classifier nothing about what it should do differently.
+func tierPolicyBlock(level keeper.SecurityLevel) string {
+	p := level.Tier()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "========== CREDENTIAL TIER: %s ==========\n", p.Label)
+	fmt.Fprintf(&sb, "What a credential at this tier can do: %s\n", p.Blast)
+	if p.HumanApproval {
+		sb.WriteString("This tier cannot be granted by you. A human approves every read.\n")
+		sb.WriteString("Answer ALLOW only if you would recommend the grant; it will be recorded as an escalation for a person to confirm. Answer DENY if you would not.\n")
+	}
+	sb.WriteString("Check, at this tier:\n")
+	for _, c := range p.Checks {
+		fmt.Fprintf(&sb, "- %s\n", c)
+	}
+	sb.WriteString("==================================================\n\n")
+	return sb.String()
 }
 
 const maxAuditText = 2000
@@ -482,6 +616,9 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	// Admin watch policy first — above the untrusted conversation fence so
 	// injected text in the history can't get ahead of the operator's rules.
 	sb.WriteString(watchPolicyBlock(watch))
+	// Then the credential's tier, for the same reason: it is our policy, derived
+	// from an operator-set level, and it has to outrank anything the history says.
+	sb.WriteString(tierPolicyBlock(req.SecurityLevel))
 
 	if req.ConvHistory != "" {
 		delim, ok := randomDelimiter()
@@ -498,7 +635,7 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 
 	sb.WriteString("========== CURRENT REQUEST TO EVALUATE ==========\n")
 	fmt.Fprintf(&sb, "Agent: %q (crew: %q)\n", req.AgentName, req.CrewName)
-	fmt.Fprintf(&sb, "Credential: %q (Security Level: L%d)\n", req.CredentialName, req.SecurityLevel)
+	fmt.Fprintf(&sb, "Credential: %q (tier: %s)\n", req.CredentialName, req.SecurityLevel.Label())
 	fmt.Fprintf(&sb, "Intent: %q\n", req.Request.Intent)
 
 	if req.Command != "" {

@@ -179,6 +179,7 @@ func TestExtractUsageTokens(t *testing.T) {
 // covResetForecastFlags restores the forecast command's flags after a test.
 func covResetForecastFlags(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	t.Cleanup(func() {
 		_ = costForecastCmd.Flags().Set("prompt", "")
 		_ = costForecastCmd.Flags().Set("from-history", "")

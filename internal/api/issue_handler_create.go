@@ -175,6 +175,33 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Same workspace-scoping for assignee_id as the parent_issue_id / routine_id
+	// checks: pre-fix the field went into the INSERT verbatim, so a
+	// workspace-A caller could assign a new issue to a guessed or enumerated
+	// workspace-B user or agent ID. The read path (issueSelectQuery) resolves
+	// assignee_id to a display name for anyone viewing the issue, so an
+	// unvalidated cross-workspace assignee_id was a direct information
+	// disclosure, not just a dangling reference.
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		assigneeType := ""
+		if req.AssigneeType != nil {
+			assigneeType = *req.AssigneeType
+		}
+		if assigneeType != "user" && assigneeType != "agent" {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_type must be 'user' or 'agent' when assignee_id is set")
+			return
+		}
+		ok, vErr := validateAssigneeWorkspace(r.Context(), tx, assigneeType, *req.AssigneeID, wsID)
+		if vErr != nil {
+			internalError(w, r, h.logger, "validate assignee_id", vErr)
+			return
+		}
+		if !ok {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+			return
+		}
+	}
+
 	// Same workspace-scoping for parent_issue_id. Pre-fix the field was
 	// inserted verbatim from the request — a workspace-A user could
 	// POST a new issue under their own crew with parent_issue_id pointing
@@ -193,6 +220,32 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		if parentExists == 0 {
 			writeProblem(w, r, http.StatusBadRequest, "parent_issue_id does not exist in this workspace")
+			return
+		}
+	}
+
+	// project_id and milestone_id had no such guard, though they are the same
+	// shape as parent_issue_id twenty lines up: an id the caller supplies that
+	// the read path later resolves to a name. A workspace-A member could file
+	// an issue into a workspace-B project, and every issue listing that joins
+	// projects would then render B's project name to A. The fence matrix found
+	// both live (POST and PATCH).
+	for _, fk := range []struct {
+		field string
+		table string
+		value *string
+	}{
+		{"project_id", "projects", req.ProjectID},
+		{"milestone_id", "milestones", req.MilestoneID},
+	} {
+		if fk.value == nil || *fk.value == "" {
+			continue
+		}
+		// tx, not h.db: the INSERT below runs in this transaction, and the
+		// neighbouring parent_issue_id / routine_id checks already validate
+		// against it. Reading from h.db here would guard a different snapshot
+		// than the one being written.
+		if !fkInWorkspaceOrReject(w, r, tx, h.logger, fk.table, fk.field, *fk.value, wsID) {
 			return
 		}
 	}

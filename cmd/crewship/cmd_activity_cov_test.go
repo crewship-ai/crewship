@@ -32,6 +32,7 @@ const covCrew = "ccrewabcdefghijklmnop"
 // CREWSHIP_* env vars that would otherwise override cliCfg.
 func covSaveState(t *testing.T) {
 	t.Helper()
+	guardCLIState(t)
 	origCfg := cliCfg
 	origServer := flagServer
 	origWorkspace := flagWorkspace
@@ -67,6 +68,7 @@ func covStubCli9(t *testing.T) *clitest.StubServer {
 // global command objects don't leak state between tests.
 func covSetFlagCli9(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
+	guardCLIState(t)
 	f := cmd.Flags().Lookup(name)
 	if f == nil {
 		t.Fatalf("command %s has no --%s flag", cmd.Name(), name)
@@ -84,6 +86,7 @@ func covSetFlagCli9(t *testing.T, cmd *cobra.Command, name, value string) {
 // everything written. Not safe for parallel tests (mutates a global).
 func covCaptureStdoutCli9(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -119,6 +122,7 @@ func covStubDown(t *testing.T) {
 // cli.PrintSuccess / warning output which writes to stderr by design.
 func covCaptureStderrCli9(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	orig := os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {

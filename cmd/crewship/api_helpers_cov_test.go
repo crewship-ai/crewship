@@ -28,6 +28,7 @@ const covAgentIDCli3 = "cagent0000000000000000aa"
 // the tests in the *_cov_test.go files use t.Parallel().
 func covStub(t *testing.T) *clitest.StubServer {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	stub := clitest.NewStubServer()
 	t.Cleanup(stub.Close)
@@ -56,6 +57,7 @@ func covStub(t *testing.T) *clitest.StubServer {
 // escape hatch instead, which overwrites the list directly.
 func covResetFlags(t *testing.T, cmd *cobra.Command) {
 	t.Helper()
+	guardCLIState(t)
 	t.Cleanup(func() {
 		cmd.Flags().VisitAll(func(f *pflag.Flag) {
 			if !f.Changed {
@@ -77,6 +79,7 @@ func covResetFlags(t *testing.T, cmd *cobra.Command) {
 // to assert their output.
 func covCaptureStdoutCli3(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -102,6 +105,7 @@ func covCaptureStdoutCli3(t *testing.T, fn func()) string {
 // and friends write there.
 func covCaptureStderr(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	old := os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {

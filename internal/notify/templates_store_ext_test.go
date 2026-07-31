@@ -18,15 +18,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 var tmplTestCounter atomic.Int64
@@ -41,16 +40,12 @@ var tmplTestCounter atomic.Int64
 // relying on a private database to hide a leak.
 var sharedTemplateDB = sync.OnceValues(func() (*sql.DB, error) {
 	os.Setenv("ENCRYPTION_KEY", strings.Repeat("0123456789abcdef", 4))
-	dir, err := os.MkdirTemp("", "notify-templates")
+	// testutil.NewMigratedDB rather than MigratedDB(t): this fixture has no
+	// *testing.T to hang cleanup on by construction — it is shared across the
+	// package's tests. The teardown func is dropped deliberately; the DB lives
+	// for the whole test binary.
+	db, _, err := testutil.NewMigratedDB()
 	if err != nil {
-		return nil, err
-	}
-	db, err := database.Open("file:" + dir + "/templates.db")
-	if err != nil {
-		return nil, err
-	}
-	quiet := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := database.Migrate(context.Background(), db.DB, quiet); err != nil {
 		return nil, err
 	}
 	return db.DB, nil

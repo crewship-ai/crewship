@@ -47,7 +47,7 @@ Crewship is a self-hosted runtime that gives every crew of AI coding agents a sh
 The `make build` process creates a single self-contained binary:
 
 1. **Frontend:** `pnpm build` creates a Next.js static export
-2. **Embedding:** The `out/` directory is copied to `web/out/` and embedded via `//go:embed`
+2. **Embedding:** `scripts/embed-web-out.sh sync` stages `out/` into `web/out/`, which is embedded via `//go:embed all:out`. `web/out/` also holds one tracked file, `.placeholder.html`, so the embed resolves in a fresh clone or worktree; a binary built over it serves 503 on every UI route instead of a blank page.
 3. **Compilation:** `go build` produces a statically linked binary with version metadata
 
 ```

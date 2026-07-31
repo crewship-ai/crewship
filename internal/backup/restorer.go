@@ -72,6 +72,14 @@ type ExtractedPayload struct {
 	// volumePathsBySlug so a future migration that drops a real named
 	// volume can't accidentally collide with a system section name.
 	systemPathsBySlug map[string]map[string]string // crew → kind ("var-lib") → path
+
+	// memoryBlobsPath is the temp tar holding the memory-blobs/
+	// section (content-addressed memory_versions blobs). Unlike the
+	// per-crew sections above this one is workspace-scoped, not keyed
+	// by slug — memory_versions has no crew_id. Empty when the bundle
+	// carried no such section (older bundles, or BlobRoot unset at
+	// backup time).
+	memoryBlobsPath string
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -102,6 +110,7 @@ func (p *ExtractedPayload) Close() error {
 	p.volumePathsBySlug = nil
 	p.memoryPathBySlug = nil
 	p.systemPathsBySlug = nil
+	p.memoryBlobsPath = ""
 	return err
 }
 
@@ -175,6 +184,29 @@ func (p *ExtractedPayload) OpenSystem(ctx context.Context, slug, kind string) (i
 	f, err := p.storageOrDefault().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open system section %s/%s: %w", slug, kind, err)
+	}
+	return f, true, nil
+}
+
+// HasMemoryBlobs reports whether the bundle carried a memory-blobs
+// section (content-addressed memory_versions blobs).
+func (p *ExtractedPayload) HasMemoryBlobs() bool {
+	return p.memoryBlobsPath != ""
+}
+
+// OpenMemoryBlobs returns a reader over the inner tar of memory-version
+// blobs collected by WriteMemoryBlobsSection, named "<sha[:2]>/<sha>"
+// (the memory-blobs/ prefix is stripped, matching how OpenWorkspace /
+// OpenMemory strip their own crew-slug prefix). Caller closes. Returns
+// (nil, false, nil) when the bundle has no such section — older
+// bundles, or BlobRoot unset at backup time.
+func (p *ExtractedPayload) OpenMemoryBlobs(ctx context.Context) (io.ReadCloser, bool, error) {
+	if p.memoryBlobsPath == "" {
+		return nil, false, nil
+	}
+	f, err := p.storageOrDefault().Open(ctx, p.memoryBlobsPath)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open memory-blobs section: %w", err)
 	}
 	return f, true, nil
 }
@@ -355,6 +387,11 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				return nil, err
 			}
 
+		case strings.HasPrefix(name, memoryBlobsSectionPrefix):
+			if err := repackIntoSink(tr, hdr, name, memoryBlobsSectionPrefix, sinkFor); err != nil {
+				return nil, err
+			}
+
 		default:
 			// Forward-compat: unknown entries are silently discarded.
 			if _, err := io.Copy(io.Discard, tr); err != nil {
@@ -377,6 +414,10 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		name := s.file.Name()
 		if err := s.file.Close(); err != nil {
 			return nil, fmt.Errorf("backup: close inner tar file %s: %w", key, err)
+		}
+		if key == memoryBlobsSinkKey {
+			out.memoryBlobsPath = name
+			continue
 		}
 		parts := strings.SplitN(key, "/", 3)
 		if len(parts) < 2 {
@@ -424,10 +465,17 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 //	workspace/<slug>                  → one file per crew
 //	volumes/<slug>/<volumeName>       → one file per crew+volume
 //	memory/<slug>                     → one file per crew
+//	system/<slug>/<kind>              → one file per crew+kind
+//	memory-blobs                      → single bundle-wide sink (no
+//	                                     crew slug — memory_versions is
+//	                                     workspace-scoped)
 //
-// Entry names inside the sink are stripped of their outermost path
-// segments so CopyTo places them directly at the container destination
-// (e.g. /workspace/, /home/agent/, /output/).
+// Entry names inside the per-crew sinks are stripped of their outermost
+// path segments so CopyTo places them directly at the container
+// destination (e.g. /workspace/, /home/agent/, /output/). The
+// memory-blobs sink keeps its entries as "<sha[:2]>/<sha>" — there is
+// no crew-slug segment to strip, and RestoreMemoryBlobs wants that
+// shape to reconstruct the destination path.
 func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, sinkFor func(string) (*sink, error)) error {
 	rest := strings.TrimPrefix(name, topPrefix)
 	var key string
@@ -469,6 +517,12 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		}
 		key = "system/" + slug + "/" + kind
 		strip = slug + "/" + kind + "/"
+	case memoryBlobsSectionPrefix:
+		// No crew slug — memory_versions is workspace-scoped. rest is
+		// already "<sha[:2]>/<sha>", so it rides straight through as
+		// both the sink key and the inner tar entry name.
+		key = memoryBlobsSinkKey
+		strip = ""
 	default:
 		return nil
 	}

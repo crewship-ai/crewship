@@ -56,6 +56,7 @@ import {
 import { isValidEnvVarName, suggestEnvVarName } from "@/lib/env-var-name"
 import { cn } from "@/lib/utils"
 import { BrandPicker } from "./brand-picker"
+import { CREDENTIAL_TIERS } from "./credential-form"
 
 const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>> = {
   TOKEN: KeyRound,
@@ -87,6 +88,9 @@ export function AddCredentialWizard({
   const canBind = abilities.can("manage", "Credential")
 
   const [step, setStep] = React.useState<Step>("type")
+  // Keeper tier. Defaults to L1 — the column's default — so a wizard run that
+  // ignores this control behaves exactly as it did before the control existed.
+  const [securityLevel, setSecurityLevel] = React.useState(1)
   const [itemTypeKey, setItemTypeKey] = React.useState<ItemTypeKey>("TOKEN")
   const [primaryValue, setPrimaryValue] = React.useState("")
   const [extras, setExtras] = React.useState<Record<string, string>>({})
@@ -180,6 +184,7 @@ export function AddCredentialWizard({
         scope,
         tags,
       }
+      body.security_level = securityLevel
       if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
       if (scope === "CREW") body.crew_ids = crewIds
@@ -515,6 +520,45 @@ export function AddCredentialWizard({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Keeper tier. On this step rather than a fourth one: "who gets it" and
+              "how hard is it to get" are the same decision, and splitting them
+              would put the tier behind another click nobody takes. */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">How closely Keeper guards it</Label>
+            <div className="flex flex-wrap gap-2">
+              {CREDENTIAL_TIERS.map((t) => (
+                <button
+                  key={t.level}
+                  type="button"
+                  aria-pressed={securityLevel === t.level}
+                  onClick={() => setSecurityLevel(t.level)}
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-[11px] transition-colors",
+                    securityLevel === t.level
+                      ? t.level >= 4
+                        ? "border-warn/50 bg-warn/10 text-warn"
+                        : "border-primary/50 bg-primary/10 text-primary-hover"
+                      : "border-white/10 text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {/* The blast radius and what the choice costs, for the tier selected.
+                An operator picking "critical" is opting into a human approval on
+                every read, which they should read before saving, not after. */}
+            <p className="text-[10px] leading-relaxed text-muted-foreground">
+              {CREDENTIAL_TIERS.find((t) => t.level === securityLevel)?.blast}
+            </p>
+            <p className={cn(
+              "text-[10px] leading-relaxed",
+              securityLevel >= 4 ? "text-warn" : "text-muted-foreground",
+            )}>
+              {CREDENTIAL_TIERS.find((t) => t.level === securityLevel)?.consequence}
+            </p>
           </div>
 
           {scope === "CREW" && (

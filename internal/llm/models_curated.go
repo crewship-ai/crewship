@@ -15,6 +15,12 @@ import "strings"
 var curatedModels = map[string][]ModelInfo{
 	"anthropic": {
 		{ID: "claude-fable-5", DisplayName: "Claude Fable 5", Provider: "anthropic"},
+		// The current Opus. It was missing from this list, so a picker rendering
+		// the curated set offered Fable 5 and then jumped straight to 4.8 —
+		// anyone choosing "Opus" from the dropdown silently got the previous
+		// generation, and the model an operator would most often want as a judge
+		// could only be reached by typing the id by hand.
+		{ID: "claude-opus-5", DisplayName: "Claude Opus 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", DisplayName: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", DisplayName: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-opus-4-6", DisplayName: "Claude Opus 4.6", Provider: "anthropic"},

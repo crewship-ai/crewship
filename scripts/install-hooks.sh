@@ -83,13 +83,11 @@ fi
 # (e.g. `undefined: neutralizeControl`). No staged .go → nothing to gate. (#1004)
 STAGED_GO="$(git diff --cached --name-only --diff-filter=ACMR -z | tr '\0' '\n' | grep -E '\.go$' || true)"
 if [ -n "$STAGED_GO" ] && command -v golangci-lint >/dev/null 2>&1; then
-  # web/embed.go's `//go:embed all:out` needs a target dir to typecheck. A
-  # fresh `git worktree add` has no web/out, which fails typecheck repo-wide
-  # and blocks ANY commit. Mirror CI's setup-go-embed stub. (#1004)
-  if [ ! -f web/out/index.html ]; then
-    mkdir -p web/out
-    echo '<!doctype html>' > web/out/index.html
-  fi
+  # web/embed.go's `//go:embed all:out` needs a target dir to typecheck, and
+  # a fresh `git worktree add` used to have none — which failed typecheck
+  # repo-wide and blocked ANY commit (#1004). This hook used to hand-roll a
+  # web/out/index.html stub for that; web/out/.placeholder.html is tracked
+  # in git now (#1567), so the checkout satisfies the embed on its own.
 
   # Determine merge-base with main/master
   BASE_REF="origin/main"

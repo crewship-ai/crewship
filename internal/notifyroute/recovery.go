@@ -198,13 +198,7 @@ func (r *Router) RunRecoveryLoop(ctx context.Context, isLeader func() bool) {
 	if r == nil {
 		return
 	}
-	sweep := func() {
-		if isLeader != nil && !isLeader() {
-			return
-		}
-		r.RecoverStuckDeliveries(ctx)
-	}
-	sweep()
+	r.recoverySweep(ctx, isLeader)
 	t := time.NewTicker(recoveryInterval)
 	defer t.Stop()
 	for {
@@ -212,7 +206,18 @@ func (r *Router) RunRecoveryLoop(ctx context.Context, isLeader func() bool) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sweep()
+			r.recoverySweep(ctx, isLeader)
 		}
 	}
+}
+
+// recoverySweep is the single leader-gated sweep step, extracted out of
+// RunRecoveryLoop's ticker loop so it can be exercised directly by a test —
+// a nil/false isLeader must skip the sweep entirely, a true one must run it
+// — without waiting on the 2-minute ticker or a background goroutine.
+func (r *Router) recoverySweep(ctx context.Context, isLeader func() bool) {
+	if isLeader != nil && !isLeader() {
+		return
+	}
+	r.RecoverStuckDeliveries(ctx)
 }

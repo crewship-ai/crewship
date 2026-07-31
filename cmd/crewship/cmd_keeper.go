@@ -78,6 +78,7 @@ type keeperServerStatus struct {
 	OllamaURL    string `json:"ollama_url"`
 	Model        string `json:"model"`
 	OllamaOnline bool   `json:"ollama_online"`
+	OllamaProbed bool   `json:"ollama_probed"`
 	SecretCount  int    `json:"secret_count"`
 
 	// Governance model (M2a, #1001). Configured=false → the server default
@@ -181,9 +182,17 @@ Examples:
 			if server.Enabled {
 				status = cli.Green + "enabled" + cli.Reset
 			}
-			ollamaStatus := cli.Red + "offline" + cli.Reset
-			if server.OllamaOnline {
+			// Three states, not two. "offline" for an endpoint nobody dialled reads
+			// as a broken model server, which is what sent the last configuration
+			// session looking for a problem that did not exist.
+			ollamaStatus := cli.Yellow + "not checked" + cli.Reset
+			switch {
+			case server.OllamaURL == "":
+				ollamaStatus = cli.Yellow + "no endpoint configured" + cli.Reset
+			case server.OllamaProbed && server.OllamaOnline:
 				ollamaStatus = cli.Green + "online" + cli.Reset
+			case server.OllamaProbed:
+				ollamaStatus = cli.Red + "offline" + cli.Reset
 			}
 
 			fmt.Printf("%sKeeper Security (server)%s\n", cli.Bold, cli.Reset)

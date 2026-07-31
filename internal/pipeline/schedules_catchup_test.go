@@ -8,6 +8,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -177,6 +178,19 @@ VALUES ('psched_all', 'ws_test', 'all', 'pipe_1', '* * * * *', 'UTC', '{}', 1, ?
 }
 
 // On-time schedules (no backlog) behave identically under every policy —
+// offPeakDailyCron returns a daily cron whose occurrence is ~12 hours from now.
+//
+// This test's premise is "the schedule is due but NOT behind", which a literal
+// `0 8 * * *` only satisfies for 1439 of the 1440 minutes in a day: seeded with
+// next_run_at one minute in the past, the tick inspects the window
+// [now-1m, now], and if a real cron occurrence falls inside it the scheduler
+// correctly reports a missed one — so the premise stops holding and all three
+// sub-cases fail. That is not hypothetical: CI hit 08:00:18 UTC on 2026-07-30
+// and went red on a PR that never touched this package.
+func offPeakDailyCron() string {
+	return fmt.Sprintf("0 %d * * *", (time.Now().UTC().Hour()+12)%24)
+}
+
 // the policy only matters once a schedule has fallen behind.
 func TestPipelineScheduler_Catchup_OnTimeIgnoresPolicy(t *testing.T) {
 	for _, policy := range []string{CatchupSkip, CatchupOnce, CatchupAll} {
@@ -205,8 +219,8 @@ func TestPipelineScheduler_Catchup_OnTimeIgnoresPolicy(t *testing.T) {
 			_, err = db.ExecContext(context.Background(), `
 INSERT INTO pipeline_schedules
   (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, catchup_policy, created_at, updated_at)
-VALUES ('psched_ontime', 'ws_test', 'ontime', 'pipe_1', '0 8 * * *', 'UTC', '{}', 1, ?, ?, ?, ?)`,
-				pastTime, policy, now, now)
+VALUES ('psched_ontime', 'ws_test', 'ontime', 'pipe_1', ?, 'UTC', '{}', 1, ?, ?, ?, ?)`,
+				offPeakDailyCron(), pastTime, policy, now, now)
 			if err != nil {
 				t.Fatalf("seed due: %v", err)
 			}

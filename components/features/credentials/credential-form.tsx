@@ -46,7 +46,49 @@ export interface CredentialFormValues {
   crewIds: string[]
   tags: string[]
   expiresAt: string // YYYY-MM-DD or ""
+  /** Keeper tier, 1–4. See CREDENTIAL_TIERS. */
+  securityLevel: number
 }
+
+/**
+ * The Keeper tiers, mirroring internal/keeper/tier.go.
+ *
+ * This control did not exist. The column has been on the credentials table since
+ * v2 and the CLI could set it, but the console could not — so the tier of every
+ * credential created through the UI was 1, including the production ones, and the
+ * operator had no way to see or change that.
+ *
+ * The consequence text is not decoration: L4 turns every read into a human
+ * approval and forces the four-eyes rule, which is a real operational cost. An
+ * operator choosing a tier is choosing that, so the picker says so before they
+ * pick rather than after.
+ */
+export const CREDENTIAL_TIERS = [
+  {
+    level: 1,
+    label: "L1 · low",
+    blast: "Read-only or low-value (npm read token, public API key)",
+    consequence: "Auto-approved when the agent states an intent — no model call, no cost.",
+  },
+  {
+    level: 2,
+    label: "L2 · medium",
+    blast: "Write access to a non-production system (GitHub write, staging DB)",
+    consequence: "Every read is judged by the Keeper model.",
+  },
+  {
+    level: 3,
+    label: "L3 · high",
+    blast: "Admin access to real infrastructure (SSH, database admin, cloud account)",
+    consequence: "Judged with extra checks, needs a substantive intent, and auto-leases rather than granting standing access.",
+  },
+  {
+    level: 4,
+    label: "L4 · critical",
+    blast: "Production administration, payments, or customer data at scale",
+    consequence: "A human approves every read — the model can recommend but never grant — and whoever's agent asked cannot be the one who approves.",
+  },
+] as const
 
 export const EMPTY_FORM: CredentialFormValues = {
   name: "",
@@ -58,6 +100,7 @@ export const EMPTY_FORM: CredentialFormValues = {
   crewIds: [],
   tags: [],
   expiresAt: "",
+  securityLevel: 1,
 }
 
 interface Crew { id: string; name: string }
@@ -520,6 +563,36 @@ export function CredentialForm({
             />
             <p className="text-[10px] text-muted-foreground">
               Optional — drives the &quot;Expiring&quot; KPI and the 30-day warning banner.
+            </p>
+          </div>
+
+          {/* Keeper tier */}
+          <div className="space-y-1">
+            <Label htmlFor="cred-tier" className="text-xs">Keeper tier</Label>
+            <Select
+              value={String(values.securityLevel)}
+              onValueChange={(v) => setField("securityLevel", Number(v))}
+            >
+              <SelectTrigger id="cred-tier" className="text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CREDENTIAL_TIERS.map((t) => (
+                  <SelectItem key={t.level} value={String(t.level)}>
+                    <span className="flex flex-col items-start gap-0.5 py-0.5">
+                      <span>{t.label}</span>
+                      <span className="text-[10px] text-muted-foreground">{t.blast}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* What the choice costs, for the tier actually selected. */}
+            <p className={cn(
+              "text-[10px] leading-relaxed",
+              values.securityLevel >= 4 ? "text-warn" : "text-muted-foreground",
+            )}>
+              {CREDENTIAL_TIERS.find((t) => t.level === values.securityLevel)?.consequence}
             </p>
           </div>
 

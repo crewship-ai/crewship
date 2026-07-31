@@ -29,6 +29,7 @@ const covWSCli8 = "cws0123456789abcdefghij"
 // it mutates package-level state (cliCfg & friends).
 func covSetupCli8(t *testing.T, serverURL string) {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	t.Setenv("CREWSHIP_SERVER", "")
 	t.Setenv("CREWSHIP_WORKSPACE", "")
@@ -42,6 +43,7 @@ func covSetupCli8(t *testing.T, serverURL string) {
 // Changed marker at test end (several RunE paths branch on Changed).
 func covSetFlagCli8(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
+	guardCLIState(t)
 	fl := cmd.Flags().Lookup(name)
 	if fl == nil {
 		t.Fatalf("flag --%s not registered on %s", name, cmd.Name())
@@ -58,6 +60,7 @@ func covSetFlagCli8(t *testing.T, cmd *cobra.Command, name, value string) {
 // covCaptureStdoutCli8 captures everything fn writes to os.Stdout.
 func covCaptureStdoutCli8(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

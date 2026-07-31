@@ -154,6 +154,43 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Same workspace-scoping for assignee_id as issue Create/Update
+	// (issue_handler_create.go, issue_handler_update.go): pre-fix this went
+	// straight into the INSERT. triage_rules has no assignee_type column —
+	// Process() always writes matched rows with assignee_type='agent' — so
+	// the rule's assignee_id is validated as an agent, not a user.
+	if req.AssigneeID != nil && *req.AssigneeID != "" {
+		ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, "agent", *req.AssigneeID, wsID)
+		if vErr != nil {
+			internalError(w, r, h.logger, "validate assignee_id", vErr)
+			return
+		}
+		if !ok {
+			writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+			return
+		}
+	}
+
+	// crew_id and project_id got no such check, and on a triage rule they are
+	// worse than a name leak: Process() applies the rule to incoming issues, so
+	// a foreign crew_id routes this tenant's issues into another tenant's crew
+	// on every match, unattended.
+	for _, fk := range []struct {
+		field string
+		table string
+		value *string
+	}{
+		{"crew_id", "crews", req.CrewID},
+		{"project_id", "projects", req.ProjectID},
+	} {
+		if fk.value == nil || *fk.value == "" {
+			continue
+		}
+		if !fkInWorkspaceOrReject(w, r, h.db, h.logger, fk.table, fk.field, *fk.value, wsID) {
+			return
+		}
+	}
+
 	// Get next position
 	var maxPos int
 	if err := h.db.QueryRowContext(r.Context(),
@@ -271,6 +308,9 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		if *req.CrewID == "" {
 			ub.SetNull("crew_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "crews", "crew_id", *req.CrewID, wsID) {
+				return
+			}
 			ub.Set("crew_id", *req.CrewID)
 		}
 	}
@@ -278,6 +318,17 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		if *req.AssigneeID == "" {
 			ub.SetNull("assignee_id")
 		} else {
+			// Same workspace-scoping as CreateRule above: validated as an agent,
+			// since triage_rules has no assignee_type column.
+			ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, "agent", *req.AssigneeID, wsID)
+			if vErr != nil {
+				internalError(w, r, h.logger, "validate assignee_id", vErr)
+				return
+			}
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+				return
+			}
 			ub.Set("assignee_id", *req.AssigneeID)
 		}
 	}
@@ -288,6 +339,9 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		if *req.ProjectID == "" {
 			ub.SetNull("project_id")
 		} else {
+			if !fkInWorkspaceOrReject(w, r, h.db, h.logger, "projects", "project_id", *req.ProjectID, wsID) {
+				return
+			}
 			ub.Set("project_id", *req.ProjectID)
 		}
 	}

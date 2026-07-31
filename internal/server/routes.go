@@ -21,7 +21,12 @@ import (
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
-	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
+	// /metrics is registered WITHOUT a method so every method reaches the
+	// handler. It answers 404 to an unauthorized caller on purpose (F-003), and
+	// a method-gated pattern would have ServeMux answer 405 + `Allow: GET, HEAD`
+	// first — confirming to a scanner exactly what the 404 hides (#1501). The
+	// handler re-imposes the method rule for callers that got past the gate.
+	s.mux.HandleFunc("/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /ws", s.handleWebSocket)
 	s.mux.HandleFunc("GET /ws/terminal", s.handleTerminalWebSocket)
 	s.mux.HandleFunc("GET /openapi.json", api.ServeOpenAPISpec)
@@ -159,7 +164,18 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		// 404 rather than 401 to avoid confirming the endpoint exists to
 		// an unauthorized scanner. Prometheus scrapers configured for the
 		// authorized path won't notice the difference.
+		//
+		// This runs BEFORE the method check on purpose: an unauthorized POST
+		// must be answered exactly like an unauthorized GET, or the pair of
+		// responses says "something is here" (#1501).
 		http.NotFound(w, r)
+		return
+	}
+	// Past the gate, an honest answer. The route is registered method-less so
+	// the check above can see every request, so the method rule lives here.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
 

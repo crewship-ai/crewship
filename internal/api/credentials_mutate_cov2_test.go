@@ -175,7 +175,7 @@ func TestCM3_Update_SecurityLevelNotANumber400(t *testing.T) {
 	h, userID, wsID := covCM3Rig(t)
 	credID := covCM3Seed(t, h, userID, wsID, "cm3-sec")
 	rr := covCMUpdate(t, h, userID, wsID, "OWNER", credID, `{"security_level":"high"}`)
-	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "security_level must be 1, 2, or 3") {
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "security_level must be one of") {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 }

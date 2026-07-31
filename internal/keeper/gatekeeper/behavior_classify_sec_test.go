@@ -20,7 +20,7 @@ func TestSecClassifyBehavior_DenyQuotingWarnStaysDeny(t *testing.T) {
 	// parseResponse extracts only the {...} object (decision=DENY); the raw
 	// substring scan must NOT downgrade this to WARN.
 	raw := `Considering options "ALLOW", "WARN", "DENY". {"decision":"DENY","reason":"tight loop"}`
-	got := classifyBehaviorDecision(string(keeper.DecisionDeny), "tight loop", raw)
+	got := classifyBehaviorDecision(string(keeper.DecisionDeny), "tight loop", raw, false)
 	if got != BehaviorDeny {
 		t.Fatalf("DENY whose surrounding prose mentions \"WARN\" was downgraded: got %v, want BehaviorDeny", got)
 	}
@@ -28,7 +28,7 @@ func TestSecClassifyBehavior_DenyQuotingWarnStaysDeny(t *testing.T) {
 
 func TestSecClassifyBehavior_EscalateQuotingWarnStaysEscalate(t *testing.T) {
 	raw := `Torn between "WARN" and block. {"decision":"ESCALATE","reason":"ambiguous"}`
-	got := classifyBehaviorDecision(string(keeper.DecisionEscalate), "ambiguous", raw)
+	got := classifyBehaviorDecision(string(keeper.DecisionEscalate), "ambiguous", raw, false)
 	if got != BehaviorEscalate {
 		t.Fatalf("ESCALATE whose reason quotes \"WARN\" was downgraded: got %v, want BehaviorEscalate", got)
 	}
@@ -37,7 +37,7 @@ func TestSecClassifyBehavior_EscalateQuotingWarnStaysEscalate(t *testing.T) {
 func TestSecClassifyBehavior_GenuineWarnStillWarns(t *testing.T) {
 	// Regression: a real WARN must still classify as WARN after the fix.
 	raw := `{"decision":"WARN","reason":"borderline"}`
-	got := classifyBehaviorDecision(string(keeper.DecisionDeny), "borderline", raw)
+	got := classifyBehaviorDecision(string(keeper.DecisionDeny), "borderline", raw, false)
 	if got != BehaviorWarn {
 		t.Fatalf("genuine WARN not recognised: got %v, want BehaviorWarn", got)
 	}

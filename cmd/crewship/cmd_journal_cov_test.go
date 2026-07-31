@@ -38,6 +38,7 @@ func setupStubCLICov(t *testing.T, stub *clitest.StubServer) {
 // setFormatCov sets the global --format value and restores it at cleanup.
 func setFormatCov(t *testing.T, format string) {
 	t.Helper()
+	guardCLIState(t)
 	orig := flagFormat
 	flagFormat = format
 	t.Cleanup(func() { flagFormat = orig })
@@ -47,6 +48,7 @@ func setFormatCov(t *testing.T, format string) {
 // command flag state is package-global and leaks across tests otherwise.
 func setFlagCov(t *testing.T, cmd *cobra.Command, name, value string) {
 	t.Helper()
+	guardCLIState(t)
 	f := cmd.Flags().Lookup(name)
 	if f == nil {
 		t.Fatalf("command %q has no --%s flag", cmd.Name(), name)
@@ -66,6 +68,7 @@ func setFlagCov(t *testing.T, cmd *cobra.Command, name, value string) {
 // returns everything written plus fn's error.
 func captureStdoutCov(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
+	guardCLIState(t)
 	orig := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

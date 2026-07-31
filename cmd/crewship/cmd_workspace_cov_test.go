@@ -23,6 +23,7 @@ const covWS = "cabcdefghijklmnopqrs"
 // the cmd/crewship RunE paths read package globals.
 func setStubCLI(t *testing.T, serverURL string) {
 	t.Helper()
+	guardCLIState(t)
 	saveCLIState(t)
 	t.Setenv("CREWSHIP_SERVER", "")
 	t.Setenv("CREWSHIP_WORKSPACE", "")
@@ -37,6 +38,7 @@ func setStubCLI(t *testing.T, serverURL string) {
 // and seed progress lines go to os.Stderr.
 func captureStdoutCovCli2(t *testing.T, fn func()) string {
 	t.Helper()
+	guardCLIState(t)
 	oldOut, oldErr := os.Stdout, os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {

@@ -1,6 +1,6 @@
 "use client"
 
-import { ScrollText, ShieldCheck, Users } from "lucide-react"
+import { Cog, ScrollText, ShieldCheck, Users } from "lucide-react"
 
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { cn } from "@/lib/utils"
@@ -24,8 +24,23 @@ import type { Actor } from "./inbox-types"
 
 const GLYPH: Record<string, { icon: typeof ScrollText; tone: string }> = {
   routine: { icon: ScrollText, tone: "bg-purple/20 text-purple" },
-  system: { icon: ShieldCheck, tone: "bg-notice/20 text-notice" },
-  crew: { icon: Users, tone: "bg-success/20 text-success" },
+  system: { icon: Cog, tone: "bg-notice/20 text-notice" },
+  crew: { icon: Users, tone: "bg-info/20 text-info" },
+}
+
+// Keeper is the one system sender worth telling apart at a glance: it is the
+// security gatekeeper, and it wears a shield everywhere else in the product
+// (the admin nav, the decision sheet, the journal). A cog made its notices look
+// like a settings change (#1530).
+//
+// Keyed on the sender SLUG, not the display name — the name is display text and
+// could be renamed. The prefix catches Keeper's sub-senders too
+// (keeper_skill_review, keeper_behavior, keeper_memory_health, …), which the
+// original exact match left wearing the generic mark.
+const KEEPER_GLYPH = { icon: ShieldCheck, tone: "bg-success/20 text-success" }
+
+function isKeeper(id: string): boolean {
+  return id === "keeper" || id.startsWith("keeper_")
 }
 
 export function ActorAvatar({ actor, size = 24 }: { actor: Actor; size?: 20 | 24 | 32 }) {
@@ -59,7 +74,11 @@ export function ActorAvatar({ actor, size = 24 }: { actor: Actor; size?: 20 | 24
     )
   }
 
-  const g = GLYPH[actor.kind] ?? GLYPH.system
+  const slug = (actor.seed || actor.id || "").toLowerCase()
+  const g =
+    actor.kind === "system" && isKeeper(slug)
+      ? KEEPER_GLYPH
+      : GLYPH[actor.kind] ?? GLYPH.system
   const Icon = g.icon
   return (
     <span className={cn("grid shrink-0 place-items-center rounded-md", g.tone, box)}>

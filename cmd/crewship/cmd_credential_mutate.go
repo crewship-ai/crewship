@@ -8,9 +8,22 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+// securityLevelHelp lists the tiers and what each one means. Generated from
+// keeper.SecurityLevels rather than restated, so the flag help, the rejection
+// message and the policy that enforces them cannot drift into describing three
+// different scales.
+func securityLevelHelp() string {
+	parts := make([]string, 0, len(keeper.SecurityLevels()))
+	for _, l := range keeper.SecurityLevels() {
+		parts = append(parts, fmt.Sprintf("%d = %s", int(l), l.Label()))
+	}
+	return strings.Join(parts, ", ")
+}
 
 // buildEndpointCredentialValue folds an ENDPOINT_URL base URL plus an optional
 // bearer token and repeatable `K=V` headers into the one-object JSON the server
@@ -137,8 +150,12 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		secLevel, _ := flags.GetInt("security-level")
-		if secLevel < 0 || secLevel > 3 {
-			return fmt.Errorf("--security-level must be between 0 and 3")
+		// 0 means "not passed" (the flag's zero value), so it stays legal and the
+		// server applies its default. Anything else has to be a real tier: the
+		// ceiling used to be 3, which made L4 — the tier that requires human
+		// approval on every read — unreachable from the CLI.
+		if secLevel != 0 && !keeper.SecurityLevel(secLevel).Valid() {
+			return fmt.Errorf("--security-level %d is not a tier: %s", secLevel, securityLevelHelp())
 		}
 
 		body := map[string]interface{}{
@@ -268,8 +285,8 @@ var credUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("security-level") {
 			v, _ := flags.GetInt("security-level")
-			if v < 0 || v > 3 {
-				return fmt.Errorf("--security-level must be between 0 and 3")
+			if !keeper.SecurityLevel(v).Valid() {
+				return fmt.Errorf("--security-level %d is not a tier: %s", v, securityLevelHelp())
 			}
 			body["security_level"] = v
 		}

@@ -5,22 +5,18 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/net/websocket"
 
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 // openTestDB returns a freshly-migrated SQLite DB in a temp dir. The
@@ -32,51 +28,105 @@ import (
 // When called with a non-nil *testing.T the cleanup is registered;
 // the bare-package newTestServer() helper passes nil, which is fine
 // for unit tests that exit immediately.
+//
+// The schema comes from testutil's process-wide migrated template
+// (one migration run per test binary, then a ~1ms file copy per call)
+// rather than from a per-call database.Migrate. This helper is invoked
+// ~80 times in this package and the migration chain was the single
+// largest contributor to its wall-clock. The template is produced by
+// database.Migrate and opened with database.Open, so the schema and
+// the pragmas (foreign_keys ON, WAL, busy_timeout) are the same ones
+// production runs — including the busy_timeout that keeps the
+// lifecycle boot tests from flaking on a transient writer lock when
+// recoverOrphanedRuns writes while a test polls a row.
 func openTestDB(t *testing.T) *sql.DB {
-	// File-backed SQLite per call so multiple goroutines see a stable
-	// schema. Each invocation gets a unique path — the helper is
-	// called from many parallel tests and the previous shared
-	// `/tmp/test-auth-lifecycle.db` made them stomp each other when
-	// run with `-count=1`.
-	var path string
-	if t != nil {
-		path = filepath.Join(t.TempDir(), "test-auth-lifecycle.db")
-	} else {
-		// No t.Cleanup hook is available — use a process-unique name
-		// in the OS temp dir so collisions between bare newTestServer()
-		// callers can't happen. Files are tiny and the OS reaps temp
-		// on shutdown anyway.
-		path = filepath.Join(os.TempDir(), fmt.Sprintf("test-auth-lifecycle-%d-%d.db", os.Getpid(), atomic.AddInt64(&testDBCounter, 1)))
-	}
-	// busy_timeout matches production (internal/database/database.go) so a
-	// transient writer lock during concurrent boot (e.g. recoverOrphanedRuns
-	// writing while a test polls a row) retries instead of returning an
-	// immediate SQLITE_BUSY — the lifecycle boot tests are otherwise flaky
-	// under slow/contended CI runners.
-	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL&_pragma=busy_timeout(5000)")
-	if err != nil {
-		if t != nil {
-			t.Fatalf("open: %v", err)
+	if t == nil {
+		// No t.Cleanup hook is available. Same contract as before: the
+		// per-call temp file leaks until the process exits, which for
+		// bare newTestServer() callers means "immediately after".
+		db, _, err := testutil.NewMigratedDB()
+		if err != nil {
+			panic(err)
 		}
-		panic(err)
+		return db.DB
 	}
-	if t != nil {
-		t.Cleanup(func() { db.Close() })
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db, logger); err != nil {
-		if t != nil {
-			t.Fatalf("migrate: %v", err)
-		}
-		panic(err)
-	}
-	return db
+	return testutil.MigratedSQLDB(t)
 }
 
-// testDBCounter is the per-process counter that gives each bare
-// (no-*testing.T) openTestDB call a unique filename. Incremented
-// atomically so concurrent table-driven tests don't collide.
-var testDBCounter int64
+// TestOpenTestDB_EnforcesForeignKeys pins the property issue #1550 was filed
+// about: every connection this package's fixtures hand out enforces foreign
+// keys, so a row production could never write is rejected in tests too.
+//
+// The regression it guards against is silent, which is the whole reason it is
+// worth a test. openTestDB used to build its own DSN:
+//
+//	file:<path>?_foreign_keys=on&_journal=WAL&_pragma=busy_timeout(5000)
+//
+// `_foreign_keys=` and `_journal=` are mattn/go-sqlite3 spellings. This repo
+// drives modernc.org/sqlite, which ignores parameters it does not recognise
+// rather than erroring — so the helper read as "foreign keys on" while
+// enforcement was left to whatever a pooled connection happened to inherit.
+// Nothing announced it: three TestLazyGatekeeper_* tests went red on -shuffle
+// only, and nine other tests in this package were quietly seeding orphan rows
+// the API cannot produce. Routing the helper through testutil (and therefore
+// through database.Open) fixed it, but a fixture that goes back to a hand-built
+// DSN would break it again just as quietly.
+//
+// Enforcement is per-connection, not per-database, so a single PRAGMA read
+// proves nothing about the connection the next query lands on. Probe several.
+func TestOpenTestDB_EnforcesForeignKeys(t *testing.T) {
+	db := openTestDB(t)
+
+	// crews.workspace_id REFERENCES workspaces(id), and no workspace is seeded:
+	// exactly the orphan the API has no route to create.
+	const orphanCrew = `INSERT INTO crews (id, workspace_id, name, slug)
+		VALUES (?, 'ws-that-was-never-created', ?, ?)`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// database.Open caps the pool at 5. Eight probes therefore cover every
+	// connection the pool will ever open, and using goroutines without a
+	// rendezvous means a lower cap would slow the test down rather than
+	// deadlock it.
+	const probes = 8
+	var wg sync.WaitGroup
+	for i := 0; i < probes; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Errorf("probe %d: acquire connection: %v", i, err)
+				return
+			}
+			defer conn.Close()
+
+			var fk int
+			if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&fk); err != nil {
+				t.Errorf("probe %d: read foreign_keys: %v", i, err)
+				return
+			}
+			if fk != 1 {
+				t.Errorf("probe %d: foreign_keys = %d, want 1", i, fk)
+			}
+
+			id := fmt.Sprintf("crew-orphan-%d", i)
+			switch _, err := conn.ExecContext(ctx, orphanCrew, id, id, id); {
+			case err == nil:
+				t.Errorf("probe %d: orphan crew ACCEPTED — foreign keys are not "+
+					"enforced on this connection", i)
+			case !strings.Contains(err.Error(), "FOREIGN KEY constraint failed"):
+				t.Errorf("probe %d: orphan crew rejected for the wrong reason: %v", i, err)
+			}
+
+			// Hold the connection open a moment so the pool has to hand the next
+			// probe a different one instead of recycling this one.
+			time.Sleep(20 * time.Millisecond)
+		}(i)
+	}
+	wg.Wait()
+}
 
 func newTestServer() *Server {
 	return newTestServerForT(nil)
