@@ -1041,7 +1041,7 @@ function GovernanceModelCard({
           them here was the server refusing the write. Say it on both cards, in
           the same words, before either mistake is possible. */}
       <div
-        className="px-4 py-2 border-b border-border/40 text-[11px] leading-snug text-muted-foreground"
+        className="px-4 py-2 border-b border-border/40 text-xs leading-snug text-muted-foreground"
         data-testid="keeper-gov-scope"
       >
         <strong className="font-medium text-foreground/80">Scope:</strong> this workspace only. It overrides{" "}

@@ -537,7 +537,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
           belongs before the mistake, which means at the top of the card and not
           in the footnote under it. */}
       <div
-        className="px-4 py-2 border-b border-border/40 text-[11px] leading-snug text-muted-foreground"
+        className="px-4 py-2 border-b border-border/40 text-xs leading-snug text-muted-foreground"
         data-testid="keeper-judge-scope"
       >
         <strong className="font-medium text-foreground/80">Scope:</strong> the instance-wide judge — the default for
