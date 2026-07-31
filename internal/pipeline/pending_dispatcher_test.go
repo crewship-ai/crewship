@@ -12,8 +12,14 @@ import (
 // recording how many Runs overlapped (high-water mark) and how many
 // completed. It lets the dispatcher tests prove that co-due rows fire
 // concurrently instead of serially.
+//
+// gate, when set, replaces the delay with a barrier the test opens by hand.
+// A duration says "probably still running when I look"; a barrier says "still
+// running until I say otherwise", which is the difference between a test that
+// usually exercises a drain and one that always does.
 type fakeExecutor struct {
 	delay     time.Duration
+	gate      <-chan struct{}
 	inFlight  int32
 	maxInWork int32
 	completed int32
@@ -27,7 +33,13 @@ func (f *fakeExecutor) Run(ctx context.Context, in RunInput) (*RunResult, error)
 			break
 		}
 	}
-	if f.delay > 0 {
+	switch {
+	case f.gate != nil:
+		select {
+		case <-f.gate:
+		case <-ctx.Done():
+		}
+	case f.delay > 0:
 		select {
 		case <-time.After(f.delay):
 		case <-ctx.Done():
@@ -116,30 +128,64 @@ func TestPendingDispatcher_BoundedConcurrency(t *testing.T) {
 // TestPendingDispatcher_StopDrainsInFlight: Stop() must block until every
 // dispatched goroutine has finished (graceful shutdown / WaitGroup drain).
 //
-// The wait below is for all four to be IN FLIGHT, not for the first one. Stop
-// is not a flush: sweep() returns on stopCh and abandons the not-yet-dispatched
-// tail on purpose, so anything still queued when Stop lands never runs. Waiting
-// on `inFlight > 0` and then asserting all four completed asserted the opposite
-// of that design, and only passed when the sweep happened to win the race —
-// which under -race it usually lost (`expected 4 completed, got 1`, #1552's
-// go-race job on main).
+// Stop is not a flush. sweep() returns on stopCh and abandons the
+// not-yet-dispatched tail on purpose, so anything still queued when Stop lands
+// never runs. The original test waited for `inFlight > 0` — one goroutine of
+// four — and then required all four to have completed, which asserts the
+// opposite of that design and holds only when the sweep wins the race. Under
+// -race on a contended runner it lost: `expected 4 completed, got 1`.
 //
-// Waiting for the full set makes the drain the only thing under test: four
-// goroutines are running, Stop must not return until all four are done. The
-// pool is 12, so all four fit at once and this is deterministic rather than a
-// bet on scheduling.
+// Nothing here is timed. The runs block on a barrier this test opens by hand,
+// so the drain is not something the test hopes to catch in progress — it is a
+// state the test holds open. That makes the real contract observable: Stop is
+// called while four goroutines are provably still running, and must not return
+// until every one of them has finished.
 func TestPendingDispatcher_StopDrainsInFlight(t *testing.T) {
 	const n = 4
 	store := enqueueDue(t, n)
-	exec := &fakeExecutor{delay: 150 * time.Millisecond}
+	release := make(chan struct{})
+	exec := &fakeExecutor{gate: release}
 	d := NewPendingRunDispatcher(store, exec, nil)
 
+	var releaseOnce, stopOnce sync.Once
+	letGo := func() { releaseOnce.Do(func() { close(release) }) }
+	stop := func() { stopOnce.Do(d.Stop) }
+
 	d.Start(context.Background())
+	// Registered before the first Fatalf can fire. Start took
+	// context.Background(), so a dispatcher left running outlives this test and
+	// leaks into whichever one runs next — the order-dependence class #1551
+	// closed. Release first: Stop waits on the WaitGroup, and the gated runs
+	// are what it is waiting for, so stopping without opening the barrier would
+	// hang rather than clean up.
+	t.Cleanup(func() { letGo(); stop() })
+
 	if !waitFor(t, 5*time.Second, func() bool { return atomic.LoadInt32(&exec.inFlight) == n }) {
 		t.Fatalf("precondition: only %d/%d runs reached the executor, so there is no full drain to test",
 			atomic.LoadInt32(&exec.inFlight), n)
 	}
-	d.Stop() // must not return until in-flight runs complete
+
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); stop() }()
+
+	// Stop must still be blocked: all four runs are parked on the barrier. This
+	// is the assertion the previous version could not make, because it had no
+	// way to keep a run in flight. A generous window — its only job is to catch
+	// a Stop that returned early, and it cannot produce a false failure, since
+	// a correct Stop stays blocked indefinitely.
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while all runs were still in flight — it did not wait for the drain")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	letGo()
+
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop did not return after the in-flight runs were released")
+	}
 
 	if got := atomic.LoadInt32(&exec.inFlight); got != 0 {
 		t.Fatalf("Stop returned with %d runs still in flight", got)
