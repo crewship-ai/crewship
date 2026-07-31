@@ -18,7 +18,7 @@ import (
 func TestPrintKeeperGovernance_ReportsTheEffectiveSecondApproverRule(t *testing.T) {
 	tierFloor, ok := keeper.MinSecondApproverLevel()
 	if !ok {
-		t.Skip("no tier forces a second approver; nothing to report")
+		t.Fatal("no tier forces a second approver — the control this test exists for is gone, which is a failure, not a reason to skip")
 	}
 
 	t.Run("toggle off: the tier floor is still named", func(t *testing.T) {

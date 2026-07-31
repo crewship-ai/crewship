@@ -147,7 +147,7 @@ func TestKeeperGovernance_ReportsTheEffectiveSecondApproverRule(t *testing.T) {
 
 	tierFloor, ok := keeper.MinSecondApproverLevel()
 	if !ok {
-		t.Skip("no tier forces a second approver; nothing to report")
+		t.Fatal("no tier forces a second approver — the control this test exists for is gone, which is a failure, not a reason to skip")
 	}
 
 	// Toggle OFF (and never configured) — the tier floor is the whole rule.

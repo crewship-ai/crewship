@@ -54,7 +54,7 @@ func listEscalations(t *testing.T, h *QueryHandler, userID, wsID, crewID string)
 func TestListEscalations_ReportsWhyFourEyesApplies(t *testing.T) {
 	tierFloor, ok := keeper.MinSecondApproverLevel()
 	if !ok {
-		t.Skip("no tier forces a second approver; nothing to report")
+		t.Fatal("no tier forces a second approver — the control this test exists for is gone, which is a failure, not a reason to skip")
 	}
 	lowest := keeper.SecurityLevels()[0]
 
@@ -227,7 +227,7 @@ func seedFourEyesFixture(t *testing.T, escType string, level keeper.SecurityLeve
 func TestListEscalations_FourEyesMatchesResolve(t *testing.T) {
 	tierFloor, ok := keeper.MinSecondApproverLevel()
 	if !ok {
-		t.Skip("no tier forces a second approver; nothing to report")
+		t.Fatal("no tier forces a second approver — the control this test exists for is gone, which is a failure, not a reason to skip")
 	}
 	lowest := keeper.SecurityLevels()[0]
 
@@ -331,7 +331,7 @@ func TestListEscalations_FourEyesMatchesResolve(t *testing.T) {
 func TestListEscalations_FourEyesFollowsATierChange(t *testing.T) {
 	tierFloor, ok := keeper.MinSecondApproverLevel()
 	if !ok {
-		t.Skip("no tier forces a second approver; nothing to report")
+		t.Fatal("no tier forces a second approver — the control this test exists for is gone, which is a failure, not a reason to skip")
 	}
 	h, ownerID, wsID, crewID := seedFourEyesFixture(
 		t, "CREDENTIAL", keeper.SecurityLevels()[0], "", false, true)
