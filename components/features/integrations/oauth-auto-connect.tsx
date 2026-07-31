@@ -61,9 +61,26 @@ export function OAuthAutoConnect({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mcp_url: mcpURL, server_name: serverName }),
       })
-      const data = await res.json()
+      // Parsed defensively and only trusted after the status is checked:
+      // apiFetch resolves on 4xx/5xx, and a gateway 502 arrives as an HTML
+      // page whose failed .json() used to be reported as "Network error" —
+      // sending the operator to check their wifi while the server is what is
+      // down (#1563).
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setStatus("error")
+        // The server distinguishes "admins only" from "that MCP URL has no
+        // OAuth metadata"; keep its wording rather than a second guess at it.
+        const said = [data?.error, data?.detail, data?.message].find(
+          (m) => typeof m === "string" && m.trim(),
+        )
+        setError(
+          typeof said === "string" ? said : `Could not start the OAuth flow (HTTP ${res.status})`,
+        )
+        return
+      }
 
-      if (data.status === "authorize") {
+      if (data?.status === "authorize") {
         // Open browser for OAuth consent FIRST — if the popup is
         // blocked, skip the authorizing-state dance entirely so the
         // user gets a concrete error instead of a 2-minute silent wait.
@@ -110,12 +127,12 @@ export function OAuthAutoConnect({
           }
           timeoutRef.current = null
         }, 120000)
-      } else if (data.status === "needs_client_id") {
+      } else if (data?.status === "needs_client_id") {
         setStatus("error")
         setError(data.message || "Please provide Client ID manually via OAuth form in credential picker.")
       } else {
         setStatus("error")
-        setError(data.error || "Unknown error")
+        setError(data?.error || "Unknown error")
       }
     } catch {
       setStatus("error")
@@ -165,7 +182,7 @@ export function OAuthAutoConnect({
             : "Connect with OAuth to automatically authenticate with this service."}
       </p>
       {error && (
-        <p className="text-label text-destructive">{error}</p>
+        <p role="alert" className="text-label text-destructive">{error}</p>
       )}
       <Button
         size="sm"
