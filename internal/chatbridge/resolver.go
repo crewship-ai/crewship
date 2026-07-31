@@ -30,13 +30,29 @@ type IPCResolver struct {
 // fires while Next.js may be down).
 func (r *IPCResolver) BaseURL() string { return r.baseURL }
 
+// resolverTransport is the connection pool every IPCResolver dials on.
+//
+// Deliberately NOT http.DefaultTransport. The default is process-global, and
+// httptest.Server.Close() closes its idle connections as a courtesy to whoever
+// might be using it — so in a test binary, any parallel test tearing down its
+// own server reaps connections belonging to everyone else. That is how
+// TestIncrementMessageCount failed on linux-arm64 with "HTTP/1.x transport
+// connection broken: http: CloseIdleConnections called" while touching nothing
+// that test owned. See TestResolverDoesNotShareTheGlobalTransport.
+//
+// One package-level transport rather than one per resolver: the six
+// construction sites all run at wiring time, and they dial the same internal
+// API, so they should share a pool — just not the whole process's.
+var resolverTransport http.RoundTripper = http.DefaultTransport.(*http.Transport).Clone()
+
 // NewIPCResolver creates an IPCResolver that calls the internal API at the given URL.
 func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCResolver {
 	return &IPCResolver{
 		baseURL:       nextjsURL,
 		internalToken: internalToken,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   10 * time.Second,
+			Transport: resolverTransport,
 		},
 		logger: logger,
 	}
