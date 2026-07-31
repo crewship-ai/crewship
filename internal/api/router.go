@@ -21,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -96,19 +97,24 @@ type Router struct {
 	keeperSecrets       SecretGetter
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
+	keeperSettings      *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
 	govModelStatus      GovModelStatusProvider
-	composioConfig      *config.ComposioConfig
-	keeperConvReader    ConversationReader
-	convSearcher        ConversationSearcher
-	missionCallback     MissionCallback
-	scheduleUpdater     ScheduleUpdater
-	logWriter           *logcollector.Writer
-	allowSignup         bool
-	googleClientID      string
-	googleSecret        string
-	authBaseURL         string
-	license             *license.License
-	agentHandler        *AgentHandler
+	// govModelJudge is the same resolver as govModelStatus, concretely typed so
+	// the admin judge routes can build a candidate hosted judge. nil → those
+	// routes 503.
+	govModelJudge    *GovModelResolver
+	composioConfig   *config.ComposioConfig
+	keeperConvReader ConversationReader
+	convSearcher     ConversationSearcher
+	missionCallback  MissionCallback
+	scheduleUpdater  ScheduleUpdater
+	logWriter        *logcollector.Writer
+	allowSignup      bool
+	googleClientID   string
+	googleSecret     string
+	authBaseURL      string
+	license          *license.License
+	agentHandler     *AgentHandler
 	// credentialHandler and skillGenHandler are stashed at
 	// registerCrewsRoutes time so the registerInternalRoutes step
 	// can wire the matching /api/v1/internal/credentials and
@@ -226,6 +232,10 @@ type Router struct {
 	// useful in dev / test builds that haven't wired explicit config.
 	auxModels    llm.AuxiliaryModels
 	auxModelsSet bool
+
+	// keeperAuxSettings layers the runtime per-slot overrides over auxModels.
+	// nil → boot-time values only (CLI processes, most tests).
+	keeperAuxSettings *keepercfg.AuxStore
 
 	// Keeper Phase 2 (PR-C / PRD §6 F4) evaluators. Optional — the
 	// router_internal route registration passes whichever are non-nil
@@ -349,11 +359,27 @@ func (r *Router) PolicyResolver() *policy.Resolver {
 // from blowing up on a zero-valued struct (every Provider would be
 // "" → ResolveAux would error). Production wires the real config via
 // WithAuxiliaryModels.
+//
+// When the runtime override store is wired it wins: it holds the same boot-time
+// values as its inherited layer, so this returns the config in force rather than
+// the one captured at construction. Every caller goes through here, which is why
+// an admin edit reaches the aux-status surface and the run-verdict provider
+// without a restart.
 func (r *Router) AuxModels() llm.AuxiliaryModels {
+	if r.keeperAuxSettings != nil {
+		return r.keeperAuxSettings.Resolved()
+	}
 	if !r.auxModelsSet {
 		return llm.DefaultAuxiliaryModels()
 	}
 	return r.auxModels
+}
+
+// KeeperAuxSettings exposes the runtime evaluator-override store for the admin
+// handlers. nil when unwired — callers must surface that as 503 rather than
+// silently pretending the write landed.
+func (r *Router) KeeperAuxSettings() *keepercfg.AuxStore {
+	return r.keeperAuxSettings
 }
 
 // SetVersion records the binary version for the version-info endpoint.

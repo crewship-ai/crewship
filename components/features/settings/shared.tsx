@@ -88,13 +88,18 @@ export function SettingsRow({
         className,
       )}
     >
-      <div className="min-w-0 shrink-0">
+      {/* The label side flexes and may shrink; the control side never does.
+          It used to be the other way round, which meant a row with a long
+          description pushed its own control out of the card — the description
+          clipped mid-word and the input sat on top of the text. A description
+          is allowed to be a sentence, so the layout has to absorb one. */}
+      <div className="min-w-0 flex-1">
         <div className="text-xs text-foreground">{label}</div>
         {description && (
           <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">{description}</div>
         )}
       </div>
-      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
+      <div className="flex items-center gap-2 shrink-0 justify-end">{children}</div>
     </div>
   )
 }

@@ -14,7 +14,19 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/keeper"
 )
+
+// securityLevelHint is the one rejection message both write paths use. It names
+// every tier and what it means, because "must be 1..4" tells an operator the
+// shape of the field and nothing about which one their credential is.
+var securityLevelHint = func() string {
+	parts := make([]string, 0, len(keeper.SecurityLevels()))
+	for _, l := range keeper.SecurityLevels() {
+		parts = append(parts, fmt.Sprintf("%d = %s (%s)", int(l), l.Label(), l.Tier().Blast))
+	}
+	return "security_level must be one of: " + strings.Join(parts, "; ")
+}()
 
 // encryptOrError encrypts a credential value for storage, handling the
 // failure tail that Create / Update / Rotate all shared: log the error
@@ -373,8 +385,18 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secLevel := 1
-	if req.SecurityLevel != nil && *req.SecurityLevel >= 1 && *req.SecurityLevel <= 3 {
+	// The tier an operator asks for is the tier they get, or the request is
+	// refused. This used to silently clamp: `security_level: 4` fell through the
+	// range check and landed as 1, so marking a production-admin credential
+	// CRITICAL gave it the LOWEST tier — and the API said 201. L4 also has real
+	// consequences now (internal/keeper/tier.go), which makes the silent
+	// downgrade a security bug rather than a cosmetic one.
+	secLevel := int(keeper.SecurityLevelL1)
+	if req.SecurityLevel != nil {
+		if !keeper.SecurityLevel(*req.SecurityLevel).Valid() {
+			replyError(w, http.StatusBadRequest, securityLevelHint)
+			return
+		}
 		secLevel = *req.SecurityLevel
 	}
 
@@ -770,11 +792,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		case int:
 			n = v
 		default:
-			replyError(w, http.StatusBadRequest, "security_level must be 1, 2, or 3")
+			replyError(w, http.StatusBadRequest, securityLevelHint)
 			return
 		}
-		if n < 1 || n > 3 {
-			replyError(w, http.StatusBadRequest, "security_level must be 1, 2, or 3")
+		if !keeper.SecurityLevel(n).Valid() {
+			replyError(w, http.StatusBadRequest, securityLevelHint)
 			return
 		}
 		body["security_level"] = n
