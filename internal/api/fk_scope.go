@@ -53,6 +53,7 @@ var fkScopeQueries = map[string]string{
 // Returns nil when the row is in-workspace, errFKNotInWorkspace when it is
 // absent/foreign (map to 400), or the underlying DB error otherwise (map to
 // 500 — a transient failure is not an authorization decision).
+//
 // q is a rowQuerier (issue_handler.go) rather than a *sql.DB so a caller that
 // already holds a transaction validates against the SAME snapshot it is about
 // to INSERT into. issue_handler_create.go's neighbouring parent_issue_id and
