@@ -80,7 +80,10 @@ func (r *Router) registerSystemRoutes() {
 	// AuxModels() so test/dev builds that didn't wire
 	// WithAuxiliaryModels still see the MVP defaults rather than
 	// 5 empty rows.
-	auxStatus := NewAuxStatusHandler(r.AuxModels(), r.keeperConfig, r.logger)
+	auxStatus := NewAuxStatusHandler(r.AuxModels(), r.keeperConfig, r.logger).
+		// So a slot pinned to a vault key is not reported as a missing env var
+		// (#1554).
+		WithCredentials(r.keeperAuxSettings, NewAuxCredentialLookup(r.db))
 	// ADMIN+ floor (#868): aux-status enumerates provider + model id for every
 	// slot (incl. Keeper) — the same operational-metadata leak class #893
 	// closed for /system/keeper, so it sits behind the same admin floor.

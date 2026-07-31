@@ -12,6 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { SettingsCard, SettingsRow, SettingsEmpty } from "@/components/features/settings/shared"
+import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 import { cn } from "@/lib/utils"
 
 /**
@@ -76,6 +77,11 @@ interface AuxSlot {
   provider: AuxField<string>
   model: AuxField<string>
   timeout_ms: AuxField<number>
+  /** Which stored key this slot spends (#1554). Optional: a server from before
+   *  the field existed sends nothing, and the row then renders without a picker
+   *  rather than claiming the key is unset. `editable: false` means the server
+   *  has no way to VERIFY a chosen credential, so it must not offer one. */
+  credential_id?: AuxField<string>
   overridden: boolean
 }
 
@@ -117,6 +123,19 @@ function reviewSlotFor(slot: string): string | null {
   }
 }
 
+/** The Select's stand-in for "no credential" — Radix has no empty-string value. */
+const AUX_CREDENTIAL_NONE = "__none__"
+
+/**
+ * Only an API_KEY can back an evaluator. The endpoint a hosted evaluator dials
+ * is ours (api.anthropic.com / api.openai.com), so an ENDPOINT_URL credential
+ * has nothing to do here — offering one would give the operator a row that saves
+ * cleanly and then authenticates with a URL. The judge's own picker is wider
+ * (it accepts ENDPOINT_URL, because its endpoint IS configurable); this is the
+ * narrower half of the same question.
+ */
+const AUX_CREDENTIAL_TYPE = "API_KEY"
+
 /** Provenance, in the words an operator needs to decide whether Reset does anything. */
 function sourceNote(source: string): string {
   switch (source) {
@@ -145,6 +164,16 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // can be tested and run without the two results overwriting each other.
   const [running, setRunning] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Record<string, { ok: boolean; detail: string }>>({})
+  // Which stored keys a slot may be pointed at (#1554). Same hook the governance
+  // model's picker uses, so the two surfaces cannot disagree about what the
+  // workspace holds — the list is filtered narrower here (see AUX_CREDENTIAL_TYPE).
+  const { credentials } = useCredentials(workspaceId ?? undefined)
+  // The hook assigns whatever the endpoint returned without checking its shape,
+  // so a non-array body would take this whole card down — and this card's job is
+  // to REPORT breakage, not to become it.
+  const keyCredentials = Array.isArray(credentials)
+    ? credentials.filter((c) => c.type === AUX_CREDENTIAL_TYPE)
+    : []
 
   const load = useCallback(async () => {
     if (!workspaceId) return
@@ -441,6 +470,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
                 <SlotEditor
                   slot={auxBySlot.get(r.id)!}
                   providers={aux?.providers ?? []}
+                  credentials={keyCredentials}
                   workspaceId={workspaceId}
                   busy={busy}
                   onSave={saveSlot}
@@ -503,6 +533,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
               <SlotEditor
                 slot={s}
                 providers={aux?.providers ?? []}
+                credentials={keyCredentials}
                 workspaceId={workspaceId}
                 busy={busy}
                 onSave={saveSlot}
@@ -531,11 +562,12 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
  * here degrades an evaluator silently.
  */
 function SlotEditor({
-  slot, providers, workspaceId, busy, onSave, onProbe, probing, probeResult,
+  slot, providers, credentials, workspaceId, busy, onSave, onProbe, probing, probeResult,
   onRun, runningNow, runResult,
 }: {
   slot: AuxSlot
   providers: string[]
+  credentials: { id: string; name: string }[]
   workspaceId: string | null
   busy: boolean
   onSave: (slot: string, patch: Record<string, unknown>) => Promise<void>
@@ -586,6 +618,9 @@ function SlotEditor({
     return () => controller.abort()
   }, [provider, workspaceId])
 
+  const pinnedKey = slot.credential_id?.value ?? ""
+  const showKeyPicker = Boolean(slot.credential_id?.editable) && provider !== "ollama"
+
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-1.5">
@@ -632,6 +667,50 @@ function SlotEditor({
             ))}
           </SelectContent>
         </Select>
+
+        {/* Which stored key this slot spends. Absent for a local ("ollama")
+            evaluator, which dials the instance judge endpoint and needs none —
+            a picker there would be a control wired to nothing. Absent too when
+            the server cannot VERIFY a chosen credential (editable: false) or
+            predates the field: offering a choice that is never checked is how a
+            key from the wrong workspace gets bound. */}
+        {showKeyPicker && (
+          <Select
+            value={pinnedKey === "" ? AUX_CREDENTIAL_NONE : pinnedKey}
+            disabled={busy}
+            onValueChange={(next) => {
+              const id = next === AUX_CREDENTIAL_NONE ? "" : next
+              if (id === pinnedKey) return
+              void onSave(slot.slot, { credential_id: id })
+            }}
+          >
+            <SelectTrigger
+              size="sm"
+              className="h-7 w-[9.5rem] text-[11px]"
+              aria-label={`${slot.label} key`}
+              data-testid={`keeper-aux-credential-${slot.slot}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={AUX_CREDENTIAL_NONE} className="text-[11px]">
+                server&apos;s own key
+              </SelectItem>
+              {credentials.map((c) => (
+                <SelectItem key={c.id} value={c.id} className="text-[11px]">{c.name}</SelectItem>
+              ))}
+              {/* A pinned key that is no longer listed — revoked, or from a
+                  workspace this view cannot see — stays selectable. Rendering
+                  the picker blank would let the next save silently clear it, and
+                  this is precisely the row that stopped working. */}
+              {pinnedKey !== "" && !credentials.some((c) => c.id === pinnedKey) && (
+                <SelectItem value={pinnedKey} className="text-[11px]">
+                  {pinnedKey} (unavailable)
+                </SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* The configured model is not one the provider offers. Silent until a

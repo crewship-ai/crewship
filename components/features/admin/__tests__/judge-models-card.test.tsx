@@ -489,3 +489,128 @@ describe("JudgeModelsCard — how much detail it shows by default", () => {
     })
   })
 })
+
+// Which KEY an evaluator spends (#1554).
+//
+// The rows could pick a provider and a model and not a credential, so every
+// hosted evaluator billed whatever key the server process booted with. On an
+// instance holding several Anthropic keys — the normal case, each with its own
+// subscription limit — the card could say which model a sweep runs and not whose
+// subscription it charges. Worse, an instance whose env key had gone stale had
+// five dead evaluators and rendered them all as configured.
+describe("JudgeModelsCard — which key an evaluator spends", () => {
+  beforeEach(() => { cleanup(); apiFetch.mockReset() })
+
+  async function openDetail() {
+    fireEvent.click(await screen.findByTestId("keeper-aux-toggle"))
+  }
+
+  const CREDS = [
+    { id: "cred_prod", name: "prod-anthropic", type: "API_KEY" },
+    { id: "cred_endpoint", name: "self-hosted-llm", type: "ENDPOINT_URL" },
+  ]
+
+  function slot(over: Record<string, unknown> = {}) {
+    return {
+      slot: "curator", label: "Skill review + memory consolidation", applies_at: "immediately",
+      provider: { value: "anthropic", source: "default", editable: true },
+      model: { value: "claude-haiku-4-5", source: "default", editable: true },
+      timeout_ms: { value: 30000, source: "default", editable: true },
+      credential_id: { value: "", source: "default", editable: true },
+      overridden: false,
+      ...over,
+    }
+  }
+
+  function route(slots: unknown[], creds: unknown[] = CREDS) {
+    apiFetch.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes("aux-status")) return Promise.resolve(ok({ subsystems: [HEALTHY] }))
+      if (u.includes("/api/v1/credentials")) return Promise.resolve(ok(creds))
+      if (u.includes("/admin/keeper/aux")) {
+        return Promise.resolve(ok({
+          slots, providers: ["anthropic", "openai", "ollama"],
+          judge_provider: "ollama", judge_model: "qwen2.5:7b", any_overridden: false,
+        }))
+      }
+      return Promise.resolve(ok({ models: [] }))
+    })
+  }
+
+  it("offers a key picker on a paid evaluator row", async () => {
+    route([slot()])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    expect(await screen.findByTestId("keeper-aux-credential-curator")).toBeTruthy()
+  })
+
+  it("offers only keys, not endpoints — an evaluator authenticates with one", async () => {
+    route([slot()])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    fireEvent.click(await screen.findByTestId("keeper-aux-credential-curator"))
+    expect(await screen.findByText("prod-anthropic")).toBeTruthy()
+    // An ENDPOINT_URL saves cleanly and then fails at first use, so it is not
+    // offered at all rather than refused after the fact.
+    expect(screen.queryByText("self-hosted-llm")).toBeNull()
+  })
+
+  it("saves the chosen key to the slot endpoint", async () => {
+    route([slot()])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    fireEvent.click(await screen.findByTestId("keeper-aux-credential-curator"))
+    fireEvent.click(await screen.findByText("prod-anthropic"))
+
+    await waitFor(() => {
+      const put = apiFetch.mock.calls.find(
+        (c) => String(c[0]).includes("/admin/keeper/aux/curator") &&
+          (c[1] as { method?: string } | undefined)?.method === "PUT",
+      )
+      expect(put).toBeTruthy()
+      expect(JSON.parse(String((put![1] as { body: string }).body))).toEqual({ credential_id: "cred_prod" })
+    })
+  })
+
+  it("does not ask a local evaluator which key it spends", async () => {
+    // "ollama" dials the instance judge endpoint and needs no key at all. A
+    // picker there is a control wired to nothing.
+    route([slot({ provider: { value: "ollama", source: "instance", editable: true } })])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    await screen.findByTestId("keeper-aux-model-curator")
+    expect(screen.queryByTestId("keeper-aux-credential-curator")).toBeNull()
+  })
+
+  it("keeps a pinned-but-now-unlisted key visible instead of dropping it", async () => {
+    // A revoked key still names what the slot is configured to spend. Rendering
+    // the picker blank would let the next save silently clear it — and the
+    // operator needs to SEE that this is the row that stopped working.
+    route([slot({ credential_id: { value: "cred_gone", source: "instance", editable: true } })])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    expect(await screen.findByText(/cred_gone/)).toBeTruthy()
+    expect(screen.getByText(/unavailable/i)).toBeTruthy()
+  })
+
+  it("hides the picker when the server cannot verify credentials", async () => {
+    // editable=false means no credential check is wired, so a stored key would
+    // never be validated. A picker whose choice cannot be checked is worse than
+    // no picker.
+    route([slot({ credential_id: { value: "", source: "default", editable: false } })])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    await screen.findByTestId("keeper-aux-model-curator")
+    expect(screen.queryByTestId("keeper-aux-credential-curator")).toBeNull()
+  })
+
+  it("stays rendered against an older server that sends no credential field", async () => {
+    const legacy = slot()
+    delete (legacy as Record<string, unknown>).credential_id
+    route([legacy])
+    render(<JudgeModelsCard workspaceId="ws1" />)
+    await openDetail()
+    expect(await screen.findByTestId("keeper-aux-model-curator")).toBeTruthy()
+    expect(screen.queryByTestId("keeper-aux-credential-curator")).toBeNull()
+  })
+})

@@ -18,7 +18,8 @@ import (
 // the only way that can be true is through the per-request gov-model seam.
 
 // auxStoreFor builds a store on a throwaway DB. The DDL mirrors
-// internal/database/migrations/20260730111147_keeper_aux_settings.sql.
+// internal/database/migrations/20260730111147_keeper_aux_settings.sql plus
+// 20260730205811_keeper_aux_credential.sql.
 func auxStoreFor(t *testing.T) *keepercfg.AuxStore {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
@@ -34,7 +35,8 @@ func auxStoreFor(t *testing.T) *keepercfg.AuxStore {
 		CREATE TABLE keeper_aux_settings (
 			slot TEXT PRIMARY KEY, provider TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '', timeout_ms INTEGER,
-			updated_by TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')`); err != nil {
+			updated_by TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '',
+			credential_id TEXT)`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
 	s := keepercfg.NewAuxStore(db, llm.DefaultAuxiliaryModels())
@@ -53,7 +55,7 @@ func judgeAt(url, model string) func() (string, string) {
 func TestAuxLiveResolver_NoOverrideFallsThrough(t *testing.T) {
 	store := auxStoreFor(t)
 	resolve := newAuxLiveResolver("behavior", store, nil,
-		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 
 	if p, m := resolve(context.Background(), "ws-1"); p != nil || m != "" {
 		t.Errorf("got (%v, %q), want a fall-through to the construction default", p, m)
@@ -65,7 +67,7 @@ func TestAuxLiveResolver_NoOverrideFallsThrough(t *testing.T) {
 func TestAuxLiveResolver_OverrideAppliesWithoutRebuild(t *testing.T) {
 	store := auxStoreFor(t)
 	resolve := newAuxLiveResolver("behavior", store, nil,
-		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 
 	// Resolver already exists (as it does in production — built at boot).
 	if p, _ := resolve(context.Background(), "ws-1"); p != nil {
@@ -119,13 +121,13 @@ func TestAuxLiveResolver_LocalSlotNeedsAJudgeEndpoint(t *testing.T) {
 	}
 
 	resolve := newAuxLiveResolver("negative", store, nil,
-		judgeAt("", ""), nil, nil, slog.Default())
+		judgeAt("", ""), nil, nil, nil, slog.Default())
 	if p, _ := resolve(context.Background(), "ws-1"); p != nil {
 		t.Error("built a local evaluator with no judge endpoint configured")
 	}
 
 	resolve = newAuxLiveResolver("negative", store, nil,
-		judgeAt("http://10.0.0.5:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://10.0.0.5:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 	if p, _ := resolve(context.Background(), "ws-1"); p == nil {
 		t.Error("a configured judge endpoint did not produce a provider")
 	}
@@ -147,7 +149,7 @@ func TestAuxLiveResolver_WorkspaceGovModelStillWins(t *testing.T) {
 		return ws, "workspace-pinned"
 	})
 	resolve := newAuxLiveResolver("curator", store, next,
-		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 
 	p, m := resolve(context.Background(), "ws-1")
 	if m != "workspace-pinned" || p != llm.Provider(ws) {
@@ -167,7 +169,7 @@ func TestAuxLiveResolver_UnbuildableOverrideFallsThrough(t *testing.T) {
 	}
 
 	resolve := newAuxLiveResolver("memory_health", store, nil,
-		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, slog.Default())
+		judgeAt("http://127.0.0.1:11434", "qwen2.5:7b"), nil, nil, nil, slog.Default())
 	if p, _ := resolve(context.Background(), "ws-1"); p != nil {
 		t.Error("built an anthropic provider with no API key")
 	}
@@ -188,12 +190,12 @@ func TestAuxLiveResolver_NilStoreReturnsTheOriginalResolver(t *testing.T) {
 		called = true
 		return nil, ""
 	})
-	resolve := newAuxLiveResolver("behavior", nil, next, nil, nil, nil, slog.Default())
+	resolve := newAuxLiveResolver("behavior", nil, next, nil, nil, nil, nil, slog.Default())
 	resolve(context.Background(), "ws-1")
 	if !called {
 		t.Error("the original resolver was not called")
 	}
-	if resolve := newAuxLiveResolver("behavior", nil, nil, nil, nil, nil, slog.Default()); resolve != nil {
+	if resolve := newAuxLiveResolver("behavior", nil, nil, nil, nil, nil, nil, slog.Default()); resolve != nil {
 		t.Error("a nil store with no next resolver should stay nil, not wrap")
 	}
 }

@@ -135,17 +135,32 @@ func KnownAuxProvider(p string) bool {
 // the sweeps run on a schedule, so minutes is already generous.
 const auxTimeoutMax = 10 * time.Minute
 
+// maxAuxCredentialIDLen bounds a stored credential id. Vault ids are CUIDs
+// (~25 characters); the ceiling is here so a hand-edited row cannot put an
+// unbounded string into a log line or an error message.
+const maxAuxCredentialIDLen = 200
+
 // AuxOverride is one stored row. An empty string or nil means "inherit".
 type AuxOverride struct {
-	Provider  string
-	Model     string
-	Timeout   *time.Duration
-	UpdatedAt string
-	UpdatedBy string
+	Provider string
+	Model    string
+	Timeout  *time.Duration
+	// CredentialID names the vault API_KEY this slot's provider dials with
+	// (#1554). Empty is the pre-existing behaviour: the builder reads the key
+	// from the process environment.
+	//
+	// Revoke-safety, mirroring governance.Settings.GovModelCredentialID: a revoke
+	// is a SOFT delete, so the column's ON DELETE SET NULL does not fire and the
+	// id stays here. The resolver looks the credential up per build and degrades
+	// a missing/revoked/wrong-typed one back to the env key with a WARN rather
+	// than dialling with a stale id.
+	CredentialID string
+	UpdatedAt    string
+	UpdatedBy    string
 }
 
 func (o AuxOverride) empty() bool {
-	return o.Provider == "" && o.Model == "" && o.Timeout == nil
+	return o.Provider == "" && o.Model == "" && o.Timeout == nil && o.CredentialID == ""
 }
 
 // AuxEffective is one slot as resolved: the values in force plus where each came
@@ -162,6 +177,12 @@ type AuxEffective struct {
 	// the admin card use; a Go duration string is an operator-facing nicety the
 	// CLI applies on top.
 	TimeoutMS Field[int64] `json:"timeout_ms"`
+	// CredentialID is the vault key this slot spends. It has only two sources —
+	// set here, or nothing — because there is no env layer to inherit from: the
+	// pre-#1554 behaviour is not "a credential named in the environment", it is
+	// "no credential at all, the provider reads the raw key from the process
+	// env". So an empty value here means exactly that, and Source is default.
+	CredentialID Field[string] `json:"credential_id"`
 
 	Overridden bool   `json:"overridden"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
@@ -171,14 +192,27 @@ type AuxEffective struct {
 // AuxPatch is a partial update for one slot. A nil field is left alone; a
 // pointer to the zero value CLEARS the override so the field inherits again.
 type AuxPatch struct {
-	Provider  *string
-	Model     *string
-	TimeoutMS *int64
+	Provider     *string
+	Model        *string
+	TimeoutMS    *int64
+	CredentialID *string
 }
 
 func (p AuxPatch) empty() bool {
-	return p.Provider == nil && p.Model == nil && p.TimeoutMS == nil
+	return p.Provider == nil && p.Model == nil && p.TimeoutMS == nil && p.CredentialID == nil
 }
+
+// AuxCredentialLookup turns a slot's stored credential id into the API key its
+// provider dials with. It is the seam the evaluator builders use to reach the
+// vault without this package (or internal/server) importing the credentials
+// layer; the concrete implementation lives in internal/api, and tests pass a
+// stub.
+//
+// A missing / revoked / soft-deleted / undecryptable / wrong-typed credential
+// returns a non-nil error, which callers treat the way ResolveGovModel treats
+// its own lookup failure (§4.4): degrade — here, back to the process-env key —
+// with a WARN, never a hard failure and never a dial with a stale id.
+type AuxCredentialLookup func(ctx context.Context, credentialID string) (apiKey string, err error)
 
 // AuxStore is the DB-backed per-slot override, cached in memory. Reads happen on
 // every evaluator build, so they must not touch the database.
@@ -232,7 +266,7 @@ func (s *AuxStore) Load(ctx context.Context) error {
 // auxSelectAll is shared by the boot-time load and the transactional refresh, so
 // the two can never drift into reading different columns.
 const auxSelectAll = `
-	SELECT slot, provider, model, timeout_ms, updated_at, COALESCE(updated_by, '')
+	SELECT slot, provider, model, timeout_ms, COALESCE(credential_id, ''), updated_at, COALESCE(updated_by, '')
 	  FROM keeper_aux_settings`
 
 // scanAuxRows builds the cache map from a query over auxSelectAll and closes
@@ -242,15 +276,18 @@ func scanAuxRows(rows *sql.Rows) (map[string]AuxOverride, error) {
 
 	next := map[string]AuxOverride{}
 	for rows.Next() {
-		var slot, provider, model, updatedAt, updatedBy string
+		var slot, provider, model, credentialID, updatedAt, updatedBy string
 		var timeoutMS sql.NullInt64
-		if err := rows.Scan(&slot, &provider, &model, &timeoutMS, &updatedAt, &updatedBy); err != nil {
+		if err := rows.Scan(&slot, &provider, &model, &timeoutMS, &credentialID, &updatedAt, &updatedBy); err != nil {
 			return nil, fmt.Errorf("keepercfg: scan aux setting: %w", err)
 		}
 		if !KnownAuxSlot(slot) {
 			continue
 		}
-		o := AuxOverride{Provider: provider, Model: model, UpdatedAt: updatedAt, UpdatedBy: updatedBy}
+		o := AuxOverride{
+			Provider: provider, Model: model, CredentialID: credentialID,
+			UpdatedAt: updatedAt, UpdatedBy: updatedBy,
+		}
 		if timeoutMS.Valid {
 			d := time.Duration(timeoutMS.Int64) * time.Millisecond
 			o.Timeout = &d
@@ -305,6 +342,12 @@ func resolveAuxSlot(slot string, dflt, builtin llm.AuxiliaryModels, o AuxOverrid
 	}
 	eff.Provider = pickAux(o.Provider, base.Provider, shipped.Provider)
 	eff.Model = pickAux(o.Model, base.Model, shipped.Model)
+	// No env layer to inherit from — see AuxEffective.CredentialID.
+	if o.CredentialID != "" {
+		eff.CredentialID = Field[string]{Value: o.CredentialID, Source: SourceInstance}
+	} else {
+		eff.CredentialID = Field[string]{Source: SourceDefault}
+	}
 
 	switch {
 	case o.Timeout != nil:
@@ -413,6 +456,9 @@ func (s *AuxStore) applyLocked(ctx context.Context, slot string, p AuxPatch, act
 			next.Timeout = &d
 		}
 	}
+	if p.CredentialID != nil {
+		next.CredentialID = strings.TrimSpace(*p.CredentialID)
+	}
 	if err := validateAux(next); err != nil {
 		return AuxEffective{}, err
 	}
@@ -445,12 +491,13 @@ func readAuxSlotTx(ctx context.Context, tx *sql.Tx, slot string) (AuxOverride, e
 	var (
 		o         AuxOverride
 		timeoutMS sql.NullInt64
+		credID    sql.NullString
 		updatedBy sql.NullString
 	)
 	err := tx.QueryRowContext(ctx, `
-		SELECT provider, model, timeout_ms, updated_at, updated_by
+		SELECT provider, model, timeout_ms, credential_id, updated_at, updated_by
 		  FROM keeper_aux_settings WHERE slot = ?`, slot).
-		Scan(&o.Provider, &o.Model, &timeoutMS, &o.UpdatedAt, &updatedBy)
+		Scan(&o.Provider, &o.Model, &timeoutMS, &credID, &o.UpdatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuxOverride{}, nil
 	}
@@ -461,6 +508,7 @@ func readAuxSlotTx(ctx context.Context, tx *sql.Tx, slot string) (AuxOverride, e
 		d := time.Duration(timeoutMS.Int64) * time.Millisecond
 		o.Timeout = &d
 	}
+	o.CredentialID = credID.String
 	o.UpdatedBy = updatedBy.String
 	return o, nil
 }
@@ -593,15 +641,16 @@ func persistAuxTx(ctx context.Context, tx *sql.Tx, slot string, o AuxOverride, a
 		timeout = o.Timeout.Milliseconds()
 	}
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO keeper_aux_settings (slot, provider, model, timeout_ms, updated_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		INSERT INTO keeper_aux_settings (slot, provider, model, timeout_ms, credential_id, updated_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		ON CONFLICT(slot) DO UPDATE SET
-			provider   = excluded.provider,
-			model      = excluded.model,
-			timeout_ms = excluded.timeout_ms,
-			updated_by = excluded.updated_by,
-			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
-		slot, o.Provider, o.Model, timeout, nullIfEmpty(actor))
+			provider      = excluded.provider,
+			model         = excluded.model,
+			timeout_ms    = excluded.timeout_ms,
+			credential_id = excluded.credential_id,
+			updated_by    = excluded.updated_by,
+			updated_at    = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+		slot, o.Provider, o.Model, timeout, nullIfEmpty(o.CredentialID), nullIfEmpty(actor))
 	if err != nil {
 		return fmt.Errorf("keepercfg: persist aux slot %s: %w", slot, err)
 	}
@@ -635,7 +684,47 @@ func validateAux(o AuxOverride) error {
 			return newValidation(fmt.Sprintf("the evaluator timeout must be at most %s", auxTimeoutMax))
 		}
 	}
+	// Shape only. Whether the id names a credential that EXISTS, is active, is an
+	// API_KEY and belongs to the caller's workspace is checked by the admin
+	// handler, which has the vault; this package deliberately has no notion of a
+	// workspace and must not grow one to store a string.
+	if o.CredentialID != "" {
+		if len(o.CredentialID) > maxAuxCredentialIDLen {
+			return newValidation(fmt.Sprintf("the credential id is too long (%d characters, limit %d)",
+				len(o.CredentialID), maxAuxCredentialIDLen))
+		}
+		for _, r := range o.CredentialID {
+			if r < 0x20 || r == 0x7f {
+				return newValidation("the credential id contains a control character")
+			}
+		}
+	}
 	return nil
+}
+
+// CredentialFor is the vault key a slot's evaluator should be built with, or ""
+// for "read it from the process environment" — the pre-#1554 behaviour, and
+// what an untouched instance resolves to.
+//
+// It mirrors llm.ResolveAux's fall-through rather than reading the slot's row
+// blindly: a slot with no provider of its own resolves its MODEL through the
+// fallback slot, so it has to spend the fallback's key too. A slot that does
+// have a provider keeps its own credential (possibly empty) — borrowing the
+// fallback's key there would hand an anthropic key to an openai endpoint.
+//
+// Nil-receiver safe: a process with no store names no credential.
+func (s *AuxStore) CredentialFor(slot string) string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	eff := s.effectiveSlotLocked(slot)
+	if eff.CredentialID.Value != "" || eff.Provider.Value != "" || slot == auxSlotFallback {
+		return eff.CredentialID.Value
+	}
+	return s.effectiveSlotLocked(auxSlotFallback).CredentialID.Value
 }
 
 // pickAux layers one string field: instance override, else the inherited value —

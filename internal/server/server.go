@@ -844,6 +844,11 @@ func (s *Server) mountAPIRouter(
 			eff := keeperSettings.Effective()
 			return eff.EndpointURL.Value, eff.Model.Value
 		},
+		// Which vault key a hosted evaluator spends (#1554). Without this the
+		// slots pick a provider and a model and then bill whatever
+		// ANTHROPIC_API_KEY this process booted with — the reason an instance
+		// with a stale env key had five dead evaluators and said nothing.
+		goapi.NewAuxCredentialLookup(deps.DB),
 		s.journalWriter, deps.DB, logger)
 	opts = append(opts, goapi.WithKeeperPhase2Evaluators(
 		evals.skillReview,

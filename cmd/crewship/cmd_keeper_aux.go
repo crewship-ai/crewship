@@ -43,9 +43,15 @@ The four evaluator slots apply on the next evaluation. run_summary and fallback
 are captured into the pipeline executors at boot, so those two need a restart —
 'aux list' marks them.
 
+A hosted slot bills a key. By default that is the one in the server's own
+environment; 'aux set <slot> --credential <name>' points it at a stored vault
+key instead, which is how an instance holding several subscriptions says which
+one a sweep spends.
+
 Examples:
   crewship keeper aux list
   crewship keeper aux set behavior --model claude-opus-5
+  crewship keeper aux set behavior --credential prod-anthropic
   crewship keeper aux set curator --provider ollama --model qwen2.5:7b
   crewship keeper aux test behavior      # call that evaluator's model once
   crewship keeper aux use-judge          # every slot onto the local judge, no per-token cost
@@ -61,12 +67,13 @@ type keeperAuxIntField struct {
 }
 
 type keeperAuxSlot struct {
-	Slot      string               `json:"slot"`
-	Label     string               `json:"label"`
-	AppliesAt string               `json:"applies_at"`
-	Provider  keeperConfigStrField `json:"provider"`
-	Model     keeperConfigStrField `json:"model"`
-	TimeoutMS keeperAuxIntField    `json:"timeout_ms"`
+	Slot         string               `json:"slot"`
+	Label        string               `json:"label"`
+	AppliesAt    string               `json:"applies_at"`
+	Provider     keeperConfigStrField `json:"provider"`
+	Model        keeperConfigStrField `json:"model"`
+	TimeoutMS    keeperAuxIntField    `json:"timeout_ms"`
+	CredentialID keeperConfigStrField `json:"credential_id"`
 
 	Overridden bool   `json:"overridden"`
 	UpdatedAt  string `json:"updated_at"`
@@ -99,6 +106,12 @@ func printKeeperAuxConfig(cfg keeperAuxConfig) {
 			orUnset(s.Provider.Value), orUnset(s.Model.Value), sourceNote(s.Model.Source))
 		fmt.Printf("    Timeout:  %s %s\n",
 			formatAuxTimeout(s.TimeoutMS.Value), sourceNote(s.TimeoutMS.Source))
+		// Which subscription this slot bills. Only printed when one is pinned:
+		// on an instance that never set one, "the server's own key" is noise on
+		// every row, and every row is the default.
+		if s.CredentialID.Value != "" {
+			fmt.Printf("    Key:      %s %s\n", s.CredentialID.Value, sourceNote(s.CredentialID.Source))
+		}
 		// Named per row rather than once in a footnote: an operator who changes
 		// run_summary and sees no change concludes the write failed.
 		if s.AppliesAt == "restart" {
@@ -148,10 +161,11 @@ var keeperAuxListCmd = &cobra.Command{
 }
 
 var (
-	flagKeeperAuxProvider string
-	flagKeeperAuxModel    string
-	flagKeeperAuxTimeout  string
-	flagKeeperAuxResetAll bool
+	flagKeeperAuxProvider   string
+	flagKeeperAuxModel      string
+	flagKeeperAuxTimeout    string
+	flagKeeperAuxCredential string
+	flagKeeperAuxResetAll   bool
 )
 
 var keeperAuxSetCmd = &cobra.Command{
@@ -165,6 +179,13 @@ var keeperAuxSetCmd = &cobra.Command{
   --model <id>       e.g. claude-opus-5, claude-haiku-4-5, qwen2.5:7b.
                      Pass "" to clear the override.
   --timeout <dur>    per-call deadline, e.g. 30s. Pass "" to inherit.
+  --credential <name>
+                     which stored API_KEY this slot spends, BY NAME. Several
+                     Anthropic keys is the normal case — each carries its own
+                     subscription limit — and without this the slot bills
+                     whatever key the server process was started with. Pass ""
+                     to go back to that. Ignored by an 'ollama' slot, which
+                     dials the local judge and needs no key.
 
 A provider needs a model: the builder needs both, and a provider alone would
 resolve to the fallback slot, which looks like the override was ignored.
@@ -173,6 +194,8 @@ Examples:
   crewship keeper aux set behavior --model claude-opus-5
   crewship keeper aux set curator --provider ollama --model qwen2.5:7b
   crewship keeper aux set memory_health --timeout 45s
+  crewship keeper aux set behavior --credential prod-anthropic
+  crewship keeper aux set behavior --credential ""            # server's own key
   crewship keeper aux set behavior --provider "" --model ""   # back to inherited`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -201,13 +224,31 @@ Examples:
 				body["timeout_ms"] = d.Milliseconds()
 			}
 		}
-		if len(body) == 0 {
-			return fmt.Errorf("nothing to change — pass --provider, --model and/or --timeout (see 'crewship keeper aux set --help')")
+		wantCredential := cmd.Flags().Changed("credential")
+		if len(body) == 0 && !wantCredential {
+			return fmt.Errorf("nothing to change — pass --provider, --model, --timeout and/or --credential (see 'crewship keeper aux set --help')")
 		}
 
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
 			return err
+		}
+		// --credential takes a NAME. "Which of my three Anthropic keys" is a
+		// question an operator answers by name and never by CUID, so the name→id
+		// resolution happens here rather than being pushed onto them. "" is the
+		// documented clear and is deliberately NOT a lookup — a credential that
+		// has since been deleted must still be clearable.
+		if wantCredential {
+			raw := strings.TrimSpace(flagKeeperAuxCredential)
+			if raw == "" {
+				body["credential_id"] = ""
+			} else {
+				id, rerr := resolveCredentialID(client, raw)
+				if rerr != nil {
+					return rerr
+				}
+				body["credential_id"] = id
+			}
 		}
 		var out keeperAuxConfig
 		if err := putJSON(client, keeperAuxPath+"/"+slot, body, &out); err != nil {
@@ -359,6 +400,7 @@ func init() {
 	keeperAuxSetCmd.Flags().StringVar(&flagKeeperAuxProvider, "provider", "", `anthropic, openai, or ollama ("" to inherit)`)
 	keeperAuxSetCmd.Flags().StringVar(&flagKeeperAuxModel, "model", "", `model id, e.g. claude-opus-5 or qwen2.5:7b ("" to inherit)`)
 	keeperAuxSetCmd.Flags().StringVar(&flagKeeperAuxTimeout, "timeout", "", `per-call deadline, e.g. 30s ("" to inherit)`)
+	keeperAuxSetCmd.Flags().StringVar(&flagKeeperAuxCredential, "credential", "", `vault API_KEY this slot spends, by name ("" for the server's own key)`)
 	keeperAuxResetCmd.Flags().BoolVar(&flagKeeperAuxResetAll, "all", false, "clear the override on every slot")
 
 	keeperAuxCmd.AddCommand(keeperAuxListCmd)

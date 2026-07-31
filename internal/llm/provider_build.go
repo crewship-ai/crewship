@@ -35,15 +35,43 @@ func BuildAuxProvider(m AuxModel) (Provider, error) {
 // == "" keeps the historical env-then-localhost behaviour, which is what
 // the plain BuildAuxProvider callers still want.
 func BuildAuxProviderAt(m AuxModel, ollamaBase string) (Provider, error) {
+	return BuildAuxProviderWithKey(m, ollamaBase, "")
+}
+
+// BuildAuxProviderWithKey is BuildAuxProviderAt with an explicit API key.
+//
+// It exists because an evaluator slot can now name the VAULT CREDENTIAL it
+// spends (#1554) instead of silently billing whatever key the server process
+// booted with. On an instance holding several keys — the normal case, since each
+// carries its own subscription limit — "which model" was answerable and "on
+// whose key" was not.
+//
+// apiKey == "" is the pre-existing behaviour, exactly: the key comes from
+// ANTHROPIC_API_KEY / OPENAI_API_KEY and a missing one is still a hard error
+// rather than a provider that 401s on first use. That is what keeps an instance
+// nobody has configured unchanged by this parameter.
+//
+// The endpoint for a keyed provider is OURS (api.anthropic.com / api.openai.com),
+// not an operator-supplied URL, so there is no key-exfiltration hazard of the
+// kind that makes governance refuse to attach the server key to a tenant-chosen
+// openai_compat endpoint. "ollama" ignores the key: it dials the instance judge
+// endpoint, which needs none.
+func BuildAuxProviderWithKey(m AuxModel, ollamaBase, apiKey string) (Provider, error) {
 	switch m.Provider {
 	case "anthropic":
-		key := os.Getenv("ANTHROPIC_API_KEY")
+		key := apiKey
+		if key == "" {
+			key = os.Getenv("ANTHROPIC_API_KEY")
+		}
 		if key == "" {
 			return nil, fmt.Errorf("ANTHROPIC_API_KEY env not set (required for anthropic aux slot %q)", m.Model)
 		}
 		return NewAnthropic(key), nil
 	case "openai":
-		key := os.Getenv("OPENAI_API_KEY")
+		key := apiKey
+		if key == "" {
+			key = os.Getenv("OPENAI_API_KEY")
+		}
 		if key == "" {
 			return nil, fmt.Errorf("OPENAI_API_KEY env not set (required for openai aux slot %q)", m.Model)
 		}

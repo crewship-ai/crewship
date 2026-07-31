@@ -89,3 +89,36 @@ func TestBackupTableIntent_SortedIncludedTables(t *testing.T) {
 		}
 	}
 }
+
+// TestKeeperAuxSettings_ExcludedFromBundles pins that the instance-global
+// evaluator wiring is classified, and classified as an EXCLUDE.
+//
+// keeper_aux_settings holds one row per Keeper evaluator slot: which provider
+// and model it dials, and — since #1554 — which vault credential it BILLS. That
+// last column is a FOREIGN KEY into `credentials`, which is workspace-scoped, so
+// the reverse-FK walk in DiscoverScopedTables now reaches this table from
+// `workspaces` and demands a BackupTableIntent entry it did not previously need.
+//
+// The entry has to be an exclude, and the reason is not bookkeeping. The table
+// is instance-global — one row per slot for the whole server, no workspace_id —
+// so carrying it across a restore would let a bundle from one instance repoint
+// the TARGET's evaluators at the source's models and, worse, at a credential id
+// that means nothing in the target's vault. Those five slots are the paid half
+// of the Keeper stack, so the failure would be a silent spend against the wrong
+// subscription (or a degrade to the env key) on an instance nobody touched.
+//
+// Flipping this to IntentInclude is therefore a product decision, not a
+// refactor, and this test is what makes that flip argue for itself.
+func TestKeeperAuxSettings_ExcludedFromBundles(t *testing.T) {
+	got, ok := BackupTableIntent["keeper_aux_settings"]
+	if !ok {
+		t.Fatalf("keeper_aux_settings has no BackupTableIntent entry: its credential_id FK " +
+			"makes it reachable from workspaces, so CategoriseScopedTables now returns " +
+			"ErrDiscoveryDrift for it")
+	}
+	if got == IntentInclude {
+		t.Errorf("keeper_aux_settings is IntentInclude; it is instance-global evaluator "+
+			"wiring (incl. which paid key each slot spends) and must not ride a workspace "+
+			"bundle into another instance, got %v", got)
+	}
+}

@@ -304,7 +304,14 @@ func (r *Router) resolveRunVerdict() {
 		r.logger.Warn("run verdict: run_summary aux slot resolve failed; outcome verdicts disabled", "error", err)
 		return
 	}
-	provider, err := llm.BuildAuxProvider(aux)
+	// Whichever vault key the operator pinned to this slot (#1554); "" keeps the
+	// historical process-env key. Bounded, because this runs on the first verdict
+	// rather than at boot and a wedged DB must not hang a run's teardown.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	provider, err := buildAuxWithCredential(ctx, aux,
+		r.keeperAuxSettings.CredentialFor(string(llm.SlotRunSummary)),
+		NewAuxCredentialLookup(r.db), r.logger)
 	if err != nil {
 		r.logger.Warn("run verdict: run_summary provider build failed; outcome verdicts disabled", "error", err)
 		return
