@@ -63,6 +63,7 @@ const (
 	KeyProvMaxStartsPerMin  = "provisioning.max_starts_per_min"
 	KeyWebhookAgentPerMin   = "webhook.agent_per_min"
 	KeyKeeperJudgeProbe     = "keeper.judge_probe_per_min"
+	KeyKeeperReviewRun      = "keeper.review_run_per_hour"
 )
 
 // hardMax is a generous shared ceiling. It exists only to reject absurd
@@ -165,6 +166,19 @@ var registry = []Meta{
 	// subnet. Instance-wide rather than per IP — the capability being rationed is
 	// the daemon's outbound dial, not a client's share of it.
 	{KeyKeeperJudgeProbe, "Keeper", "Judge probe", "Judge connection tests + model discovery, instance-wide. Both dial an operator-supplied address, so the cap is what stops the tool being used to sweep a network.", "req/min", 6, 1, 600},
+	// The manual Keeper Reviews trigger (#1575). Sibling of the judge probe
+	// above and enforced by the same code, but its own bucket because it
+	// rations a different thing: the probe's cap exists so a configuration
+	// tool cannot sweep a network, this one exists so a button cannot spend
+	// money. A run is a full evaluation against real subject material on the
+	// slot's (often hosted, always paid) evaluator model — strictly more per
+	// press than a probe — so it is metered per HOUR, not per minute.
+	//
+	// The bucket's BURST is fixed at one full pass over the four evaluators
+	// rather than tracking this value, so "run everything now" always goes
+	// through at once and only the sustained rate is bounded. At the default
+	// that is four runs immediately, then one a minute.
+	{KeyKeeperReviewRun, "Keeper", "Manual review run", "Operator-triggered Keeper Reviews runs (`crewship keeper review run`), instance-wide. Each one spends a full evaluation on a paid model, so this is the cap on what the button can bill. Bursts up to one pass over the four evaluators regardless of this value.", "runs/hour", 60, 1, 3600},
 }
 
 var byKey = func() map[string]Meta {

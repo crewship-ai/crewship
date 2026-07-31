@@ -34,6 +34,14 @@ package api
 //     (and often a crew), and assertBoundCrewWorkspaceDB enforces it. An admin
 //     session carries no such binding, so any crew or agent id in the body is
 //     checked against the session's workspace explicitly below.
+//
+// And one thing the SCHEDULED path gets from being a schedule: a cadence.
+// Every run here is a full evaluation on the slot's evaluator model, which on
+// the paid aux slots is billed per token. roleManage bounds who may press the
+// button, not how often, so a held-down button, a retry loop, or a routine
+// wired to `crewship keeper review run` could bill a workspace's evaluator as
+// fast as HTTP allows. The bucket below is the cadence, shared with the aux
+// probe's — see keeper_spend_limiter.go and issue #1575.
 
 import (
 	"bytes"
@@ -51,6 +59,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 )
 
 // The slot names, spelled the way the internal routes spell them so an
@@ -109,13 +118,32 @@ type AdminKeeperReviewHandler struct {
 	db     *sql.DB
 	kp2    *KeeperPhase2Handler
 	logger *slog.Logger
+
+	// runs is the spend cap: instance-wide, the same mechanism the aux probe
+	// gets from the judge handler. Metered per HOUR rather than per minute
+	// because a run costs more than a probe does — a probe asks a model whether
+	// it answers, a run makes it read real subject material and write a verdict
+	// to the audit trail.
+	//
+	// The burst is one full pass over the four evaluators, fixed rather than
+	// tracking the configured rate: "check everything now" is the flow #1555
+	// shipped for and must never be the thing that trips the limit. At the
+	// shipped 60/hour that reads as four runs immediately, then one a minute —
+	// well inside what an operator does by hand, and nowhere near what a loop
+	// does.
+	runs *spendLimiter
 }
 
 func NewAdminKeeperReviewHandler(db *sql.DB, kp2 *KeeperPhase2Handler, logger *slog.Logger) *AdminKeeperReviewHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AdminKeeperReviewHandler{db: db, kp2: kp2, logger: logger}
+	return &AdminKeeperReviewHandler{
+		db:     db,
+		kp2:    kp2,
+		logger: logger,
+		runs:   newSpendLimiter(ratelimitcfg.KeyKeeperReviewRun, time.Hour, len(keeperReviewSlots)),
+	}
 }
 
 // reviewRunBody is the union of the fields an operator may pin for a run. Every
@@ -217,6 +245,21 @@ func (h *AdminKeeperReviewHandler) Run(w http.ResponseWriter, r *http.Request) {
 	inner.Body = io.NopCloser(bytes.NewReader(encoded))
 	inner.ContentLength = int64(len(encoded))
 	inner.Header.Set("Content-Type", "application/json")
+
+	// Last gate before the model, and deliberately last: a token buys a model
+	// call, so the requests that never reach one — an unknown slot, a crew from
+	// another tenant, a workspace that has never failed — must not spend the
+	// operator's budget on their way to a 4xx. Everything above this line is
+	// free; everything below it is billed.
+	if allowed, wait := h.runs.take(); !allowed {
+		h.logger.Warn("keeper review: manual run refused, over the run budget",
+			"slot", slot, "workspace_id", workspaceID, "actor", actorIDForReview(r),
+			"retry_after", wait.Round(time.Second).String())
+		replyRateLimited(w,
+			"Too many manual review runs — each one spends a full evaluation on this instance's "+
+				"evaluator model, so they are rate limited instance-wide.", wait)
+		return
+	}
 
 	h.logger.Info("keeper review: manual run",
 		"slot", slot, "workspace_id", workspaceID, "actor", actorIDForReview(r))
