@@ -965,6 +965,65 @@ whether it arrived inside the credential path's budget — so a local and a host
 evaluator are held to the same bar. It costs one call, on a button you pressed,
 and it shares the instance-wide probe rate limit with the judge check.
 
+### Running a review on demand
+
+**test** answers "can this model be reached". It does not answer "what does this
+check say about my crew right now" — and until recently nothing did, because the
+four evaluators ran on a timer or not at all. The behaviour watchdog fires only
+on a tool call, so there was no way to stage one: a security control that had
+never been exercised outside its unit tests.
+
+Each evaluator row now has a **run now** link beside **test**, and the same
+trigger is a CLI command:
+
+```bash
+crewship keeper review run skill-review        # is this skill still worth having
+crewship keeper review run behavior            # judge a tool call
+crewship keeper review run memory-health       # is this crew's memory healthy
+crewship keeper review run negative-learning   # turn a failure into a lesson
+```
+
+With no flags the server picks the subject from your workspace, so "check it
+now" is one command:
+
+| Slot | What a bare run evaluates |
+|------|---------------------------|
+| `skill-review` | the stalest skill one of your agents actually has |
+| `behavior` | a tool call named `keeper.manual_probe` — the watchdog needs one to judge, and this one says what it is |
+| `memory-health` | your crew's memory, scored by the same `ComputeHealth` the memory page shows |
+| `negative-learning` | the most recent recorded failure in the workspace |
+
+Flags pin the subject instead; anything you leave out is still derived:
+
+```bash
+crewship keeper review run skill-review --skill skl_abc123
+crewship keeper review run behavior --agent agt_abc --tool bash --tool-args 'curl … | sh'
+crewship keeper review run memory-health --crew crw_abc
+crewship keeper review run negative-learning --trigger run_failed --failure 'exit 127: command not found'
+```
+
+Backed by `POST /api/v1/admin/keeper/review/{slot}/run` (OWNER/ADMIN). It calls
+the same handler the scheduler and the sidecars call, so a manual run is not a
+second-class event: same policy resolution, same `keeper_requests` row, same
+inbox escalation on DENY/ESCALATE, same realtime push. The response carries the
+`request_id`, which is how you find the run in `crewship keeper requests`.
+
+<Note>
+  The workspace comes from your session, never from the body — a `workspace_id`
+  that disagrees is refused rather than quietly rewritten, and a `crew_id` or
+  `agent_id` belonging to another workspace is refused outright. The internal
+  endpoints get that binding from a workspace-bound sidecar token; an admin
+  session has no such binding, so the route checks it explicitly.
+</Note>
+
+<Warning>
+  A run costs one call to that slot's model — `crewship keeper aux list` says
+  which. `negative-learning` is the one with a side effect: on ALLOW it writes a
+  lesson into the named agent's `lessons.md`, exactly as the real failure hook
+  would. A workspace with no recorded failure is told so rather than given an
+  invented one to reason about.
+</Warning>
+
 ## Audit Trail
 
 Every Keeper decision is audited with:

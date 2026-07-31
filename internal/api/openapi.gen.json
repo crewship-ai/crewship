@@ -965,6 +965,45 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/review/{slot}/run": {
+      "post": {
+        "operationId": "post_api_v1_admin_keeper_review_slot_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/legacy-resources": {
       "get": {
         "operationId": "get_api_v1_admin_legacy-resources",
