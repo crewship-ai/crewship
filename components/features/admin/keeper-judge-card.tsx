@@ -514,7 +514,7 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
   return (
     <SettingsCard
       title="Credential access judge"
-      description="Three steps, in order: point it at a model server, pick a model it actually has, then turn it on. Instance-wide; a workspace governance model overrides it per request. Changes apply to the next credential request — no restart."
+      description="Three steps, in order: point it at a model server, pick a model it actually has, then turn it on. Changes apply to the next credential request — no restart."
       actions={
         canEdit && cfg.overridden ? (
           <Button
@@ -530,6 +530,23 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
         ) : undefined
       }
     >
+      {/* Which of the two judge cards am I on, and why are there two? (#1558)
+          The instance row stores a provider and a wire but the server refuses
+          anything except native Ollama on write — so without this the first
+          thing that teaches an operator the split is a 400. Documentation
+          belongs before the mistake, which means at the top of the card and not
+          in the footnote under it. */}
+      <div
+        className="px-4 py-2 border-b border-border/40 text-xs leading-snug text-muted-foreground"
+        data-testid="keeper-judge-scope"
+      >
+        <strong className="font-medium text-foreground/80">Scope:</strong> the instance-wide judge — the default for
+        every workspace on this server. It speaks the native Ollama API only; an Anthropic or OpenAI-compatible judge
+        takes its endpoint or API key from a workspace vault, so it is configured on{" "}
+        <strong className="font-medium text-foreground/80">Judge for this workspace</strong> below, which overrides
+        this card for that one workspace.
+      </div>
+
       {/* Step 1. The endpoint and its own Connect button, because "is anything
           there" is a question you ask BEFORE choosing a model — and it is the
           cheap half of the check (one GET /api/tags, no model load). */}
@@ -757,12 +774,14 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
       </SettingsRow>
 
       {/* Provider/wire is not a step — it is a fact about what the instance judge
-          speaks, and it moves out of the flow into a footnote. */}
+          speaks, and it moves out of the flow into a footnote. The reason it can
+          only say "ollama" is at the top of the card; this is the value in force,
+          reported because the API sends it and an operator reading a support
+          thread needs to be able to quote it. */}
       <div className="px-4 py-2 border-t border-border/40 text-xs text-muted-foreground/70">
-        Speaks the native Ollama API (<span className="font-mono" data-testid="keeper-judge-wire">
+        Protocol in force (reported, not settable): <span className="font-mono" data-testid="keeper-judge-wire">
           {cfg.judge_provider.value || "—"}{cfg.judge_wire.value ? ` / ${cfg.judge_wire.value}` : ""}
-        </span>). An OpenAI-compatible or Anthropic judge is configured per workspace as the
-        governance model below, which carries its endpoint and key in the vault.
+        </span>.
       </div>
 
       {testResult && (

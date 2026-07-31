@@ -132,6 +132,27 @@ describe("KeeperJudgeCard", () => {
     expect(screen.queryByTestId("keeper-judge-save")).not.toBeInTheDocument()
   })
 
+  // #1558: one question — "which model judges credential access?" — is answered
+  // by two cards, and until this landed the only thing that taught an operator
+  // which one they were on was a validation error from the server. The scope
+  // note is documentation read BEFORE the mistake, so it has to be on the card
+  // whether or not anything is configured.
+  it("says what it governs, at which scope, and where the other case lives", async () => {
+    mockRoutes(config())
+    render(<KeeperJudgeCard workspaceId="ws1" />)
+
+    const scope = await screen.findByTestId("keeper-judge-scope")
+    // Scope: every workspace on this server.
+    expect(scope).toHaveTextContent(/instance-wide/i)
+    expect(scope).toHaveTextContent(/every workspace/i)
+    // The constraint the server enforces in keepercfg.validate().
+    expect(scope).toHaveTextContent(/ollama/i)
+    // The pointer at the other card, named as it is titled.
+    expect(scope).toHaveTextContent(/judge for this workspace/i)
+    // And why the split exists, not just that it does.
+    expect(scope).toHaveTextContent(/api key/i)
+  })
+
   it("turns Keeper on and names the judge in a single write", async () => {
     // A fresh instance: nothing configured, engine off. This is the flow the
     // whole slice exists for.

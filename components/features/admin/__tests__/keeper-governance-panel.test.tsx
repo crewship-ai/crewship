@@ -454,6 +454,27 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
   // the instance judge it overrides — the two are one question asked at two
   // scopes, and having them at opposite ends of the page is what made an operator
   // conclude there was no way to choose a model or an API key at all.
+  // #1558: the other half of the scope explanation. This card is the ONLY place
+  // the CREDENTIAL judge can be hosted, because the key it needs lives in this
+  // workspace's vault — and the card has to say that before the operator goes
+  // looking for Anthropic in the instance card and hits a 400. (The Background
+  // checks slots are hosted-capable too, but they are a different question and
+  // read their key from the server env, not the vault.)
+  it("says what it governs, at which scope, and where the other case lives", async () => {
+    mockRoutes(BASE)
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
+
+    const scope = await screen.findByTestId("keeper-gov-scope")
+    // Scope: this workspace only.
+    expect(scope).toHaveTextContent(/this workspace only/i)
+    // What only this card can do.
+    expect(scope).toHaveTextContent(/anthropic|openai-compatible/i)
+    expect(scope).toHaveTextContent(/vault/i)
+    // The pointer at the other card, named as it is titled, with its limit.
+    expect(scope).toHaveTextContent(/credential access judge/i)
+    expect(scope).toHaveTextContent(/ollama/i)
+  })
+
   it("renders the four governance-model provider options (#1001 gov-model)", async () => {
     mockRoutes(BASE)
     render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} section="judge" />)
