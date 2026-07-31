@@ -115,21 +115,37 @@ func TestPendingDispatcher_BoundedConcurrency(t *testing.T) {
 
 // TestPendingDispatcher_StopDrainsInFlight: Stop() must block until every
 // dispatched goroutine has finished (graceful shutdown / WaitGroup drain).
+//
+// The wait below is for all four to be IN FLIGHT, not for the first one. Stop
+// is not a flush: sweep() returns on stopCh and abandons the not-yet-dispatched
+// tail on purpose, so anything still queued when Stop lands never runs. Waiting
+// on `inFlight > 0` and then asserting all four completed asserted the opposite
+// of that design, and only passed when the sweep happened to win the race —
+// which under -race it usually lost (`expected 4 completed, got 1`, #1552's
+// go-race job on main).
+//
+// Waiting for the full set makes the drain the only thing under test: four
+// goroutines are running, Stop must not return until all four are done. The
+// pool is 12, so all four fit at once and this is deterministic rather than a
+// bet on scheduling.
 func TestPendingDispatcher_StopDrainsInFlight(t *testing.T) {
-	store := enqueueDue(t, 4)
+	const n = 4
+	store := enqueueDue(t, n)
 	exec := &fakeExecutor{delay: 150 * time.Millisecond}
 	d := NewPendingRunDispatcher(store, exec, nil)
 
 	d.Start(context.Background())
-	// Give the sweep a beat to spawn the dispatch goroutines.
-	waitFor(t, time.Second, func() bool { return atomic.LoadInt32(&exec.inFlight) > 0 })
+	if !waitFor(t, 5*time.Second, func() bool { return atomic.LoadInt32(&exec.inFlight) == n }) {
+		t.Fatalf("precondition: only %d/%d runs reached the executor, so there is no full drain to test",
+			atomic.LoadInt32(&exec.inFlight), n)
+	}
 	d.Stop() // must not return until in-flight runs complete
 
 	if got := atomic.LoadInt32(&exec.inFlight); got != 0 {
 		t.Fatalf("Stop returned with %d runs still in flight", got)
 	}
-	if got := atomic.LoadInt32(&exec.completed); got != 4 {
-		t.Fatalf("expected 4 completed after Stop drain, got %d", got)
+	if got := atomic.LoadInt32(&exec.completed); got != n {
+		t.Fatalf("expected %d completed after Stop drain, got %d", n, got)
 	}
 }
 
