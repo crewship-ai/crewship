@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // FileInfo describes a file or directory returned by the file listing API.
@@ -31,32 +33,60 @@ func NewServer(basePath string) *Server {
 	return &Server{basePath: basePath}
 }
 
+// crewRel validates the caller-supplied crew id and sub-path and returns the
+// basePath-relative path to operate on.
+//
+// The crew id is checked first and separately, through the same
+// safepath.ValidateComponent every other handler uses for an id destined for
+// a filesystem path: it arrives from the request path, and every containment
+// check below is relative to the *crew* directory — so a crew id of "../.."
+// would make the crew directory the check's own base and pass trivially,
+// handing out any file the process can read. A crew id is one path element,
+// nothing else.
+func crewRel(crewID, subPath string) (string, bool) {
+	if _, err := safepath.ValidateComponent(crewID); err != nil {
+		return "", false
+	}
+	rel := crewID
+	if subPath != "" {
+		rel = filepath.Join(crewID, filepath.Clean(subPath))
+	}
+	inside, err := filepath.Rel(crewID, rel)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return rel, true
+}
+
 // HandleFileList returns a JSON listing of files in a crew's output directory.
 func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	subPath := r.URL.Query().Get("path")
 
-	base := filepath.Join(s.basePath, crewID)
-	dir := base
-	if subPath != "" {
-		dir = filepath.Join(base, filepath.Clean(subPath))
+	empty := func() {
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "files": []FileInfo{}})
 	}
 
-	rel, err := filepath.Rel(base, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	rel, ok := crewRel(crewID, subPath)
+	if !ok {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	base := filepath.Join(s.basePath, crewID)
+	dir := filepath.Join(s.basePath, rel)
 
 	// Resolve symlinks and re-check containment (matches HandleFileDownload V-09).
+	// The check is against the *crew* directory, not basePath, so a symlink
+	// that stays inside the storage tree but points at another crew is refused
+	// as well.
 	realBase, err := filepath.EvalSymlinks(base)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "files": []FileInfo{}})
+		empty()
 		return
 	}
 	realDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "files": []FileInfo{}})
+		empty()
 		return
 	}
 	if realDir != realBase && !strings.HasPrefix(realDir, realBase+string(os.PathSeparator)) {
@@ -64,13 +94,30 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := os.ReadDir(realDir)
+	// Read through an os.Root anchored at basePath: each component is
+	// validated as the root walks it, so no symlink reached along the way can
+	// redirect the listing outside the storage tree between the check above
+	// and the open below.
+	root, err := os.OpenRoot(s.basePath)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer root.Close()
+	d, err := root.Open(rel)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"crew_id": crewID,
-				"files":   []FileInfo{},
-			})
+			empty()
+			return
+		}
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer d.Close()
+	entries, err := d.ReadDir(-1)
+	if err != nil {
+		if os.IsNotExist(err) {
+			empty()
 			return
 		}
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -83,9 +130,9 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(filepath.Join(s.basePath, crewID), filepath.Join(dir, e.Name()))
+		crewRelPath, _ := filepath.Rel(crewID, filepath.Join(rel, e.Name()))
 		files = append(files, FileInfo{
-			Path:    rel,
+			Path:    crewRelPath,
 			Name:    e.Name(),
 			Size:    info.Size(),
 			IsDir:   e.IsDir(),
@@ -104,13 +151,13 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	filePath := r.PathValue("path")
 
-	base := filepath.Join(s.basePath, crewID)
-	full := filepath.Join(base, filepath.Clean(filePath))
-	rel, err := filepath.Rel(base, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	rel, ok := crewRel(crewID, filePath)
+	if !ok {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	base := filepath.Join(s.basePath, crewID)
+	full := filepath.Join(s.basePath, rel)
 
 	// V-09: Resolve symlinks and re-check containment
 	realBase, err := filepath.EvalSymlinks(base)
@@ -128,7 +175,14 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(realFull)
+	// Serve through an os.Root anchored at basePath — see HandleFileList.
+	root, err := os.OpenRoot(s.basePath)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer root.Close()
+	f, err := root.Open(rel)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "not found", http.StatusNotFound)
