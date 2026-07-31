@@ -102,6 +102,15 @@ crewship inbox archive inbox_abc123       # resolve with action=archived, no dec
 
 `inbox get <id>` (backed by `GET /api/v1/inbox/{id}`) is the detail counterpart of `list` — it returns the markdown body and the structured `payload` that the list view omits. `inbox archive <id>` maps to a `resolved` PATCH with `resolved_action=archived`; only non-decision kinds (messages, failed-run notices, advisories) archive — the server `409`s an archive on a source-managed waitpoint/escalation.
 
+On a `CREDENTIAL` escalation, `inbox get` also prints whether resolving it needs a **second approver**, and which of the two controls demands it:
+
+```text
+2nd approver required · workspace policy + L4 · critical credentials
+whoever owns nela cannot resolve it — someone else has to
+```
+
+The same answer rides the JSON as `second_approver_required` / `second_approver_by_workspace` / `second_approver_by_tier` / `security_level_label`, the fields the crew escalations list carries. It is computed **when you read the row**, not when the escalation was raised: the workspace toggle and the credential's tier both change afterwards. Absent means the server said nothing, not that a single approver will do — see [Keeper → The switch is a floor, not a master switch](/guides/keeper#the-switch-is-a-floor-not-a-master-switch).
+
 `resolve` is the inbox-side only — it does **not** call the source endpoint. To actually approve a waitpoint through to the executor, use `crewship approvals approve <id>`. To resolve an escalation lifecycle, use `crewship escalation resolve <id>`. The inbox row tracks the decision; the source endpoint enacts it.
 
 ### Bulk operations

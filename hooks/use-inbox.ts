@@ -55,6 +55,26 @@ export interface InboxItem {
   resolved_action?: string
   created_at: string
   updated_at: string
+  /**
+   * Four-eyes, as it will be applied to THIS escalation (#1574) — the same
+   * fields, computed the same way, that the crew escalations list carries
+   * (#1559), so the two surfaces cannot describe one rule differently.
+   *
+   * Top-level and NOT in `payload` on purpose. Payload is written when the
+   * escalation is raised; both inputs to this answer — the workspace
+   * require_second_approver toggle and the credential's tier — change
+   * afterwards, so a stored copy goes stale in the direction that matters: an
+   * unguarded one-click Approve on a row whose resolve now 403s. The server
+   * computes these at read time; nothing here re-derives them.
+   *
+   * Absent on every other kind, and on a pre-#1574 server — which degrades to
+   * "say nothing", not to a claim.
+   */
+  second_approver_required?: boolean
+  second_approver_by_workspace?: boolean
+  second_approver_by_tier?: boolean
+  /** The linked credential's tier, e.g. "L4 · critical". */
+  security_level_label?: string
 }
 
 interface InboxListResponse {

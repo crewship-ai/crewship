@@ -6,6 +6,7 @@ import { AlertTriangle, Clock, Eye, EyeOff } from "lucide-react"
 import { Appear, DetailCard, Pill } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import type { InboxItem } from "@/hooks/use-inbox"
@@ -202,6 +203,20 @@ export function DecisionCard({
         <div className="text-body font-semibold">{item.title}</div>
 
         <DecisionSubject item={item} />
+
+        {/* Ahead of the buttons: whether this person can resolve it at all
+            decides whether pressing one is worth anything. The same component
+            the crew escalations panel renders (#1559/#1574) — the inbox is the
+            other surface with a one-click Approve on the same escalation, and
+            it used to offer it in silence. Every value is the server's
+            read-time answer; the row never re-derives it from the payload. */}
+        <FourEyesNotice
+          required={item.second_approver_required === true}
+          byWorkspace={item.second_approver_by_workspace === true}
+          byTier={item.second_approver_by_tier === true}
+          securityLevelLabel={item.security_level_label ?? null}
+          agentSlug={item.sender_name ?? null}
+        />
 
         <KindActions
           item={item}
