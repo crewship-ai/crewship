@@ -17,7 +17,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
-	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/runverdict"
 )
 
@@ -26,16 +25,22 @@ import (
 const runVerdictFlagKey = "run_verdict_summaries"
 
 // newRunVerdictHook builds the closure NewWiredExecutor installs via
-// WithRunVerdict when both a DB and a pre-resolved LLM provider are
-// available. Checks the workspace feature flag, fetches the run's
-// journal entries by actor_id, and calls runverdict.GenerateAndEmit.
-// Every failure is logged and swallowed — this narrates a run, it must
-// never affect one.
-func newRunVerdictHook(db *sql.DB, emitter Emitter, provider llm.Provider, model string, logger *slog.Logger) func(ctx context.Context, workspaceID, crewID, agentID, pipelineID, pipelineSlug, runID string) {
+// WithRunVerdict when both a DB and a verdict resolver are available.
+// Checks the workspace feature flag, fetches the run's journal entries
+// by actor_id, resolves the provider for THIS run, and calls
+// runverdict.GenerateAndEmit. Every failure is logged and swallowed —
+// this narrates a run, it must never affect one.
+//
+// resolve is called per run rather than once here (#1556): the executors
+// this hook is installed on outlive any number of aux-slot edits.
+func newRunVerdictHook(db *sql.DB, emitter Emitter, resolve runverdict.Resolver, logger *slog.Logger) func(ctx context.Context, workspaceID, crewID, agentID, pipelineID, pipelineSlug, runID string) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return func(ctx context.Context, workspaceID, crewID, agentID, pipelineID, pipelineSlug, runID string) {
+		if resolve == nil {
+			return
+		}
 		enabled, err := featureflags.IsEnabled(ctx, db, workspaceID, runVerdictFlagKey)
 		if err != nil {
 			logger.Debug("run verdict: feature flag check", "error", err, "run_id", runID)
@@ -64,6 +69,9 @@ func newRunVerdictHook(db *sql.DB, emitter Emitter, provider llm.Provider, model
 			// routine runs tab's per-run entry list.
 			Payload: map[string]any{"pipeline_id": pipelineID, "pipeline_slug": pipelineSlug, "run_id": runID},
 		}
+		// Resolved per run, so an aux-slot edit made while this executor was
+		// already running reaches THIS verdict (#1556).
+		provider, model := resolve()
 		if err := runverdict.GenerateAndEmit(ctx, emitter, provider, model, base, entries); err != nil {
 			logger.Debug("run verdict: generate", "error", err, "run_id", runID)
 		}

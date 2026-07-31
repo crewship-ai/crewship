@@ -63,11 +63,8 @@ func NewAdminKeeperAuxHandler(store *keepercfg.AuxStore, judge *keepercfg.Store,
 type keeperAuxSlotResponse struct {
 	Slot  string `json:"slot"`
 	Label string `json:"label"`
-	// AppliesAt is "immediately" or "restart". Surfaced because an operator who
-	// changes run_summary and sees no change would otherwise conclude the write
-	// silently failed: that provider is captured into the pipeline executors at
-	// boot, while the four evaluator slots resolve per request.
-	AppliesAt string                    `json:"applies_at"`
+	// There is no applies_at here any more (#1556): every slot resolves from the
+	// store at use time, so every override is in force on the next evaluation.
 	Provider  keeperConfigField[string] `json:"provider"`
 	Model     keeperConfigField[string] `json:"model"`
 	TimeoutMS keeperConfigField[int64]  `json:"timeout_ms"`
@@ -103,7 +100,6 @@ func auxSlotPayload(eff keepercfg.AuxEffective, credsEditable bool) keeperAuxSlo
 	return keeperAuxSlotResponse{
 		Slot:      eff.Slot,
 		Label:     eff.Label,
-		AppliesAt: eff.AppliesAt,
 		Provider:  keeperConfigField[string]{Value: eff.Provider.Value, Source: string(eff.Provider.Source), Editable: true},
 		Model:     keeperConfigField[string]{Value: eff.Model.Value, Source: string(eff.Model.Source), Editable: true},
 		TimeoutMS: keeperConfigField[int64]{Value: eff.TimeoutMS.Value, Source: string(eff.TimeoutMS.Source), Editable: true},

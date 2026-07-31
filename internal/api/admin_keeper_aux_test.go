@@ -131,13 +131,16 @@ func TestAdminKeeperAux_GetListsEverySlotWithProvenance(t *testing.T) {
 	if !behavior.Model.Editable {
 		t.Error("behavior model is not editable — the whole point of the endpoint")
 	}
-	if behavior.AppliesAt != keepercfg.AppliesImmediately {
-		t.Errorf("behavior applies_at = %q, want immediately", behavior.AppliesAt)
+	// applies_at is gone (#1556): every slot resolves from the store at use
+	// time, so no row may reintroduce a "needs a restart" caveat.
+	var raw map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
 	}
-	// run_summary is captured into the pipeline executors at boot; saying
-	// otherwise would have an operator conclude the write failed.
-	if run := auxRow(t, resp, string(llm.SlotRunSummary)); run.AppliesAt != keepercfg.AppliesOnRestart {
-		t.Errorf("run_summary applies_at = %q, want restart", run.AppliesAt)
+	for _, s := range raw["slots"].([]any) {
+		if _, ok := s.(map[string]any)["applies_at"]; ok {
+			t.Errorf("slot %v still carries applies_at", s.(map[string]any)["slot"])
+		}
 	}
 }
 

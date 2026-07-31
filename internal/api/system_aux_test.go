@@ -14,7 +14,13 @@ import (
 
 func newAuxStatusHandler(cfg llm.AuxiliaryModels) *AuxStatusHandler {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewAuxStatusHandler(cfg, nil, logger)
+	return NewAuxStatusHandler(auxStatic(cfg), nil, logger)
+}
+
+// auxStatic pins the aux config for a test. Production passes
+// Router.AuxModels, which re-reads the override store per request (#1556).
+func auxStatic(cfg llm.AuxiliaryModels) func() llm.AuxiliaryModels {
+	return func() llm.AuxiliaryModels { return cfg }
 }
 
 func TestAuxStatus_Unauthorized(t *testing.T) {

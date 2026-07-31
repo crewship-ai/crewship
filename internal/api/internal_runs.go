@@ -258,7 +258,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	// (a user-aborted run has no goal outcome to assess) and whenever
 	// the run_summary aux slot has no buildable provider (SetRunVerdict
 	// wired nil) or the workspace has the feature flag off.
-	if body.Status != "CANCELLED" && h.runVerdictProvider != nil {
+	if body.Status != "CANCELLED" && h.runVerdict != nil {
 		h.verdictWG.Add(1)
 		go func() {
 			defer h.verdictWG.Done()
@@ -364,6 +364,9 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 // level since a verdict is a best-effort narrative aid, never allowed
 // to surface as a caller-visible failure.
 func (h *InternalHandler) generateRunVerdict(ctx context.Context, workspaceID, agentID, runID string) {
+	if h.runVerdict == nil {
+		return
+	}
 	enabled, err := featureflags.IsEnabled(ctx, h.db, workspaceID, runVerdictFlagKey)
 	if err != nil {
 		h.logger.Debug("run verdict: feature flag check", "error", err, "run_id", runID)
@@ -402,7 +405,10 @@ func (h *InternalHandler) generateRunVerdict(ctx context.Context, workspaceID, a
 		AgentID:     agentID,
 		TraceID:     runID,
 	}
-	if err := runverdict.GenerateAndEmit(ctx, h.journal, h.runVerdictProvider, h.runVerdictModel, base, entries); err != nil {
+	// Resolved here rather than held on the handler: an aux-slot edit made
+	// while the server was up must reach THIS verdict (#1556).
+	provider, model := h.runVerdict()
+	if err := runverdict.GenerateAndEmit(ctx, h.journal, provider, model, base, entries); err != nil {
 		h.logger.Debug("run verdict: generate", "error", err, "run_id", runID)
 	}
 	// Same async-queue caveat as above: drain the verdict entry itself

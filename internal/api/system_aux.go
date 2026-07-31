@@ -30,7 +30,12 @@ import (
 // MVP defaults from llm.DefaultAuxiliaryModels so the surface is
 // useful even before an operator overrides anything.
 type AuxStatusHandler struct {
-	cfg llm.AuxiliaryModels
+	// aux resolves the auxiliary-model config in force, per request. A
+	// captured struct would have made this diagnostic disagree with the admin
+	// card the moment an operator overrode a slot (#1556) — the aux settings
+	// are runtime-settable, and a status surface that reports the boot-time
+	// value is worse than none.
+	aux func() llm.AuxiliaryModels
 	// keeper is the credential-access judge's config — a DIFFERENT path
 	// from the aux slots (server.go builds it straight from cfg.Keeper).
 	// It is reported here because it is the judge an operator actually
@@ -57,11 +62,15 @@ type AuxStatusHandler struct {
 	probeErr map[string]string
 }
 
-// NewAuxStatusHandler builds a handler bound to cfg. Pass the same
-// AuxiliaryModels struct the production subsystems read from so the
-// status surface can't drift from what the resolvers actually use.
-func NewAuxStatusHandler(cfg llm.AuxiliaryModels, keeper *config.KeeperConfig, logger *slog.Logger) *AuxStatusHandler {
-	return &AuxStatusHandler{cfg: cfg, keeper: keeper, logger: logger}
+// NewAuxStatusHandler builds a handler over aux. Pass the same accessor the
+// production subsystems resolve through (Router.AuxModels) so the status
+// surface can't drift from what the resolvers actually use. A nil accessor
+// reports the built-in MVP defaults.
+func NewAuxStatusHandler(aux func() llm.AuxiliaryModels, keeper *config.KeeperConfig, logger *slog.Logger) *AuxStatusHandler {
+	if aux == nil {
+		aux = llm.DefaultAuxiliaryModels
+	}
+	return &AuxStatusHandler{aux: aux, keeper: keeper, logger: logger}
 }
 
 // WithCredentials makes the buildability check honour each slot's pinned vault
@@ -128,16 +137,17 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// and to read the real credential judge's model off the wrong row.
 	// The config field stays (an existing KEEPER= override must not start
 	// erroring); it just stops pretending to drive anything.
+	cfg := h.aux()
 	slots := []struct {
 		slot  llm.Slot
 		label string
 		raw   llm.AuxModel // the slot's own config, pre-fallback
 	}{
-		{llm.SlotCurator, "Skill review + memory consolidation", h.cfg.Curator},
-		{llm.SlotBehavior, "Tool-call behaviour monitor", h.cfg.Behavior},
-		{llm.SlotMemoryHealth, "Memory-health audit", h.cfg.MemoryHealth},
-		{llm.SlotNegative, "Failure → lessons extraction", h.cfg.Negative},
-		{llm.SlotRunSummary, "Run summary verdicts", h.cfg.RunSummary},
+		{llm.SlotCurator, "Skill review + memory consolidation", cfg.Curator},
+		{llm.SlotBehavior, "Tool-call behaviour monitor", cfg.Behavior},
+		{llm.SlotMemoryHealth, "Memory-health audit", cfg.MemoryHealth},
+		{llm.SlotNegative, "Failure → lessons extraction", cfg.Negative},
+		{llm.SlotRunSummary, "Run summary verdicts", cfg.RunSummary},
 	}
 
 	out := auxStatusResponse{Subsystems: make([]auxSubsystemRow, 0, len(slots)+1)}
@@ -148,7 +158,7 @@ func (h *AuxStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	out.Subsystems = append(out.Subsystems, h.accessJudgeRow(r.Context()))
 
 	for _, s := range slots {
-		resolved, err := llm.ResolveAux(h.cfg, s.slot)
+		resolved, err := llm.ResolveAux(cfg, s.slot)
 		if err != nil {
 			// No provider AND no fallback is a misconfiguration. Surface the
 			// row rather than 500ing the whole call — partial visibility is

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/runverdict"
 )
 
 // stubVerdictProvider is a minimal llm.Provider returning a canned
@@ -34,6 +35,14 @@ func (s *stubVerdictProvider) Stream(ctx context.Context, req llm.Request, handl
 func (s *stubVerdictProvider) Name() string { return "stub" }
 
 const stubVerdictJSON = `{"outcome":"goal_met","verdict":"Agent completed the task successfully.","summary":"The agent ran the requested steps and finished without error."}`
+
+// staticVerdictResolver is the boot-time-pinned wiring these tests want: a
+// resolver that always hands back the same provider. Production's resolver
+// (Router.RunVerdict) re-reads the aux store per run — see
+// TestUpdateRun_UsesTheProviderInForceAtRunTime.
+func staticVerdictResolver(p llm.Provider, model string) runverdict.Resolver {
+	return func() (llm.Provider, string) { return p, model }
+}
 
 // verdictEntryPayload looks up the summary.generated entry (if any) for
 // runID and returns its outcome + verdict fields, or ("", "", false) if
@@ -89,7 +98,7 @@ func TestUpdateRun_EmitsVerdict_WhenCompletedAndProviderWired(t *testing.T) {
 	h := NewInternalHandler(db, "test-token", logger)
 	_ = wireTestJournalForHandler(t, db, h)
 	provider := &stubVerdictProvider{content: stubVerdictJSON}
-	h.SetRunVerdict(provider, "claude-haiku-4-5")
+	h.SetRunVerdict(staticVerdictResolver(provider, "claude-haiku-4-5"))
 
 	createAndCompleteRun(t, h, db, wsID, "a-verdict", "run-verdict-1", "COMPLETED")
 
@@ -121,7 +130,7 @@ func TestUpdateRun_NoVerdict_WhenCancelled(t *testing.T) {
 	h := NewInternalHandler(db, "test-token", logger)
 	_ = wireTestJournalForHandler(t, db, h)
 	provider := &stubVerdictProvider{content: stubVerdictJSON}
-	h.SetRunVerdict(provider, "claude-haiku-4-5")
+	h.SetRunVerdict(staticVerdictResolver(provider, "claude-haiku-4-5"))
 
 	createAndCompleteRun(t, h, db, wsID, "a-cancel", "run-cancel-1", "CANCELLED")
 
@@ -174,7 +183,7 @@ func TestUpdateRun_NoVerdict_WhenWorkspaceFlagOverriddenOff(t *testing.T) {
 	h := NewInternalHandler(db, "test-token", logger)
 	_ = wireTestJournalForHandler(t, db, h)
 	provider := &stubVerdictProvider{content: stubVerdictJSON}
-	h.SetRunVerdict(provider, "claude-haiku-4-5")
+	h.SetRunVerdict(staticVerdictResolver(provider, "claude-haiku-4-5"))
 
 	createAndCompleteRun(t, h, db, wsID, "a-off", "run-off-1", "COMPLETED")
 
@@ -183,5 +192,48 @@ func TestUpdateRun_NoVerdict_WhenWorkspaceFlagOverriddenOff(t *testing.T) {
 	}
 	if _, _, found := verdictEntryPayload(t, db, "run-off-1"); found {
 		t.Error("expected no summary.generated entry when the workspace flag override is off")
+	}
+}
+
+// TestUpdateRun_UsesTheProviderInForceAtRunTime is the handler half of #1556:
+// the wiring happens ONCE (as router_internal.go does it at boot) and then the
+// resolved provider changes underneath it — what an operator repointing the
+// run_summary aux slot does. The second run has to bill the second model.
+//
+// Before the fix SetRunVerdict took a provider VALUE, so this property could not
+// even be expressed: the handler held the boot-time provider for the life of the
+// process, which is precisely why that slot was labelled "needs a restart".
+func TestUpdateRun_UsesTheProviderInForceAtRunTime(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a-live', ?, 'Bot', 'bot', 'IDLE')`, wsID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	h := NewInternalHandler(db, "test-token", logger)
+	_ = wireTestJournalForHandler(t, db, h)
+
+	booted := &stubVerdictProvider{content: stubVerdictJSON}
+	overridden := &stubVerdictProvider{content: stubVerdictJSON}
+	inForce := llm.Provider(booted)
+	h.SetRunVerdict(func() (llm.Provider, string) { return inForce, "claude-haiku-4-5" })
+
+	createAndCompleteRun(t, h, db, wsID, "a-live", "run-live-1", "COMPLETED")
+	if booted.calls != 1 {
+		t.Fatalf("first run: boot provider calls = %d, want 1", booted.calls)
+	}
+
+	// The operator repoints the slot. Nothing is re-wired, nothing restarts.
+	inForce = overridden
+
+	createAndCompleteRun(t, h, db, wsID, "a-live", "run-live-2", "COMPLETED")
+	if overridden.calls != 1 {
+		t.Errorf("second run: overridden provider calls = %d, want 1 — the handler captured the boot provider", overridden.calls)
+	}
+	if booted.calls != 1 {
+		t.Errorf("second run went to the boot provider again (calls = %d)", booted.calls)
 	}
 }

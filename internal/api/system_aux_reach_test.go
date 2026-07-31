@@ -45,7 +45,7 @@ func TestAuxReach_LocalJudgeAnswering(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewAuxStatusHandler(llm.AuxiliaryModels{}, &config.KeeperConfig{
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{}), &config.KeeperConfig{
 		Enabled: true, OllamaURL: srv.URL, Model: "qwen2.5:7b",
 	}, newTestLogger())
 
@@ -61,7 +61,7 @@ func TestAuxReach_LocalJudgeNotRunning(t *testing.T) {
 	url := srv.URL
 	srv.Close()
 
-	h := NewAuxStatusHandler(llm.AuxiliaryModels{}, &config.KeeperConfig{
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{}), &config.KeeperConfig{
 		Enabled: true, OllamaURL: url, Model: "qwen2.5:7b",
 	}, newTestLogger())
 
@@ -84,7 +84,7 @@ func TestAuxReach_PaidProviderIsNotDialled(t *testing.T) {
 		Curator:  llm.AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5"},
 		Fallback: llm.AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5"},
 	}
-	h := NewAuxStatusHandler(cfg, nil, newTestLogger())
+	h := NewAuxStatusHandler(auxStatic(cfg), nil, newTestLogger())
 
 	row := reachRow(t, h, "curator")
 	// nil means "not probed" — an honest third state. Claiming either true or
@@ -99,7 +99,7 @@ func TestAuxReach_PaidProviderIsNotDialled(t *testing.T) {
 }
 
 func TestAuxReach_DisabledJudgeIsNotProbed(t *testing.T) {
-	h := NewAuxStatusHandler(llm.AuxiliaryModels{}, &config.KeeperConfig{
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{}), &config.KeeperConfig{
 		Enabled: false, OllamaURL: "http://127.0.0.1:1", Model: "qwen2.5:7b",
 	}, newTestLogger())
 
@@ -119,7 +119,7 @@ func TestAuxReach_ProbeIsCached(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewAuxStatusHandler(llm.AuxiliaryModels{}, &config.KeeperConfig{
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{}), &config.KeeperConfig{
 		Enabled: true, OllamaURL: srv.URL, Model: "qwen2.5:7b",
 	}, newTestLogger())
 
@@ -139,7 +139,7 @@ func TestAuxReach_ProbeHasATimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := NewAuxStatusHandler(llm.AuxiliaryModels{}, &config.KeeperConfig{
+	h := NewAuxStatusHandler(auxStatic(llm.AuxiliaryModels{}), &config.KeeperConfig{
 		Enabled: true, OllamaURL: srv.URL, Model: "qwen2.5:7b",
 	}, newTestLogger())
 

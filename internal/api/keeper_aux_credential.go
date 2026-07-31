@@ -99,6 +99,7 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 func buildAuxWithCredential(
 	ctx context.Context,
 	m llm.AuxModel,
+	ollamaBase string,
 	credentialID string,
 	lookup keepercfg.AuxCredentialLookup,
 	logger *slog.Logger,
@@ -113,7 +114,7 @@ func buildAuxWithCredential(
 			apiKey = key
 		}
 	}
-	return llm.BuildAuxProviderWithKey(m, "", apiKey)
+	return llm.BuildAuxProviderWithKey(m, ollamaBase, apiKey)
 }
 
 // newAuxCredentialCheck builds the write-time validator the admin handler uses.

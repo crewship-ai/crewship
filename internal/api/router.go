@@ -261,18 +261,28 @@ type Router struct {
 	keeperPhase2     *KeeperPhase2Handler
 	keeperPhase2Once sync.Once
 
-	// runVerdictProvider/runVerdictModel back the post-run outcome
-	// verdict (#1403): built lazily (once) from the run_summary aux
-	// slot, shared by every production executor construction site —
-	// the internal-runs terminal handler (ad-hoc agent runs) and every
-	// pipeline.NewWiredExecutor call (routine runs: HTTP, boot-resume,
-	// cron scheduler) — so they resolve/build the same provider once
-	// instead of duplicating llm.ResolveAux + llm.BuildAuxProvider at
-	// each call site. nil provider (after resolution) means the slot
-	// is unconfigured/unbuildable; callers treat that as "feature off".
+	// runVerdict* back the post-run outcome verdict (#1403). Every
+	// production call site — the internal-runs terminal handler (ad-hoc
+	// agent runs) and every pipeline.NewWiredExecutor (routine runs:
+	// HTTP, boot-resume, cron scheduler) — holds the RunVerdict method
+	// rather than its result, so they all share one built provider
+	// without any of them capturing it. nil provider (after resolution)
+	// means the slot is unconfigured/unbuildable; callers treat that as
+	// "feature off".
+	//
+	// Cached on the wiring it was built from rather than behind a
+	// sync.Once (#1556): the run_summary and fallback aux slots are
+	// runtime-settable, and a once-built provider made those two the only
+	// slots whose override needed a server restart. Keyed on
+	// provider|model|ollama-endpoint so an edit is live on the next
+	// verdict and an unchanged wiring still reuses one HTTP client.
+	runVerdictMu       sync.Mutex
+	runVerdictFpr      string
 	runVerdictProvider llm.Provider
 	runVerdictModel    string
-	runVerdictOnce     sync.Once
+	// runVerdictWarned is the last failure already reported, so a slot that
+	// cannot be built logs once per distinct problem instead of once per run.
+	runVerdictWarned string
 
 	// internalHandler is retained (it is otherwise local to
 	// registerInternalRoutes) so shutdown can drain its in-flight
@@ -295,45 +305,85 @@ func (r *Router) DrainVerdicts(timeout time.Duration) {
 	}
 }
 
-// resolveRunVerdict builds the run_summary aux provider once. A
-// misconfigured/unbuildable slot (e.g. no ANTHROPIC_API_KEY) logs a
-// warning and leaves runVerdictProvider nil — never fails boot.
-func (r *Router) resolveRunVerdict() {
+// RunVerdict resolves the run_summary aux slot to the LLM provider and model in
+// force RIGHT NOW, for the post-run outcome verdict (#1403). It matches
+// runverdict.Resolver, so call sites pass the method rather than its result.
+//
+// Resolved per verdict, not once at boot (#1556). run_summary and the fallback
+// slot behind it are runtime-settable from the console; a provider built once
+// and handed to the executors made those the only two of the seven aux slots
+// whose override took effect on the next server start rather than the next
+// evaluation. The provider is still built at most once per distinct wiring —
+// it carries a keep-alive'd HTTP client, and for Ollama a rebuild can mean a
+// cold model load — the same cache shape the four Keeper Reviews slots use in
+// internal/server/keeper_aux_live.go.
+//
+// A nil provider means the slot is unconfigured or unbuildable (e.g. no
+// ANTHROPIC_API_KEY). Callers must read that as "verdict generation is off",
+// not as an error; a later fix to the wiring is picked up on the next call.
+func (r *Router) RunVerdict() (llm.Provider, string) {
 	aux, err := llm.ResolveAux(r.AuxModels(), llm.SlotRunSummary)
 	if err != nil {
-		r.logger.Warn("run verdict: run_summary aux slot resolve failed; outcome verdicts disabled", "error", err)
-		return
+		r.dropRunVerdict("run verdict: run_summary aux slot resolve failed; outcome verdicts disabled", err)
+		return nil, ""
 	}
-	// Whichever vault key the operator pinned to this slot (#1554); "" keeps the
-	// historical process-env key. Bounded, because this runs on the first verdict
-	// rather than at boot and a wedged DB must not hang a run's teardown.
+	// An "ollama" slot must dial the endpoint the instance is configured with —
+	// the judge endpoint is itself runtime-settable — rather than whatever
+	// KEEPER_OLLAMA_URL the process started with.
+	var ollamaBase string
+	if aux.Provider == keepercfg.ProviderOllama && r.keeperSettings != nil {
+		ollamaBase = r.keeperSettings.Effective().EndpointURL.Value
+	}
+	// The pinned vault key is part of the built provider's identity (#1554), so
+	// it belongs in the fingerprint: repointing a slot at a different
+	// subscription has to rebuild, not reuse a client authenticated with the
+	// key the operator just moved away from.
+	credID := r.keeperAuxSettings.CredentialFor(string(llm.SlotRunSummary))
+	fpr := aux.Provider + "|" + aux.Model + "|" + ollamaBase + "|" + credID
+
+	r.runVerdictMu.Lock()
+	defer r.runVerdictMu.Unlock()
+	if r.runVerdictProvider != nil && r.runVerdictFpr == fpr {
+		return r.runVerdictProvider, r.runVerdictModel
+	}
+
+	// Bounded: this resolves the key on the first verdict rather than at boot,
+	// and a wedged database must not hang a run's teardown — nor hold this lock
+	// for longer than the deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	provider, err := buildAuxWithCredential(ctx, aux,
-		r.keeperAuxSettings.CredentialFor(string(llm.SlotRunSummary)),
-		NewAuxCredentialLookup(r.db), r.logger)
+	provider, err := buildAuxWithCredential(ctx, aux, ollamaBase, credID, NewAuxCredentialLookup(r.db), r.logger)
 	if err != nil {
-		r.logger.Warn("run verdict: run_summary provider build failed; outcome verdicts disabled", "error", err)
+		r.dropRunVerdictLocked("run verdict: run_summary provider build failed; outcome verdicts disabled", err)
+		return nil, ""
+	}
+	r.runVerdictProvider, r.runVerdictModel, r.runVerdictFpr = provider, aux.Model, fpr
+	r.runVerdictWarned = ""
+	return provider, aux.Model
+}
+
+// dropRunVerdict forgets any cached provider and logs why. Forgetting matters:
+// the operator moved the slot to a wiring that does not resolve, and quietly
+// billing the model they moved away from would be worse than no verdicts.
+func (r *Router) dropRunVerdict(msg string, err error) {
+	r.runVerdictMu.Lock()
+	defer r.runVerdictMu.Unlock()
+	r.dropRunVerdictLocked(msg, err)
+}
+
+// dropRunVerdictLocked is dropRunVerdict for callers already holding the mutex.
+// The warning is emitted at most once per distinct failure, so a permanently
+// misconfigured slot does not write a line per run.
+func (r *Router) dropRunVerdictLocked(msg string, err error) {
+	r.runVerdictProvider, r.runVerdictModel, r.runVerdictFpr = nil, "", ""
+	key := msg + ": " + err.Error()
+	if r.runVerdictWarned == key {
 		return
 	}
-	r.runVerdictProvider = provider
-	r.runVerdictModel = aux.Model
-}
-
-// RunVerdictProvider returns the pre-resolved LLM provider for the
-// post-run outcome verdict (#1403), lazily building it on first call.
-// nil when the run_summary aux slot is unconfigured or unbuildable —
-// callers must treat nil as "verdict generation is off", not an error.
-func (r *Router) RunVerdictProvider() llm.Provider {
-	r.runVerdictOnce.Do(r.resolveRunVerdict)
-	return r.runVerdictProvider
-}
-
-// RunVerdictModel returns the model string paired with
-// RunVerdictProvider(). Empty when the provider is nil.
-func (r *Router) RunVerdictModel() string {
-	r.runVerdictOnce.Do(r.resolveRunVerdict)
-	return r.runVerdictModel
+	r.runVerdictWarned = key
+	if r.logger != nil {
+		r.logger.Warn(msg, "error", err)
+	}
 }
 
 // SetKeeperPhase2Evaluators is the legacy post-construction setter.

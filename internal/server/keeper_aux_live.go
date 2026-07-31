@@ -27,7 +27,9 @@ import (
 //
 //  1. the workspace's vault-backed governance model (M2a) — unchanged
 //  2. the instance aux override for this slot (this file)
-//  3. the slot's construction-time default (boot-time YAML/env)
+//  3. the instance override for the fallback slot, when the slot itself is
+//     unset — the case llm.ResolveAux would resolve through Fallback
+//  4. the slot's construction-time default (boot-time YAML/env)
 //
 // A slot with no override returns (nil, "") and the gatekeeper uses the provider
 // it was built with, so an instance nobody has configured behaves exactly as it
@@ -108,10 +110,18 @@ func (r *auxLiveResolver) resolve(ctx context.Context, workspaceID string) (llm.
 	}
 
 	eff := r.store.EffectiveSlot(r.slot)
-	if !eff.Overridden {
+	provider, model, overridden := eff.Provider.Value, eff.Model.Value, eff.Overridden
+	if provider == "" {
+		// The slot itself is unset, so llm.ResolveAux would have reached the
+		// fallback slot. Read the fallback's current value here too, or an
+		// override there would be the one aux setting still needing a restart
+		// (#1556) — it is only ever consulted during boot-time resolution.
+		fb := r.store.EffectiveSlot(keepercfg.SlotFallback)
+		provider, model, overridden = fb.Provider.Value, fb.Model.Value, fb.Overridden
+	}
+	if !overridden {
 		return nil, "" // fall through to the construction-time default
 	}
-	provider, model := eff.Provider.Value, eff.Model.Value
 	if provider == "" || model == "" {
 		return nil, ""
 	}

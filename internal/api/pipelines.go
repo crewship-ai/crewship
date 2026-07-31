@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/runverdict"
 )
 
 // PipelineHandler exposes the workspace-scoped HTTP surface for
@@ -36,13 +36,12 @@ type PipelineHandler struct {
 	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
 	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
 	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
-	// runVerdictProvider/runVerdictModel back the post-run outcome
-	// verdict (#1403) for routine runs — pre-resolved once at boot from
-	// the run_summary aux slot, same as internal.InternalHandler's
-	// wiring for ad-hoc agent runs. nil provider → no verdict hook
-	// installed (NewWiredExecutor's degraded-mode contract).
-	runVerdictProvider llm.Provider
-	runVerdictModel    string
+	// runVerdict resolves the post-run outcome verdict's provider+model
+	// (#1403) for routine runs, at the moment a run terminates — same
+	// wiring as internal.InternalHandler's for ad-hoc agent runs, and
+	// same reason it is a resolver rather than a value (#1556). nil → no
+	// verdict hook installed (NewWiredExecutor's degraded-mode contract).
+	runVerdict runverdict.Resolver
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -147,13 +146,13 @@ func (h *PipelineHandler) SetSignalRegistry(s *pipeline.SignalRegistry) {
 	h.signals = s
 }
 
-// SetRunVerdict wires the pre-resolved LLM provider + model used to
-// generate a post-run outcome verdict (#1403) for routine runs. A nil
-// provider disables verdict generation entirely (the run_summary aux
-// slot had no buildable provider at boot).
-func (h *PipelineHandler) SetRunVerdict(p llm.Provider, model string) {
-	h.runVerdictProvider = p
-	h.runVerdictModel = model
+// SetRunVerdict wires the resolver the executors this handler builds ask
+// for the LLM provider + model to generate a post-run outcome verdict
+// (#1403) for routine runs. Called per terminating run, so a change to
+// the run_summary aux slot reaches executors that are already running
+// (#1556). A nil resolver disables verdict generation entirely.
+func (h *PipelineHandler) SetRunVerdict(resolve runverdict.Resolver) {
+	h.runVerdict = resolve
 }
 
 // SignalRegistry exposes the wired registry (nil until set) so the
@@ -270,16 +269,15 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		// DB derives the idempotency + step-override stores inside the
 		// factory — thin, goroutine-free DB wrappers, cheap to
 		// reconstruct per-run, impossible to forget at a call site.
-		DB:                 h.db,
-		Waitpoints:         h.waitpoints,
-		WS:                 h.ws,
-		Runs:               h.runs,
-		RunStore:           h.runStore,
-		CodeRunner:         h.codeRunner,
-		ScriptRunner:       h.scriptRunner,
-		Signals:            h.signals,
-		RunVerdictProvider: h.runVerdictProvider,
-		RunVerdictModel:    h.runVerdictModel,
+		DB:           h.db,
+		Waitpoints:   h.waitpoints,
+		WS:           h.ws,
+		Runs:         h.runs,
+		RunStore:     h.runStore,
+		CodeRunner:   h.codeRunner,
+		ScriptRunner: h.scriptRunner,
+		Signals:      h.signals,
+		RunVerdict:   h.runVerdict,
 		// Shared verdict WaitGroup: every ephemeral executor this handler
 		// builds registers its async verdict goroutine here so shutdown can
 		// drain them all (DrainVerdicts) before the journal writer closes.
