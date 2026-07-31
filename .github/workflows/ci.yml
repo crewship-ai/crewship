@@ -657,26 +657,24 @@ jobs:
           #
           #   race-deny.txt  → NOT race-tested anywhere. Needs the
           #                    structural justification in the job comment.
-          #
-          # cmd/crewship is the second deny entry, and it is a real race, not
-          # a cost exclusion. Putting the package back under -race is what
-          # found it: resetCLIState (clistate_test.go) restores process-wide
-          # CLI globals from t.Cleanup while a parallel test reads them
-          # through shellPromptString — 80 test files in this package call
-          # t.Parallel(), so a cleanup lands at an arbitrary point relative
-          # to every one of them. Tracked in #1610; deleting this entry is
-          # that issue's acceptance test. The rest of #1553 — the client.go
-          # resolution race and the internal/api shard — is unaffected and
-          # green, so it is not held up by this.
           #   race-shard.txt → race-tested, by the go-race-api job. Covered,
           #                    just not from this binary's timeout budget.
+          #
+          # cmd/crewship was the second deny entry and is back under -race
+          # as of #1610. It was a real race, not a cost exclusion, and
+          # putting the package under -race is what found it: resetCLIState
+          # (clistate_test.go) restores process-wide CLI globals from
+          # t.Cleanup while a parallel test reads them through
+          # shellPromptString. Exactly one of the package's 189 parallel
+          # tests reached a state-mutating helper, so the fix was to make
+          # that one serial; clistate_parallel_guard_test.go now fails the
+          # build if the pairing comes back.
           #
           # A stale entry in either (renamed/removed package) fails loudly
           # rather than silently covering less than the comment claims.
           denyfile="${RUNNER_TEMP:-/tmp}/race-deny.txt"
           cat > "$denyfile" <<'DENY'
           github.com/crewship-ai/crewship/internal/database
-          github.com/crewship-ai/crewship/cmd/crewship
           DENY
           shardfile="${RUNNER_TEMP:-/tmp}/race-shard.txt"
           cat > "$shardfile" <<'SHARD'

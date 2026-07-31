@@ -209,9 +209,13 @@ func TestKeeperConfigCmds_NoAuth(t *testing.T) {
 // output has to say so AND name the command that configures the other case —
 // otherwise the CLI teaches less than the console does, and the first thing
 // that teaches an operator is a 400 from `keeper config set`.
+// Deliberately NOT t.Parallel(): covCaptureStdoutCli3 reaches
+// guardCLIState, whose cleanup rewrites the process-wide CLI globals.
+// A parallel test's cleanup fires at an arbitrary point relative to
+// every other parallel test, so this one raced shellPromptString's read
+// of cli.Bold (#1610). See TestCLIStateGuard_NoParallelWriter, which
+// keeps the pairing from coming back.
 func TestPrintKeeperInstanceConfig_NamesTheOtherScope(t *testing.T) {
-	t.Parallel()
-
 	out := covCaptureStdoutCli3(t, func() {
 		printKeeperInstanceConfig(keeperInstanceConfig{
 			Enabled:     keeperConfigBoolField{Value: true, Source: "instance"},
