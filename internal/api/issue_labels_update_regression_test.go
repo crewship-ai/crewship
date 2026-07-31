@@ -24,6 +24,7 @@ import (
 
 func TestUpdateLabel_RenamesInOwnWorkspaceAndFencesOthers(t *testing.T) {
 	ensureEncryptionKey(t)
+	ctx := t.Context()
 	db := setupTestDB(t)
 	attacker := fenceSeedTenant(t, db, "a")
 	victim := fenceSeedTenant(t, db, "b")
@@ -50,7 +51,6 @@ func TestUpdateLabel_RenamesInOwnWorkspaceAndFencesOthers(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("PATCH own label = %d, want 200; body=%s", rr.Code, fenceTrim(rr.Body.String()))
 	}
-	ctx := t.Context()
 	var name, color string
 	if err := db.QueryRowContext(ctx, `SELECT name, color FROM labels WHERE id = ?`, attacker.ids["labelId"]).
 		Scan(&name, &color); err != nil {
