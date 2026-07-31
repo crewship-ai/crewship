@@ -170,6 +170,26 @@ func SecurityLevels() []SecurityLevel {
 	return []SecurityLevel{SecurityLevelL1, SecurityLevelL2, SecurityLevelL3, SecurityLevelL4}
 }
 
+// MinSecondApproverLevel is the lowest tier whose policy forces the four-eyes
+// rule on its own — the answer to "the workspace toggle is off, so when does a
+// credential escalation still need a second approver?".
+//
+// It exists because that answer had to be given in four places (the governance
+// card, the escalation row, `crewship keeper status`, the docs) and writing
+// "L4" down in each of them is how a table change quietly turns four pieces of
+// operator-facing copy into four lies. Derived from the table instead.
+//
+// The second return is false when no tier forces the rule at all — impossible
+// with the table as it stands, and the honest answer if that ever changes.
+func MinSecondApproverLevel() (SecurityLevel, bool) {
+	for _, l := range SecurityLevels() {
+		if l.Tier().SecondApprover {
+			return l, true
+		}
+	}
+	return 0, false
+}
+
 // RefusalRisk is the risk score attached to a refusal this package makes on its
 // own (a too-thin intent), as opposed to one the judge returned.
 //

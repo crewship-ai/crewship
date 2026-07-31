@@ -61,6 +61,23 @@ interface GovernanceResponse {
   // agent hired by user A cannot be resolved by user A — a different approver
   // is required. Backed by keeper_governance_settings.require_second_approver.
   require_second_approver?: boolean
+  // The four-eyes rule as ENFORCED (#1559). The toggle above is only half of
+  // it: keeper.TierPolicy.SecondApprover forces the rule on the top tier
+  // whatever the toggle says, so a card that renders the toggle alone tells an
+  // operator the opposite of what the resolve endpoint will do.
+  //
+  // tier_floor_label is the half that does not depend on the toggle — what is
+  // still in force with it off — which is the only version of this answer the
+  // card can use, because it has to render for a draft the server hasn't seen.
+  // Absent from a server older than #1559: then the card says nothing rather
+  // than name a tier from a constant of its own.
+  effective_second_approver?: {
+    min_security_level: number
+    min_security_level_label?: string
+    source: string
+    tier_floor_security_level?: number
+    tier_floor_label?: string
+  }
   // Credential-lease auto-issuance TTL in seconds (#1373). 0 = off (grants stay
   // standing). A positive value makes a Keeper ALLOW / escalation approve
   // re-issue an L3/L4 grant as a lease of that length. Server accepts 0 or
@@ -626,6 +643,11 @@ function FindingsRoutingCard({
   const riskNum = Number(form.draft.risk)
   const riskValid = Number.isInteger(riskNum) && riskNum >= 1 && riskNum <= 10
 
+  // Server-reported, never a constant here: the tier table lives in
+  // internal/keeper/tier.go and a copy of "L4" in the console is a copy that
+  // goes stale silently.
+  const tierFloorLabel = gov.effective_second_approver?.tier_floor_label ?? ""
+
   function handleSave() {
     void form.submit(async (draft) => {
       await put({
@@ -725,10 +747,27 @@ function FindingsRoutingCard({
       {/* Four-eyes credential gate (#1084). When on, an escalation raised by an
           agent hired by user A must be resolved by a DIFFERENT approver. The
           server warns (not blocks) if the workspace lacks a second eligible
-          approver; that advisory arrives as a toast on save. */}
+          approver; that advisory arrives as a toast on save.
+
+          Off is not "nobody needs a second approver" (#1559): the credential's
+          tier forces the rule on its own at the floor the server reports, and
+          it can only tighten this switch, never loosen it. Said here, once,
+          while the switch is off — with it on the row's own description
+          already says a second approver is required. */}
       <SettingsRow
         label="Require a second approver"
-        description="Four-eyes: credential escalations can't be approved by the same person who owns the requesting agent. Needs ≥2 OWNER/ADMIN/MANAGER members."
+        description={
+          <>
+            Four-eyes: credential escalations can&rsquo;t be approved by the same person who
+            owns the requesting agent. Needs ≥2 OWNER/ADMIN/MANAGER members.
+            {!form.draft.secondApprover && tierFloorLabel && (
+              <span className="block mt-1" data-testid="keeper-second-approver-tier-note">
+                Off here, but {tierFloorLabel} credentials still require one. A credential&rsquo;s
+                tier can only tighten this rule, never loosen it.
+              </span>
+            )}
+          </>
+        }
         border={false}
       >
         <Switch

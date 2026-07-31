@@ -21,6 +21,18 @@ export const escalationSchema = z.object({
   // credential already in the vault. Non-null ⇒ Approve activates it (the
   // human does not need to supply the secret).
   credential_id: z.string().nullable().default(null),
+  // Four-eyes, as it will be applied to THIS escalation (#1559). The server
+  // decides it at resolve time from two inputs the console could not see — the
+  // workspace require_second_approver toggle and the tier of the linked
+  // credential, which forces the rule on the top tier whatever the toggle says.
+  // `required` is the answer; the two flags are the reason, and they are
+  // independent (a workspace can require it where the tier would have anyway).
+  // Defaulted so a pre-#1559 server degrades to "say nothing", not to a claim.
+  second_approver_required: z.boolean().default(false),
+  second_approver_by_workspace: z.boolean().default(false),
+  second_approver_by_tier: z.boolean().default(false),
+  /** The linked credential's tier, e.g. "L4 · critical". Null when there is none. */
+  security_level_label: z.string().nullable().default(null),
 })
 
 /** Structured evidence attached to an escalation, providing context about what the agent was doing. */

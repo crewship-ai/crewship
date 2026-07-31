@@ -684,14 +684,43 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		// PENDING_APPROVAL credential it created; non-null means "approve here
 		// activates it" (no secret to type).
 		CredentialID *string `json:"credential_id"`
+
+		// The four-eyes rule as it will be applied to THIS row (issue #1559).
+		// ResolveEscalation decides it from two inputs the console could not
+		// see — the workspace toggle and the tier of the linked credential —
+		// so an Approve button that was going to 403 looked exactly like one
+		// that was not, and the refusal was the first anyone heard of it.
+		//
+		// SecondApproverRequired is the answer; the two `By` flags are the
+		// reason, and they are independent: a workspace can have the rule on
+		// while the tier would have forced it anyway. Read live rather than
+		// stored, because both inputs can change after the escalation is
+		// raised.
+		SecondApproverRequired    bool `json:"second_approver_required"`
+		SecondApproverByWorkspace bool `json:"second_approver_by_workspace"`
+		SecondApproverByTier      bool `json:"second_approver_by_tier"`
+		// SecurityLevelLabel is the linked credential's tier ("L4 · critical"),
+		// from keeper's table so the console does not keep its own copy. Empty
+		// when the escalation has no credential behind it.
+		SecurityLevelLabel string `json:"security_level_label,omitempty"`
+
+		// initiatorUserID / securityLevel back the fields above and are not
+		// serialised: the owning user id is not the console's business, and
+		// the raw level is already carried as its label.
+		initiatorUserID sql.NullString
+		securityLevel   sql.NullInt64
 	}
 
+	// LEFT JOIN, not JOIN: a CREDENTIAL escalation may carry no credential row
+	// (the legacy flow where the human supplies the secret), and those rows
+	// must still list.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
 		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
-		       e.credential_id, from_a.name, from_a.slug
+		       e.credential_id, from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
+		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
 		WHERE e.crew_id = ? AND e.workspace_id = ?
 		ORDER BY e.created_at DESC
 		LIMIT ? OFFSET ?
@@ -710,6 +739,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.PeerConversationID, &item.Status, &item.Resolution, &item.Action,
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
 			&item.CredentialID, &item.FromName, &item.FromSlug,
+			&item.initiatorUserID, &item.securityLevel,
 		); err != nil {
 			replyInternalError(w, h.logger, "scan escalation", err)
 			return
@@ -719,11 +749,46 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			masked := "[credential submitted]"
 			item.Resolution = &masked
 		}
+		if item.securityLevel.Valid {
+			item.SecurityLevelLabel = keeper.SecurityLevel(item.securityLevel.Int64).Label()
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "rows iteration", err)
 		return
+	}
+
+	// Four-eyes (#1559), mirroring ResolveEscalation's own reasoning:
+	//
+	//   - CREDENTIAL escalations only.
+	//   - The rule compares the approver against the agent's recorded owner, so
+	//     an agent with no owner (legacy pre-v99 row) cannot have it enforced —
+	//     and a row that claimed otherwise would be worse than saying nothing.
+	//   - The workspace toggle opts every tier in; the credential's own tier
+	//     forces it on the top tier regardless. Either is sufficient.
+	//
+	// The governance row is read once for the whole page, not once per item.
+	needsGovernance := false
+	for i := range items {
+		if items[i].Type == "CREDENTIAL" && items[i].initiatorUserID.Valid && items[i].initiatorUserID.String != "" {
+			needsGovernance = true
+			break
+		}
+	}
+	if needsGovernance {
+		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
+		for i := range items {
+			it := &items[i]
+			if it.Type != "CREDENTIAL" || !it.initiatorUserID.Valid || it.initiatorUserID.String == "" {
+				continue
+			}
+			it.SecondApproverByWorkspace = gov.RequireSecondApprover
+			if it.securityLevel.Valid {
+				it.SecondApproverByTier = keeper.SecurityLevel(it.securityLevel.Int64).Tier().SecondApprover
+			}
+			it.SecondApproverRequired = it.SecondApproverByWorkspace || it.SecondApproverByTier
+		}
 	}
 
 	writeJSON(w, http.StatusOK, items)

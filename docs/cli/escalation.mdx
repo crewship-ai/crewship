@@ -47,10 +47,20 @@ crewship escalation resolve esc_abc --action redirect --redirect-to viktor
 
 Prints `Escalation <id> resolved.` on success.
 
-If the workspace has [segregation of duties](/guides/credentials#segregation-of-duties-second-approver)
-enabled (`crewship keeper second-approver enable`), resolving a `CREDENTIAL`
-escalation is refused with **403** when the caller is recorded as the owner of
-the agent that raised it — including a workspace OWNER, which is not exempt.
+Resolving a `CREDENTIAL` escalation is refused with **403** when the caller is
+recorded as the owner of the agent that raised it — including a workspace OWNER,
+which is not exempt. Two independent things put that
+[segregation of duties](/guides/credentials#segregation-of-duties-second-approver)
+rule in force, and **either is sufficient**:
+
+- the workspace toggle (`crewship keeper second-approver enable`), which covers
+  every credential; or
+- the credential's own **L4 · critical** tier, which forces the rule whether or
+  not the workspace opted in — a tier can only tighten it, never loosen it.
+
+`crewship keeper status` prints which of the two applies on its `In force:`
+line, so you can check before you are refused rather than after. See
+[Keeper → The switch is a floor, not a master switch](/guides/keeper#the-switch-is-a-floor-not-a-master-switch).
 
 ## `crewship escalation pending-count`
 

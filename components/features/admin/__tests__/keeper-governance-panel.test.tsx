@@ -88,6 +88,16 @@ interface Gov {
   security_contact_user_id: string
   deny_notify_min_risk: number
   require_second_approver?: boolean
+  // The four-eyes rule as enforced (#1559) — the toggle above is only half of
+  // it. tier_floor_* is what the credential tier forces on its own, and is
+  // reported whatever the toggle says.
+  effective_second_approver?: {
+    min_security_level: number
+    min_security_level_label?: string
+    source: string
+    tier_floor_security_level?: number
+    tier_floor_label?: string
+  }
   auto_lease_seconds?: number
   watch_spec?: string
   watch_presets?: string[]
@@ -131,6 +141,15 @@ const BASE: Gov = {
   enabled: true,
   security_contact_user_id: "",
   deny_notify_min_risk: 7,
+  // Mirrors what internal/api/keeper_governance.go computes for a workspace
+  // with the toggle off: the tier table alone forces four-eyes, from L4 up.
+  effective_second_approver: {
+    min_security_level: 4,
+    min_security_level_label: "L4 · critical",
+    source: "tier",
+    tier_floor_security_level: 4,
+    tier_floor_label: "L4 · critical",
+  },
 }
 
 describe("KeeperGovernancePanel (#1001 M0)", () => {
@@ -262,6 +281,57 @@ describe("KeeperGovernancePanel (#1001 M0)", () => {
 
     expect(await screen.findByTestId("keeper-governance-second-approver")).toHaveAttribute("aria-checked", "true")
     expect(screen.queryByTestId("keeper-findings-save")).not.toBeInTheDocument()
+  })
+
+  // ── Four-eyes: the toggle is only half the rule (#1559) ──────────────────
+  //
+  // keeper.TierPolicy.SecondApprover forces four-eyes on the top tier whatever
+  // this switch says. Rendered as if the switch were the only control, "off"
+  // read as "nobody needs a second approver here" — and the first correction an
+  // operator got was a 403 on their own approval. The note has to appear
+  // exactly when the switch is off: with it on, the row's own description
+  // already says a second approver is required, and repeating it there would
+  // be a second sentence saying the same thing.
+
+  it("names the tier floor that still applies when the toggle is off", async () => {
+    mockRoutes({ ...BASE, require_second_approver: false })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    const note = await screen.findByTestId("keeper-second-approver-tier-note")
+    // The label comes from the server's tier table, not from a string in the
+    // console — that is the whole point of shipping tier_floor_label.
+    expect(note).toHaveTextContent("L4 · critical")
+    expect(note).toHaveTextContent(/tighten/i)
+  })
+
+  it("drops the tier note the moment the toggle is switched on", async () => {
+    mockRoutes({ ...BASE, require_second_approver: false })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    expect(await screen.findByTestId("keeper-second-approver-tier-note")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("keeper-governance-second-approver"))
+    // Follows the draft, not the saved row: the note answers "what applies if
+    // this stays off", which is already false before the save lands.
+    expect(screen.queryByTestId("keeper-second-approver-tier-note")).not.toBeInTheDocument()
+  })
+
+  it("shows no tier note when the toggle is already on", async () => {
+    mockRoutes({ ...BASE, require_second_approver: true })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    await screen.findByTestId("keeper-governance-second-approver")
+    expect(screen.queryByTestId("keeper-second-approver-tier-note")).not.toBeInTheDocument()
+  })
+
+  it("says nothing when the server reports no tier floor", async () => {
+    // A pre-#1559 server sends no effective block, and a server whose tier
+    // table forces nothing sends an empty floor. Inventing "L4" from a constant
+    // in the console is exactly the drift this field exists to prevent.
+    mockRoutes({ ...BASE, require_second_approver: false, effective_second_approver: undefined })
+    render(<KeeperGovernancePanel workspaceId="ws1" serverEnabled={true} />)
+
+    await screen.findByTestId("keeper-governance-second-approver")
+    expect(screen.queryByTestId("keeper-second-approver-tier-note")).not.toBeInTheDocument()
   })
 
   it("surfaces the server's second-approver warning as a warning toast", async () => {

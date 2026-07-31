@@ -131,6 +131,76 @@ func TestKeeperGovernance_PutRequireSecondApproverRoundTrips(t *testing.T) {
 	}
 }
 
+// TestKeeperGovernance_ReportsTheEffectiveSecondApproverRule — issue #1559.
+//
+// The stored toggle is not the rule. keeper.TierPolicy.SecondApprover forces
+// four-eyes on the top tier whatever the toggle says (enforced in
+// escalation_handler.go), so a response that returns only
+// require_second_approver hands every reader — console, CLI, operator — a
+// value that contradicts what the resolve endpoint will do. The GET must say
+// what is actually in force.
+func TestKeeperGovernance_ReportsTheEffectiveSecondApproverRule(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewKeeperGovernanceHandler(db, newComposioTestLogger(), nil)
+
+	tierFloor, ok := keeper.MinSecondApproverLevel()
+	if !ok {
+		t.Fatal("no tier forces a second approver — the control this test exists for is gone, which is a failure, not a reason to skip")
+	}
+
+	// Toggle OFF (and never configured) — the tier floor is the whole rule.
+	rr := doGovernanceReq(t, h, http.MethodGet, "", wsID, userID)
+	res := decodeGovernance(t, rr.Body.Bytes())
+	if res.RequireSecondApprover {
+		t.Fatalf("precondition: toggle should be off, got %+v", res)
+	}
+	eff := res.EffectiveSecondApprover
+	if eff.Source != effectiveSourceTier {
+		t.Errorf("source with the toggle off = %q, want %q", eff.Source, effectiveSourceTier)
+	}
+	if eff.MinSecurityLevel != int(tierFloor) {
+		t.Errorf("min level with the toggle off = %d, want the tier floor %d", eff.MinSecurityLevel, int(tierFloor))
+	}
+	if eff.MinSecurityLevelLabel != tierFloor.Label() {
+		t.Errorf("label = %q, want %q — the console renders it verbatim", eff.MinSecurityLevelLabel, tierFloor.Label())
+	}
+	if eff.TierFloorSecurityLevel != int(tierFloor) || eff.TierFloorLabel != tierFloor.Label() {
+		t.Errorf("tier floor = %d/%q, want %d/%q", eff.TierFloorSecurityLevel, eff.TierFloorLabel,
+			int(tierFloor), tierFloor.Label())
+	}
+
+	// Toggle ON — it covers every tier, so the floor drops to the lowest one.
+	rr = doGovernanceReq(t, h, http.MethodPut, `{"require_second_approver": true}`, wsID, userID)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	lowest := keeper.SecurityLevels()[0]
+	for _, res := range []keeperGovernanceResponse{
+		decodeGovernance(t, rr.Body.Bytes()),
+		// The PUT response and the GET must agree; a card that re-baselines on
+		// the PUT would otherwise show a different rule until the next reload.
+		decodeGovernance(t, doGovernanceReq(t, h, http.MethodGet, "", wsID, userID).Body.Bytes()),
+	} {
+		if res.EffectiveSecondApprover.Source != effectiveSourceWorkspace {
+			t.Errorf("source with the toggle on = %q, want %q",
+				res.EffectiveSecondApprover.Source, effectiveSourceWorkspace)
+		}
+		if res.EffectiveSecondApprover.MinSecurityLevel != int(lowest) {
+			t.Errorf("min level with the toggle on = %d, want %d (the toggle covers every tier)",
+				res.EffectiveSecondApprover.MinSecurityLevel, int(lowest))
+		}
+		// Still reported with the toggle on: the governance card has to be able
+		// to say what turning it OFF would leave behind, and that answer does
+		// not depend on the toggle's current value.
+		if res.EffectiveSecondApprover.TierFloorLabel != tierFloor.Label() {
+			t.Errorf("tier floor with the toggle on = %q, want %q",
+				res.EffectiveSecondApprover.TierFloorLabel, tierFloor.Label())
+		}
+	}
+}
+
 func TestKeeperGovernance_PutRejectsNonMemberContact(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
