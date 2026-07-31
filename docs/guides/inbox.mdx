@@ -12,13 +12,16 @@ It lives at `/inbox` in the running web UI and is the first item in the **Plan**
 
 ## What lands in the Inbox
 
-Four kinds of items get written through to `inbox_items` (migration v85) the moment their source signal fires:
+Seven kinds of items get written through to `inbox_items` the moment their source signal fires. `inbox.AllKinds` is the single source of truth for the set, and `TestInboxKindsMatchSchema` inserts one row per entry against the real migrated schema — a kind added there without a matching migration fails CI rather than failing silently at runtime, where the alert simply never arrives:
 
 | Kind | When it's created | Resolves via |
 |------|-------------------|--------------|
 | `waitpoint` | A routine hits a `wait` step of `kind: approval` (Harbormaster gate) | Approve / Deny — calls `/pipelines/waitpoints/{token}/approve` |
 | `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalation_handler.go` records one | Mark resolved (decision is recorded in the escalation row separately) |
 | `failed_run` | A `pipeline_run` reaches the `failed` terminal state | Retry (re-fires the routine with the same inputs) or Cancel |
+| `memory_consolidation` | The consolidator distils journal entries into candidate rules, or Keeper's memory-health sweep suggests one | **Accept** / **Reject** — `/consolidate/proposed/{id}/approve\|reject`. OWNER/ADMIN only, so the row is addressed to `ADMIN`. |
+| `schedule_missed` | A cron schedule was overdue and dropped or deferred occurrences per its `catchup_policy` | **Run now** — fires the schedule out of cycle (`/pipeline-schedules/{id}/run`, the same call as `crewship routine schedules now`) — or Dismiss. |
+| `schedule_circuit_breaker_tripped` | A schedule auto-disabled itself after N consecutive failures, to stop the spam and the cost bleed | **Re-enable schedule** — `PATCH /pipeline-schedules/{id}` with `{"enabled": true}`, the same call as `crewship routine schedules enable`. OWNER/ADMIN only. |
 | `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role. Also carries **"your agent replied"** chat notifications: when an assistant reply lands in a session you aren't currently viewing, one per-user item appears with a scrubbed preview (repeated replies refresh it in place instead of stacking). See [Chat & Sessions](/guides/chat-sessions#your-agent-replied-notifications). | One-click jump to the linked issue or the **Open chat** deep link, or Dismiss. Opening the chat (or `crewship chat read`) clears it automatically. |
 
 Chat-reply items get priority placement: under Smart grouping they form their own **Agent replies** group directly beneath *Decisions needed* (never buried in FYI), and each row shows an **Open chat** quick action on hover that deep-links straight into the session — continue the conversation in one click; opening it clears the item.
@@ -55,8 +58,22 @@ A two-pane layout:
 
 | Pane | Purpose |
 |------|---------|
-| Left list (420 px) | Item rows ordered newest-first. Three tabs at the top — **Inbox**, **Unread**, **Archived**. Each row shows a **sender avatar** (agent / crew / routine / system, coloured per sender), an unread dot, the title, the kind, sender, and a relative timestamp. A **Group** control buckets the list by **Smart** (Decisions needed → Needs review → FYI), Type, Sender, Routine, Issue, or Crew. |
-| Right detail | Sender avatar + name + role, a **rendered-markdown body** (headings, lists, code — not a raw blob), a humanised **Context** card (key/value, not raw JSON, with credential-looking values masked behind a reveal toggle), kind-specific action buttons, an **Archive** button on non-decision rows, and — for waitpoints — a `WaitpointRunDetail` block showing which step is paused. |
+| Left list (460 px) | The column carries its own chrome: **search** + **Select** on one row, then the **Inbox / Unread / Archived** tabs with **Filter** and **Display**. Rows are one line of title and one line of everything else — subject, category, and either the relative time or, for a waitpoint, **how long is left**. Groups are collapsible, and **Decisions needed** is pinned above the rest whatever arrived last. |
+| Right detail | The decision first, then the evidence: a **decision card** with the countdown and the action buttons, a definition strip (subject / crew / category / arrived), for waitpoints a `WaitpointRunDetail` block showing which step is paused, a **rendered-markdown body**, and a humanised **Context** card with credential-looking values masked behind a reveal toggle. |
+
+**Filter** holds the facets — the smart **buckets** (Decisions needed, Agent replies, Ready for review, Routine progress, Everything else) and a **subject** picker; in the Archived view it swaps to **outcome**, **decided by** and **period**, because those are the questions an archive answers and the live buckets mean nothing over resolved rows. Whatever is applied shows as a removable chip under the toolbar, so a filter can never hide inside a closed menu. **Display** holds grouping (Smart buckets / Category / Subject / Nothing) and sort (Newest / Oldest / **Expiring first**).
+
+The **subject** is who the row is ABOUT, not who sent it: ten producers write their rows as `sender_type=system` ("Keeper", "Skill Curator") while carrying `agent_name` in the payload, so keying identity off the sender alone put a system glyph on "casey requested GH_TOKEN". Identity follows one rule everywhere — **a square is a machine, a circle is a person** — which matters most in the archive, where casey (agent) asked and pavel (user) approved sit in the same row.
+
+The subject picker **searches the workspace roster**, not the loaded rows. A facet built from the page can only offer an agent while they are noisy, and going quiet is usually why you go looking for one.
+
+Search covers `body_md` as well as the title and sender — the sentence someone remembers is usually in the message.
+
+**Selection**: **Select** turns on checkboxes, a click ticks one row and **shift-click takes the range** between the anchor and the target, walking the flattened *visible* order so a range inside one group cannot sweep in the collapsed groups between them.
+
+Every waitpoint carries `timeout_at`, and both the row and the decision card **count down** to it — in minutes, then hours, then days, because a day-long default rendered as "1428m" is a figure nobody converts in their head. `Expiring first` sorts on the same field.
+
+Decisions are gated by the role the **server** enforces, not by what the UI feels like offering. `/pipelines/waitpoints/{token}/approve` and the escalation lifecycle are `roleCreate` (MANAGER and up); `/skills/proposed/approve` and `/consolidate/proposed/{id}/approve` are `roleManage` (OWNER/ADMIN only). When the caller cannot decide, the card **names who can** instead of handing them a button that answers 403 — and the rows themselves are addressed to the role that can act, a pairing `TestInboxTargetRoleMatchesDecider` reads out of the source and requires to agree.
 
 The detail panel's action row is what the source-of-truth call hangs off:
 
@@ -78,7 +95,7 @@ The inbox is the one surface that aggregates messages from every agent, routine,
 
 ### Grouping & bulk triage
 
-Once the list gets long, flat newest-first ordering stops scaling. The list can be grouped by **Type**, **Routine**, **Issue**, or **Crew** — the group key comes off `kind` plus the relevant `payload` field (`pipeline_slug` for Routine, `issue_identifier` for Issue, `crew_id` for Crew). A row whose field is missing lands in a stable "No routine" / "No issue" / "No crew" bucket rather than disappearing. Grouping is **client-side** — it re-buckets the rows already loaded, no extra fetch.
+Once the list gets long, flat newest-first ordering stops scaling. **Display** groups the list by **Smart buckets** (the default), **Category**, **Subject**, or nothing at all. Smart buckets keep a fixed order with *Decisions needed* first: insertion order would put whichever bucket the newest row happened to land in at the top, so the one thing blocking an agent could sit below routine chatter purely because nothing had been decided in a while. Grouping is **client-side** — it re-buckets the rows already loaded, no extra fetch.
 
 Each group is a collapsible folder with a count in its header. A group-header checkbox selects the whole group (and renders **indeterminate** when only some rows under it are checked); per-row checkboxes select individuals. When you collapse a group or switch filters, off-screen checked ids are pruned from the selection so the counts in the bulk bar stay honest.
 
@@ -89,6 +106,10 @@ Bulk **Resolve** never silently closes a decision item. If the selection contain
 </Warning>
 
 A row whose `kind` is an unknown value renders as a generic notification (hardened fallback) instead of crashing the row — new server-side kinds degrade gracefully in an older UI.
+
+<Warning>
+`GET /api/v1/inbox` is `LIMIT 100` (500 max) with **no cursor**. The Archived view is therefore the most recent window, not the whole history, and any count computed from the loaded page describes that window. This is why the tabs show a number only for the list actually loaded — unread excepted, since it comes from `/inbox/count`, the same source the bell badge reads. Per-state counts and a cursor are the fix.
+</Warning>
 
 ## Realtime
 
@@ -111,7 +132,7 @@ The Inbox has full CLI parity — everything the web surface exposes is scriptab
 
 | Command | What it does |
 |---------|--------------|
-| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. JSON now includes `payload`, `sender_type`, and (for agent senders) `avatar_seed` + `avatar_style`. |
+| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind`, `--limit` (defaults to 50; the server caps at 500), `--format json\|yaml\|quiet`. JSON carries `payload`, `sender_type`, agent-sender `avatar_seed` + `avatar_style`, and — so a script can see who a row is addressed to and who closed it — `target_role`, `resolved_by_user_id` and `resolved_at`. |
 | `crewship inbox get <id>` | Show one item with its full markdown body **and** the structured Context (payload) — the read counterpart of the web detail pane. `--format json` for scripting. |
 | `crewship inbox read <id>` | Mark an item as read. |
 | `crewship inbox unread <id>` | Flip back to unread (also the way to **restore** an archived item). |
