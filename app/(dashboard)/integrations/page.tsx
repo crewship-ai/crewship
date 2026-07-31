@@ -26,6 +26,7 @@ import { RegistryBrowser } from "@/components/features/mcp/components/registry-b
 import type { RegistryAddPayload } from "@/components/features/mcp/components/registry-browser"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { readApiError } from "@/lib/api-error"
 
 import { ExpandedPanel } from "@/components/features/integrations/expanded-panel"
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
@@ -396,19 +397,31 @@ function LegacyIntegrationsPage() {
   ) {
     if (!workspaceId || !canManage) return
 
+    // A refused write must not read as a successful one. apiFetch
+    // RESOLVES on 4xx/5xx, so the bare `await` this used to do meant the
+    // refetch below quietly restored the old chip state and nothing
+    // disagreed with the operator — they saw their click undo itself and
+    // had no way to learn why (#1594). handleDelete a few lines down
+    // already checked res.ok, so this was an inconsistency inside one
+    // component rather than a convention nobody had.
     try {
+      let res: Response | null = null
+      let fallback = ""
+
       if (hasAccess && hasAnyBindings) {
         // Remove binding
         const bId = bindingIds[server.id]?.[agent.id]
         if (bId) {
-          await apiFetch(
+          fallback = `Failed to remove ${agent.name}'s access`
+          res = await apiFetch(
             `/api/v1/agents/${agent.id}/integrations/${bId}?workspace_id=${workspaceId}`,
             { method: "DELETE" },
           )
         }
       } else {
         // Create binding
-        await apiFetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+        fallback = `Failed to grant ${agent.name} access`
+        res = await apiFetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -418,6 +431,13 @@ function LegacyIntegrationsPage() {
           }),
         })
       }
+
+      if (res && !res.ok) {
+        toast.error(await readApiError(res, fallback))
+      }
+      // Refetch either way: on failure the server is the only source of
+      // truth for what the binding now is, and leaving the optimistic
+      // chip state up would be a second lie on top of the first.
       await fetchAll(workspaceId)
     } catch {
       toast.error("Network error")

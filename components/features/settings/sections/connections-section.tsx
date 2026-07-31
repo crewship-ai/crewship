@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { crewColorHex } from "@/lib/entities"
 import { apiFetch } from "@/lib/api-fetch"
+import { readApiError } from "@/lib/api-error"
 import { toast } from "sonner"
 import { useAbilities } from "@/hooks/use-abilities"
 import { isManagerTier } from "@/lib/permissions/tiers"
@@ -200,18 +201,52 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     // link at all. Remember what was removed so every failure path — a
     // rejected POST or a thrown request — can put it back.
     let removed: Connection | null = null
-    const restoreRemoved = async () => {
-      if (!removed) return
-      await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from_crew_id: removed.from_crew_id,
-          to_crew_id: removed.to_crew_id,
-          direction: removed.direction,
-        }),
-      }).catch(() => {})
+
+    // A failed rollback SURFACES. The decision, written down because the
+    // previous `.catch(() => {})` could not be told apart from an
+    // oversight (#1594):
+    //
+    // The caller already toasts "Failed to change the link", which the
+    // user reasonably reads as "nothing happened". When the restore also
+    // fails that reading is wrong in the one direction that costs them
+    // something — the delete DID happen, so the old link is gone and no
+    // new one replaced it. Staying silent leaves them believing they
+    // still have a link they no longer have.
+    //
+    // Returns whether the restore succeeded so each failure path can say
+    // the right thing rather than toasting twice.
+    const restoreRemoved = async (): Promise<boolean> => {
+      if (!removed) return true
+      try {
+        const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from_crew_id: removed.from_crew_id,
+            to_crew_id: removed.to_crew_id,
+            direction: removed.direction,
+          }),
+        })
+        // apiFetch resolves on 4xx/5xx, so a refused restore reaches here
+        // rather than the catch — checking ok is what makes this real.
+        return res.ok
+      } catch {
+        return false
+      }
     }
+
+    // Both failure paths report the same way: the server's reason when
+    // there is one, plus the lost-link warning when the rollback failed.
+    const reportFailure = async (reason: string) => {
+      const restored = await restoreRemoved()
+      toast.error(
+        restored
+          ? reason
+          : `${reason} — and the previous link could not be restored. ` +
+              `${selected.name} and ${other.name} are now unlinked; re-create the link manually.`,
+      )
+    }
+
     try {
       // "not linked" is the one state with no row, so it is a plain delete.
       //
@@ -266,9 +301,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         body: JSON.stringify({ from_crew_id: from, to_crew_id: to, direction }),
       })
       if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        await restoreRemoved()
-        toast.error(body?.detail ?? body?.error ?? "Failed to change the link")
+        await reportFailure(await readApiError(res, "Failed to change the link"))
         // The rendered state is now a guess either way — re-read it.
         await fetchData()
         return
@@ -276,8 +309,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
       toast.success(`${selected.name} → ${other.name}: ${PAIR_LABELS[next].toLowerCase()}`)
       await fetchData()
     } catch {
-      await restoreRemoved()
-      toast.error("Failed to change the link")
+      await reportFailure("Failed to change the link")
       await fetchData()
     } finally {
       setPendingPair(null)
