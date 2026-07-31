@@ -7,6 +7,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -117,6 +118,17 @@ type changePasswordRequest struct {
 // "password_change") — the caller's current session is preserved so they
 // are not logged out of the tab they just used. CLI-token callers have no
 // current browser session, so all browser sessions are revoked.
+//
+// The current-password check is a credential-verification oracle: it
+// answers differently for a right and a wrong guess (#1513). Holding a
+// stolen session already lets an attacker act as the user, but it does
+// NOT hand them the password itself — and recovering that buys
+// persistence past session revocation plus whatever the person reused it
+// on. So the check runs through checkAndLockoutOnFail, the exact same
+// per-account lockout that guards sign-in, rather than a bare bcrypt
+// compare that costs an attacker nothing to repeat. The router puts the
+// route on the strict per-IP auth bucket for the same reason
+// (routeWithRateLimiting).
 func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -141,9 +153,12 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var hashed sql.NullString
+	var (
+		email  string
+		hashed sql.NullString
+	)
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT hashed_password FROM users WHERE id = ?", user.ID).Scan(&hashed)
+		"SELECT email, hashed_password FROM users WHERE id = ?", user.ID).Scan(&email, &hashed)
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
@@ -153,12 +168,42 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !hashed.Valid || hashed.String == "" {
-		// OAuth-only accounts have no password to verify against.
+		// OAuth-only accounts have no password to verify against. Checked
+		// BEFORE the lockout path, which reports a password-less account as
+		// plain "invalid credentials" — correct for sign-in (it must not
+		// enumerate), wrong here (the caller is already authenticated as
+		// this account and needs to be told to use recovery).
 		replyError(w, http.StatusBadRequest,
 			"no password set for this account — use password recovery to set one")
 		return
 	}
-	if bcryptCompareHashAndPassword(hashed.String, req.CurrentPassword) != nil {
+
+	// Same verification path as sign-in: consecutive wrong guesses advance
+	// users.failed_login_count and freeze the account once it crosses the
+	// threshold, a correct one clears it. Sharing the counter with login is
+	// deliberate — an attacker who cannot afford failures on /api/auth
+	// must not get a fresh, free budget of them here.
+	verifiedID, _, verr := checkAndLockoutOnFail(r.Context(), h.db, email, req.CurrentPassword, time.Now())
+	switch {
+	case verr == nil && verifiedID == user.ID:
+		// Current password confirmed.
+	case errors.Is(verr, ErrAccountLocked):
+		h.logger.Warn("password change blocked by account lockout", "user_id", user.ID)
+		replyError(w, http.StatusLocked,
+			"too many failed attempts — this account is temporarily locked")
+		return
+	case errors.Is(verr, ErrInvalidCredentials):
+		replyError(w, http.StatusUnauthorized, "current password is incorrect")
+		return
+	case verr != nil:
+		replyInternalError(w, h.logger, "verify current password", verr)
+		return
+	default:
+		// No error, but the row the email resolved to is not the caller's.
+		// Unreachable while emails are unique; refusing beats rotating the
+		// password of whichever row won the lookup.
+		h.logger.Error("password change: email resolved to a different user",
+			"user_id", user.ID, "resolved_id", verifiedID)
 		replyError(w, http.StatusUnauthorized, "current password is incorrect")
 		return
 	}
