@@ -80,6 +80,58 @@ func TestTier_ScrutinyIncreasesWithLevel(t *testing.T) {
 	}
 }
 
+// SelfServiceDelivery is the delivery half of the tier vocabulary, and it is the
+// field the auto-lease gate reads. Pinning the exact split here is what stops a
+// surface from re-deriving "which tiers are self-service" with a literal of its
+// own: if this table changes, the gate changes with it, and if it does not, the
+// companion test in internal/api fails.
+func TestTier_SelfServiceDeliveryIsTheLowerTwoTiers(t *testing.T) {
+	want := map[SecurityLevel]bool{
+		SecurityLevelL1: true,
+		SecurityLevelL2: true,
+		SecurityLevelL3: false,
+		SecurityLevelL4: false,
+	}
+	for _, l := range SecurityLevels() {
+		if got := l.Tier().SelfServiceDelivery; got != want[l] {
+			t.Errorf("%s SelfServiceDelivery = %v, want %v", l, got, want[l])
+		}
+	}
+}
+
+// Delivery has to be monotone for the same reason scrutiny is: a higher tier
+// that handed the agent the raw value for the whole run, while a lower one
+// leased it, would invert the meaning of the ladder.
+func TestTier_SelfServiceDeliveryStopsOnceAndDoesNotComeBack(t *testing.T) {
+	levels := SecurityLevels()
+	for i := 1; i < len(levels); i++ {
+		lo, hi := levels[i-1].Tier(), levels[i].Tier()
+		if hi.SelfServiceDelivery && !lo.SelfServiceDelivery {
+			t.Errorf("%s is self-service but %s is not", hi.Level, lo.Level)
+		}
+	}
+	// A tier that both skips the judge and would be leased is incoherent: the
+	// lease exists to bound a Keeper-mediated grant, and there is no decision to
+	// bound if no judge ever ran.
+	for _, l := range levels {
+		p := l.Tier()
+		if p.AutoAllow && !p.SelfServiceDelivery {
+			t.Errorf("%s auto-allows without a judge yet is not self-service delivered", l)
+		}
+	}
+}
+
+// The fail-closed default has to reach this field too. An unknown level resolves
+// to L4, so a corrupt row must be treated as Keeper-mediated (leased), never as
+// the self-service tier that hands the agent a standing secret.
+func TestTier_UnknownLevelIsNotSelfService(t *testing.T) {
+	for _, l := range []SecurityLevel{0, -1, 5, 99} {
+		if l.Tier().SelfServiceDelivery {
+			t.Errorf("level %d resolved to a self-service policy — a garbage level would buy a standing grant", int(l))
+		}
+	}
+}
+
 // The reason an operator marks a credential L4: the model may vouch for a
 // request but must not grant it.
 func TestApplyTierFloor_CriticalCannotBeGrantedByTheModel(t *testing.T) {

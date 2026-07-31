@@ -23,6 +23,9 @@ import "fmt"
 //   - L4 can never be granted by the model alone. An ALLOW is upgraded to
 //     ESCALATE, so a human confirms every production-admin credential read. This
 //     is the whole reason an operator marks something L4.
+//   - L1 and L2 are delivered to the agent for the whole run; L3 and L4 are
+//     mediated per read, which is why only their grants auto-lease. See
+//     SelfServiceDelivery.
 //
 // The floors are deliberately one-directional: a tier can only make a verdict
 // stricter, never looser. A judge that wants to DENY an L1 read still denies it.
@@ -40,6 +43,23 @@ type TierPolicy struct {
 
 	// AutoAllow permits the no-model fast path (L1 only).
 	AutoAllow bool
+	// SelfServiceDelivery marks the tiers whose value is handed to the agent for
+	// the whole run — boot env vars, /secrets files, the sidecar credstore — as
+	// opposed to being mediated by Keeper per read.
+	//
+	// It is the delivery half of the tier vocabulary, and it is what the
+	// credential auto-lease gate reads. A lease bounds a Keeper decision: it
+	// makes access decay after the ALLOW that granted it. There is no decision to
+	// bound on a self-service tier, and expiring one of those mid-run would not
+	// contain an attacker — it would break the agent's own LLM calls with an
+	// invalid key. So L1/L2 stay standing grants and L3/L4 are leased.
+	//
+	// This lived as a comment on governance.AutoLeaseSeconds and as a literal
+	// `>= L3` in internal/api until #1557. It is a field for the same reason
+	// Label is: a rule two surfaces spell out independently is a rule that will
+	// eventually be spelled two different ways, and here the drift would silently
+	// grant standing access where a lease was intended.
+	SelfServiceDelivery bool
 	// MinIntentChars is the shortest intent this tier accepts. Requests below it
 	// are denied before the model call, with a reason that says what to add.
 	MinIntentChars int
@@ -69,17 +89,19 @@ type TierPolicy struct {
 var tierPolicies = map[SecurityLevel]TierPolicy{
 	SecurityLevelL1: {
 		Level: SecurityLevelL1, Label: "L1 · low",
-		Blast:          "read-only or low-value access (npm read token, public API key)",
-		AutoAllow:      true,
-		MinIntentChars: 10,
+		Blast:               "read-only or low-value access (npm read token, public API key)",
+		AutoAllow:           true,
+		SelfServiceDelivery: true,
+		MinIntentChars:      10,
 		Checks: []string{
 			"Does the stated intent describe actual work, rather than restating the credential's name?",
 		},
 	},
 	SecurityLevelL2: {
 		Level: SecurityLevelL2, Label: "L2 · medium",
-		Blast:          "write access to a non-production system (GitHub write, staging database)",
-		MinIntentChars: 15,
+		Blast:               "write access to a non-production system (GitHub write, staging database)",
+		SelfServiceDelivery: true,
+		MinIntentChars:      15,
 		Checks: []string{
 			"Does the stated intent describe actual work, rather than restating the credential's name?",
 			"Is a WRITE-capable credential actually needed, or would a read-only one do?",

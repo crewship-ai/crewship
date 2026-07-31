@@ -78,10 +78,10 @@ type Settings struct {
 	// exactly as before. A positive value makes a Keeper ALLOW — and the
 	// approval of an agent-proposed CREDENTIAL escalation — re-issue the
 	// requesting agent's grant as a short-lived LEASE of that many seconds,
-	// so credential access decays instead of persisting. Only L3/L4
-	// (security_level >= 3) credentials are auto-leased: L1/L2 are the
-	// boot-delivered self-service tier whose whole point is that the agent
-	// holds them for the run. Clamped to MaxAutoLeaseSeconds on write.
+	// so credential access decays instead of persisting. Which tiers this
+	// applies to is decided by keeper.TierPolicy.SelfServiceDelivery — today
+	// L3/L4 are leased and L1/L2 are not — rather than by a threshold restated
+	// here; see that field for why. Clamped to MaxAutoLeaseSeconds on write.
 	// Enforced in internal/api (issueCredentialLease + the delivery-path
 	// gates), not here — this package only resolves the setting.
 	AutoLeaseSeconds int `json:"auto_lease_seconds"`
