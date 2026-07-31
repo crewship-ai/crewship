@@ -105,9 +105,11 @@ feature correctness.
   outlives its request also outlives the *test* that drove it, where it
   races that test's teardown and fails a bystander at random (#1596).
   A long-lived daemon that genuinely cannot be drained goes in
-  `unregisteredSpawnSites` with its reason; a test that hands a
-  directory to such a handler takes it from `storageDir(t)`, not
-  `t.TempDir()`.
+  `unregisteredSpawnSites` with its reason. A test that hands a storage
+  directory to **any** handler with a detached writer takes it from
+  `storageDir(t)`, not `t.TempDir()` — `t.TempDir()` fails the test when
+  its `RemoveAll` races a late write, and a `t.TempDir()` taken after
+  `setupTestDB` is cleaned up *before* the drain runs.
 
 ## Frontend data fetching
 

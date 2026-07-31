@@ -54,15 +54,20 @@ func setupTestDB(t *testing.T) *sql.DB {
 // want storageDir (below), not t.TempDir, for exactly that reason.
 //
 // Failing on timeout rather than hanging: see waitForBackgroundWork.
-// The message names the waiting test because the whole class of bugs
-// this closes is failures landing on a test that did not cause them —
-// a timeout here should not repeat that mistake.
+//
+// The message names the waiting test but does NOT claim it started the
+// stuck work, because backgroundWork is package-level and the counter
+// cannot prove ownership — the straggler may belong to a test that
+// finished earlier. Claiming otherwise would reintroduce, in the error
+// message, the misattribution this whole helper exists to remove
+// (CodeRabbit, #1618).
 func drainBackgroundWork(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		if !waitForBackgroundWork(30 * time.Second) {
-			t.Errorf("detached handler work started by %s did not finish within 30s; "+
-				"a background goroutine is stuck and would have raced this test's teardown", t.Name())
+			t.Errorf("%s: detached internal/api background work did not drain within 30s; "+
+				"a background goroutine (started by this test or an earlier one) is stuck "+
+				"and would have raced this test's teardown", t.Name())
 		}
 	})
 }
