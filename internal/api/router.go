@@ -57,7 +57,10 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	mux    *http.ServeMux
+	// mux is a recording wrapper around http.ServeMux (router_mux.go).
+	// Same Handle/HandleFunc surface, plus the registered route table —
+	// which the method guards and the spec-drift test both need.
+	mux    *routeMux
 	db     *sql.DB
 	logger *slog.Logger
 	authMw *AuthMiddleware
@@ -479,7 +482,7 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authMw := NewAuthMiddleware(validator, sessionsStore, db, logger)
 
 	r := &Router{
-		mux:           http.NewServeMux(),
+		mux:           newRouteMux(),
 		db:            db,
 		logger:        logger,
 		authMw:        authMw,
@@ -508,6 +511,13 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
 	r.registerRoutes()
+
+	// Close the method-routing hole every Go 1.22 ServeMux has: a request
+	// whose method is not registered for a literal path falls through to a
+	// sibling wildcard pattern instead of answering 405 (#1489). Must run
+	// after every registrar and before the first request. See
+	// router_mux.go.
+	r.mux.sealMethodGuards()
 
 	// Bound the request body on the public API surface (P3). The cap
 	// wraps the mux beneath the rate limiters so it applies to every
