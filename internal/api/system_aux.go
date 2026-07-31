@@ -54,6 +54,11 @@ type AuxStatusHandler struct {
 	auxStore *keepercfg.AuxStore
 	creds    keepercfg.AuxCredentialLookup
 
+	// judgeEndpoint resolves the address a self-hosted slot actually dials
+	// (#1566). nil → the KEEPER_OLLAMA_URL fallback this surface used to probe
+	// unconditionally.
+	judgeEndpoint func() string
+
 	// Probe results are cached so several open admin consoles do not turn a
 	// status read into a poll loop against the model server.
 	probeMu  sync.Mutex
@@ -78,6 +83,18 @@ func NewAuxStatusHandler(aux func() llm.AuxiliaryModels, keeper *config.KeeperCo
 func (h *AuxStatusHandler) WithCredentials(store *keepercfg.AuxStore, lookup keepercfg.AuxCredentialLookup) *AuxStatusHandler {
 	h.auxStore = store
 	h.creds = lookup
+	return h
+}
+
+// WithJudgeEndpoint points the reachability probe at the address a self-hosted
+// slot actually dials, rather than at KEEPER_OLLAMA_URL.
+//
+// Same accessor the ModelsHandler takes, and for the same reason: the instance
+// judge endpoint is settable at runtime, so anything that captures it — or, as
+// here, reads a process env var instead of it — answers a question about a
+// different address than the one the request will go to.
+func (h *AuxStatusHandler) WithJudgeEndpoint(fn func() string) *AuxStatusHandler {
+	h.judgeEndpoint = fn
 	return h
 }
 
@@ -335,7 +352,18 @@ func (h *AuxStatusHandler) annotateReach(ctx context.Context, row *auxSubsystemR
 		row.ReachDetail = "not checked — press Test to call it once"
 		return
 	}
-	base := os.Getenv("KEEPER_OLLAMA_URL")
+	// The address the SLOT dials, not the one the process booted with (#1566).
+	// An ollama aux slot resolves through the instance judge endpoint, which is
+	// settable at runtime — so probing KEEPER_OLLAMA_URL answered a question
+	// about a different address and answered it confidently: judge endpoint up
+	// and the slot's endpoint down rendered as "reachable".
+	var base string
+	if h.judgeEndpoint != nil {
+		base = strings.TrimSpace(h.judgeEndpoint())
+	}
+	if base == "" {
+		base = os.Getenv("KEEPER_OLLAMA_URL")
+	}
 	if base == "" {
 		// Mirrors llm.BuildAuxProvider's own default, so the row reports the
 		// endpoint the evaluator would actually use.
