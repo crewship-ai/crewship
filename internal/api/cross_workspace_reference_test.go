@@ -54,11 +54,21 @@ type refCase struct {
 	linkTable  string
 	linkColumn string
 	victimKey  string
-	// scopeSQL is appended to the WHERE clause with the attacker's workspace id
-	// bound as the second parameter. Empty means "no extra scope" — used for
-	// join tables that have no workspace column, where the linkColumn match
-	// alone is already proof.
+	// scopeSQL is appended to the WHERE clause and takes one bound parameter.
+	// Empty means "no extra scope" — only correct for a table with no column
+	// that could narrow it, where the linkColumn match alone is already proof.
+	//
+	// Leaving it empty where a scope IS available makes the assertion count
+	// rows anywhere in the database, including ones the victim legitimately
+	// owns, which turns a legitimate fixture into a spurious failure the moment
+	// someone adds a seed. So prefer a scope wherever the table offers one.
 	scopeSQL string
+	// scopeKey names which of the attacker's ids binds to scopeSQL's parameter.
+	// Empty binds the attacker's workspace id — right for the many tables with
+	// a workspace_id column, wrong for join tables that have none. crew_members,
+	// for instance, is keyed by crew_id and user_id only, so it scopes to the
+	// attacker's own crew instead.
+	scopeKey string
 }
 
 func refCases() []refCase {
@@ -316,7 +326,11 @@ func refCases() []refCase {
 			linkTable:  "crew_members",
 			linkColumn: "user_id",
 			victimKey:  "userId",
-			scopeSQL:   "",
+			// crew_members has no workspace_id (only crew_id + user_id), so the
+			// scope is the attacker's own crew — the crew they tried to add the
+			// foreign user to.
+			scopeSQL: "crew_id = ?",
+			scopeKey: "crewId",
 		},
 		{
 			name:       "notification_channel_pair_foreign_agent",
@@ -327,7 +341,7 @@ func refCases() []refCase {
 			linkTable:  "notification_channel_agents",
 			linkColumn: "agent_id",
 			victimKey:  "agentId",
-			scopeSQL:   "",
+			scopeSQL:   "workspace_id = ?",
 		},
 		{
 			name:       "pipeline_schedule_targets_foreign_routine",
@@ -453,7 +467,14 @@ func TestCrossWorkspaceFence_ForeignReferences(t *testing.T) {
 				t.Fatalf("case %s names victim key %q, which the tenant seeds never set", c.name, c.victimKey)
 			}
 
-			n := refLinkCount(t, db, c.linkTable, c.linkColumn, victimID, c.scopeSQL, attacker.wsID)
+			scopeArg := attacker.wsID
+			if c.scopeKey != "" {
+				scopeArg = attacker.ids[c.scopeKey]
+				if scopeArg == "" {
+					t.Fatalf("case %s names scopeKey %q, which the tenant seeds never set", c.name, c.scopeKey)
+				}
+			}
+			n := refLinkCount(t, db, c.linkTable, c.linkColumn, victimID, c.scopeSQL, scopeArg)
 			if n > 0 {
 				t.Fatalf("LEAKED: %s — %s persisted %d row(s) in %s.%s pointing at the other tenant's %s (%s). status=%d body=%s",
 					c.name, c.attack, n, c.linkTable, c.linkColumn, c.victimKey, victimID,
@@ -473,14 +494,14 @@ func TestCrossWorkspaceFence_ForeignReferences(t *testing.T) {
 }
 
 // refLinkCount counts rows in the attacker's own scope that reference victimID.
-func refLinkCount(t *testing.T, db *sql.DB, table, column, victimID, scopeSQL, attackerWS string) int {
+func refLinkCount(t *testing.T, db *sql.DB, table, column, victimID, scopeSQL, scopeArg string) int {
 	t.Helper()
 	// #nosec G202 -- table/column/scopeSQL come from the in-file case table, never from input.
 	q := "SELECT COUNT(*) FROM " + table + " WHERE " + column + " = ?"
 	args := []any{victimID}
 	if scopeSQL != "" {
 		q += " AND " + scopeSQL
-		args = append(args, attackerWS)
+		args = append(args, scopeArg)
 	}
 	var n int
 	if err := db.QueryRow(q, args...).Scan(&n); err != nil {

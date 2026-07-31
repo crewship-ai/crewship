@@ -50,8 +50,9 @@ func TestUpdateLabel_RenamesInOwnWorkspaceAndFencesOthers(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("PATCH own label = %d, want 200; body=%s", rr.Code, fenceTrim(rr.Body.String()))
 	}
+	ctx := t.Context()
 	var name, color string
-	if err := db.QueryRow(`SELECT name, color FROM labels WHERE id = ?`, attacker.ids["labelId"]).
+	if err := db.QueryRowContext(ctx, `SELECT name, color FROM labels WHERE id = ?`, attacker.ids["labelId"]).
 		Scan(&name, &color); err != nil {
 		t.Fatalf("read label back: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestUpdateLabel_RenamesInOwnWorkspaceAndFencesOthers(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("PATCH cross-workspace label = %d, want 404; body=%s", rr.Code, fenceTrim(rr.Body.String()))
 	}
-	if err := db.QueryRow(`SELECT name FROM labels WHERE id = ?`, victim.ids["labelId"]).Scan(&name); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT name FROM labels WHERE id = ?`, victim.ids["labelId"]).Scan(&name); err != nil {
 		t.Fatalf("read victim label: %v", err)
 	}
 	if name != victim.marker("labels") {

@@ -26,21 +26,26 @@ import (
 // an unvalidatable reference is the state this whole class of bug lives in.
 func projectLeadInWorkspaceOrReject(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger,
 	leadType, leadID *string, wsID string) bool {
-	if leadID == nil || *leadID == "" {
-		return true
-	}
-	if leadType == nil || *leadType == "" {
-		writeProblem(w, r, http.StatusBadRequest, "lead_type is required when lead_id is set")
-		return false
-	}
+	// The enum is checked first and independently of lead_id, so a request that
+	// moves only lead_type cannot store a value neither read-path branch
+	// resolves. Empty means "clearing", which is allowed.
 	var table string
-	switch *leadType {
-	case "user":
-		table = "users"
-	case "agent":
-		table = "agents"
-	default:
-		writeProblem(w, r, http.StatusBadRequest, "lead_type must be 'user' or 'agent'")
+	if leadType != nil && *leadType != "" {
+		switch *leadType {
+		case "user":
+			table = "users"
+		case "agent":
+			table = "agents"
+		default:
+			writeProblem(w, r, http.StatusBadRequest, "lead_type must be 'user' or 'agent'")
+			return false
+		}
+	}
+	if leadID == nil || *leadID == "" {
+		return true // no reference to resolve
+	}
+	if table == "" {
+		writeProblem(w, r, http.StatusBadRequest, "lead_type is required when lead_id is set")
 		return false
 	}
 	return fkInWorkspaceOrReject(w, r, db, logger, table, "lead_id", *leadID, wsID)
@@ -373,30 +378,42 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Health != nil {
 		ub.Set("health", *req.Health)
 	}
-	if req.LeadType != nil {
-		ub.Set("lead_type", *req.LeadType)
-	}
-	if req.LeadID != nil {
-		// The effective type is whatever this PATCH sets, or the stored one
-		// when the caller only moves the id. Validating against the wrong table
-		// would be worse than not validating: it would 400 legitimate edits.
-		leadType := req.LeadType
-		if leadType == nil && *req.LeadID != "" {
-			var stored sql.NullString
+	// lead_type and lead_id are one polymorphic reference, so the pair is
+	// validated whenever EITHER half moves — validating only on lead_id would
+	// let `{"lead_type":"agent"}` alone re-point a stored user id at the agents
+	// table (or set an arbitrary string that neither read-path branch resolves),
+	// leaving the pair desynced without ever failing a check.
+	//
+	// Whichever half the request omits is read back from the stored row, so the
+	// check always runs against the pair the row will actually hold. Validating
+	// a moved id against the wrong table would be worse than not validating: it
+	// would 400 legitimate edits.
+	if req.LeadType != nil || req.LeadID != nil {
+		leadType, leadID := req.LeadType, req.LeadID
+		if leadType == nil || leadID == nil {
+			var storedType, storedID sql.NullString
 			if err := h.db.QueryRowContext(r.Context(),
-				`SELECT lead_type FROM projects WHERE id = ? AND workspace_id = ?`,
-				projectID, wsID).Scan(&stored); err != nil && !errors.Is(err, sql.ErrNoRows) {
-				internalError(w, r, h.logger, "read project lead_type", err)
+				`SELECT lead_type, lead_id FROM projects WHERE id = ? AND workspace_id = ?`,
+				projectID, wsID).Scan(&storedType, &storedID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				internalError(w, r, h.logger, "read project lead pair", err)
 				return
 			}
-			if stored.Valid {
-				leadType = &stored.String
+			if leadType == nil && storedType.Valid {
+				leadType = &storedType.String
+			}
+			if leadID == nil && storedID.Valid {
+				leadID = &storedID.String
 			}
 		}
-		if !projectLeadInWorkspaceOrReject(w, r, h.db, h.logger, leadType, req.LeadID, wsID) {
+		if !projectLeadInWorkspaceOrReject(w, r, h.db, h.logger, leadType, leadID, wsID) {
 			return
 		}
-		ub.Set("lead_id", *req.LeadID)
+		if req.LeadType != nil {
+			ub.Set("lead_type", *req.LeadType)
+		}
+		if req.LeadID != nil {
+			ub.Set("lead_id", *req.LeadID)
+		}
 	}
 	if req.StartDate != nil {
 		ub.Set("start_date", *req.StartDate)

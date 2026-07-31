@@ -53,7 +53,13 @@ var fkScopeQueries = map[string]string{
 // Returns nil when the row is in-workspace, errFKNotInWorkspace when it is
 // absent/foreign (map to 400), or the underlying DB error otherwise (map to
 // 500 — a transient failure is not an authorization decision).
-func assertFKInWorkspace(ctx context.Context, db *sql.DB, table, id, wsID string) error {
+// q is a rowQuerier (issue_handler.go) rather than a *sql.DB so a caller that
+// already holds a transaction validates against the SAME snapshot it is about
+// to INSERT into. issue_handler_create.go's neighbouring parent_issue_id and
+// routine_id checks run on its tx; a project_id check reading h.db instead
+// would be a different read view, which is the classic shape of a TOCTOU
+// between the guard and the write it guards.
+func assertFKInWorkspace(ctx context.Context, q rowQuerier, table, id, wsID string) error {
 	if id == "" || wsID == "" {
 		return errFKNotInWorkspace
 	}
@@ -62,7 +68,7 @@ func assertFKInWorkspace(ctx context.Context, db *sql.DB, table, id, wsID string
 		return fmt.Errorf("assertFKInWorkspace: unsupported table %q", table)
 	}
 	var one int
-	err := db.QueryRowContext(ctx, query, id, wsID).Scan(&one)
+	err := q.QueryRowContext(ctx, query, id, wsID).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errFKNotInWorkspace
 	}
@@ -78,9 +84,9 @@ func assertFKInWorkspace(ctx context.Context, db *sql.DB, table, id, wsID string
 // the fence matrix found went unfixed for so long is that each one needed six
 // lines of near-identical query + error mapping, and that is exactly the tax
 // that gets skipped under deadline.
-func fkInWorkspaceOrReject(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger,
+func fkInWorkspaceOrReject(w http.ResponseWriter, r *http.Request, q rowQuerier, logger *slog.Logger,
 	table, field, id, wsID string) bool {
-	if err := assertFKInWorkspace(r.Context(), db, table, id, wsID); err != nil {
+	if err := assertFKInWorkspace(r.Context(), q, table, id, wsID); err != nil {
 		if errors.Is(err, errFKNotInWorkspace) {
 			writeProblem(w, r, http.StatusBadRequest, field+" does not exist in this workspace")
 			return false

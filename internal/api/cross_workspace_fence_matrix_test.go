@@ -143,6 +143,21 @@ type fenceProbe struct {
 	path string
 	body string
 	mode probeMode
+	// markerKind names which kind's marker a probeNoLeak probe should hunt for.
+	// Empty means "this kind's own". A sub-collection needs it: the rows under
+	// GET /crews/{crewId}/missions are missions, so the string that would prove
+	// a leak is the MISSIONS marker, not the crews one. Getting this wrong is
+	// how a probe ends up searching for a string the endpoint never renders,
+	// which passes whatever the fence does.
+	markerKind string
+}
+
+// marker returns the kind whose marker this probe proves a leak with.
+func (p fenceProbe) markerFor(kindName string) string {
+	if p.markerKind != "" {
+		return p.markerKind
+	}
+	return kindName
 }
 
 type fenceKind struct {
@@ -298,6 +313,7 @@ func TestCrossWorkspaceFence_Matrix(t *testing.T) {
 	probes := 0
 
 	positives := 0
+	noLeakControls := 0
 	for _, k := range fenceKinds() {
 		k := k
 		t.Run(k.name, func(t *testing.T) {
@@ -345,6 +361,39 @@ func TestCrossWorkspaceFence_Matrix(t *testing.T) {
 					}
 					t.Run(v.label+" "+p.method+" "+p.path, func(t *testing.T) {
 						probes++
+
+						// Structural guard, part 2: falsifiability, per probe.
+						//
+						// `!strings.Contains(body, marker)` passes trivially when
+						// the marker is nowhere this endpoint renders — the
+						// assertion cannot fail, so it proves nothing. Two probes
+						// shipped in exactly that state (crew_connections named its
+						// peer crew "Peer b"; runs seeded empty metadata) and
+						// review caught them, not the suite.
+						//
+						// So each no-leak probe first runs the IDENTICAL request as
+						// the owning tenant and requires the marker to be present.
+						// That is the control: the same request, the same body
+						// parsing, differing only in whose data it should see. If
+						// the owner's copy shows the marker and the attacker's does
+						// not, the absence means something.
+						if p.mode == probeNoLeak {
+							ownPath, ok := fenceSubst(p.path, victim, victim, false)
+							if !ok {
+								t.Fatalf("no-leak control for %s: a placeholder has no seeded id", p.path)
+							}
+							own := fenceDo(t, r, victim, p, ownPath)
+							want := victim.marker(p.markerFor(k.name))
+							if !strings.Contains(own.Body.String(), want) {
+								t.Fatalf("UNFALSIFIABLE: the owning tenant's own %s %s (status %d) does not contain its marker %q. "+
+									"The attacker-side assertion below is `body does not contain that string`, which then passes "+
+									"whether or not the fence holds. Seed the marker into a field this endpoint renders, set "+
+									"markerKind to the kind whose rows it lists, or make this a probeDeny probe. body=%s",
+									p.method, ownPath, own.Code, want, fenceTrim(own.Body.String()))
+							}
+							noLeakControls++
+						}
+
 						rr := fenceDo(t, r, attacker, p, path)
 						switch p.mode {
 						case probeDeny:
@@ -357,9 +406,10 @@ func TestCrossWorkspaceFence_Matrix(t *testing.T) {
 									p.method, path, rr.Code, fenceTrim(rr.Body.String()))
 							}
 						case probeNoLeak:
-							if strings.Contains(rr.Body.String(), victim.marker(k.name)) {
+							leak := victim.marker(p.markerFor(k.name))
+							if strings.Contains(rr.Body.String(), leak) {
 								t.Fatalf("LEAKED: WS-A %s %s returned %d carrying WS-B's marker %q — cross-tenant content. body=%s",
-									p.method, path, rr.Code, victim.marker(k.name), fenceTrim(rr.Body.String()))
+									p.method, path, rr.Code, leak, fenceTrim(rr.Body.String()))
 							}
 							if rr.Code >= 500 {
 								t.Errorf("%s %s = %d (5xx); body=%s", p.method, path, rr.Code, fenceTrim(rr.Body.String()))
@@ -388,8 +438,11 @@ func TestCrossWorkspaceFence_Matrix(t *testing.T) {
 	if positives < 8 {
 		t.Fatalf("only %d positive controls ran — without them the 404s above are not evidence of isolation", positives)
 	}
-	t.Logf("cross-workspace fence: %d probes across %d resource kinds, %d positive controls",
-		probes, len(fenceKinds()), positives)
+	if noLeakControls < 10 {
+		t.Fatalf("only %d no-leak controls ran — without them the content assertions are not falsifiable", noLeakControls)
+	}
+	t.Logf("cross-workspace fence: %d probes across %d resource kinds, %d positive controls, %d no-leak controls",
+		probes, len(fenceKinds()), positives, noLeakControls)
 }
 
 // fenceRowIntact reports whether the row is still present and not tombstoned.
@@ -455,9 +508,9 @@ func fenceKinds() []fenceKind {
 				{method: "GET", path: "/api/v1/crews/{crewId}/policy", mode: probeDeny},
 				{method: "GET", path: "/api/v1/crews/{crewId}/persona", mode: probeDeny},
 				{method: "PUT", path: "/api/v1/crews/{crewId}/policy", body: `{"autonomy_level":"open"}`, mode: probeDeny},
-				{method: "GET", path: "/api/v1/crews/{crewId}/members", mode: probeNoLeak},
-				{method: "GET", path: "/api/v1/crews/{crewId}/missions", mode: probeNoLeak},
-				{method: "GET", path: "/api/v1/crews/{crewId}/escalations", mode: probeNoLeak},
+				{method: "GET", path: "/api/v1/crews/{crewId}/members", mode: probeDeny},
+				{method: "GET", path: "/api/v1/crews/{crewId}/missions", mode: probeNoLeak, markerKind: "missions"},
+				{method: "GET", path: "/api/v1/crews/{crewId}/escalations", mode: probeNoLeak, markerKind: "escalations"},
 				{method: "GET", path: "/api/v1/crews", mode: probeNoLeak},
 			},
 		},
@@ -481,10 +534,10 @@ func fenceKinds() []fenceKind {
 				{method: "PUT", path: "/api/v1/agents/{agentId}/persona", body: `{"persona":"pwned"}`, mode: probeDeny},
 				{method: "POST", path: "/api/v1/agents/{agentId}/stop", mode: probeDeny},
 				{method: "POST", path: "/api/v1/agents/{agentId}/webhook-secret/rotate", mode: probeDeny},
-				{method: "GET", path: "/api/v1/agents/{agentId}/skills", mode: probeNoLeak},
-				{method: "GET", path: "/api/v1/agents/{agentId}/credentials", mode: probeNoLeak},
-				{method: "GET", path: "/api/v1/agents/{agentId}/chats", mode: probeNoLeak},
-				{method: "GET", path: "/api/v1/agents/{agentId}/runs", mode: probeNoLeak},
+				{method: "GET", path: "/api/v1/agents/{agentId}/skills", mode: probeDeny},
+				{method: "GET", path: "/api/v1/agents/{agentId}/credentials", mode: probeDeny},
+				{method: "GET", path: "/api/v1/agents/{agentId}/chats", mode: probeNoLeak, markerKind: "chats"},
+				{method: "GET", path: "/api/v1/agents/{agentId}/runs", mode: probeNoLeak, markerKind: "runs"},
 				{method: "GET", path: "/api/v1/agents", mode: probeNoLeak},
 			},
 		},
@@ -504,6 +557,15 @@ func fenceKinds() []fenceKind {
 					t.Fatalf("seed credential: %v", err)
 				}
 				ten.ids["credentialId"] = id
+				// A binding, so GET /credentials/bindings has a row to render.
+				// The listing echoes credential_name, which is the marker — an
+				// empty bindings table made that probe unfalsifiable.
+				if _, err := db.Exec(`INSERT INTO credential_bindings
+					(id, workspace_id, credential_id, scope, slot, created_by)
+					VALUES (?, ?, ?, 'WORKSPACE', 'FENCE_SLOT', ?)`,
+					"credbind-fence-"+ten.tag, ten.wsID, id, ten.userID); err != nil {
+					t.Fatalf("seed credential binding: %v", err)
+				}
 			},
 			probes: []fenceProbe{
 				{method: "GET", path: "/api/v1/credentials/{credentialId}", mode: probeDeny},
@@ -538,7 +600,7 @@ func fenceKinds() []fenceKind {
 				{method: "PATCH", path: "/api/v1/projects/{projectId}", body: `{"name":"pwned"}`, mode: probeDeny},
 				{method: "DELETE", path: "/api/v1/projects/{projectId}", mode: probeDeny},
 				{method: "GET", path: "/api/v1/projects/{projectId}/stats", mode: probeDeny},
-				{method: "GET", path: "/api/v1/projects/{projectId}/milestones", mode: probeNoLeak},
+				{method: "GET", path: "/api/v1/projects/{projectId}/milestones", mode: probeDeny},
 				{method: "GET", path: "/api/v1/projects", mode: probeNoLeak},
 			},
 		},
@@ -702,7 +764,7 @@ func fenceKinds() []fenceKind {
 				{method: "POST", path: "/api/v1/crews/{crewId}/missions/{missionId}/start", mode: probeDeny},
 				{method: "POST", path: "/api/v1/crews/{crewId}/missions/{missionId}/clone", mode: probeDeny},
 				{method: "POST", path: "/api/v1/missions/{missionId}/checkpoints", body: `{"label":"pwned"}`, mode: probeDeny},
-				{method: "GET", path: "/api/v1/missions/{missionId}/checkpoints", mode: probeNoLeak},
+				{method: "GET", path: "/api/v1/missions/{missionId}/checkpoints", mode: probeDeny},
 				{method: "GET", path: "/api/v1/missions", mode: probeNoLeak},
 			},
 		},
@@ -754,8 +816,29 @@ func fenceKinds() []fenceKind {
 				{method: "PUT", path: "/api/v1/agents/{agentId}/chats/{chatId}/read", mode: probeDeny},
 				{method: "POST", path: "/api/v1/chats/{chatId}/steer", body: `{"message":"pwned"}`, mode: probeDeny},
 				{method: "POST", path: "/api/v1/chats/{chatId}/participants", body: `{"user_id":"x"}`, mode: probeDeny},
-				{method: "GET", path: "/api/v1/chats/{chatId}/messages", mode: probeNoLeak},
-				{method: "GET", path: "/api/v1/chats/{chatId}/participants", mode: probeNoLeak},
+				{method: "GET", path: "/api/v1/chats/{chatId}/messages", mode: probeDeny},
+				{method: "GET", path: "/api/v1/chats/{chatId}/participants", mode: probeDeny},
+			},
+		},
+		{
+			// Seeded so GET /crews/{crewId}/escalations has something that COULD
+			// leak — a no-leak probe against an empty table is not a test.
+			name:  "escalations",
+			table: "escalations",
+			idKey: "escalationId",
+			seed: func(t *testing.T, db *sql.DB, ten *fenceTenant) {
+				id := "esc-fence-" + ten.tag
+				if _, err := db.Exec(`INSERT INTO escalations
+					(id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+					VALUES (?, ?, ?, ?, ?, ?, 'PENDING', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+					id, ten.wsID, ten.ids["crewId"], ten.ids["chatId"], ten.ids["agentId"],
+					ten.marker("escalations")); err != nil {
+					t.Fatalf("seed escalation: %v", err)
+				}
+				ten.ids["escalationId"] = id
+			},
+			probes: []fenceProbe{
+				{method: "PATCH", path: "/api/v1/escalations/{escalationId}/resolve", body: `{"resolution":"pwned"}`, mode: probeDeny},
 			},
 		},
 		{
@@ -781,12 +864,18 @@ func fenceKinds() []fenceKind {
 			},
 		},
 		{
-			name:  "crew_connections",
-			table: "crew_connections",
-			idKey: "connectionId",
+			name:                "crew_connections",
+			table:               "crew_connections",
+			idKey:               "connectionId",
+			positiveGet:         "/api/v1/crew-connections",
+			positiveShowsMarker: true,
 			seed: func(t *testing.T, db *sql.DB, ten *fenceTenant) {
+				// The peer crew carries the marker because that is what the
+				// connection listing renders (to_crew_name). Naming it "Peer x"
+				// made the no-leak probe unfalsifiable: the marker was nowhere in
+				// the data, so strings.Contains could never fire.
 				other := seedCrewRow(t, db, "crew-fence-peer-"+ten.tag, ten.wsID,
-					"Peer "+ten.tag, "crew-peer-"+ten.tag)
+					ten.marker("crew_connections"), "crew-peer-"+ten.tag)
 				ten.ids["peerCrewId"] = other
 				id := "conn-fence-" + ten.tag
 				if _, err := db.Exec(`INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id)
@@ -898,17 +987,47 @@ func fenceKinds() []fenceKind {
 			},
 		},
 		{
-			name:        "runs",
-			positiveGet: "/api/v1/runs/{runId}",
-			table:       "",
+			name:                "runs",
+			positiveGet:         "/api/v1/runs/{runId}",
+			table:               "",
+			positiveShowsMarker: true,
 			seed: func(t *testing.T, db *sql.DB, ten *fenceTenant) {
 				runID := "run-fence-" + ten.tag
-				seedRunFixture(t, db, runID, ten.ids["agentId"], ten.wsID, "COMPLETED", "USER", "")
+				// The marker rides in metadata, which runResponse renders. Passing
+				// "" here (as this seed originally did) left the marker absent from
+				// the data entirely, so the /api/v1/runs no-leak probe could not
+				// have failed whatever the fence did.
+				seedRunFixture(t, db, runID, ten.ids["agentId"], ten.wsID, "COMPLETED", "USER",
+					`{"marker":"`+ten.marker("runs")+`"}`)
 				ten.ids["runId"] = runID
 			},
 			probes: []fenceProbe{
 				{method: "GET", path: "/api/v1/runs/{runId}", mode: probeDeny},
 				{method: "GET", path: "/api/v1/runs", mode: probeNoLeak},
+			},
+		},
+		{
+			name:  "journal",
+			table: "journal_entries",
+			idKey: "journalId",
+			// Split out of the runs kind: /api/v1/journal renders `summary`, not
+			// the run metadata, so a journal probe hunting for the runs marker was
+			// looking for a string this endpoint never emits. Each kind now seeds
+			// its marker into a field its OWN endpoints render.
+			positiveGet:         "/api/v1/journal",
+			positiveShowsMarker: true,
+			seed: func(t *testing.T, db *sql.DB, ten *fenceTenant) {
+				id := "je-fence-" + ten.tag
+				if _, err := db.Exec(`INSERT INTO journal_entries
+					(id, workspace_id, agent_id, entry_type, severity, actor_type, summary, payload, refs)
+					VALUES (?, ?, ?, 'note', 'info', 'system', ?, '{}', '{}')`,
+					id, ten.wsID, ten.ids["agentId"], ten.marker("journal")); err != nil {
+					t.Fatalf("seed journal entry: %v", err)
+				}
+				ten.ids["journalId"] = id
+			},
+			probes: []fenceProbe{
+				{method: "GET", path: "/api/v1/journal/{journalId}", mode: probeDeny},
 				{method: "GET", path: "/api/v1/journal", mode: probeNoLeak},
 			},
 		},

@@ -241,7 +241,11 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if fk.value == nil || *fk.value == "" {
 			continue
 		}
-		if !fkInWorkspaceOrReject(w, r, h.db, h.logger, fk.table, fk.field, *fk.value, wsID) {
+		// tx, not h.db: the INSERT below runs in this transaction, and the
+		// neighbouring parent_issue_id / routine_id checks already validate
+		// against it. Reading from h.db here would guard a different snapshot
+		// than the one being written.
+		if !fkInWorkspaceOrReject(w, r, tx, h.logger, fk.table, fk.field, *fk.value, wsID) {
 			return
 		}
 	}
