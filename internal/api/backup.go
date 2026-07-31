@@ -442,20 +442,53 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		auditAction = "backup.restore.dry_run"
 	}
 	WriteAuditLog(ctx, h.db, h.journal, auditAction, "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
-		"scope":         string(result.Manifest.Scope),
-		"crews_count":   result.CrewsCount,
-		"rows_inserted": result.RowsInserted,
-		"dry_run":       req.DryRun,
+		"scope":                  string(result.Manifest.Scope),
+		"crews_count":            result.CrewsCount,
+		"rows_inserted":          result.RowsInserted,
+		"dry_run":                req.DryRun,
+		"security_level_clamped": result.SecurityLevelClamped,
 	})
 
+	// A credential whose tier the restore had to rewrite gets its own
+	// journal entry, not just a field on the backup.restore one (#1603).
+	// The point of the record is that somebody can find it later while
+	// asking "why is this credential L4?", and a number buried in the
+	// metadata of a different event is not findable. It also carries the
+	// credential ids, which the restore event has no business listing.
+	if result.SecurityLevelClamped > 0 {
+		h.logger.Warn("backup restore clamped out-of-range credential security levels",
+			"count", result.SecurityLevelClamped, "path", req.Path,
+			"workspace_id", workspaceID, "user", user.ID, "dry_run", req.DryRun)
+		WriteAuditLog(ctx, h.db, h.journal, "credential.security_level.clamped", "backup", req.Path,
+			user.ID, workspaceID, map[string]interface{}{
+				"count":       result.SecurityLevelClamped,
+				"credentials": result.SecurityLevelClamps,
+				"clamped_to":  clampedToTier(result),
+				"dry_run":     req.DryRun,
+				"reason":      "the bundle carried a security_level the tier table does not define; the strictest tier is the fail-closed reading, matching keeper.SecurityLevel.Tier",
+			})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"manifest":              result.Manifest,
-		"restored_ws":           result.RestoredWs,
-		"restored_workspace_id": result.RestoredWorkspaceID,
-		"crews_count":           result.CrewsCount,
-		"rows_inserted":         result.RowsInserted,
-		"docker_phase_skipped":  result.DockerPhaseSkipped,
+		"manifest":               result.Manifest,
+		"restored_ws":            result.RestoredWs,
+		"restored_workspace_id":  result.RestoredWorkspaceID,
+		"crews_count":            result.CrewsCount,
+		"rows_inserted":          result.RowsInserted,
+		"docker_phase_skipped":   result.DockerPhaseSkipped,
+		"security_level_clamped": result.SecurityLevelClamped,
+		"security_level_clamps":  result.SecurityLevelClamps,
 	})
+}
+
+// clampedToTier reports the tier the restore clamped to, read off the
+// clamp records rather than re-derived, so the audit entry cannot claim a
+// different tier from the one actually written.
+func clampedToTier(result *backup.RestoreResult) int {
+	if len(result.SecurityLevelClamps) == 0 {
+		return 0
+	}
+	return result.SecurityLevelClamps[0].To
 }
 
 // allowRestore enforces the cross-tenant write guard described in

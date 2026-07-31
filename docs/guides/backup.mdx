@@ -172,6 +172,26 @@ crewship backup restore bundle.tar.zst --dry-run
 
 A dry-run decrypts the bundle, validates the manifest, replays the DB transaction, and then **rolls back**. The only side effect is a single `backup.restore.dry_run` row in the audit log — handy for proving a bundle is restorable before the real cutover. The distinct audit action lets auditors tell "verified" apart from "actually restored".
 
+### Credential security levels are re-checked on the way in
+
+A restore writes the bundle's rows as it finds them — with one exception. `credentials.security_level` is not data, it is the input to a Keeper gate, so every value is checked against the tier table (L1–L4) as the bundle is applied. A level the table does not define — `0`, a negative number, a tier from a future release, a corrupt or tampered value — is written at the **strictest tier** instead:
+
+```bash
+crewship backup restore bundle.tar.zst
+# ✓ Restore complete — workspace=acme crews=4 rows=312 id=ws_abc123
+# ⚠ 2 credential(s) carried a security_level outside L1-L4 and were clamped to
+#   the strictest tier: deploy-key (bundle said 0), stripe-live (bundle said 99).
+#   Re-set each one with `crewship credential update <name> --security-level N`.
+```
+
+Three things about that behaviour are deliberate:
+
+- **The credential is kept, not dropped.** Recovering an instance that is quietly missing a secret is a worse outcome than recovering one credential at too strict a tier.
+- **The clamp goes up, never down.** The strictest tier is what Keeper already resolves an unrecognised level to at every decision point, so no gate changes behaviour; what changes is that the stored value now agrees with the gate.
+- **You are told either way.** The count and the affected credentials come back in the API response, and a `credential.security_level.clamped` entry lands in the journal with the value the bundle carried — so the question "why is this credential L4?" has an answer months later.
+
+`--dry-run` reports the same thing (as *would be clamped*) without writing, which is the cheapest way to check a bundle before a cutover.
+
 ## Delete & rotate
 
 ```bash

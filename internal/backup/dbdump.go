@@ -650,6 +650,12 @@ func quoteIdent(name string) string {
 //     schema via PRAGMA table_info and double-quoted before being
 //     concatenated into the SQL string. An attacker who tampered with
 //     dump.json cannot smuggle SQL through column identifiers.
+//   - Values are otherwise written as the bundle carries them — a
+//     restore re-asserts the bundle's truth. The single exception is
+//     credentials.security_level, which is not data but the input to a
+//     security control: a level the tier table does not define is
+//     written at the strictest tier and reported through
+//     RestoreStats.SecurityLevelClamps (#1603).
 //
 // Rows are inserted in the order recorded in BackupTables so parent
 // rows land before children and FK enforcement does not explode on
@@ -667,6 +673,14 @@ func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
 type RestoreStats struct {
 	RowsSeen     int // total rows in the bundle (sum of len(Tables[*]))
 	RowsInserted int // rows that actually landed (sum of RowsAffected)
+	// SecurityLevelClamped is how many credentials rows carried a
+	// security_level the tier table does not define and were written at
+	// the strictest tier instead. See clampRestoredSecurityLevel.
+	SecurityLevelClamped int
+	// SecurityLevelClamps is a bounded sample of those rows — enough for
+	// an admin to go and re-tier them by hand, capped so a wildly
+	// malformed bundle cannot make the restore result unbounded.
+	SecurityLevelClamps []SecurityLevelClamp
 }
 
 // RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
@@ -785,6 +799,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			}
 		}
 		for _, row := range rows {
+			// pendingClamp is only reported if the row actually lands:
+			// INSERT OR IGNORE silently drops a PK collision, and telling an
+			// admin to go re-tier a credential this restore never touched
+			// would send them after a row that is already correct.
+			var pendingClamp *SecurityLevelClamp
 			cols := make([]string, 0, len(row))
 			placeholders := make([]string, 0, len(row))
 			args := make([]any, 0, len(row))
@@ -797,9 +816,30 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				if !allowed[k] {
 					continue
 				}
+				val := row[k]
+				// The one VALUE-level check in this loop, and it is
+				// deliberately here rather than in the PreInsert hook:
+				// PreInsert is composed by the caller (runner_restore.go),
+				// so a guard placed there would protect the runner's restore
+				// and miss RestoreDump / RestoreDumpTx and every other
+				// caller. security_level feeds a security control, not a
+				// user's data — the guarantee has to hold for every path
+				// into the column, so it sits on the insert itself.
+				// Reasoning in full: security_level.go.
+				//
+				// row is the caller's dump and is never mutated; only the
+				// bound argument changes.
+				if table == credentialsTable && k == securityLevelColumn {
+					fixed, clamped := clampRestoredSecurityLevel(val)
+					if clamped {
+						c := newSecurityLevelClamp(row, val)
+						pendingClamp = &c
+					}
+					val = fixed
+				}
 				cols = append(cols, quoteIdent(k))
 				placeholders = append(placeholders, "?")
-				args = append(args, row[k])
+				args = append(args, val)
 			}
 			if len(cols) == 0 {
 				continue
@@ -814,8 +854,16 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			if err != nil {
 				return stats, fmt.Errorf("backup: insert into %s: %w", table, err)
 			}
+			// A driver that cannot report RowsAffected is assumed to have
+			// inserted: over-reporting a clamp is a redundant warning,
+			// under-reporting one is a security control that stayed quiet.
+			landed := true
 			if n, err := res.RowsAffected(); err == nil {
 				stats.RowsInserted += int(n)
+				landed = n > 0
+			}
+			if pendingClamp != nil && landed {
+				appendSecurityLevelClamp(&stats, *pendingClamp)
 			}
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"filippo.io/age"
@@ -94,6 +95,47 @@ type RestoreResult struct {
 	// only) is on purpose — when an API handler passes a nil Logger
 	// the old path silently dropped data.
 	DroppedCrewFilesystems []string
+	// SecurityLevelClamped counts credentials rows whose bundle-supplied
+	// security_level was not a tier keeper's table defines, and which
+	// were therefore written at the strictest tier instead (#1603). On a
+	// dry run this is what WOULD be clamped.
+	//
+	// Structured for the same reason DroppedCrewFilesystems is: the
+	// admin who has to go and re-tier those credentials cannot do it
+	// from a log line the API handler never printed.
+	SecurityLevelClamped int
+	// SecurityLevelClamps is a bounded sample of the above, with the
+	// credential id, its name, and the value the bundle carried.
+	SecurityLevelClamps []SecurityLevelClamp
+}
+
+// warnSecurityLevelClamps emits the operator-facing warning for a restore
+// that had to rewrite credential tiers. Shared by the dry-run and the
+// committed path so the two cannot describe the same bundle differently.
+func warnSecurityLevelClamps(logger func(string), clamps []SecurityLevelClamp, total int, dryRun bool) {
+	if total == 0 || logger == nil {
+		return
+	}
+	verb := "clamped to"
+	if dryRun {
+		verb = "would be clamped to"
+	}
+	strictest := strictestSecurityLevel()
+	details := make([]string, 0, len(clamps))
+	for _, c := range clamps {
+		label := c.CredentialID
+		if c.Name != "" {
+			label = fmt.Sprintf("%s (%s)", c.Name, c.CredentialID)
+		}
+		details = append(details, fmt.Sprintf("%s: %s", label, c.From))
+	}
+	more := ""
+	if total > len(clamps) {
+		more = fmt.Sprintf(" (+%d more)", total-len(clamps))
+	}
+	logger(fmt.Sprintf(
+		"WARNING: %d restored credential(s) carried a security_level outside the tier table and %s %s, the strictest tier — re-set each one deliberately with `crewship credential update <name> --security-level N`: %s%s",
+		total, verb, strictest.Label(), strings.Join(details, "; "), more))
 }
 
 // RestoreBackup applies a bundle to the target DB + docker engine. It
@@ -479,6 +521,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				rowsSeen += len(rows)
 			}
 		}
+		// A dry run's whole point is telling the admin what a real
+		// restore would do. "This bundle carries credentials at a tier
+		// that does not exist" is the most actionable thing it can say,
+		// so it is reported here as well as on the committed path.
+		clamps, clamped := InspectSecurityLevels(extracted.DBDump)
+		warnSecurityLevelClamps(opts.Logger, clamps, clamped, true)
 		return &RestoreResult{
 			Manifest:               manifest,
 			RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
@@ -487,6 +535,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			RowsInserted:           rowsSeen, // dry-run reports potential inserts
 			DockerPhaseSkipped:     skipDocker,
 			DroppedCrewFilesystems: droppedCrewFilesystems,
+			SecurityLevelClamped:   clamped,
+			SecurityLevelClamps:    clamps,
 		}, nil
 	}
 
@@ -568,6 +618,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil, err
 		}
 		stats = s
+		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 	} else {
 		if err := memoryBlobsRestore(ctx); err != nil {
 			return nil, err
@@ -616,6 +667,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			RowsInserted:           0,
 			DockerPhaseSkipped:     skipDocker,
 			DroppedCrewFilesystems: droppedCrewFilesystems,
+			SecurityLevelClamped:   stats.SecurityLevelClamped,
+			SecurityLevelClamps:    stats.SecurityLevelClamps,
 		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
@@ -627,6 +680,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		RowsInserted:           stats.RowsInserted,
 		DockerPhaseSkipped:     skipDocker,
 		DroppedCrewFilesystems: droppedCrewFilesystems,
+		SecurityLevelClamped:   stats.SecurityLevelClamped,
+		SecurityLevelClamps:    stats.SecurityLevelClamps,
 	}, nil
 }
 
