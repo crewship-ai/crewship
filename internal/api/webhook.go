@@ -443,7 +443,9 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 	// once the response flushes. The `ctx` parameter is the request ctx
 	// threaded in from the webhook handler.
 	parentCtx := context.WithoutCancel(ctx)
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 

@@ -61,7 +61,7 @@ func waitForCrewLesson(t *testing.T, storagePath, crewID, mustContain string) st
 func TestMissionUpdate_TerminalTransitionEmitsCrewLesson(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	storagePath := t.TempDir()
+	storagePath := storageDir(t)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -115,7 +115,7 @@ func TestMissionUpdate_TerminalTransitionEmitsCrewLesson(t *testing.T) {
 func TestMissionUpdate_TerminalRetransitionIsIdempotent(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	storagePath := t.TempDir()
+	storagePath := storageDir(t)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -181,7 +181,7 @@ func TestMissionUpdate_TerminalRetransitionIsIdempotent(t *testing.T) {
 func TestMissionUpdate_NonTerminalTransitionEmitsNoLesson(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	storagePath := t.TempDir()
+	storagePath := storageDir(t)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -276,7 +276,7 @@ func TestMissionUpdate_UnwiredStoragePath_StillSucceeds(t *testing.T) {
 func TestEmitMissionOutcomeLessonAsync_MissingMissionRow(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	storagePath := t.TempDir()
+	storagePath := storageDir(t)
 
 	// Don't insert any mission row.
 	emitMissionOutcomeLessonAsync(

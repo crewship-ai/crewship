@@ -195,7 +195,9 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// completion against its own ledger). Tests that need to observe the
 	// goroutine's effects set h.testRunDone and receive from it.
 	parentCtx := context.WithoutCancel(r.Context())
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		defer func() {
 			h.mu.Lock()
 			delete(h.running, workspaceID)

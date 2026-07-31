@@ -450,7 +450,11 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 	h.jobs[crewID] = job
 	h.mu.Unlock()
 
-	go h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
+	finish := beginBackgroundWork()
+	go func() {
+		defer finish()
+		h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
+	}()
 	h.logger.Info("provisioning triggered", "crew_id", crewID)
 	return EnqueueResult{Started: true}, nil
 }

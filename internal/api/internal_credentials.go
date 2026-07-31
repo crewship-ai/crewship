@@ -457,7 +457,9 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	if body.Status == "REVOKED" {
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 		h.reconcileWG.Add(1)
+		finish := beginBackgroundWork()
 		go func() {
+			defer finish()
 			defer h.reconcileWG.Done()
 			defer cancel()
 			reconcileRevokedCredentialFiles(rctx, h.db, h.logger, h.container, credID, workspaceID)

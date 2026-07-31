@@ -138,7 +138,9 @@ func (h *AssignmentHandler) pumpAndDispatch(ctx context.Context, crewID string) 
 	}
 	for _, id := range claimed {
 		h.dispatchWG.Add(1)
+		finish := beginBackgroundWork()
 		go func(assignmentID string) {
+			defer finish()
 			defer h.dispatchWG.Done()
 			if derr := h.dispatchByID(context.Background(), assignmentID); derr != nil {
 				h.logger.Error("pumped dispatch failed",

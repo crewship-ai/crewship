@@ -100,6 +100,14 @@ feature correctness.
   change.
 - **No `Co-Authored-By` lines in commits.**
 - **Never amend after a pre-commit hook failure** — make a new commit.
+- **A detached goroutine in `internal/api` registers with
+  `beginBackgroundWork`** (see `internal/api/background.go`). Work that
+  outlives its request also outlives the *test* that drove it, where it
+  races that test's teardown and fails a bystander at random (#1596).
+  A long-lived daemon that genuinely cannot be drained goes in
+  `unregisteredSpawnSites` with its reason; a test that hands a
+  directory to such a handler takes it from `storageDir(t)`, not
+  `t.TempDir()`.
 
 ## Frontend data fetching
 

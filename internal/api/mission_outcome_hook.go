@@ -72,7 +72,9 @@ func emitMissionOutcomeLessonAsync(
 	// race-cancel the lesson write.
 	detached := context.WithoutCancel(ctx)
 
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		// Bound the work; 5s is plenty for a single file write but
 		// keeps an alarmingly slow disk from leaking goroutines.
 		workCtx, cancel := context.WithTimeout(detached, 5*time.Second)

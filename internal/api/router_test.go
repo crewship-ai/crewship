@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -32,7 +33,75 @@ import (
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	resetCapabilityCache()
-	return testutil.MigratedSQLDB(t)
+	db := testutil.MigratedSQLDB(t)
+	drainBackgroundWork(t)
+	return db
+}
+
+// drainBackgroundWork registers the cleanup that waits for this
+// package's detached handler goroutines (see background.go) before the
+// caller's fixture is torn down.
+//
+// Ordering is the whole point, and t.Cleanup is LIFO: this registers
+// AFTER testutil.MigratedSQLDB has registered its quiesce, so it runs
+// BEFORE it. The database is therefore still open when the stragglers
+// finish, which is what turns "sql: database is closed" into the write
+// the handler intended.
+//
+// It does NOT order itself against cleanups the test registers later —
+// notably a t.TempDir() the test takes after setupTestDB, which runs
+// first. Tests that hand a directory to a handler with an async writer
+// want storageDir (below), not t.TempDir, for exactly that reason.
+//
+// Failing on timeout rather than hanging: see waitForBackgroundWork.
+// The message names the waiting test because the whole class of bugs
+// this closes is failures landing on a test that did not cause them —
+// a timeout here should not repeat that mistake.
+func drainBackgroundWork(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		if !waitForBackgroundWork(30 * time.Second) {
+			t.Errorf("detached handler work started by %s did not finish within 30s; "+
+				"a background goroutine is stuck and would have raced this test's teardown", t.Name())
+		}
+	})
+}
+
+// storageDir returns a directory for a handler's storage path, for
+// tests whose handler writes to it from a detached goroutine.
+//
+// It exists because t.TempDir() is the wrong fixture for that job on
+// two counts, and this package hits both:
+//
+//  1. Its cleanup contract is "if RemoveAll fails, fail the test".
+//     A straggler that recreates a subdirectory inside RemoveAll's
+//     readdir→rmdir window fails the test for something it did not do.
+//     internal/testutil/migrateddb.go rejected this contract for the
+//     same reason and records the 2026-07-20 incident where it failed
+//     three unrelated tests.
+//  2. It cleans up in t.Cleanup order, which for a dir taken after
+//     setupTestDB means it runs BEFORE any drain registered there.
+//
+// So this drains first, then removes, and downgrades a failed removal
+// to a log line. The OS reclaims the directory either way; a leftover
+// temp dir is not worth a red test, and a red test attributed to the
+// wrong cause is worse than the leftover.
+func storageDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "crewship-apistorage-")
+	if err != nil {
+		t.Fatalf("storageDir: create temp dir: %v", err)
+	}
+	// LIFO again: the removal is registered first so the drain
+	// registered after it runs before it. Reversing these two lines
+	// reinstates exactly the race this helper exists to remove.
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Logf("storageDir: temp dir not fully removed (non-fatal): %v", err)
+		}
+	})
+	drainBackgroundWork(t)
+	return dir
 }
 
 // resetCapabilityCache empties the process-wide capability cache.
