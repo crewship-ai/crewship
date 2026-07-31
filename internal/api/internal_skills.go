@@ -3,12 +3,19 @@ package api
 // Internal sidecar route for LLM-driven skill generation
 // (PRD-SLASH-CAPABILITIES-2026 §6.4).
 //
-// Mirrors internal_routines.go in shape. SkillGenerateHandler reads
-// the workspace from r.PathValue("workspaceId") (it was designed for
-// the public route /workspaces/{workspaceId}/skills/generate); the
-// internal entry takes workspace_id from the query (per the sidecar
-// proxyToAPI convention) and SetPathValue's it back onto the request
-// so the public handler runs unchanged.
+// Mirrors internal_routines.go in shape. The internal entry takes
+// workspace_id from the query (per the sidecar proxyToAPI convention)
+// and puts it in the request CONTEXT, which is where
+// SkillGenerateHandler.Generate reads it from.
+//
+// It used to read r.PathValue("workspaceId") instead, and this adapter
+// stamped the value onto the path to suit it. That read was the
+// path/query divergence hole: on the public route the middleware
+// validates membership against ?workspace_id= while the path can name
+// a different tenant (see the comment on Generate). The context value
+// is now the only one that carries the workspace here — the
+// SetPathValue below is kept for any middleware that logs the path
+// variable, and is NOT what makes this route work.
 //
 // Same MANAGER role injection as internal_hire.go / internal_routines.go:
 // the public Generate handler runs requireRole("create"); injecting
@@ -66,14 +73,16 @@ func (h *SkillInternalAdapter) Generate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Public Generate reads workspaceId via r.PathValue — the public
-	// route is /workspaces/{workspaceId}/skills/generate. The internal
-	// route doesn't have a {workspaceId} pattern (it takes it from
-	// the query per sidecar convention), so we stamp it onto the
-	// request here. Go 1.22+ http.ServeMux semantics let handlers
-	// rely on this independent of the registered route pattern.
+	// Cosmetic: the internal route has no {workspaceId} pattern, so
+	// anything that reads the path variable (request logging) sees the
+	// same tenant the context carries. Generate does NOT read this —
+	// deleting this line changes nothing, deleting the ctxWorkspaceID
+	// value below breaks the route.
 	r.SetPathValue("workspaceId", wsID)
 
+	// This is the load-bearing line: Generate resolves the workspace
+	// from the context. Pinned by
+	// TestSkillAdapter_Internal_CarriesWorkspaceInContext.
 	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
 	ctx = context.WithValue(ctx, ctxRole, "MANAGER")
 	if callerID != "" {

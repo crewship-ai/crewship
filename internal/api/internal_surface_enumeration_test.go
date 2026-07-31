@@ -59,8 +59,8 @@ func newFenceRouter(t *testing.T) (*Router, string) {
 	return r, wsID
 }
 
-// fenceProbe sends one request through the full router stack.
-func fenceProbe(t *testing.T, r *Router, method, target, remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
+// probeInternalFence sends one request through the full router stack.
+func probeInternalFence(t *testing.T, r *Router, method, target, remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var body *strings.Reader
 	if method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut {
@@ -107,7 +107,7 @@ func TestInternalSurface_MethodMismatchIs404_NotEnumerable(t *testing.T) {
 	// The reference response: an unauthorised caller hitting a route that
 	// EXISTS with the RIGHT method. This is the fence 404 every other probe
 	// has to be indistinguishable from.
-	ref := fenceProbe(t, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID, fenceAttackerAddr, nil)
+	ref := probeInternalFence(t, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID, fenceAttackerAddr, nil)
 	if ref.Code != http.StatusNotFound {
 		t.Fatalf("reference fence probe: status = %d, want 404 — body: %q", ref.Code, ref.Body.String())
 	}
@@ -166,7 +166,7 @@ func TestInternalSurface_MethodMismatchIs404_NotEnumerable(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := fenceProbe(t, r, tc.method, tc.target, fenceAttackerAddr, tc.headers)
+			rr := probeInternalFence(t, r, tc.method, tc.target, fenceAttackerAddr, tc.headers)
 			assertIndistinguishable404(t, tc.name, rr, wantBody)
 		})
 	}
@@ -194,7 +194,7 @@ func TestInternalSurface_MethodMismatchIs404_FromPrivateOrigin(t *testing.T) {
 		{"unknown internal path", http.MethodGet, "/api/v1/internal/definitely-not-a-real-route"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := fenceProbe(t, r, tc.method, tc.target, fenceLoopbackAddr,
+			rr := probeInternalFence(t, r, tc.method, tc.target, fenceLoopbackAddr,
 				map[string]string{"X-Internal-Token": fenceInternalToken})
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("%s: status = %d, want 404 — body: %q", tc.name, rr.Code, rr.Body.String())
@@ -215,7 +215,7 @@ func TestInternalSurface_LegitimateCallStillWorks(t *testing.T) {
 
 	auth := map[string]string{"X-Internal-Token": fenceInternalToken}
 
-	rr := fenceProbe(t, r, http.MethodGet, "/api/v1/internal/crews?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	rr := probeInternalFence(t, r, http.MethodGet, "/api/v1/internal/crews?workspace_id="+wsID, fenceLoopbackAddr, auth)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("legitimate GET /internal/crews: status = %d, want 200 — body: %q", rr.Code, rr.Body.String())
 	}
@@ -226,7 +226,7 @@ func TestInternalSurface_LegitimateCallStillWorks(t *testing.T) {
 	// HEAD is registered implicitly alongside every GET pattern by
 	// net/http. If the existence check ever stops delegating to the mux's
 	// own matcher, this is the first thing that breaks.
-	rr = fenceProbe(t, r, http.MethodHead, "/api/v1/internal/crews?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	rr = probeInternalFence(t, r, http.MethodHead, "/api/v1/internal/crews?workspace_id="+wsID, fenceLoopbackAddr, auth)
 	if rr.Code != http.StatusOK {
 		t.Errorf("legitimate HEAD /internal/crews: status = %d, want 200", rr.Code)
 	}
@@ -236,7 +236,7 @@ func TestInternalSurface_LegitimateCallStillWorks(t *testing.T) {
 	// ServeHTTP re-derives the match, so {agentId} must still bind — this
 	// handler's own "Agent not found" (rather than the fence's "Not Found")
 	// is the proof that it did.
-	rr = fenceProbe(t, r, http.MethodGet, "/api/v1/internal/agents/no-such-agent/resolve?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	rr = probeInternalFence(t, r, http.MethodGet, "/api/v1/internal/agents/no-such-agent/resolve?workspace_id="+wsID, fenceLoopbackAddr, auth)
 	if !strings.Contains(rr.Body.String(), "Agent not found") {
 		t.Errorf("wildcard route did not reach its handler with {agentId} bound — status %d, body: %q",
 			rr.Code, rr.Body.String())
@@ -261,7 +261,7 @@ func TestInternalSurface_LegitimateCallStillWorks(t *testing.T) {
 func TestInternalSurface_NonCanonicalPathGetsTheFence404(t *testing.T) {
 	r, wsID := newFenceRouter(t)
 
-	ref := fenceProbe(t, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID, fenceAttackerAddr, nil)
+	ref := probeInternalFence(t, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID, fenceAttackerAddr, nil)
 	if ref.Code != http.StatusNotFound {
 		t.Fatalf("reference fence probe: status = %d, want 404", ref.Code)
 	}
@@ -281,7 +281,7 @@ func TestInternalSurface_NonCanonicalPathGetsTheFence404(t *testing.T) {
 		{"trailing double slash", http.MethodGet, "/api/v1/internal/credentials//?workspace_id=" + wsID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := fenceProbe(t, r, tc.method, tc.target, fenceAttackerAddr, nil)
+			rr := probeInternalFence(t, r, tc.method, tc.target, fenceAttackerAddr, nil)
 			assertIndistinguishable404(t, tc.name, rr, wantBody)
 			if loc := rr.Header().Get("Location"); loc != "" {
 				t.Errorf("%s: Location = %q, want absent — a redirect echoes back the canonical internal path",
@@ -292,7 +292,7 @@ func TestInternalSurface_NonCanonicalPathGetsTheFence404(t *testing.T) {
 
 	// The same must hold for a caller the network gate lets through, so a
 	// non-canonical spelling is not a way around the fence from the LAN either.
-	rr := fenceProbe(t, r, http.MethodGet, "//api/v1/internal/keeper/request", fenceLoopbackAddr,
+	rr := probeInternalFence(t, r, http.MethodGet, "//api/v1/internal/keeper/request", fenceLoopbackAddr,
 		map[string]string{"X-Internal-Token": fenceInternalToken})
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("private-origin non-canonical probe: status = %d, want 404 — body: %q", rr.Code, rr.Body.String())

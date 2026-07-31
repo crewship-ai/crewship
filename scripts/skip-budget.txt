@@ -22,5 +22,12 @@
 #                    so it guards on euid. Permanent platform guard, not debt —
 #                    carries a SKIP-WAIVER comment but deliberately no tracking
 #                    issue, because there is nothing to come back and fix.
+#   121  2026-07-30  +1 from #1486's tamper-evidence bypass suite
+#                    (internal/journal/verify_bypass_test.go). Real debt, and
+#                    the only entry here that is: the test states an invariant
+#                    that does NOT hold today — VerifyChain reports OK after a
+#                    permanent→normal priority downgrade — and is skipped
+#                    behind SKIP-WAIVER(#1572) so the fix has a red test to
+#                    turn green. Lower this back to 120 when #1572 lands.
 
-120
+121
