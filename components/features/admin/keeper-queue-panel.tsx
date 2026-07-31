@@ -89,6 +89,21 @@ function decisionStatusKey(decision: string | null | undefined): string {
   }
 }
 
+// Dense multi-column data grid — the desktop review row below packs six
+// columns into fixed 60-120px widths (Decision/Risk/Created), the same
+// density components/features/dashboard/recent-missions-table.tsx uses for a
+// narrow-column grid row elsewhere in the app. Kept below text-xs on purpose
+// and shared here so the six cells that use it can't drift apart.
+const ROW_CELL = "text-[11px] text-muted-foreground"
+
+// The LLM prompt / raw response are potentially long verbatim dumps, shown in
+// a scrollable monospace box — the same role and density
+// components/features/activity/json-viewer.tsx uses for a raw-text viewer
+// elsewhere in the app. Shared because the prompt and response panes are
+// otherwise identical.
+const RAW_DUMP_CLASS =
+  "text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap font-mono max-h-[280px] overflow-y-auto"
+
 export interface KeeperQueuePanelProps {
   workspaceId: string | null | undefined
 }
@@ -175,7 +190,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
           <h3 className="text-body font-medium text-foreground/80 leading-none">
             Keeper review log
           </h3>
-          <p className="text-[11px] text-muted-foreground mt-1 leading-snug max-w-2xl">
+          <p className="text-xs text-muted-foreground mt-1 leading-snug max-w-2xl">
             A read-only record of the four Phase-2 evaluator paths (skills,
             behavior, memory health, negative learning). These are
             observations for audit, not an action queue — there is no
@@ -222,7 +237,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
                 <span className="truncate">{tab.label}</span>
               </div>
               <div className="mt-1 text-xl font-semibold tabular-nums leading-none">{count}</div>
-              <div className="mt-1 text-[10px] text-muted-foreground">
+              <div className="mt-1 text-xs text-muted-foreground">
                 {count === 0 ? "no entries" : count === 1 ? "entry" : "entries"} · {tab.prdRef}
               </div>
             </button>
@@ -236,7 +251,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
           on is deciding to spend. */}
       {entries.length === 0 && !loading && !err && (
         <div className="rounded-xl border border-border/60 bg-muted/20 px-4 py-3">
-          <p className="text-[11px] text-muted-foreground leading-relaxed">
+          <p className="text-xs text-muted-foreground leading-relaxed">
             Nothing recorded yet. These evaluators are not on-demand: behaviour reviews are sampled
             from agent tool calls while the workspace <span className="text-foreground/80">watchdog</span> is
             on (Admin → Keeper → Watchdog), and the skill / memory-health / negative-learning sweeps
@@ -302,7 +317,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
             >
               <Icon className="h-3 w-3" />
               {tab.label}
-              <span className="text-[10px] text-muted-foreground font-mono">{tab.prdRef}</span>
+              <span className="text-xs text-muted-foreground font-mono">{tab.prdRef}</span>
               {count > 0 && (
                 <span className={cn(
                   "ml-1 inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full text-[10px] font-mono",
@@ -337,7 +352,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
           >
             {rows.length === 0 ? (
               <div className="flex items-center justify-center py-10 text-center px-4">
-                <div className="text-[11px] text-muted-foreground max-w-sm">
+                <div className="text-xs text-muted-foreground max-w-sm">
                   {activeTab.emptyHint}
                 </div>
               </div>
@@ -363,7 +378,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
                     )}
                   >
                     <div className="text-xs font-medium truncate">{entry.agent_name}</div>
-                    <div className="text-[11px] text-muted-foreground font-mono truncate">
+                    <div className={cn(ROW_CELL, "font-mono truncate")}>
                       {entry.crew_id || "—"}
                     </div>
                     <div>
@@ -373,13 +388,13 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
                         className="text-[10px]"
                       />
                     </div>
-                    <div className="text-[11px] text-muted-foreground font-mono md:text-right tabular-nums">
+                    <div className={cn(ROW_CELL, "font-mono md:text-right tabular-nums")}>
                       {entry.risk_score != null ? `${entry.risk_score}/10` : "—"}
                     </div>
-                    <div className="text-[11px] text-muted-foreground truncate italic">
+                    <div className={cn(ROW_CELL, "truncate italic")}>
                       {entry.reason || "—"}
                     </div>
-                    <div className="text-[11px] text-muted-foreground font-mono truncate">
+                    <div className={cn(ROW_CELL, "font-mono truncate")}>
                       {new Date(entry.created_at).toLocaleString()}
                     </div>
                   </button>
@@ -412,7 +427,7 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
                   <StatusBadge
                     status={decisionStatusKey(selected.decision)}
                     label={selected.decision ?? "PENDING"}
-                    className="mt-1 text-[10px]"
+                    className="mt-1 text-xs"
                   />
                 </div>
                 <DetailField
@@ -424,14 +439,14 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
               </div>
 
               <DetailBlock label="Intent">
-                <div className="text-[11px] bg-muted/40 border border-border/60 rounded-md p-2.5">
+                <div className="text-xs bg-muted/40 border border-border/60 rounded-md p-2.5">
                   {redactSecrets(selected.intent)}
                 </div>
               </DetailBlock>
 
               {selected.reason && (
                 <DetailBlock label="Reason">
-                  <div className="text-[11px] bg-muted/40 border border-border/60 rounded-md p-2.5">
+                  <div className="text-xs bg-muted/40 border border-border/60 rounded-md p-2.5">
                     {redactSecrets(selected.reason)}
                   </div>
                 </DetailBlock>
@@ -439,11 +454,11 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
 
               <DetailBlock label="LLM prompt">
                 {selected.ollama_prompt ? (
-                  <pre className="text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap font-mono max-h-[280px] overflow-y-auto">
+                  <pre className={RAW_DUMP_CLASS}>
                     {redactSecrets(selected.ollama_prompt)}
                   </pre>
                 ) : (
-                  <div className="text-[11px] text-muted-foreground italic bg-muted/40 border border-border/60 rounded-md p-2.5">
+                  <div className="text-xs text-muted-foreground italic bg-muted/40 border border-border/60 rounded-md p-2.5">
                     Not available
                   </div>
                 )}
@@ -451,18 +466,18 @@ export const KeeperQueuePanel = React.memo(function KeeperQueuePanel({
 
               <DetailBlock label="LLM raw response">
                 {selected.ollama_raw_response ? (
-                  <pre className="text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap font-mono max-h-[280px] overflow-y-auto">
+                  <pre className={RAW_DUMP_CLASS}>
                     {redactSecrets(selected.ollama_raw_response)}
                   </pre>
                 ) : (
-                  <div className="text-[11px] text-muted-foreground italic bg-muted/40 border border-border/60 rounded-md p-2.5">
+                  <div className="text-xs text-muted-foreground italic bg-muted/40 border border-border/60 rounded-md p-2.5">
                     Not available
                   </div>
                 )}
               </DetailBlock>
 
               <div className="pt-3 border-t border-border/60">
-                <div className="text-[10px] text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   Request ID:{" "}
                   <span className="font-mono">{selected.id}</span>
                 </div>

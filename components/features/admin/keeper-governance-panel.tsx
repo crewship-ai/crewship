@@ -156,7 +156,7 @@ function GovStageRow({ stage }: { stage: GovTestStage }) {
       ? "text-muted-foreground/60"
       : "text-destructive"
   return (
-    <div className="flex items-start gap-2 px-4 py-1.5 text-[11px]">
+    <div className="flex items-start gap-2 px-4 py-1.5 text-xs">
       <span className={`shrink-0 font-mono ${colour}`} aria-hidden="true">{mark}</span>
       <span className="w-[13rem] shrink-0 text-foreground/80">{stage.label}</span>
       <span className={`min-w-0 flex-1 leading-snug ${stage.ok ? "text-muted-foreground" : colour}`}>
@@ -385,7 +385,7 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
         description="Workspace-level watchdog controls"
       >
         <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-[11px] text-destructive/90">{err ?? "Failed to load governance settings"}</span>
+          <span className="text-xs text-destructive/90">{err ?? "Failed to load governance settings"}</span>
           <Button
             variant="outline"
             size="sm"
@@ -472,7 +472,7 @@ function WatchdogCard({
           does not belong in a right-aligned control slot. */}
       <div className="px-4 py-2.5 border-b border-border/40">
         <div className="text-xs text-foreground">What to flag</div>
-        <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
+        <div className="text-xs text-muted-foreground/80 mt-0.5 leading-snug">
           Pick the ones that matter here. These are added to the checks it always does.
         </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -503,7 +503,7 @@ function WatchdogCard({
                 />
                 <span className="min-w-0">
                   <span className="text-xs text-foreground">{p.label}</span>
-                  <span className="block text-[11px] text-muted-foreground/80 leading-snug">
+                  <span className="block text-xs text-muted-foreground/80 leading-snug">
                     {p.caption}
                   </span>
                 </span>
@@ -516,7 +516,7 @@ function WatchdogCard({
       {/* Free-form rules — natural language, injected as authoritative policy. */}
       <div className="px-4 py-2.5">
         <div className="text-xs text-foreground">Anything else to flag</div>
-        <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">
+        <div className="text-xs text-muted-foreground/80 mt-0.5 leading-snug">
           One rule per line, in your own words. Optional — leave it empty and the checks above still apply.
         </div>
         <Textarea
@@ -715,7 +715,7 @@ function FindingsRoutingCard({
             data-testid="keeper-governance-risk"
           />
           {!riskValid && (
-            <span className="text-[11px] text-destructive/90" data-testid="keeper-governance-risk-invalid">
+            <span className="text-xs text-destructive/90" data-testid="keeper-governance-risk-invalid">
               Must be a whole number from 1 to 10.
             </span>
           )}
@@ -745,17 +745,17 @@ function FindingsRoutingCard({
           className="px-4 py-2.5 border-t border-border/40 bg-muted/20"
           data-testid="keeper-findings-test-result"
         >
-          <div className="text-[11px] text-foreground/80">
+          <div className="text-xs text-foreground/80">
             {testResult.recipients.length === 0
               ? "That finding reached nobody."
               : `A finding reaches ${testResult.recipients.length} ${testResult.recipients.length === 1 ? "person" : "people"}:`}
           </div>
           {testResult.warning && (
-            <div className="text-[11px] text-destructive/90 mt-1 leading-snug">{testResult.warning}</div>
+            <div className="text-xs text-destructive/90 mt-1 leading-snug">{testResult.warning}</div>
           )}
           <ul className="mt-1.5 space-y-1">
             {testResult.recipients.map((r) => (
-              <li key={r.user_id} className="text-[11px] text-muted-foreground flex flex-wrap gap-x-2">
+              <li key={r.user_id} className="text-xs text-muted-foreground flex flex-wrap gap-x-2">
                 <span className="text-foreground/80">{r.email || r.name || r.user_id}</span>
                 {r.role && <span className="font-mono">{r.role}</span>}
                 <span className="text-muted-foreground/70">{r.reason}</span>
@@ -851,7 +851,7 @@ function CredentialLeasesCard({
             <span className="text-xs text-muted-foreground">min</span>
           </span>
           {problem && (
-            <span className="text-[11px] text-destructive/90 text-right max-w-[15rem]" data-testid="keeper-governance-auto-lease-invalid">
+            <span className="text-xs text-destructive/90 text-right max-w-[15rem]" data-testid="keeper-governance-auto-lease-invalid">
               {problem}
             </span>
           )}
@@ -1051,7 +1051,7 @@ function GovernanceModelCard({
                   in the list yet. */}
               {catalogue.length > 0 && (
                 <span className="flex flex-col items-end gap-1" data-testid="keeper-gov-models">
-                  <span className="text-[10px] text-muted-foreground/70">click to use</span>
+                  <span className="text-xs text-muted-foreground/70">click to use</span>
                   <span className="flex flex-wrap justify-end gap-1 max-w-[22rem]">
                     {catalogue.map((m) => (
                       <button
@@ -1073,7 +1073,7 @@ function GovernanceModelCard({
                 </span>
               )}
               {modelMissing && (
-                <span className="text-[11px] text-destructive/90" data-testid="keeper-gov-model-required">
+                <span className="text-xs text-destructive/90" data-testid="keeper-gov-model-required">
                   A model is required for this provider.
                 </span>
               )}
@@ -1130,7 +1130,7 @@ function GovernanceModelCard({
             <GovStageRow key={st.name} stage={st} />
           ))}
           {testResult.ok && (
-            <p className="px-4 py-1.5 text-[11px] text-success">
+            <p className="px-4 py-1.5 text-xs text-success">
               This judge works. Save to put it in force for this workspace.
             </p>
           )}
