@@ -265,7 +265,12 @@ func (h *AuxStatusHandler) probe(ctx context.Context, base string) (bool, string
 // the alternative is billing the operator for looking at a status page.
 func (h *AuxStatusHandler) annotateReach(ctx context.Context, row *auxSubsystemRow, provider string) {
 	if !isSelfHosted(provider) {
-		row.ReachDetail = "not probed — Crewship does not call a paid API to render a status page"
+		// Short, and it names the ACTION rather than the policy. The old wording
+		// ("not probed — Crewship does not call a paid API to render a status
+		// page") explained our reasoning to someone who had not asked for it, on
+		// five rows at once, and left them with nothing to do about it. The Test
+		// link beside the row is the thing to do.
+		row.ReachDetail = "not checked — press Test to call it once"
 		return
 	}
 	base := os.Getenv("KEEPER_OLLAMA_URL")

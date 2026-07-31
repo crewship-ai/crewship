@@ -6,6 +6,23 @@ node_modules/
 .next/
 out/
 web/out/
+# …except one tracked placeholder. `web/embed.go` declares
+# `//go:embed all:out`, which is a COMPILE-TIME requirement: with no
+# `web/out/` on disk every `go build`/`go test` in a fresh clone or
+# `git worktree add` dies with "pattern all:out: no matching files
+# found" before it reaches the change under test (#1567). Keeping one
+# tracked file in there makes the directory always exist.
+#
+# Three lines, not one `!`: git never descends into an excluded
+# directory, so a file inside it cannot be re-included until the
+# directory itself is un-excluded. Un-exclude `web/out/`, re-exclude
+# its contents, then carve out the placeholder. Verify any edit here
+# with `git check-ignore -v web/out/.placeholder.html` (must print
+# nothing) and `git check-ignore -v web/out/index.html` (must print
+# the `web/out/*` rule).
+!web/out/
+web/out/*
+!web/out/.placeholder.html
 build/
 dist/
 next-env.d.ts

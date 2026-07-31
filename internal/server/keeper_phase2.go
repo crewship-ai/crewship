@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/policy"
 )
@@ -71,38 +72,50 @@ type phase2Evaluators struct {
 //	SlotBehavior     → BehaviorEvaluator        (F4.2, sampled tool-call monitor)
 //	SlotMemoryHealth → MemoryHealthEvaluator    (F4.3, daily memory hygiene)
 //	SlotNegative     → NegativeLearningEvaluator (F4.4, failure → lessons.md)
+//
+// auxSettings is the runtime per-slot override store (nil in test/embedded
+// wirings, which then behave exactly as before): each evaluator's gov-model
+// resolver is wrapped so an override applies at request time instead of
+// requiring these evaluators to be rebuilt — see keeper_aux_live.go. judge
+// resolves the current instance judge endpoint for a slot pointed at "ollama".
 func buildPhase2Evaluators(
 	aux llm.AuxiliaryModels,
 	govModel gatekeeper.GovModelResolver,
 	dfltOllamaURL, dfltOllamaModel string,
+	auxSettings *keepercfg.AuxStore,
+	judge func() (string, string),
 	j journal.Emitter,
 	db *sql.DB,
 	logger *slog.Logger,
 ) phase2Evaluators {
 	out := phase2Evaluators{}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	live := func(slot llm.Slot) gatekeeper.GovModelResolver {
+		return newAuxLiveResolver(string(slot), auxSettings, govModel, judge, j, db, logger)
+	}
+
+	if gk := buildAuxGatekeeper(aux, llm.SlotCurator, live(llm.SlotCurator), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.skillReview = gatekeeper.NewSkillReviewEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: skill_review evaluator unavailable (curator aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/skill-review will return 503")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotBehavior, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotBehavior, live(llm.SlotBehavior), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.behavior = gatekeeper.NewBehaviorEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: behavior evaluator unavailable (behavior aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/behavior will return 503; F4.2 sampling hook will no-op")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotMemoryHealth, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotMemoryHealth, live(llm.SlotMemoryHealth), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.memoryHealth = gatekeeper.NewMemoryHealthEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: memory_health evaluator unavailable (memory_health aux slot not configured and no local default judge)",
 			"impact", "POST /api/v1/keeper/memory-health will return 503")
 	}
 
-	if gk := buildAuxGatekeeper(aux, llm.SlotNegative, govModel, dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
+	if gk := buildAuxGatekeeper(aux, llm.SlotNegative, live(llm.SlotNegative), dfltOllamaURL, dfltOllamaModel, j, db, logger); gk != nil {
 		out.negative = gatekeeper.NewNegativeLearningEvaluator(gk, logger)
 	} else {
 		logger.Warn("keeper: negative_learning evaluator unavailable (negative aux slot not configured and no local default judge)",

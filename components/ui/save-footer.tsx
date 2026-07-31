@@ -37,6 +37,7 @@ export function SaveFooter({
   reasonPlaceholder = "why are you making this change?",
   canSave = true,
   saveLabel = "Save",
+  testId,
   className,
 }: {
   dirty: boolean
@@ -52,6 +53,9 @@ export function SaveFooter({
   /** Caller-side validation veto (e.g. a forbidden option combination). */
   canSave?: boolean
   saveLabel?: string
+  /** Applied to the Save button. Pages with several cards need to address one
+   *  footer rather than "the Save button", of which there are now four. */
+  testId?: string
   className?: string
 }) {
   const saving = status === "saving"
@@ -136,6 +140,7 @@ export function SaveFooter({
               size="sm"
               onClick={onSave}
               disabled={blocked}
+              data-testid={testId}
               className="h-7 gap-1.5 text-xs max-sm:flex-1"
             >
               {saving && <Loader2 className="h-3 w-3 animate-spin" />}

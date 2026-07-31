@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { MembersSection } from "../members-section"
 
@@ -12,9 +13,8 @@ import { MembersSection } from "../members-section"
 
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
-vi.mock("@/components/admin/capability-grid", () => ({
-  CapabilityGrid: () => <div data-testid="capability-grid" />,
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 vi.mock("@/components/features/members/invite-member-dialog", () => ({
   InviteMemberDialog: () => <div data-testid="invite-dialog" />,
@@ -38,15 +38,21 @@ const members = [
   member("m-member", "MEMBER", "u-member", "Mel Member"),
 ]
 
+// The section now owns the bulk-capabilities query itself (the pips in the
+// collapsed row need it whether or not any row is expanded), so every render
+// needs a query client. Retries off so a stubbed failure surfaces at once.
 function renderSection(opts: { callerRole?: string }) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
-    <MembersSection
-      members={members}
-      workspaceId="ws1"
-      currentUserId="u-caller"
-      callerRole={opts.callerRole}
-      onRefresh={vi.fn()}
-    />,
+    <QueryClientProvider client={qc}>
+      <MembersSection
+        members={members}
+        workspaceId="ws1"
+        currentUserId="u-caller"
+        callerRole={opts.callerRole}
+        onRefresh={vi.fn()}
+      />
+    </QueryClientProvider>,
   )
 }
 
@@ -54,6 +60,7 @@ describe("MembersSection — role-tiered controls", () => {
   beforeEach(() => {
     cleanup()
     apiFetch.mockReset()
+    apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ members: [] }) })
   })
 
   it("gives an ADMIN invite, remove and role-change", () => {
@@ -98,42 +105,53 @@ describe("MembersSection — role-tiered controls", () => {
 
   it("never sends a mutating request for a MEMBER caller — there is no control that could", () => {
     renderSection({ callerRole: "MEMBER" })
+    // The capability read is admin-gated too, so a MEMBER caller issues no
+    // request of any kind from this section.
     expect(apiFetch).not.toHaveBeenCalled()
   })
 })
 
 // Progressive disclosure is right for reference material and wrong for live
-// state. The section had both behind identical accordions: a role legend
-// that never changes, and a capability grid whose checkboxes mutate
-// permissions immediately. Collapsing the second meant "who can do what
-// here?" — the question the screen exists to answer — needed extra clicks.
+// state. #1517: the roster and the capability grid were two separate lists of
+// the same people, so "what can this person do?" meant reading both. There is
+// now one row per person, and expanding it is what reveals their grants.
 describe("MembersSection — disclosure", () => {
-  beforeEach(() => cleanup())
-
-  it("shows the capability grid without making an admin open it", async () => {
-    renderSection({ callerRole: "OWNER" })
-    // Live, immediately-applied permissions are the point of the screen.
-    expect(await screen.findByTestId("capability-grid")).toBeTruthy()
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ members: [] }) })
   })
 
-  it("keeps the role legend out of the way until asked for", () => {
+  it("gives every person exactly one row — never a second list of the same people", () => {
     renderSection({ callerRole: "OWNER" })
-    // Static reference: identical in every workspace, forever. It earns a
-    // help affordance, not permanent screen space.
+    // The defect was the same name appearing twice: once in the roster, once
+    // as a row of the capability table.
+    for (const name of ["Olive Owner", "Mo Manager", "Mel Member"]) {
+      expect(screen.getAllByText(name)).toHaveLength(1)
+    }
+  })
+
+  it("keeps the role ladder out of the way until asked for", () => {
+    renderSection({ callerRole: "OWNER" })
+    // The whole five-role ladder is reference you consult when *choosing* a
+    // role: identical in every workspace, forever. It earns a help
+    // affordance, not permanent screen space.
     expect(screen.queryByText(/All permissions except billing transfer/i)).toBeNull()
     expect(screen.getByRole("button", { name: /what do the roles mean/i })).toBeTruthy()
   })
 
-  it("reveals the legend on request", async () => {
+  it("reveals the ladder on request", async () => {
     renderSection({ callerRole: "OWNER" })
     fireEvent.click(screen.getByRole("button", { name: /what do the roles mean/i }))
     expect(await screen.findByText(/All permissions except billing transfer/i)).toBeTruthy()
   })
 
-  it("does not show the capability grid to a non-admin", () => {
-    // Unchanged gating — the grid writes to a roleManage route.
-    renderSection({ callerRole: "MEMBER" })
-    expect(screen.queryByTestId("capability-grid")).toBeNull()
+  it("states what a member's own role grants inside their row, not only in the popover", () => {
+    renderSection({ callerRole: "OWNER" })
+    fireEvent.click(screen.getByRole("button", { name: /expand permissions for Mel Member/i }))
+    // The half of "rules and permissions" that is about THIS person is no
+    // longer reachable only through a popover.
+    expect(screen.getByText(/Own resource access only/i)).toBeTruthy()
   })
 })
 
@@ -142,7 +160,11 @@ describe("MembersSection — disclosure", () => {
 // endpoint used to store — so those rows showed neither a name nor an email,
 // just an anonymous circle and a role.
 describe("MembersSection — members without a name", () => {
-  beforeEach(() => cleanup())
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ members: [] }) })
+  })
 
   const noName = [
     { id: "m1", role: "MEMBER", created_at: new Date().toISOString(),
@@ -152,14 +174,17 @@ describe("MembersSection — members without a name", () => {
   ]
 
   function renderNoName() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     return render(
-      <MembersSection
-        members={noName}
-        workspaceId="ws1"
-        currentUserId="u-caller"
-        callerRole="OWNER"
-        onRefresh={vi.fn()}
-      />,
+      <QueryClientProvider client={qc}>
+        <MembersSection
+          members={noName}
+          workspaceId="ws1"
+          currentUserId="u-caller"
+          callerRole="OWNER"
+          onRefresh={vi.fn()}
+        />
+      </QueryClientProvider>,
     )
   }
 

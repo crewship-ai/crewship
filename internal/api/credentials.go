@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/credprovider"
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -101,10 +102,21 @@ type credentialResponse struct {
 	// every role including OWNER — and a client that cannot see it can only
 	// discover the refusal by letting the user click and take a 403. That is
 	// the affordance-then-403 shape this surface has been removing.
-	Sensitivity    string  `json:"sensitivity"`
-	TokenExpiresAt *string `json:"token_expires_at"`
-	LastCheckedAt  *string `json:"last_checked_at"`
-	LastError      *string `json:"last_error"`
+	Sensitivity string `json:"sensitivity"`
+	// SecurityLevel is the Keeper tier (1–4, internal/keeper/tier.go). Read paths
+	// carry it for the same reason Sensitivity is here: it decides what happens
+	// when an agent asks for this credential — at L4 every read becomes a human
+	// approval — and a client that cannot see the tier can neither show it nor let
+	// an operator change it. The console had no tier control at all until it did,
+	// which is why every credential created through the UI was L1.
+	SecurityLevel int `json:"security_level"`
+	// SecurityLevelLabel is the same tier as the operator-facing name ("L4 ·
+	// critical"), served rather than mapped client-side so the console, the CLI
+	// and the judge prompt cannot drift into three different vocabularies.
+	SecurityLevelLabel string  `json:"security_level_label"`
+	TokenExpiresAt     *string `json:"token_expires_at"`
+	LastCheckedAt      *string `json:"last_checked_at"`
+	LastError          *string `json:"last_error"`
 	// LastUsedAt is the latest USE event recorded by RecordCredentialEvent.
 	// Distinct from LastCheckedAt — that's a health-check timestamp.
 	// Drives the Stale status (last_used_at < now-90d) in the 5-state
@@ -259,7 +271,7 @@ const credentialSelectPrefix = `
 		c.last_used_at, c.last_used_ips, c.tags,
 		c.created_at, c.updated_at,
 		c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-		c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'),
+		c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1),
 		(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 	FROM credentials c
 	WHERE `
@@ -285,7 +297,7 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
-			&encValue, &c.Sensitivity,
+			&encValue, &c.Sensitivity, &c.SecurityLevel,
 			&c.AgentCount); err != nil {
 			return nil, err
 		}
@@ -293,6 +305,7 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 		c.Tags = parseTags(tagsRaw)
 		c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
 		c.Testable = probeSupported(c.Provider, c.Type)
+		c.SecurityLevelLabel = keeper.SecurityLevel(c.SecurityLevel).Label()
 		result = append(result, c)
 	}
 	return result, rows.Err()
@@ -369,7 +382,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-			c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'),
+			c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1),
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
@@ -379,12 +392,13 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
-		&encValue, &c.Sensitivity,
+		&encValue, &c.Sensitivity, &c.SecurityLevel,
 		&c.AgentCount)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)
 	c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
 	c.Testable = probeSupported(c.Provider, c.Type)
+	c.SecurityLevelLabel = keeper.SecurityLevel(c.SecurityLevel).Label()
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Credential not found")

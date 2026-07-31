@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // CrewMessagingHandler handles cross-crew messaging and file sharing.
@@ -279,7 +281,8 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	workspaceID := h.resolveWorkspaceID(r.Context(), targetCrewID)
 
 	// Validate and resolve path within crew shared directory.
-	absPath, pathErr := h.resolveCrewSharedPath(targetCrewID, filePath, false)
+	target, pathErr := h.resolveCrewSharedPath(targetCrewID, filePath, false)
+	defer target.Close()
 	if pathErr != "" {
 		status := http.StatusBadRequest
 		switch pathErr {
@@ -292,7 +295,7 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	info, err := os.Stat(absPath)
+	info, err := target.root.Stat(target.rel)
 	if err != nil {
 		if os.IsNotExist(err) {
 			replyError(w, http.StatusNotFound, "file not found")
@@ -304,8 +307,16 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if info.IsDir() {
-		// List directory contents
-		entries, err := os.ReadDir(absPath)
+		// List directory contents (through the Root, so the listing cannot
+		// be redirected between the check above and the open here).
+		d, err := target.root.Open(target.rel)
+		if err != nil {
+			h.logger.Error("read crew directory", "error", err)
+			replyError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		entries, err := d.ReadDir(-1)
+		d.Close()
 		if err != nil {
 			h.logger.Error("read crew directory", "error", err)
 			replyError(w, http.StatusInternalServerError, "internal error")
@@ -340,7 +351,7 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	data, err := os.ReadFile(absPath)
+	data, err := target.root.ReadFile(target.rel)
 	if err != nil {
 		h.logger.Error("read crew file", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
@@ -353,7 +364,7 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	})
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("X-File-Name", filepath.Base(absPath))
+	w.Header().Set("X-File-Name", filepath.Base(target.abs))
 	w.Header().Set("X-File-Size", strconv.FormatInt(info.Size(), 10))
 	w.Write(data)
 }
@@ -410,7 +421,8 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 
 	// Validate and resolve destination within crew shared directory.
 	incomingSubPath := filepath.Join("incoming", requesterCrewID, destPath)
-	absPath, pathErr := h.resolveCrewSharedPath(targetCrewID, incomingSubPath, true)
+	target, pathErr := h.resolveCrewSharedPath(targetCrewID, incomingSubPath, true)
+	defer target.Close()
 	if pathErr != "" {
 		status := http.StatusBadRequest
 		if pathErr == "internal error" {
@@ -419,7 +431,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, status, map[string]string{"error": pathErr})
 		return
 	}
-	dst, err := os.Create(absPath)
+	dst, err := target.root.Create(target.rel)
 	if err != nil {
 		h.logger.Error("create file", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
@@ -438,9 +450,15 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	// a non-root host can't chown (the container-side init fixes ownership),
 	// and Windows has no host chown at all — skip there instead of warning
 	// on every upload.
+	//
+	// Chown the open descriptor, not the name: dst is still open here, so
+	// fchown(2) cannot be redirected by anything swapped in at that path
+	// after Create returned. A name-based chown through the Root would be
+	// confined to this crew's shared dir, but confined to the wrong file is
+	// still the wrong file.
 	if runtime.GOOS != "windows" {
-		if err := os.Chown(absPath, 1001, 1001); err != nil {
-			h.logger.Warn("chown uploaded file failed", "path", absPath, "error", err)
+		if err := dst.Chown(1001, 1001); err != nil {
+			h.logger.Warn("chown uploaded file failed", "path", target.abs, "error", err)
 		}
 	}
 
@@ -545,61 +563,181 @@ func ptrRawJSON(data json.RawMessage) *json.RawMessage {
 	return &data
 }
 
+// crewSharedTarget is a resolved crew-shared file operation: an *os.Root
+// anchored at the crew's shared directory plus the root-relative path to
+// operate on. Callers do every filesystem call through root (root.Stat,
+// root.Open, root.Create, …) so containment is enforced by the kernel walk
+// rather than by a string comparison that ran earlier. abs is retained for
+// logging and for deriving the download filename — never for an open.
+//
+// Close is nil-safe so a caller can `defer target.Close()` immediately after
+// the call, before checking the error string.
+type crewSharedTarget struct {
+	root *os.Root
+	rel  string
+	abs  string
+}
+
+func (t *crewSharedTarget) Close() {
+	if t != nil && t.root != nil {
+		_ = t.root.Close()
+	}
+}
+
+// deepestExisting walks up from p until it finds a path that exists (Lstat,
+// so a dangling or escaping symlink counts as existing), stopping at stopAt.
+// It lets the containment check below run against a real path even when the
+// destination directory has not been created yet — the case where a plain
+// EvalSymlinks(absDir) fails and would otherwise skip the check entirely.
+func deepestExisting(p, stopAt string) string {
+	for {
+		if _, err := os.Lstat(p); err == nil {
+			return p
+		}
+		parent := filepath.Dir(p)
+		if parent == p || len(parent) < len(stopAt) {
+			return stopAt
+		}
+		p = parent
+	}
+}
+
 // resolveCrewSharedPath validates and resolves a user-supplied path within a
-// crew's shared directory. It cleans the path, rejects traversal attempts, and
-// resolves symlinks to ensure the result stays within the shared dir.
-// When mkdirForWrite is true, the parent directory is created and symlink
-// validation is performed on the directory (the file may not exist yet);
-// otherwise the full path must exist.
-// Returns the resolved absolute path or an error string suitable for the client.
-func (h *CrewMessagingHandler) resolveCrewSharedPath(crewID, subPath string, mkdirForWrite bool) (string, string) {
+// crew's shared directory. When mkdirForWrite is true the destination
+// directory is created and the file may not exist yet; otherwise the full
+// path must already exist. Returns a *crewSharedTarget the caller must Close,
+// or an error string suitable for the client ("file not found" → 404,
+// "internal error" → 500, anything else → 400).
+//
+// Two layers, deliberately:
+//
+//   - The lexical checks and filepath.EvalSymlinks containment are the
+//     DIAGNOSIS. They produce the error strings and HTTP statuses callers
+//     assert on, and they are scoped to THIS crew's shared directory — a
+//     symlink that stays inside the storage tree but points at another crew
+//     is still refused.
+//   - The *os.Root is the ENFORCEMENT. It validates every component as it
+//     walks (one openat per component) and refuses any symlink leaving the
+//     root. This is what closes the create path: a destination leaf that does
+//     not exist yet cannot be symlink-resolved at all, so EvalSymlinks could
+//     never see a link planted there — and os.Create followed it. Agent
+//     containers own /crew/shared at uid 1001 on a shared bind-mount, so
+//     planting that link is inside the threat model. Same fix shape as
+//     PR #1569 used for internal/provider/localfs.
+//
+// The crew id is validated first and separately, through
+// safepath.ValidateComponent: it arrives from the request path and every
+// containment check here is relative to the crew directory, so an id of
+// "../.." would make the crew directory the check's own base and pass
+// trivially. A crew id is one path element, nothing else.
+func (h *CrewMessagingHandler) resolveCrewSharedPath(crewID, subPath string, mkdirForWrite bool) (*crewSharedTarget, string) {
+	if _, err := safepath.ValidateComponent(crewID); err != nil {
+		return nil, "invalid crew id"
+	}
+
 	cleanPath := filepath.Clean(subPath)
 	if strings.Contains(cleanPath, "..") {
-		return "", "invalid path"
+		return nil, "invalid path"
 	}
 
 	crewSharedDir := filepath.Join(h.storagePath, "crews", crewID, "shared")
 	absPath := filepath.Join(crewSharedDir, cleanPath)
-	if !strings.HasPrefix(absPath, crewSharedDir) {
-		return "", "path traversal not allowed"
+	rel, relErr := filepath.Rel(crewSharedDir, absPath)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, "path traversal not allowed"
 	}
 
 	realSharedDir, err := filepath.EvalSymlinks(crewSharedDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", "file not found"
+			return nil, "file not found"
 		}
 		h.logger.Error("eval symlinks for shared dir", "error", err)
-		return "", "internal error"
+		return nil, "internal error"
 	}
 
+	inside := func(p string) bool {
+		return p == realSharedDir || strings.HasPrefix(p, realSharedDir+string(filepath.Separator))
+	}
+
+	// An *os.Root refuses an ABSOLUTE symlink outright — the walk sees a
+	// leading "/" and reports "path escapes from parent" with no way to know
+	// the target is in-tree. So once EvalSymlinks has proved a component
+	// in-tree, rel is re-anchored on the RESOLVED path and the Root walks
+	// real components only. Without this, an absolute symlink inside the
+	// crew's own shared dir — legal before this change, and not an escape —
+	// turns a read or an upload into a 500. Same re-derivation
+	// localfs.resolve does (PR #1569).
 	if mkdirForWrite {
-		absDir := filepath.Dir(absPath)
-		if err := os.MkdirAll(absDir, 0755); err != nil {
-			h.logger.Error("create dir for crew shared path", "error", err)
-			return "", "internal error"
+		// Check BEFORE creating anything. The old order ran MkdirAll on the
+		// unresolved destination first, which happily created directories on
+		// the far side of a planted symlink and only then refused the write.
+		probe := deepestExisting(filepath.Dir(absPath), crewSharedDir)
+		realDir, derr := filepath.EvalSymlinks(probe)
+		if derr != nil {
+			h.logger.Error("eval symlinks for dir", "error", derr)
+			return nil, "internal error"
 		}
-		realDir, err := filepath.EvalSymlinks(absDir)
-		if err != nil {
-			h.logger.Error("eval symlinks for dir", "error", err)
-			return "", "internal error"
+		if !inside(realDir) {
+			return nil, "path traversal not allowed"
 		}
-		if !strings.HasPrefix(realDir, realSharedDir+string(filepath.Separator)) && realDir != realSharedDir {
-			return "", "path traversal not allowed"
+		// probe is a lexical ancestor of absPath, so suffix carries no "..";
+		// realDir is inside realSharedDir, so the join stays root-relative.
+		// The components under probe do not exist yet — the Root creates and
+		// validates them, and still refuses anything raced into place.
+		if probeRel, rerr := filepath.Rel(realSharedDir, realDir); rerr == nil {
+			if suffix, serr := filepath.Rel(probe, absPath); serr == nil {
+				rel = filepath.Join(probeRel, suffix)
+			}
 		}
-		return filepath.Join(realDir, filepath.Base(cleanPath)), ""
+	} else {
+		realAbsPath, aerr := filepath.EvalSymlinks(absPath)
+		if aerr != nil {
+			if os.IsNotExist(aerr) {
+				return nil, "file not found"
+			}
+			h.logger.Error("eval symlinks for path", "error", aerr)
+			return nil, "internal error"
+		}
+		if !inside(realAbsPath) {
+			return nil, "path traversal not allowed"
+		}
+		if resolvedRel, rerr := filepath.Rel(realSharedDir, realAbsPath); rerr == nil {
+			rel = resolvedRel
+		}
 	}
 
-	realAbsPath, err := filepath.EvalSymlinks(absPath)
+	root, err := os.OpenRoot(crewSharedDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", "file not found"
+			return nil, "file not found"
 		}
-		h.logger.Error("eval symlinks for path", "error", err)
-		return "", "internal error"
+		h.logger.Error("open crew shared root", "error", err)
+		return nil, "internal error"
 	}
-	if !strings.HasPrefix(realAbsPath, realSharedDir+string(filepath.Separator)) && realAbsPath != realSharedDir {
-		return "", "path traversal not allowed"
+	target := &crewSharedTarget{root: root, rel: rel, abs: absPath}
+
+	if mkdirForWrite {
+		if err := root.MkdirAll(filepath.Dir(rel), 0755); err != nil {
+			target.Close()
+			h.logger.Error("create dir for crew shared path", "error", err)
+			return nil, "internal error"
+		}
+		// Refuse a symlink sitting on the destination leaf. The Root already
+		// blocks one that leaves the shared tree, but a link that stays
+		// inside it is still a redirect this call must not follow silently
+		// (an upload aimed at another crew's file, or at CREW.md). Same
+		// stance as localfs.Write's "refuse symlink target".
+		if st, serr := root.Lstat(rel); serr == nil {
+			if st.Mode()&os.ModeSymlink != 0 {
+				target.Close()
+				return nil, "refuse symlink target"
+			}
+			if !st.Mode().IsRegular() {
+				target.Close()
+				return nil, "unsupported file type"
+			}
+		}
 	}
-	return realAbsPath, ""
+	return target, ""
 }

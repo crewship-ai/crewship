@@ -157,6 +157,8 @@ Per-member capabilities grant individual high-value actions (create routines, sk
 
 Aliases: `caps`, `capability`. **ADMIN+ required** to mutate; the CLI exits non-zero on a `403` so a misconfigured CI pipeline fails loudly. Capabilities are workspace-scoped — a user in multiple workspaces is configured separately in each.
 
+The dashboard equivalent is **Settings → Members**: one row per person, expanded to reveal that member's role and their eight capability grants side by side. The collapsed row summarises the grants so a capability stays comparable across the roster without expanding every row. Presets apply to the whole workspace from the card header, with a before/after diff for every member they would change.
+
 The `chat` capability is always implied and cannot be granted or revoked individually; removing chat means removing the member entirely (`workspace member remove`). The OWNER target is immutable, and you cannot mutate your own row (downgrade-then-restore defence).
 
 Valid capability strings: `chat`, `routine.create`, `skill.create`, `credential.create`, `credential.rotate`, `issue.create`, `memory.write`.

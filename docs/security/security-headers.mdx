@@ -58,6 +58,7 @@ The SPA `img-src` allows one extra host, `https://logos.composio.dev`, which ser
 |---|---|---|
 | `GET /api/auth/*` (read-only NextAuth: `session`, `csrf`, `providers`, `signin`, `error`) | **120 req/min** per IP | Polled on every dashboard page load (≥2 calls/load). Credential-free reads, so they ride the general bucket — see note below. |
 | `/api/auth/*` (non-GET), `/api/v1/auth/*`, `/api/v1/bootstrap` | **10 req/min** per IP | Credential-submitting auth endpoints (login callback, token refresh, sign-out, pairing) — strict because these gate the entire system. |
+| `POST /api/v1/users/me/password` | **10 req/min** per IP | Same strict bucket, matched by exact path rather than prefix. It verifies the caller's *current* password, so it is a credential-guessing surface wearing a `/users/me/` URL — and the attacker it matters for is holding a session or CLI token, which the general bucket exempts. Failures also advance the account lockout counter (below). |
 | `/api/v1/credentials/test`, stored-credential test paths | **60 req/min** per IP | Credential-test endpoints hit external provider APIs; a tighter bucket keeps them from being used as a free key-validation oracle for stolen secrets. |
 | `/api/*` (all other), with a **valid CLI token** | **no rate limit** | Authenticated CLI/admin bulk operations (`crewship seed`, template import, bulk-create) exempt from the per-IP bucket — see below. |
 | `/api/*` (all other) | **120 req/min** per IP | Public API endpoints. |

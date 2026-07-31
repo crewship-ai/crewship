@@ -72,8 +72,12 @@ jobs:
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
           NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
 
+      # Stages out/ into web/out/ AND fails the release if what landed is
+      # the tracked placeholder rather than a real export (#1567). This is
+      # the gate that keeps the always-compiles placeholder from ever
+      # turning into a silently UI-less release.
       - name: Copy static export for embedding
-        run: rm -rf web/out && cp -r out web/out
+        run: ./scripts/embed-web-out.sh sync
 
       # -- GoReleaser --
       # cache: true reuses module + build cache across releases keyed on

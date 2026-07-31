@@ -94,6 +94,42 @@ interface Credential {
   mcp_used: boolean
   /** Server-declared probe support — see credentials.go `testable`. */
   testable?: boolean
+  /** Keeper tier, 1–4. See TIER_BADGE. Optional so an older server response
+   *  renders the row without a badge rather than crashing the page. */
+  security_level?: number
+  security_level_label?: string
+}
+
+/**
+ * The Keeper tier, as a badge on the row.
+ *
+ * It was invisible in every listing. That is the property that decides what
+ * happens when an agent asks for the credential — at L4 every read becomes a
+ * human approval — so an operator scanning this table could not see which of
+ * their credentials were guarded and which were wide open. Worse, until the
+ * create path was fixed, anything marked "critical" was silently filed as L1,
+ * and there was no surface on which to notice.
+ *
+ * Only L2+ gets a badge. L1 is the default and the majority; badging it would
+ * put a chip on every row and make the two that matter harder to spot, which is
+ * the opposite of the point.
+ */
+const TIER_BADGE: Record<number, { short: string; cls: string; title: string }> = {
+  2: {
+    short: "L2",
+    cls: "border-info/40 text-info",
+    title: "L2 · medium — every read is judged by the Keeper model",
+  },
+  3: {
+    short: "L3",
+    cls: "border-warn/50 text-warn",
+    title: "L3 · high — judged with extra checks, needs a substantive intent, auto-leased rather than granted standing",
+  },
+  4: {
+    short: "L4",
+    cls: "border-destructive/50 text-destructive",
+    title: "L4 · critical — a human approves every read; the model can recommend but never grant",
+  },
 }
 
 const STATUS_DOT_COLOR: Record<CredentialListStatus, string> = {
@@ -854,6 +890,20 @@ function CredentialRow({
           <Badge variant="outline" className="text-[9px] px-1 font-mono shrink-0 opacity-70">
             {TYPE_LABEL[cred.type]}
           </Badge>
+          {/* How closely Keeper guards it. Sits next to the type because they
+              answer the same shape of question about the row, and because the
+              tier is the one an operator is more likely to have got wrong. */}
+          {cred.security_level !== undefined && TIER_BADGE[cred.security_level] && (
+            <Badge
+              variant="outline"
+              className={`text-[9px] h-4 px-1 font-mono shrink-0 ${TIER_BADGE[cred.security_level].cls}`}
+              title={cred.security_level_label
+                ? `${cred.security_level_label} — ${TIER_BADGE[cred.security_level].title.split("— ")[1] ?? ""}`
+                : TIER_BADGE[cred.security_level].title}
+            >
+              {TIER_BADGE[cred.security_level].short}
+            </Badge>
+          )}
           {derived === "Pending" && (
             // Deep-link straight to the inbox — the approve/reject
             // action lives there, so "go approve it" must be one

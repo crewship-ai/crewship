@@ -22,6 +22,9 @@ export interface CredentialData {
   crew_ids: string[]
   tags?: string[]
   token_expires_at?: string | null
+  /** Keeper tier, 1–4. Absent on an older API response → treated as L1, which is
+   *  the column's default. */
+  security_level?: number
 }
 
 interface EditCredentialDialogProps {
@@ -50,6 +53,7 @@ export function EditCredentialDialog({
     expiresAt: credential.token_expires_at
       ? credential.token_expires_at.slice(0, 10)
       : "",
+    securityLevel: credential.security_level ?? 1,
   }), [credential])
 
   const handleSubmit = async (values: CredentialFormValues) => {
@@ -59,6 +63,7 @@ export function EditCredentialDialog({
       provider: values.provider,
       scope: values.scope,
       tags: values.tags,
+      security_level: values.securityLevel,
     }
     if (values.value) body.value = values.value
     body.crew_ids = values.scope === "CREW" ? values.crewIds : []

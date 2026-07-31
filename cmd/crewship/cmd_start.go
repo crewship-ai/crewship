@@ -290,6 +290,13 @@ var startCmd = &cobra.Command{
 			logger.Warn("embedded web UI not available", "error", err)
 		} else {
 			deps.WebFS = webFS
+			// The embed resolved, but against the tracked placeholder
+			// rather than a real Next.js export (#1567). Say so at boot:
+			// the HTTP side already answers 503 on every UI route, and a
+			// headless deploy only ever reads the log.
+			if !web.IsBuilt(webFS) {
+				logger.Warn("embedded web UI is a placeholder, not a real build — this binary was compiled without `pnpm build` + `scripts/embed-web-out.sh sync`; every UI route will answer 503 (API and CLI are unaffected)")
+			}
 		}
 
 		srv := server.New(cfg, logger, deps)

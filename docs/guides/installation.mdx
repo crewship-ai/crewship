@@ -46,7 +46,7 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
     ```
     This runs three stages:
     1. `pnpm build` -- builds the Next.js frontend as a static export into `out/`
-    2. Copies `out/` to `web/out/` for Go embedding
+    2. Stages `out/` into `web/out/` for Go embedding (`scripts/embed-web-out.sh sync`)
     3. `go build` with version/commit ldflags into the `crewship` binary
 
     Version information is embedded via ldflags:
@@ -123,7 +123,7 @@ Lifecycle:
 
 1. **Auto-stash** — if the working tree, index, or untracked files are dirty, the script runs `git stash push --include-untracked -m "dev.sh deploy auto-stash @ <branch> (<UTC timestamp>)"` so the deploy never destroys a WIP. Recover with `git stash list` to find the entry, then `git stash apply <ref>` (the script prints this hint as part of its output). Use `apply` rather than `pop` so a mistake doesn't drop the entry from the stash list.
 2. **Fetch and checkout** — resolves the ref, force-resets the working tree to it.
-3. **Self-healing build** — `ensure_web_build_fresh()` compares mtimes of frontend sources against `.web-build-marker`. When stale, runs the full `pnpm build → cp -r out web/out` sequence; when warm, the check completes in ~0.1s. This was added because skipping `cp -r out web/out` after `pnpm build` leaves `web/out/` ~100 files behind, which the Go embed FS then serves as 404 unpredictably.
+3. **Self-healing build** — `ensure_web_build_fresh()` compares mtimes of frontend sources against `.web-build-marker`. When stale, runs the full `pnpm build → scripts/embed-web-out.sh sync` sequence; when warm, the check completes in ~0.1s. This was added because skipping the staging step after `pnpm build` leaves `web/out/` ~100 files behind, which the Go embed FS then serves as 404 unpredictably.
 4. **Restart services** — same path as `./dev.sh restart`.
 
 The same `.web-build-marker` keeps `./dev.sh start` and `./dev.sh restart` self-healing too. If you ever see "fresh `pnpm build` produces stale UI", the marker file is the place to look.
@@ -151,7 +151,7 @@ Source Code
 pnpm build --> out/ (static HTML/JS/CSS)
     |
     v
-cp out/ --> web/out/  (Go embed source)
+embed-web-out.sh sync --> web/out/  (Go embed source)
     |
     v
 go build --> crewship (single binary)

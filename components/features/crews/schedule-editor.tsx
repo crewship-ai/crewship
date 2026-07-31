@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Calendar } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { useDirtyForm } from "@/hooks/use-dirty-form"
 
 export interface ScheduleEditorProps {
   cron: string | null | undefined
@@ -30,10 +31,14 @@ export function ScheduleEditor({
   readOnly = false,
 }: ScheduleEditorProps) {
   const [editing, setEditing] = useState(false)
-  const [draftCron, setDraftCron] = useState(cron ?? "")
-  const [draftPrompt, setDraftPrompt] = useState(prompt ?? "")
-  const [draftEnabled, setDraftEnabled] = useState(enabled)
-  const [saving, setSaving] = useState(false)
+  const [toggling, setToggling] = useState(false)
+
+  // Cron and prompt are typed-in values committed by an explicit Save, which
+  // is exactly what useDirtyForm is for: it keeps the draft when a write is
+  // rejected, so a 4xx/5xx never quietly eats what someone typed. `enabled`
+  // stays out of it — the switch is an atomic control that commits on the
+  // spot (see the hook's own note about those).
+  const form = useDirtyForm({ cron: cron ?? "", prompt: prompt ?? "" })
 
   // The switch renders this, not the `enabled` prop directly, so a failed
   // write can revert the visual flip instead of leaving it stuck showing a
@@ -41,46 +46,57 @@ export function ScheduleEditor({
   const [toggleEnabled, setToggleEnabled] = useState(enabled)
   useEffect(() => { setToggleEnabled(enabled) }, [enabled])
 
-  // Sync drafts back from props once we're not actively editing — keeps
-  // the editor honest after parent re-fetches (e.g. another tab toggled
-  // the schedule, or onSave returned a normalized cron expression).
-  useEffect(() => {
-    if (editing) return
-    setDraftCron(cron ?? "")
-    setDraftPrompt(prompt ?? "")
-    setDraftEnabled(enabled)
-  }, [editing, cron, prompt, enabled])
+  const saving = toggling || form.status === "saving"
 
   const handleToggle = async (next: boolean) => {
     if (readOnly) return
     const previous = toggleEnabled
     setToggleEnabled(next) // optimistic — this is the only feedback the switch gives
     try {
-      setSaving(true)
+      setToggling(true)
       await onSave({ cron: cron ?? "", prompt: prompt ?? "", enabled: next })
       toast.success(next ? "Schedule enabled" : "Schedule disabled")
-    } catch {
+    } catch (e) {
       setToggleEnabled(previous) // the write failed, don't leave the switch lying
-      toast.error("Failed to update schedule")
+      // The server's own words — it knows whether this was a validation
+      // problem or a permission one, and guessing here would be a weaker
+      // second copy of that rule.
+      toast.error(e instanceof Error ? e.message : "Failed to update schedule")
     } finally {
-      setSaving(false)
+      setToggling(false)
     }
   }
 
   const handleSave = async () => {
-    setSaving(true)
-    try {
-      await onSave({ cron: draftCron, prompt: draftPrompt, enabled: draftEnabled })
+    let landed = false
+    await form.submit(async (draft) => {
+      try {
+        // `enabled` comes from the switch, not from the draft: it commits on
+        // its own, so re-sending a stale copy here would silently undo it.
+        // `toggleEnabled` and not the `enabled` prop, because the prop is the
+        // copy that lags — a toggle the server has already accepted is only
+        // visible in the prop once the parent's refetch lands, and saving a
+        // cron edit in that window would write the old value back.
+        await onSave({ cron: draft.cron, prompt: draft.prompt, enabled: toggleEnabled })
+        landed = true
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to save schedule")
+        // Rethrown, not swallowed: useDirtyForm records the message and keeps
+        // the draft, so the edit survives for a retry.
+        throw e
+      }
+    })
+    // Only a write the server actually accepted closes the editor. A rejected
+    // one leaves the form open and dirty — the read-only view would otherwise
+    // show the old schedule as though it were the change that was just made.
+    if (landed) {
       setEditing(false)
-    } finally {
-      setSaving(false)
+      toast.success("Schedule updated")
     }
   }
 
   const handleCancel = () => {
-    setDraftCron(cron ?? "")
-    setDraftPrompt(prompt ?? "")
-    setDraftEnabled(enabled)
+    form.reset()
     setEditing(false)
   }
 
@@ -120,8 +136,8 @@ export function ScheduleEditor({
             <div className="px-4 py-2.5 grid grid-cols-[180px_1fr] gap-3 items-center">
               <span className="text-xs text-muted-foreground">Cron</span>
               <input
-                value={draftCron}
-                onChange={(e) => setDraftCron(e.target.value)}
+                value={form.draft.cron}
+                onChange={(e) => form.set("cron", e.target.value)}
                 placeholder="0 9 * * 1-5"
                 className="bg-background border border-white/15 rounded px-2 py-1 text-sm font-mono outline-none focus:border-primary"
               />
@@ -129,14 +145,21 @@ export function ScheduleEditor({
             <div className="px-4 py-2.5 grid grid-cols-[180px_1fr] gap-3 items-start">
               <span className="text-xs text-muted-foreground mt-1.5">Prompt</span>
               <textarea
-                value={draftPrompt}
-                onChange={(e) => setDraftPrompt(e.target.value)}
+                value={form.draft.prompt}
+                onChange={(e) => form.set("prompt", e.target.value)}
                 rows={3}
                 className="bg-background border border-white/15 rounded px-2 py-1 text-sm outline-none focus:border-primary resize-y min-h-[60px]"
                 placeholder="What this agent should do every time the schedule fires…"
               />
             </div>
-            <div className="px-4 py-2 flex justify-end gap-2">
+            <div className="px-4 py-2 flex items-center justify-end gap-2">
+              {/* Outlives the toast: the reason the save was refused has to
+                  still be readable next to the button you retry with. */}
+              {form.status === "error" && (
+                <span role="alert" className="mr-auto text-[11.5px] text-destructive min-w-0 truncate">
+                  {form.error ?? "Save failed"}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={handleCancel}
