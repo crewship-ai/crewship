@@ -3,6 +3,7 @@ package safepath
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -213,5 +214,97 @@ func TestCleanAbs(t *testing.T) {
 	}
 	if _, err := CleanAbs(base, "with\x00nul"); err == nil {
 		t.Fatal("NUL in path should fail")
+	}
+}
+
+// legacyPathsafeJoin is internal/pathsafe.Join, copied verbatim from the
+// revision before this package absorbed it. It is kept ONLY as a test oracle.
+//
+// A package collapse has exactly one way to be dangerous: the survivor accepts
+// something the deleted one refused. Two call sites — the sidecar's memory HTTP
+// write surface and Engine.ReindexPath — swapped from that function to JoinRel
+// on trust, and reading both and concluding "JoinRel is stricter" is an
+// argument, not a test. This makes it a test.
+func legacyPathsafeJoin(root, rel string) (string, error) {
+	if root == "" || rel == "" {
+		return "", errLegacyUnsafe
+	}
+	if strings.ContainsRune(rel, 0) {
+		return "", errLegacyUnsafe
+	}
+	if filepath.IsAbs(rel) {
+		return "", errLegacyUnsafe
+	}
+	cleanRel := filepath.Clean(rel)
+	sep := string(filepath.Separator)
+	if cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+sep) || strings.Contains(cleanRel, sep+".."+sep) {
+		return "", errLegacyUnsafe
+	}
+	cleanRoot := filepath.Clean(root)
+	joined := filepath.Clean(filepath.Join(cleanRoot, cleanRel))
+	if joined != cleanRoot && !strings.HasPrefix(joined, cleanRoot+sep) {
+		return "", errLegacyUnsafe
+	}
+	return joined, nil
+}
+
+var errLegacyUnsafe = errors.New("pathsafe: unsafe path")
+
+// TestJoinRel_NeverLooserThanDeletedPathsafeJoin is the invariant that makes
+// the collapse safe, checked over a cross-product of the segment shapes that
+// break path guards rather than over a hand-picked list.
+//
+// Two things are asserted, and only these two, because JoinRel is deliberately
+// allowed to be STRICTER (it refuses backslash components, which pathsafe.Join
+// treated as an ordinary Linux filename byte):
+//
+//   - JoinRel never accepts an input pathsafe.Join rejected;
+//   - where both accept, they return the identical path, so no call site that
+//     swapped over silently started writing somewhere else.
+func TestJoinRel_NeverLooserThanDeletedPathsafeJoin(t *testing.T) {
+	t.Parallel()
+	base := filepath.FromSlash("/srv/agent/.memory")
+
+	segs := []string{
+		"", ".", "..", "...", "....", " ", "a", "AGENT.md", "daily",
+		`a\b`, `..\..`, "a\x00b", "\x00", "/", "//", "/etc", "etc/",
+		"-", "~", "$HOME", ".hidden", "a b", "a..b", "..a", "a..",
+	}
+	var rels []string
+	for _, a := range segs {
+		rels = append(rels, a)
+		for _, b := range segs {
+			rels = append(rels, a+"/"+b)
+			rels = append(rels, a+"/"+b+"/leaf.md")
+		}
+	}
+	rels = append(rels,
+		"../../etc/passwd", "daily/../../etc/passwd", "./AGENT.md",
+		"daily/./x.md", "daily//x.md", "a/b/../../../escape",
+		filepath.FromSlash("/srv/agent/.memory/../.memory-evil/x"),
+	)
+
+	var accepted int
+	for _, rel := range rels {
+		legacy, legacyErr := legacyPathsafeJoin(base, rel)
+		got, err := JoinRel(base, rel)
+		if err != nil {
+			continue // stricter is allowed, and is the point of the collapse
+		}
+		accepted++
+		if legacyErr != nil {
+			t.Errorf("JoinRel(%q, %q) = %q, but the deleted pathsafe.Join refused it — "+
+				"the collapse LOOSENED the guard", base, rel, got)
+			continue
+		}
+		if got != legacy {
+			t.Errorf("JoinRel(%q, %q) = %q, pathsafe.Join returned %q — result drifted",
+				base, rel, got, legacy)
+		}
+	}
+	// Guard the guard: if every input were rejected the loop above would be
+	// vacuously green and would keep passing through any future tightening.
+	if accepted < 20 {
+		t.Fatalf("only %d of %d inputs were accepted; the corpus stopped exercising the happy path", accepted, len(rels))
 	}
 }
