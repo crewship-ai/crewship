@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -97,6 +98,41 @@ func newAuxLiveResolver(
 		j: j, db: db, logger: logger,
 	}
 	return r.resolve
+}
+
+// auxCallTimeout is the same live-read as the resolver above, one field over: the
+// per-call budget an evaluator's model call is bounded by (#1601).
+//
+// timeout_ms was settable, validated on write and rendered on the Judge models
+// card with its provenance, and consumed by nothing — every evaluator ran under
+// the gatekeeper's built-in 20s constant whatever the card said. Read here, at
+// call time, for the reason the model is: these evaluators are built once at boot
+// and their pointers are held by the route handler, so a budget captured at
+// construction would be the boot-time one forever.
+//
+// Precedence, matching how llm.ResolveAux picks the provider:
+//
+//  1. the slot's own budget (instance override, else env, else shipped default)
+//  2. the fallback slot's, when the slot has none — the case ResolveAux resolves
+//     through Fallback
+//  3. nothing, which leaves the gatekeeper's own bound in force
+//
+// Returns nil for a nil store, so test and embedded wirings keep the built-in
+// bound exactly as before.
+func auxCallTimeout(store *keepercfg.AuxStore, slot string) gatekeeper.CallTimeoutResolver {
+	if store == nil {
+		return nil
+	}
+	return func() time.Duration {
+		ms := store.EffectiveSlot(slot).TimeoutMS.Value
+		if ms <= 0 {
+			ms = store.EffectiveSlot(keepercfg.SlotFallback).TimeoutMS.Value
+		}
+		if ms <= 0 {
+			return 0 // the gatekeeper keeps its own bound
+		}
+		return time.Duration(ms) * time.Millisecond
+	}
 }
 
 func (r *auxLiveResolver) resolve(ctx context.Context, workspaceID string) (llm.Provider, string) {

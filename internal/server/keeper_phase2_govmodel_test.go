@@ -33,7 +33,7 @@ func TestBuildLLMProvider_Ollama(t *testing.T) {
 func TestBuildAuxGatekeeper_FallsBackToLocalJudge(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	aux := llm.DefaultAuxiliaryModels() // behavior slot defaults to anthropic
-	gk := buildAuxGatekeeper(aux, llm.SlotBehavior, nil, "http://localhost:11434", "qwen2.5:3b-instruct", nil, nil, slog.Default())
+	gk := buildAuxGatekeeper(aux, llm.SlotBehavior, nil, nil, "http://localhost:11434", "qwen2.5:3b-instruct", nil, nil, slog.Default())
 	if gk == nil {
 		t.Fatal("expected a non-nil gatekeeper via local-judge fallback when the anthropic default can't build")
 	}
@@ -44,7 +44,7 @@ func TestBuildAuxGatekeeper_FallsBackToLocalJudge(t *testing.T) {
 func TestBuildAuxGatekeeper_NilWhenNoKeyAndNoLocalDefault(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	aux := llm.DefaultAuxiliaryModels()
-	gk := buildAuxGatekeeper(aux, llm.SlotBehavior, nil, "", "", nil, nil, slog.Default())
+	gk := buildAuxGatekeeper(aux, llm.SlotBehavior, nil, nil, "", "", nil, nil, slog.Default())
 	if gk != nil {
 		t.Fatal("expected nil gatekeeper when no API key and no local default judge is configured")
 	}
@@ -57,7 +57,7 @@ func TestBuildAuxGatekeeper_AcceptsGovModelResolver(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	aux := llm.DefaultAuxiliaryModels()
 	resolver := gatekeeper.GovModelResolver(func(context.Context, string) (llm.Provider, string) { return nil, "" })
-	gk := buildAuxGatekeeper(aux, llm.SlotBehavior, resolver, "http://localhost:11434", "qwen2.5:3b-instruct", nil, nil, slog.Default())
+	gk := buildAuxGatekeeper(aux, llm.SlotBehavior, resolver, nil, "http://localhost:11434", "qwen2.5:3b-instruct", nil, nil, slog.Default())
 	if gk == nil {
 		t.Fatal("expected a non-nil gatekeeper when a gov-model resolver is supplied")
 	}
