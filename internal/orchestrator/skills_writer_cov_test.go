@@ -14,9 +14,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-// covSkillsContainer builds a covContainer that serves directory listings
-// (script prefix "ls -1 <root>") from the listings map and optionally fails
-// rm / write scripts.
+// covSkillsContainer builds a covContainer that answers the prune's SINGLE
+// listing exec — one `ls -1` per root inside one script, each preceded by a
+// `printf` of its @@-marked header (#1646) — from the listings map, and
+// optionally fails the rm / write scripts.
 func covSkillsContainer(listings map[string]string, failRM, failWrites, failLS bool) *covContainer {
 	return &covContainer{route: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 		script := covScript(cfg)
@@ -24,12 +25,12 @@ func covSkillsContainer(listings map[string]string, failRM, failWrites, failLS b
 			if failLS {
 				return nil, errors.New("ls broken")
 			}
-			for root, listing := range listings {
-				if strings.Contains(script, "ls -1 "+root+" ") {
-					return covResult("ls", listing), nil
-				}
+			var out strings.Builder
+			for _, root := range covListedRoots(script) {
+				out.WriteString(skillListingMarker + root + "\n")
+				out.WriteString(listings[root])
 			}
-			return covResult("ls", ""), nil
+			return covResult("ls", out.String()), nil
 		}
 		if strings.HasPrefix(script, "sh -c rm -rf ") || strings.HasPrefix(script, "sh -c rm -f ") {
 			if failRM {
@@ -42,6 +43,24 @@ func covSkillsContainer(listings map[string]string, failRM, failWrites, failLS b
 		}
 		return nil, nil
 	}}
+}
+
+// covListedRoots pulls the roots out of the combined listing script, in the
+// order the prune asked for them, so the fake can reply with one transcript
+// instead of one listing per exec.
+func covListedRoots(script string) []string {
+	var roots []string
+	for _, line := range strings.Split(script, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "ls -1 '") {
+			continue
+		}
+		rest := line[len("ls -1 '"):]
+		if end := strings.Index(rest, "'"); end >= 0 {
+			roots = append(roots, rest[:end])
+		}
+	}
+	return roots
 }
 
 func covRMCommands(c *covContainer) []string {
@@ -70,29 +89,47 @@ func TestPruneStaleSkillFolders_RemovesOrphansKeepsLive(t *testing.T) {
 		keep, covQuietLogger())
 
 	rms := covRMCommands(c)
-	if len(rms) != 2 {
-		t.Fatalf("expected 2 rm commands (folders + cursor rules), got %d: %v", len(rms), rms)
+	if len(rms) != 1 {
+		t.Fatalf("expected 1 rm command covering every orphan (#1646), got %d: %v", len(rms), rms)
 	}
-	var folderRM, cursorRM string
-	for _, rm := range rms {
-		if strings.HasPrefix(rm, "rm -rf ") {
-			folderRM = rm
+	rm := rms[0]
+	if !strings.Contains(rm, ".claude/skills/stale-one") {
+		t.Errorf("orphan folder not removed: %q", rm)
+	}
+	if strings.Contains(rm, "alpha") || strings.Contains(rm, "Bad Name") {
+		t.Errorf("kept/unsafe entries must not be removed: %q", rm)
+	}
+	if !strings.Contains(rm, ".cursor/rules/stale.mdc") {
+		t.Errorf("orphan .mdc not removed: %q", rm)
+	}
+	if strings.Contains(rm, "README.txt") || strings.Contains(rm, "bad name.mdc") {
+		t.Errorf("non-mdc / unsafe entries must not be removed: %q", rm)
+	}
+}
+
+// TestPruneStaleSkillFolders_ListsEveryRootInOneExec pins the collapse
+// itself: the prune ran on EVERY agent run, skills assigned or not, and cost
+// one exec per root (#1646).
+func TestPruneStaleSkillFolders_ListsEveryRootInOneExec(t *testing.T) {
+	t.Parallel()
+	c := covSkillsContainer(map[string]string{}, false, false, false)
+	roots := []string{".claude/skills", ".agents/skills", ".opencode/skills", ".factory/skills"}
+	pruneStaleSkillFolders(context.Background(), c, "ctr1", "/output/bob",
+		roots, map[string]struct{}{}, covQuietLogger())
+
+	listings := 0
+	for _, call := range c.snapshotCalls() {
+		if len(call.Cmd) == 3 && strings.Contains(call.Cmd[2], "ls -1 ") {
+			listings++
+			for _, want := range append(append([]string{}, roots...), ".cursor/rules") {
+				if !strings.Contains(call.Cmd[2], "'"+want+"'") {
+					t.Errorf("the single listing exec does not cover %q: %q", want, call.Cmd[2])
+				}
+			}
 		}
-		if strings.HasPrefix(rm, "rm -f ") {
-			cursorRM = rm
-		}
 	}
-	if !strings.Contains(folderRM, ".claude/skills/stale-one") {
-		t.Errorf("orphan folder not removed: %q", folderRM)
-	}
-	if strings.Contains(folderRM, "alpha") || strings.Contains(folderRM, "Bad Name") {
-		t.Errorf("kept/unsafe entries must not be removed: %q", folderRM)
-	}
-	if !strings.Contains(cursorRM, ".cursor/rules/stale.mdc") {
-		t.Errorf("orphan .mdc not removed: %q", cursorRM)
-	}
-	if strings.Contains(cursorRM, "alpha.mdc") || strings.Contains(cursorRM, "README.txt") || strings.Contains(cursorRM, "bad name.mdc") {
-		t.Errorf("kept / non-mdc / unsafe entries must not be removed: %q", cursorRM)
+	if listings != 1 {
+		t.Errorf("prune issued %d listing execs, want 1 — one per root is back", listings)
 	}
 }
 

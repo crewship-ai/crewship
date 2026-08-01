@@ -147,11 +147,13 @@ func writeAgentSkills(
 // [SKILLS AVAILABLE] system prompt is the authoritative surface — the
 // filesystem layer is the bonus discovery path.
 //
-// The implementation shells out once per root for the listing and once
-// to rm the orphan set in a single command, so the cost is bounded
-// regardless of skill count. We restrict the rm to slugs that pass
-// safeSlugRe so a corrupted directory entry can never escape the
-// rooted folder.
+// One listing exec covers every root and one rm covers every orphan, so
+// the cost is two round-trips at most regardless of skill count — and the
+// rm rides the merged preflight script when one is active, making it one
+// (#1646; it used to be one ls per root plus one rm per root, i.e. five to
+// ten execs on EVERY agent run whether or not any skill was assigned). We
+// restrict the rm to slugs that pass safeSlugRe so a corrupted directory
+// entry can never escape the rooted folder.
 func pruneStaleSkillFolders(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -161,19 +163,31 @@ func pruneStaleSkillFolders(
 	keep map[string]struct{},
 	logger *slog.Logger,
 ) {
-	for _, root := range folderRoots {
-		listing, err := execCapture(ctx, container, containerID, workDir,
-			fmt.Sprintf("ls -1 %s 2>/dev/null || true", shellEscape(root)))
-		if err != nil {
-			if logger != nil {
-				logger.Warn("skill prune: list failed", "root", root, "error", err)
-			}
-			continue
+	// Cursor rules are flat .mdc files, not folders, so they are listed with
+	// the rest but filtered differently below.
+	const cursorRules = ".cursor/rules"
+	roots := make([]string, 0, len(folderRoots)+1)
+	roots = append(roots, folderRoots...)
+	roots = append(roots, cursorRules)
+
+	var lsScript strings.Builder
+	for _, root := range roots {
+		fmt.Fprintf(&lsScript, "printf '%%s\\n' '%s%s'\nls -1 '%s' 2>/dev/null || true\n",
+			skillListingMarker, shellEscape(root), shellEscape(root))
+	}
+	listing, err := execCapture(ctx, container, containerID, workDir, lsScript.String())
+	if err != nil {
+		if logger != nil {
+			logger.Warn("skill prune: list failed", "error", err)
 		}
-		var orphans []string
-		for _, name := range strings.Split(strings.TrimSpace(listing), "\n") {
-			name = strings.TrimSpace(name)
-			if name == "" || !safeSlugRe.MatchString(name) {
+		return
+	}
+	byRoot := parseSkillListing(listing)
+
+	var orphans []string
+	for _, root := range folderRoots {
+		for _, name := range byRoot[root] {
+			if !safeSlugRe.MatchString(name) {
 				continue
 			}
 			if _, ok := keep[name]; ok {
@@ -181,36 +195,8 @@ func pruneStaleSkillFolders(
 			}
 			orphans = append(orphans, path.Join(root, name))
 		}
-		if len(orphans) == 0 {
-			continue
-		}
-		args := make([]string, 0, len(orphans))
-		for _, p := range orphans {
-			args = append(args, shellEscape(p))
-		}
-		script := "rm -rf " + strings.Join(args, " ")
-		if _, err := execCapture(ctx, container, containerID, workDir, script); err != nil {
-			if logger != nil {
-				logger.Warn("skill prune: rm failed", "root", root, "error", err)
-			}
-			continue
-		}
-		if logger != nil {
-			logger.Debug("skill prune: removed orphan skill folders", "root", root, "count", len(orphans))
-		}
 	}
-
-	// Cursor rules are flat .mdc files, not folders — handle them
-	// separately so a single ls + rm walks .cursor/rules and skips any
-	// non-.mdc entries the user may have parked there manually.
-	listing, err := execCapture(ctx, container, containerID, workDir,
-		"ls -1 .cursor/rules 2>/dev/null || true")
-	if err != nil {
-		return
-	}
-	var orphans []string
-	for _, name := range strings.Split(strings.TrimSpace(listing), "\n") {
-		name = strings.TrimSpace(name)
+	for _, name := range byRoot[cursorRules] {
 		if !strings.HasSuffix(name, ".mdc") {
 			continue
 		}
@@ -221,21 +207,62 @@ func pruneStaleSkillFolders(
 		if _, ok := keep[slug]; ok {
 			continue
 		}
-		orphans = append(orphans, path.Join(".cursor/rules", name))
+		orphans = append(orphans, path.Join(cursorRules, name))
 	}
 	if len(orphans) == 0 {
 		return
 	}
+
 	args := make([]string, 0, len(orphans))
 	for _, p := range orphans {
-		args = append(args, shellEscape(p))
+		args = append(args, "'"+shellEscape(p)+"'")
 	}
-	script := "rm -f " + strings.Join(args, " ")
-	if _, err := execCapture(ctx, container, containerID, workDir, script); err != nil {
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", "rm -rf " + strings.Join(args, " ")},
+		WorkingDir:  workDir,
+		User:        "1001:1001",
+	}
+	if err := runOrBatch(ctx, container, preflightStepSkillsPrune, cfg); err != nil {
 		if logger != nil {
-			logger.Warn("skill prune: rm cursor rules failed", "error", err)
+			logger.Warn("skill prune: rm failed", "error", err)
 		}
+		return
 	}
+	if logger != nil {
+		logger.Debug("skill prune: removed orphan skill entries", "count", len(orphans))
+	}
+}
+
+// skillListingMarker separates one root's entries from the next in the single
+// listing exec's output. Chosen to be impossible as a directory entry produced
+// by `ls -1` on its own line only when we emit it: safeSlugRe rejects "@" so a
+// real entry can never be mistaken for a header.
+const skillListingMarker = "@@"
+
+// parseSkillListing turns the combined listing transcript back into
+// root → entry names.
+func parseSkillListing(out string) map[string][]string {
+	byRoot := map[string][]string{}
+	current := ""
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, skillListingMarker) {
+			current = strings.TrimPrefix(line, skillListingMarker)
+			if _, ok := byRoot[current]; !ok {
+				byRoot[current] = nil
+			}
+			continue
+		}
+		if current == "" {
+			continue
+		}
+		byRoot[current] = append(byRoot[current], line)
+	}
+	return byRoot
 }
 
 // execCapture runs a shell snippet inside the container and returns

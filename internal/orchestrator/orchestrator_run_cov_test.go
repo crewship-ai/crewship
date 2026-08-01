@@ -129,11 +129,18 @@ type covRunOpts struct {
 func covNewRunContainer(opts covRunOpts) *covContainer {
 	c := &covContainer{}
 	c.route = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
-		script := covScript(cfg)
+		// The merged preflight script rides stdin (#1646), so routing has to
+		// look at both halves of what the exec was asked to do.
+		script := covScript(cfg) + "\n" + covStdin(cfg)
 		switch {
 		case strings.Contains(script, "command -v tmux"):
 			return covResult("tmux-check", ""), nil
 		case opts.failMCPWrite && strings.Contains(script, ".mcp.json"):
+			// A merged script reports a step failure by name rather than by
+			// failing the whole exec.
+			if strings.Contains(script, preflightStepMarker+preflightStepMCPConfig) {
+				return covPreflightFailure(preflightStepMCPConfig), nil
+			}
 			return nil, errors.New("mcp write refused")
 		case strings.Contains(script, "crewship-sidecar --addr"):
 			return covResult("sidecar-start", ""), nil
@@ -146,6 +153,8 @@ func covNewRunContainer(opts covRunOpts) *covContainer {
 	}
 	c.inspect = func(execID string) (bool, int, error) {
 		switch execID {
+		case "preflight-fail":
+			return false, 1, nil
 		case "tmux-check":
 			return false, 1, nil // tmux missing → stdbuf fallback
 		case "agent-exec":
@@ -505,12 +514,13 @@ func TestRunAgent_MemoryEnabledCreatesDirsAndMigrates(t *testing.T) {
 		t.Fatalf("RunAgent: %v", err)
 	}
 	var sawAgentMem, sawCrewMem, sawMigration bool
-	for _, call := range c.snapshotCalls() {
-		script := covScript(call)
-		if strings.HasPrefix(script, "mkdir -p ") && strings.Contains(script, "/crew/agents/cov-agent/.memory/daily") {
+	// The steps ride the merged preflight script now (#1646), so look at what
+	// each exec carried on stdin as well as in its argv.
+	for _, script := range c.snapshotScripts() {
+		if strings.Contains(script, "mkdir") && strings.Contains(script, "/crew/agents/cov-agent/.memory/daily") {
 			sawAgentMem = true
 		}
-		if strings.HasPrefix(script, "mkdir -p ") && strings.Contains(script, "/crew/shared/.memory/topics") {
+		if strings.Contains(script, "mkdir") && strings.Contains(script, "/crew/shared/.memory/topics") {
 			sawCrewMem = true
 		}
 		if strings.Contains(script, "cp -a") && strings.Contains(script, "/output/cov-agent/.memory") {

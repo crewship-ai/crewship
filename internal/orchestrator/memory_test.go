@@ -628,11 +628,13 @@ func TestRunAgentMemoryDirCreation(t *testing.T) {
 		agentWriter.Close()
 	}()
 
-	var mkdirCmds [][]string
+	// The directory steps ride the merged preflight script on stdin (#1646),
+	// not their own `mkdir` argv, so collect the step bodies from there.
+	var memorySteps []string
 	mc := &mockContainer{
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
-			if len(cfg.Cmd) >= 2 && cfg.Cmd[0] == "mkdir" {
-				mkdirCmds = append(mkdirCmds, cfg.Cmd)
+			if stdin := covStdin(cfg); stdin != "" {
+				memorySteps = append(memorySteps, preflightStepBody(stdin, preflightStepMemoryDirs))
 			}
 			if len(cfg.Cmd) >= 2 && cfg.Cmd[0] == "cat" {
 				return &provider.ExecResult{ExecID: "cat", Reader: io.NopCloser(strings.NewReader(""))}, nil
@@ -666,21 +668,32 @@ func TestRunAgentMemoryDirCreation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should have 2 mkdir calls: one for scratch+output, one for memory dirs
-	if len(mkdirCmds) < 2 {
-		t.Fatalf("expected at least 2 mkdir calls, got %d", len(mkdirCmds))
+	joined := strings.Join(memorySteps, "\n")
+	if joined == "" {
+		t.Fatalf("no %q step reached the merged preflight script", preflightStepMemoryDirs)
 	}
-
-	// Second mkdir should create .memory/ dirs
-	memoryMkdir := mkdirCmds[1]
-	joined := strings.Join(memoryMkdir, " ")
 	if !strings.Contains(joined, ".memory") {
-		t.Errorf("expected .memory in second mkdir, got: %v", memoryMkdir)
+		t.Errorf("expected .memory in the memory-dirs step, got: %q", joined)
 	}
 	if !strings.Contains(joined, ".snapshots") {
-		t.Errorf("expected .snapshots in memory mkdir, got: %v", memoryMkdir)
+		t.Errorf("expected .snapshots in the memory-dirs step, got: %q", joined)
 	}
 	if !strings.Contains(joined, "daily") {
-		t.Errorf("expected daily in memory mkdir, got: %v", memoryMkdir)
+		t.Errorf("expected daily in the memory-dirs step, got: %q", joined)
 	}
+}
+
+// preflightStepBody returns the merged script's body for one named step —
+// everything between that step's marker and the next step's (or the end).
+// Lets a test assert on one step's work without matching the whole script.
+func preflightStepBody(script, step string) string {
+	i := strings.Index(script, preflightStepMarker+step+"'")
+	if i < 0 {
+		return ""
+	}
+	rest := script[i:]
+	if j := strings.Index(rest[1:], preflightStepMarker); j >= 0 {
+		rest = rest[:j+1]
+	}
+	return rest
 }

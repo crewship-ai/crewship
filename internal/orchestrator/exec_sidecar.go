@@ -566,6 +566,20 @@ func writeCredentialFiles(
 		User:        "1001:1001",
 	}
 
+	// #1646: when a merged preflight script is active this step joins it,
+	// which is how the base64-encoded credential material finally stops
+	// riding argv (/proc/<pid>/cmdline is mode 0444 and a bare ps prints it —
+	// the same exposure #1629 closed for the agent's bearer token). The
+	// ExecInspect exit-code check below is not lost in that case: the merged
+	// script reports each step's status by name and the caller checks
+	// preflightStepCredentials against the flush result.
+	if b, ok := ctr.(*preflightBatch); ok && b.accepts(cfg) {
+		b.add(preflightStepCredentials, "", script)
+		logger.Info("credential files queued for the merged preflight script",
+			"agent_slug", agentSlug, "secrets_dir", secretsAgentDir, "file_count", fileCount)
+		return nil
+	}
+
 	result, err := ctr.Exec(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("write credential files: %w", err)
