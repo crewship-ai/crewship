@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
+import { toast } from "sonner"
+
 import { ConnectionsSection } from "../connections-section"
 
 // The old screen was a from/to/direction form plus a flat list of every link
@@ -307,5 +309,73 @@ describe("Crew links — matrix overview", () => {
     await openMatrix()
     expect(screen.queryByRole("combobox")).toBeNull()
     expect(mutations()).toHaveLength(0)
+  })
+})
+
+// ── Re-point rollback (#1594) ────────────────────────────────────────
+//
+// A re-point is DELETE-then-POST. When the POST is refused, the old link
+// is already gone, so the component puts it back. Both halves of that
+// have to be honest: the refusal must be reported at all (apiFetch
+// RESOLVES on 4xx, so an unchecked `await` reads as success), and a
+// FAILED restore must be reported too — otherwise the user is told
+// "failed to change the link", reasonably reads it as "nothing
+// happened", and walks away believing they still have a link that no
+// longer exists.
+describe("Crew links — a refused re-point", () => {
+  beforeEach(() => {
+    cleanup()
+    role = "MANAGER"
+    apiFetch.mockReset()
+    vi.mocked(toast.error).mockReset()
+  })
+
+  /** DELETE succeeds; the first POST (the re-point) is refused with
+   *  `reason`; the second POST (the restore) answers `restoreStatus`. */
+  function mockRefusedRepoint(reason: unknown, restoreStatus: number) {
+    let posts = 0
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return jsonResponse(null, 204)
+      if (init?.method === "POST") {
+        posts += 1
+        if (posts === 1) return jsonResponse(reason, 409)
+        return jsonResponse(posts === 2 ? { id: "cc-restored" } : null, restoreStatus)
+      }
+      if (url.startsWith("/api/v1/crew-connections")) {
+        return jsonResponse([conn("cc-ops-eng", "c-ops", "c-eng", "unidirectional")])
+      }
+      if (url.startsWith("/api/v1/crews")) return jsonResponse(CREWS)
+      return jsonResponse(null, 404)
+    })
+  }
+
+  async function repointEngToOps() {
+    render(<ConnectionsSection workspaceId="ws1" />)
+    await screen.findByRole("button", { name: "Engineering" })
+    openSelect(pairControl("Ops"))
+    fireEvent.click(await screen.findByRole("option", { name: /sends work/i }))
+  }
+
+  it("reports the server's reason when the old link is put back", async () => {
+    mockRefusedRepoint({ detail: "target crew is archived" }, 201)
+    await repointEngToOps()
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(toast.error).toHaveBeenCalledWith("target crew is archived")
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  // The one that matters: the delete landed, the create was refused, and
+  // the restore was refused too. The pair is now unlinked and only this
+  // message says so.
+  it("warns that the previous link is gone when the restore also fails", async () => {
+    mockRefusedRepoint({ detail: "target crew is archived" }, 500)
+    await repointEngToOps()
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    const msg = String(vi.mocked(toast.error).mock.calls[0][0])
+    expect(msg).toContain("target crew is archived")
+    expect(msg).toMatch(/could not be restored/i)
+    expect(msg).toMatch(/re-create the link manually/i)
   })
 })
