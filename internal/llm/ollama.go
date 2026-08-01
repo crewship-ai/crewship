@@ -237,6 +237,15 @@ func (o *Ollama) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		body["think"] = *req.Think
 	}
 
+	// "format" is top-level too, and shares "think"'s trap: inside the options
+	// map it is accepted and ignored, so the model answers in prose and the
+	// caller sees a schema that "did not work". Omitted unless the caller asked,
+	// so an older Ollama and a model with no constrained-decoding support keep
+	// the request shape they had before.
+	if req.Format != nil {
+		body["format"] = req.Format
+	}
+
 	opts := map[string]any{}
 	if req.Temperature != nil {
 		opts["temperature"] = *req.Temperature

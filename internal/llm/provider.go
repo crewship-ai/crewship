@@ -54,6 +54,24 @@ type Request struct {
 	// Only the Ollama provider acts on this today; Anthropic and OpenAI ignore
 	// it, so setting it is never a portability hazard, just a no-op there.
 	Think *bool `json:"think,omitempty"`
+	// Format constrains the model's decoding to a shape — a JSON Schema object,
+	// or the string "json" for schema-less JSON mode. nil means "don't mention
+	// it", for the same reason Think is a pointer: the field is not universal,
+	// and a model server that does not implement it must keep seeing the request
+	// it saw before rather than a key it may reject.
+	//
+	// It exists for callers that PARSE the answer rather than show it. The Keeper
+	// judge is the motivating one: it asks for a verdict object in prose and then
+	// brace-scans the reply, so a model that opens with "Sure, here's my
+	// assessment:" produces nothing parseable — which a fail-closed path turns
+	// into DENY on every credential request. A schema removes that failure mode
+	// at the decoder instead of asking the model more firmly.
+	//
+	// It is a hint, never a guarantee: only the Ollama provider acts on it today
+	// (Anthropic and OpenAI ignore it, so setting it is a no-op there, not a
+	// portability hazard), and a hosted judge therefore still returns whatever it
+	// likes. Callers must keep their tolerant parser.
+	Format any `json:"format,omitempty"`
 }
 
 // StopReason indicates why the model stopped generating.

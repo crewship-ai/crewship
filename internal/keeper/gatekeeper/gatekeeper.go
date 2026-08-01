@@ -511,6 +511,20 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		// verdict, which this fail-closed path turns into a DENY on every
 		// request. The judge wants one JSON object, not deliberation.
 		Think: ptr(false),
+		// Constrained decoding, so "one JSON object" stops being a request the
+		// model may decline. The prompt asks for it in prose and parseResponse
+		// brace-scans the answer; a small model that opens with "Sure, here's my
+		// assessment:" — or fences the object — parses as nothing, and nothing is
+		// DENY risk 10 on every credential request. A schema removes that class at
+		// the decoder.
+		//
+		// The enum is per REQUEST TYPE, not one list for the whole method — see
+		// verdictSchema. This literal serves all five prompt templates, and they
+		// do not ask the same question.
+		//
+		// Ollama honours this; hosted providers ignore it. NormalizeRawResponse
+		// therefore stays exactly as load-bearing as it was.
+		Format: verdictSchema(rt),
 	})
 
 	if err != nil {
@@ -950,6 +964,46 @@ func NormalizeRawResponse(raw string) (decision string, risk int, reason string,
 	}
 
 	return decision, risk, resp.Reason, nil
+}
+
+// verdictSchema returns the constrained-decoding schema for one request type.
+//
+// It is a function rather than a package var because the decision SPACE is not
+// uniform: Evaluate serves five prompt templates through a single llm.Request,
+// and the behavior watchdog asks a four-verb question while the credential path
+// asks a three-verb one.
+//
+// Getting this wrong is silent and expensive in both directions:
+//
+//   - Omitting WARN on the behavior path makes it undecodable, not merely
+//     unnormalised. classifyBehaviorDecision re-parses the raw body precisely to
+//     recover WARN, and with a three-verb schema there is nothing left to
+//     recover — every would-be WARN lands on ALLOW/DENY/ESCALATE, and a DENY in
+//     "block" mode interrupts the tool call that the design wanted merely
+//     flagged.
+//   - Offering WARN on the credential path would manufacture refusals:
+//     NormalizeRawResponse folds anything outside the closed set to DENY, so the
+//     model would be handed a verb whose only effect is to deny.
+func verdictSchema(rt keeper.RequestType) map[string]any {
+	decisions := []string{
+		string(keeper.DecisionAllow),
+		string(keeper.DecisionDeny),
+		string(keeper.DecisionEscalate),
+	}
+	if rt == keeper.RequestTypeBehavior {
+		// Matches buildBehaviorPrompt's stated decision space, which is the
+		// contract the model is actually being held to.
+		decisions = append(decisions, "WARN")
+	}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"decision": map[string]any{"type": "string", "enum": decisions},
+			"reason":   map[string]any{"type": "string"},
+			"risk":     map[string]any{"type": "integer", "minimum": 1, "maximum": 10},
+		},
+		"required": []string{"decision", "reason", "risk"},
+	}
 }
 
 func randomDelimiter() (string, bool) {
