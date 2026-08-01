@@ -55,6 +55,23 @@ FILESYSTEM:
 - Scratch = /workspace/ — temporary, not persistent
 Do NOT attempt to write outside these directories -- the filesystem is read-only elsewhere.
 
+SIDECAR AUTH — how to authenticate every call to localhost:9119:
+- Your bearer token is in the CREWSHIP_AGENT_TOKEN environment variable. NEVER put it
+  on a command line — not via -H, not via -d, not anywhere in a command's arguments.
+  A command line is public: /proc/<pid>/cmdline is world-readable and a plain "ps"
+  prints it, so a -H Authorization recipe hands your token to every other agent sharing
+  this container, and they can then act as you.
+- Instead hand curl a config on file descriptor 3. Use this exact shape, with the
+  closing AUTH at the very start of its own line:
+    curl -s http://localhost:9119/<path> -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+  The shell expands the token into the heredoc, curl reads it from fd 3, and it never
+  appears in any process's arguments.
+- When the request body also comes from stdin, keep --data @- and put the auth heredoc
+  BEFORE the body heredoc — see the /keeper/execute call below for the full form.
+- Unauthenticated GETs (/results, /standup, /connections, /mission/<id>) need none of this.
+
 CREDENTIALS:
 - Credentials granted to you appear as READ-ONLY files in /secrets/{your-slug}/ (e.g., /secrets/{your-slug}/GH_TOKEN)
 - The .env file in /secrets/{your-slug}/.env maps env var names to file paths
@@ -66,13 +83,15 @@ CREDENTIALS:
   - To USE it for one command without ever reading the value — the normal case, and the only
     one that works inside this run:
       curl -s -X POST http://localhost:9119/keeper/execute \
-        -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
-        -H "Content-Type: application/json" --data @- <<'JSON'
-      {"credential_name":"PROD_DB_PASSWORD",
-       "intent":"<why you need it: the task, the system, and why THIS credential>",
-       "command":"psql -h db.internal -c 'select count(*) from orders'",
-       "env_var":"PGPASSWORD"}
-      JSON
+        -H "Content-Type: application/json" \
+        -K /dev/fd/3 --data @- 3<<AUTH <<'JSON'
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+{"credential_name":"PROD_DB_PASSWORD",
+ "intent":"<why you need it: the task, the system, and why THIS credential>",
+ "command":"psql -h db.internal -c 'select count(*) from orders'",
+ "env_var":"PGPASSWORD"}
+JSON
     The credential is injected for that one command and the output is scrubbed of its value.
   - To get a decision on its own, before starting a longer piece of work:
       POST http://localhost:9119/keeper/request with {"credential_name":"...","intent":"..."}
@@ -96,11 +115,13 @@ CREDENTIALS:
   the vault as PENDING_APPROVAL (not usable until a human approves it with one click). Send the
   request body over STDIN so the secret never lands in the command line / process args:
     curl -s -X POST http://localhost:9119/escalate \
-      -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
-      -H "Content-Type: application/json" --data @- <<'JSON'
-    {"from":"{your-slug}","reason":"<what credential and why>","type":"CREDENTIAL",
-     "metadata":"{\"name\":\"PG_PASSWORD\",\"type\":\"SECRET\",\"provider\":\"NONE\",\"value\":\"<the secret>\"}"}
-    JSON
+      -H "Content-Type: application/json" \
+      -K /dev/fd/3 --data @- 3<<AUTH <<'JSON'
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+{"from":"{your-slug}","reason":"<what credential and why>","type":"CREDENTIAL",
+ "metadata":"{\"name\":\"PG_PASSWORD\",\"type\":\"SECRET\",\"provider\":\"NONE\",\"value\":\"<the secret>\"}"}
+JSON
   "type" is one of SECRET|API_KEY|CLI_TOKEN (default SECRET); "provider" defaults to NONE. The call
   blocks until a human approves or rejects (up to 5 minutes): on approve the credential becomes
   usable by the crew, on reject it is discarded. If you do NOT have the value yourself and need a
@@ -113,9 +134,11 @@ EXPOSE PORT (show a running server to the user):
   cannot reach it directly because the container has no host port mapping.
 - To get a public URL the user can paste into their browser, call the sidecar:
     curl -s -X POST http://localhost:9119/expose-port \
-      -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"port": <port>, "description": "<short why>"}'
+      -d '{"port": <port>, "description": "<short why>"}' \
+      -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 - Response: {"token": "...", "url": "http://<host>/exposed/<token>/", "expires_at": "..."}
 - Share the "url" field with the user. It expires in 1 hour by default; pass
   "ttl_seconds": N to request a different TTL (max 24h). The URL is a capability
@@ -143,10 +166,12 @@ SAVE A REUSABLE SKILL (procedural memory for the crew):
   approves it before it ships to the crew. Send the SKILL.md over STDIN so it
   never lands in the command line:
     curl -s -X POST http://localhost:9119/skills/author \
-      -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
-      -H "Content-Type: application/json" --data @- <<'JSON'
-    {"content":"---\nname: deploy-staging\ndescription: Use when deploying the app to staging.\ncategory: DEVOPS\n---\n# Deploy to staging\n\n## When to Use\n...\n"}
-    JSON
+      -H "Content-Type: application/json" \
+      -K /dev/fd/3 --data @- 3<<AUTH <<'JSON'
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+{"content":"---\nname: deploy-staging\ndescription: Use when deploying the app to staging.\ncategory: DEVOPS\n---\n# Deploy to staging\n\n## When to Use\n...\n"}
+JSON
 - Response: {"file_name","slug","scan_status","scan_reason"}. A manager will see
   it in the proposed-skills review queue and approve or reject it.
 `

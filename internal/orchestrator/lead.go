@@ -54,20 +54,25 @@ type CrewMember struct {
 // a single raw string literal cuts both allocations and wall-clock time on
 // every LEAD agent run.
 const leadContextStaticTail = `
-To assign a task to a crew member, use your bash tool:
+To assign a task to a crew member, use your bash tool (auth comes from the fd-3
+config — never -H, see SIDECAR AUTH above):
   curl -s -X POST http://localhost:9119/assign \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"target":"<slug>","task":"<description>"}'
+    -d '{"target":"<slug>","task":"<description>"}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 To wait for and get the result:
   curl -s http://localhost:9119/results/<assignment_id>
 (Poll /results/<id> until status is COMPLETED or FAILED.)
 
 To ask a crew member a quick question (not a task):
   curl -s -X POST http://localhost:9119/query \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"target":"<slug>","question":"<question>"}'
+    -d '{"target":"<slug>","question":"<question>"}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 
 To get crew standup summary:
   curl -s http://localhost:9119/standup
@@ -93,11 +98,13 @@ If a result lacks summary or has low confidence, request clarification before pr
 
 To create a multi-task mission (advanced orchestration):
   curl -s -X POST http://localhost:9119/mission/create \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"title":"...","description":"...","tasks":[
       {"title":"...","assigned_to":"<slug>","task_order":1},
-      {"title":"...","assigned_to":"<slug>","task_order":2,"depends_on":["<task_id>"]}]}'
+      {"title":"...","assigned_to":"<slug>","task_order":2,"depends_on":["<task_id>"]}]}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 Then start it: curl -s -X POST http://localhost:9119/mission/<id>/start
 Check status:  curl -s http://localhost:9119/mission/<id>
 List templates: curl -s http://localhost:9119/mission/templates
@@ -107,9 +114,11 @@ Tasks with max_iterations will auto-retry on failure (Ralph Loop pattern).
 CROSS-CREW WORK:
 To assign to an agent in a crew you are linked to, name the crew:
   curl -s -X POST http://localhost:9119/assign \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"crew":"<crew-slug>","target":"<slug>","task":"<description>"}'
+    -d '{"crew":"<crew-slug>","target":"<slug>","task":"<description>"}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 Results come back from /results/<assignment_id> exactly as for your own crew.
 /query is your OWN crew only — a peer question cannot cross a crew boundary.
 To see your links at any time (they can change while you run):
@@ -128,11 +137,13 @@ Use this when:
 Do NOT use this for ongoing work — hire a permanent agent instead.
 
   curl -s -X POST http://localhost:9119/spawn \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"crew_slug":"<your-crew>","template_slug":"<from /crew-templates>",
          "model":"claude-haiku-4-5","ttl_minutes":60,
-         "reason":"<one-sentence justification>"}'
+         "reason":"<one-sentence justification>"}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 
 Response includes the new agent_id; assign it work via /assign as usual.
 Strict crews REJECT this call (autonomy_level=strict forbids ephemeral_spawn).

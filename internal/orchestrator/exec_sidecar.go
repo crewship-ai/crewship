@@ -12,12 +12,117 @@ import (
 	"log/slog"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// Where the sidecar's stderr lands, and how much of it we are willing to keep.
+//
+// /tmp is a tmpfs and tmpfs pages are charged to the crew's memory cgroup, so
+// an unbounded log here is a slow memory leak that ends in an OOM kill and
+// presents as "the agent died" (crew-runtime-capacity.md §5). 1 MiB is more
+// sidecar stderr than any single incident produces; keeping the newest 256 KiB
+// on each trim leaves plenty of context for whatever tripped it.
+//
+// These numbers are load-bearing, not decorative: the cap is what makes this a
+// bound rather than a slower leak, and it is charged PER CREW. The target fleet
+// is 20–50 crews on one host, so even a 4 MiB cap is ~200 MB of tmpfs across
+// the fleet — a cap much larger than that has stopped bounding anything.
+// TestSidecarLogCap_StaysInASaneRange pins both ends so a raised constant (or a
+// bad merge) cannot quietly restore the unbounded behaviour, and
+// TestSidecarLogTrim_* proves the trim against a real 2 MiB file rather than
+// against the script's text — the tighter of the two guards.
+const (
+	sidecarLogPath = "/tmp/sidecar.log"
+
+	sidecarLogMaxBytes  = 1 << 20 // trim once the log passes this
+	sidecarLogKeepBytes = 1 << 18 // …down to this much of the NEWEST output
+	sidecarLogTrimEvery = 300     // seconds between size checks
+)
+
+var (
+	sidecarLogMaxBytesStr  = strconv.Itoa(sidecarLogMaxBytes)
+	sidecarLogKeepBytesStr = strconv.Itoa(sidecarLogKeepBytes)
+	sidecarLogTrimEveryStr = strconv.Itoa(sidecarLogTrimEvery)
+)
+
+// sidecarLogTrimOnce returns the /bin/sh for ONE pass of the log cap: if the
+// log is over sidecarLogMaxBytes, rewrite it in place with its newest
+// sidecarLogKeepBytes.
+//
+// It is a standalone `if` rather than the loop's original `|| continue` so a
+// test can run the real shipped shell against a real file — the previous
+// assertions only checked that the script mentioned the constants, which stayed
+// green when the cap was raised to a value that caps nothing.
+//
+// Rewriting the same inode (`cat …tail >log`) rather than renaming is the whole
+// point: the sidecar holds this file open for its entire life, so a rotation
+// would leave it writing into an unlinked inode — output unreadable, pages
+// still charged to the cgroup, strictly worse than the leak being closed.
+func sidecarLogTrimOnce(logPath string) string {
+	return `if [ $(wc -c <` + logPath + ` 2>/dev/null || echo 0) -gt ` + sidecarLogMaxBytesStr + ` ]; then` + "\n" +
+		`  tail -c ` + sidecarLogKeepBytesStr + ` ` + logPath + ` >` + logPath + `.tail 2>/dev/null && cat ` + logPath + `.tail >` + logPath + "\n" +
+		`  rm -f ` + logPath + `.tail` + "\n" +
+		`fi`
+}
+
+// sidecarLaunchScript builds the /bin/sh program that starts crewship-sidecar,
+// bounds its log, and reports health through the exec's exit code.
+//
+// The log cap is a trim in place rather than a rotation. The sidecar holds the
+// log open for its whole life, so renaming the file would leave it writing into
+// an unlinked inode — the output becomes unreadable while its pages stay
+// charged to the cgroup, i.e. strictly worse than the leak we are closing.
+// Rewriting the same inode with its own tail keeps the writer's fd valid and
+// keeps the most recent output, which is the half anyone debugging wants.
+//
+// Two details are load-bearing:
+//
+//   - the log is truncated (`: >`) before launch, so a sidecar restarted inside
+//     a long-lived crew container does not inherit the previous one's bytes;
+//   - stderr is opened with `2>>` (O_APPEND) rather than `2>`. An appending
+//     writer reseeks to the current end on every write, so it picks up the
+//     shorter file after a trim. A plain `2>` writer would keep its old offset
+//     and refill the gap with a sparse hole, and the cap would never hold.
+//
+// The check is periodic, so the real bound is the cap plus whatever one
+// interval of stderr adds — not a hard ceiling, but a bounded one, which is
+// what the cgroup cares about.
+//
+// The trimmer exits with the sidecar (`kill -0`), so a crew that restarts its
+// sidecar does not accumulate one orphaned loop per restart against PidsLimit.
+func sidecarLaunchScript(credsB64 string) string {
+	return fmt.Sprintf(
+		// Start from an empty log.
+		`: >%[2]s`+"\n"+
+			// Pipe credentials in as base64 on stdin (never argv — see the
+			// shell-injection note at the call site). stdout/stderr go to files
+			// so the sidecar survives the docker exec stream closing; writes to
+			// a closed pipe would SIGPIPE it.
+			`echo '%[1]s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 >/dev/null 2>>%[2]s &`+"\n"+
+			`SIDECAR_PID=$!`+"\n"+
+			// Background size cap. Detached from the exec's stdio so it neither
+			// holds the stream open nor takes a SIGPIPE when it closes.
+			`while sleep %[4]s; do`+"\n"+
+			`  kill -0 $SIDECAR_PID 2>/dev/null || break`+"\n"+
+			`%[3]s`+"\n"+
+			`done </dev/null >/dev/null 2>&1 &`+"\n"+
+			// Health check: verify the sidecar answers, exit 1 on failure so the
+			// orchestrator hears about it.
+			`sleep 0.5`+"\n"+
+			`if wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
+			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
+			`else echo "sidecar health check failed" >&2; exit 1; fi`,
+		credsB64,
+		sidecarLogPath,
+		"  "+strings.ReplaceAll(sidecarLogTrimOnce(sidecarLogPath), "\n", "\n  "),
+		sidecarLogTrimEveryStr,
+	)
+}
 
 // sidecarIPCToken returns the internal-API token to hand a sidecar at
 // startup. Since #1159 it is CREW-bound when the run carries a crew —
@@ -830,19 +935,7 @@ func startSidecar(
 	// injection if a credential token contains single quotes or other shell chars.
 	credsB64 := base64.StdEncoding.EncodeToString(credsJSON)
 
-	// Start sidecar as a background process.
-	// Pipe credentials JSON via base64-decoded stdin to avoid shell injection.
-	// Redirect stdout/stderr to files so the sidecar survives after Docker exec
-	// stream closes (writes to closed pipes cause SIGPIPE which kills the process).
-	// Health check: verify sidecar is responding, exit 1 on failure so orchestrator knows.
-	script := fmt.Sprintf(
-		`echo '%s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 >/dev/null 2>>/tmp/sidecar.log &`+
-			"\n"+`sleep 0.5`+"\n"+
-			`if wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
-			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
-			`else echo "sidecar health check failed" >&2; exit 1; fi`,
-		credsB64,
-	)
+	script := sidecarLaunchScript(credsB64)
 
 	// SECURITY: Run sidecar as UID 1002 (not 1001) so the agent process
 	// cannot read /proc/<sidecar_pid>/mem to extract credentials from heap.
