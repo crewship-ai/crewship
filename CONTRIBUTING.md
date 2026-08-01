@@ -183,12 +183,24 @@ CI (`ci.yml`) runs `pnpm lint && pnpm build` and
 security workflow runs gitleaks and the dependency audit on the same
 trigger. Both must be green for review.
 
-## Wait for CodeRabbit — and check that it actually reviewed
+## CodeRabbit — wait when it is reviewing, not when it is throttled
 
 After `gh pr create`, give CodeRabbit ~2–5 minutes to post its review.
-**Do not merge before it does.** Merge first and the run errors with
-*"Review failed — PR is closed"*, and any findings it would have raised
-are lost for good.
+**If a review is coming, do not merge before it does.** Merge first and
+the run errors with *"Review failed — PR is closed"*, and any findings
+it would have raised are lost for good.
+
+**If it is rate-limited, do not wait for it.** The per-developer limit
+runs 30–45 minutes and stacks across a batch, so waiting buys a queue
+position rather than a verdict and stalls everything behind it. Review
+the PR yourself instead — a red-first test plus a mutation proving the
+test has teeth is the standard this repo applies anyway, and it is a
+real review where a queue position is not. Then say in the PR what was
+machine-reviewed and what was not, and queue a re-review
+(`scripts/review-status.sh --retrigger`) so it still lands.
+
+Red CI is a separate gate and stays absolute: throttled or not, never
+merge on a failing check.
 
 The trap is that the rule does not verify itself. CodeRabbit reports
 through a commit **status**, and when it hits the per-developer review
