@@ -26,9 +26,17 @@
 -- "escalate nothing" by accident — an out-of-range floor silently disabling the
 -- control is the one reading that must not be possible.
 --
--- Separate migration rather than an edit to 20260801113326: that one has already
+-- Separate migration rather than an edit to 20260801113326: that one had already
 -- been applied on a dev instance, and rewriting an applied migration desyncs the
 -- ledger hash for the sake of saving one ALTER.
+--
+-- This file was itself widened from 1-4 to 1-5 after a dev instance had applied
+-- it, which is the same mistake one line up. It was survivable only because the
+-- migration has never merged, so that instance was the only one carrying the old
+-- CHECK and could simply be reseeded. SQLite cannot alter a CHECK in place — the
+-- table has to be rebuilt — so had this shipped, the fix would have been a
+-- table rebuild of the settings row rather than an edit. Once it merges, this
+-- file is frozen.
 
 ALTER TABLE keeper_runtime_settings ADD COLUMN judge_escalate_from INTEGER
     CHECK (judge_escalate_from IS NULL OR (judge_escalate_from >= 1 AND judge_escalate_from <= 5));
