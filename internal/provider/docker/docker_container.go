@@ -993,16 +993,47 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	// provision; absent that we prepend the well-known feature bin dirs. imgEnv
 	// is nil when inspect failed; applyAgentLoginPath tolerates that.
 	env = applyAgentLoginPath(env, team.LoginPath, imgEnv)
+	// Locale/timezone defaults, applied last so anything the image or the
+	// devcontainer containerEnv already declared wins (see crewDefaultEnv).
+	env = applyDefaultEnv(env, imgEnv, crewDefaultEnv)
+	stopTimeout := crewStopTimeoutSeconds
 	containerCfg := &container.Config{
 		Image: runtimeImage,
 		User:  "1001:1001",
 		Env:   env,
-		Healthcheck: &container.HealthConfig{
-			Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
-			Interval: 30_000_000_000,
-			Timeout:  5_000_000_000,
-			Retries:  3,
+		// Labels, so the crew container is discoverable by something other
+		// than its name. Every GC/discovery path today (FindCrewContainer,
+		// PruneCrewRuntimes, the orphan reaper) is name-based and driven off
+		// the crews table, which means a container whose DB row is gone —
+		// crew deleted while the daemon was unreachable, DB restored from an
+		// older backup, container_prefix changed — is invisible to all of
+		// them while keeping its mounts, network and credentials. The sidecar
+		// has carried the same label set since the H7 audit (sidecar.go).
+		//
+		// Note these do NOT displace the crewship.temp=provision label the
+		// container inherits from its committed cache image; see
+		// TestSweepOrphanTempContainers_SparesLiveCrewContainers for why that
+		// inherited label cannot be used as an identity marker.
+		Labels: map[string]string{
+			"managed-by":       "crewship",
+			"crewship.kind":    "crew",
+			"crewship.crew":    team.Slug,
+			"crewship.crew-id": team.ID,
 		},
+		// Explicit stop grace period so a plain `docker stop`, a daemon
+		// shutdown and the restart policy all use the same window
+		// StopCrewRuntime passes by hand, instead of Docker's 10 s default.
+		StopTimeout: &stopTimeout,
+		// No Healthcheck. There used to be one — `test -f /workspace/.ready`
+		// every 30 s — and it was a tautology: /workspace is a host-persistent
+		// bind, so entrypoint.sh's marker outlives the container that wrote it
+		// and a freshly created container reports healthy at t=0 without
+		// having booted anything. Nothing read the answer either:
+		// ContainerStatus below switches on State.Running / Restarting / Dead
+		// / OOMKilled and never touches State.Health (waitSidecarHealthy, the
+		// repo's only State.Health reader, is scoped to sidecars). It cost one
+		// container exec per crew per 30 s — at 50 crews, ~1.7 execs/s of pure
+		// daemon load — and bought nothing.
 	}
 	// Force the bind-mounted entrypoint.sh so custom base images (debian,
 	// ubuntu) use our init script instead of their default (typically
@@ -1065,22 +1096,54 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	capAdd = append(capAdd, team.CapAdd...)
 	securityOpt = append(securityOpt, team.SecurityOpt...)
 
+	memoryBytes := int64(memoryMB) * 1024 * 1024
+	// Swap off. Docker defaults MemorySwap to 2x Memory when it is left unset,
+	// so a crew configured for 4 GiB silently gets 4 GiB of RAM PLUS 4 GiB of
+	// swap. That trade is wrong here: a clean OOM kill is a bounded, reportable
+	// failure, whereas swapping turns it into minutes of thrash that degrades
+	// every co-resident crew on the same host. MemorySwap == Memory is Docker's
+	// documented way to say "no swap"; swappiness 0 additionally stops the
+	// kernel from paging out anonymous memory under host pressure.
+	memorySwappiness := int64(0)
 	hostConfig := &container.HostConfig{
 		Runtime:        runtime,
 		ReadonlyRootfs: readonlyRoot,
 		Privileged:     team.Privileged,
-		Init:           boolPtrIf(team.Init),
-		SecurityOpt:    securityOpt,
-		CapDrop:        []string{"ALL"},
-		CapAdd:         capAdd,
+		// Init unconditionally. PID 1 is `exec sleep infinity`
+		// (scripts/entrypoint.sh), which never calls wait(), and the sidecar is
+		// launched as `… &` inside an `sh -c` exec so it is ALWAYS reparented
+		// onto PID 1. Every such orphan becomes a permanent zombie counting
+		// against PidsLimit below — a monotonic leak that ends in `fork:
+		// Resource temporarily unavailable` for the whole crew. This used to be
+		// boolPtrIf(team.Init), i.e. on only when a devcontainer feature asked
+		// for it, which for essentially every real crew meant off. team.Init is
+		// still carried on CrewConfig because the provisioner's
+		// requirements-comparison reads it; it just no longer gates this.
+		Init:        &crewInitAlways,
+		SecurityOpt: securityOpt,
+		CapDrop:     []string{"ALL"},
+		CapAdd:      capAdd,
+		// Supplementary groups for every exec in this container — the only
+		// mechanism that works given the `User: "1001:1001"` colon form. See
+		// crewGroupGID / sidecarGroupGID.
+		GroupAdd: []string{crewGroupGID, sidecarGroupGID},
 		// ExtraHosts makes host.docker.internal resolve to the Docker host
 		// on both macOS and Linux, enabling containers to reach crewshipd
 		// for assignment IPC calls via the sidecar.
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+		// Restart policy and /dev/shm sizing — parity with the sidecar, which
+		// has had a restart policy since the H7 audit (sidecar.go). on-failure
+		// with a bounded retry count so a container whose PID 1 dies comes back
+		// without a crash-looping container pinning a CPU forever.
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyOnFailure, MaximumRetryCount: 3},
+		ShmSize:       crewShmSizeBytes,
 		Resources: container.Resources{
-			Memory:    int64(memoryMB) * 1024 * 1024,
-			NanoCPUs:  int64(cpus * 1e9),
-			PidsLimit: &pidsLimit,
+			Memory:           memoryBytes,
+			MemorySwap:       memoryBytes,
+			MemorySwappiness: &memorySwappiness,
+			NanoCPUs:         int64(cpus * 1e9),
+			PidsLimit:        &pidsLimit,
+			Ulimits:          crewUlimits(),
 		},
 		Mounts: crewMounts,
 		Tmpfs: map[string]string{
