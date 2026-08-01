@@ -118,6 +118,16 @@ var crewHexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 // wedges every agent run. Ceilings are typo guards, deliberately far above
 // any host we expect to run on. 0 (or an omitted key) means "use the server
 // default" and is not range-checked — the emit path already gates on `> 0`.
+//
+// #1638: there is a SECOND, higher floor — the memory one agent actually
+// needs (~2048 MiB), below which the daemon creates the container and the
+// agent CLI is then OOM-killed on start. That one is deliberately NOT
+// mirrored here. It is an instance setting (`runtime.agent_min_memory_mb`)
+// the operator can move, and `crewship apply --dry-run` validates offline
+// with no server to read it from. A compiled-in copy would reject manifests
+// the server would accept, and would ignore an operator who moved the floor.
+// So the manifest enforces only what is universally true, and the server
+// returns the sizing advisory as a warning on apply.
 const (
 	crewMinContainerMemoryMB = 6
 	crewMaxContainerMemoryMB = 262144 // 256 GiB
@@ -415,13 +425,15 @@ func (d *CrewDocument) Validate(_ internalapi.WorkspaceContext) error {
 		// the range the API would have returned instead of deferring.
 		if mb := d.Spec.Devcontainer.MemoryMB; mb != 0 &&
 			(mb < crewMinContainerMemoryMB || mb > crewMaxContainerMemoryMB) {
-			return fmt.Errorf("crew %q: spec.devcontainer.memory_mb must be between %d and %d (omit or 0 = use the server default)",
-				d.Metadata.Slug, crewMinContainerMemoryMB, crewMaxContainerMemoryMB)
+			return fmt.Errorf("crew %q: spec.devcontainer.memory_mb must be between %d and %d (omit or 0 = use the server default); "+
+				"%d MiB is Docker's own minimum and the daemon refuses to create a container below it",
+				d.Metadata.Slug, crewMinContainerMemoryMB, crewMaxContainerMemoryMB, crewMinContainerMemoryMB)
 		}
 		if c := d.Spec.Devcontainer.CPUs; c != 0 &&
 			(c < crewMinContainerCPUs || c > crewMaxContainerCPUs) {
-			return fmt.Errorf("crew %q: spec.devcontainer.cpus must be between %g and %g (omit or 0 = use the server default)",
-				d.Metadata.Slug, crewMinContainerCPUs, crewMaxContainerCPUs)
+			return fmt.Errorf("crew %q: spec.devcontainer.cpus must be between %g and %g (omit or 0 = use the server default); "+
+				"%g is Docker's own minimum and the daemon refuses to create a container below it",
+				d.Metadata.Slug, crewMinContainerCPUs, crewMaxContainerCPUs, crewMinContainerCPUs)
 		}
 	}
 

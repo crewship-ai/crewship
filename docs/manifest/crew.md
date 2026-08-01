@@ -91,8 +91,8 @@ unmodeled keys pass through via `raw:` (typed fields win on collision).
 |---|---|---|
 | `features` | map | feature-id → feature-config (OCI ref → JSON). |
 | `env` | map[string]string | static container env (emitted as `containerEnv`). |
-| `memory_mb` | int | container memory; emitted as `hostRequirements.memory` and forwarded to the `container_memory_mb` column. Between 6 and 262144, or omit / set 0 to use the server default. |
-| `cpus` | float | container CPUs; emitted as `hostRequirements.cpus` and forwarded to `container_cpus`. Between 0.01 and 512, or omit / set 0 to use the server default. |
+| `memory_mb` | int | container memory; emitted as `hostRequirements.memory` and forwarded to the `container_memory_mb` column. Between 6 and 262144, or omit / set 0 to use the server default (4096). Below 2048 applies with a warning. |
+| `cpus` | float | container CPUs; emitted as `hostRequirements.cpus` and forwarded to `container_cpus`. Between 0.01 and 512, or omit / set 0 to use the server default (2.0). Below 0.5 applies with a warning. |
 | `post_create_command` | string | shell snippet run once after first build. |
 | `raw` | map | passthrough for any unmodeled key (e.g. `remoteUser`, `customizations`). |
 
@@ -266,12 +266,23 @@ Endpoints used:
   tolerates NULL but falls back to a wrong-for-you built-in image).
 - `spec.devcontainer.image`, when set, must equal `spec.runtime_image`.
 - `devcontainer.memory_mb` is 6–262144 and `cpus` is 0.01–512 (0 or an
-  omitted key means "use the server default"). The lower bounds are
-  Docker's own: a crew configured below them is rejected here, at apply
-  time, rather than passing every layer and then failing inside the
-  daemon on every wake — which wedges every run of that crew. The upper
-  bound on `cpus` cannot be fully checked server-side, because the
-  daemon's real limit is the host's core count.
+  omitted key means "use the server default" — 4096 MB and 2.0 CPUs).
+  These lower bounds are **Docker's own**: a crew configured below them
+  is rejected here, at apply time, rather than passing every layer and
+  then failing inside the daemon on every wake — which wedges every run
+  of that crew. The upper bound on `cpus` cannot be fully checked
+  server-side, because the daemon's real limit is the host's core count.
+
+  There is a second, higher floor — the memory one agent actually needs,
+  2048 MB by default. A crew between the two applies successfully and
+  the **server** returns a warning: the container is created and the
+  agent CLI is then OOM-killed (exit 137) on start. `Validate` does not
+  enforce it, deliberately. That floor is the
+  `runtime.agent_min_memory_mb` / `runtime.agent_min_cpus` instance
+  settings, which an operator can move, and offline validation
+  (`apply --dry-run` with no server) cannot read them — a compiled-in
+  copy would reject manifests the server would accept. See
+  [`crewship crew`](/cli/crew) for the settings and their defaults.
 - Each service: DNS-label name, unique within the crew, image present,
   numeric ports only, parseable healthcheck durations, named (not
   bind) volumes with unique mounts.

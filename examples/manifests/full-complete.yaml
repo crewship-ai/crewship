@@ -82,7 +82,7 @@ spec:
       color: "#A855F7"
       devcontainer:
         image: python:3.12-alpine
-        memory_mb: 1024
+        memory_mb: 2048
       agents:
         - { slug: herald, name: Herald, agent_role: LEAD, cli_adapter: CLAUDE_CODE,
             llm: { provider: ANTHROPIC, model: claude-sonnet-4-6 },

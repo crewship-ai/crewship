@@ -140,8 +140,8 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `description` | string | No | `null` | Crew description |
 | `color` | string | No | `null` | Palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`) |
 | `icon` | string | No | `null` | Lucide icon name (`code`, `rocket`, `clipboard`, etc.) |
-| `container_memory_mb` | integer | No | `4096` | Container memory limit in MB; must be between `6` and `262144` (`0` uses the server default) |
-| `container_cpus` | number | No | `2.0` | Container CPU limit; must be between `0.01` and `512` (`0` uses the server default) |
+| `container_memory_mb` | integer | No | `4096` | Container memory limit in MB; must be between `6` and `262144` (`0` uses the server default, `4096`). Below `2048` succeeds with a `warnings` entry |
+| `container_cpus` | number | No | `2.0` | Container CPU limit; must be between `0.01` and `512` (`0` uses the server default, `2.0`). Below `0.5` succeeds with a `warnings` entry |
 | `container_ttl_hours` | integer | No | `null` | Container time-to-live in hours |
 | `network_mode` | string | No | `"restricted"` | `"free"` or `"restricted"` (new crews default to `restricted` with an empty allowlist — LLM/CLI providers stay reachable; arbitrary egress is denied) |
 | `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` (ignored otherwise) |
@@ -149,6 +149,43 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `devcontainer_config` | string | No | `null` | Raw devcontainer.json (max 100 KB; parsed for syntax) |
 | `mise_config` | string | No | `null` | Raw mise config TOML (max 10 KB; parsed for syntax) |
 | `services_json` | string | No | `null` | Sidecar services JSON (max 64 KB; structurally validated) |
+
+<Note>
+**Two floors.** `container_memory_mb` and `container_cpus` are rejected with
+a `400` only below Docker's own minimums (`6` MB, `0.01` CPU) — the daemon
+refuses to create a container there, so the request could never have worked.
+
+Between that and the *usable* floor (`2048` MB, `0.5` CPU by default) the
+crew is **created**, and the response carries a `warnings` array explaining
+what will break: a warmed agent CLI holds 1.5–2 GiB, so a smaller crew is
+created successfully and then OOM-killed (exit 137) on start. A small crew
+can be deliberate, and refusing it would not make it bigger — so this is
+advice, not a veto. Memory is a cgroup ceiling rather than a reservation, so
+sizing at the floor costs an idle host nothing.
+
+The usable floor is settable per instance via the `runtime.agent_min_memory_mb`
+and `runtime.agent_min_cpus` [instance settings](/api-reference/instance-settings).
+`runtime.agent_min_memory_mb` is also the divisor behind a crew's
+concurrent-run budget.
+
+`0` on either field means "use the server default", and it resolves to the
+same size on `POST` and on `PATCH` — the stored row never holds `0`.
+</Note>
+
+**`warnings`** (array of strings, `POST` and `PATCH` responses only) is
+present only when there is something to say and is otherwise omitted. It is
+additive — a client that ignores it sees an unchanged crew object.
+
+```json
+{
+  "id": "c...",
+  "slug": "tiny",
+  "container_memory_mb": 512,
+  "warnings": [
+    "container_memory_mb 512 is below 2048, the memory one agent needs: the container will be created, but the agent CLI is likely to be OOM-killed (exit 137) on start. Raise the crew's memory, or lower the floor with `crewship instance settings set runtime.agent_min_memory_mb <mb>`."
+  ]
+}
+```
 
 ```json
 {
@@ -218,8 +255,8 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `color` | string | Palette ID |
 | `icon` | string | Lucide icon name |
 | `avatar_style` | string | Avatar style for agents |
-| `container_memory_mb` | integer | Container memory limit in MB; must be between `6` and `262144` (`0` resets to the server default) |
-| `container_cpus` | number | Container CPU limit; must be between `0.01` and `512` (`0` resets to the server default) |
+| `container_memory_mb` | integer | Container memory limit in MB; must be between `6` and `262144` (`0` resets to the server default, `4096`). Shrinking below `2048` succeeds with a `warnings` entry |
+| `container_cpus` | number | Container CPU limit; must be between `0.01` and `512` (`0` resets to the server default, `2.0`). Shrinking below `0.5` succeeds with a `warnings` entry |
 | `container_ttl_hours` | integer | Container TTL in hours (`0` clears it to `null`; negative is rejected) |
 | `max_ephemeral_agents` | integer | Per-crew hire-flow quota; must be between `0` and `100` |
 | `network_mode` | string | `"free"` or `"restricted"` |
