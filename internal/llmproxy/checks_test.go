@@ -19,13 +19,29 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 
 // rerouteHost redirects requests whose host contains `host` to a test server,
 // keeping the key-in-URL out of real DNS and guaranteeing no real network I/O.
+//
+// The dial goes through a transport OWNED BY THIS REROUTE, not
+// http.DefaultTransport. DefaultTransport is a process-global with a
+// process-global idle-connection pool, keyed by host:port — and every
+// server here is a httptest.Server on 127.0.0.1 with an ephemeral port
+// the OS is free to hand out again the moment the previous one closes.
+// Tests in this file run under t.Parallel(), so a pooled connection left
+// over from a closed server can be handed to a later test that happened
+// to get the same port, whose request then fails on a dead socket. The
+// monitor reports any transport error as StatusError, which is how that
+// surfaces: "status 401 -> ERROR" with the 401 never reached (#1597,
+// twice in one day on PRs touching no file in this package).
+//
+// A per-reroute transport cannot be poisoned by another test's port, and
+// costs nothing here — each test makes one request.
 func rerouteHost(host string, srv *httptest.Server) http.RoundTripper {
+	tr := &http.Transport{}
 	return roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if strings.Contains(r.URL.Host, host) {
 			r.URL.Scheme = "http"
 			r.URL.Host = strings.TrimPrefix(srv.URL, "http://")
 		}
-		return http.DefaultTransport.RoundTrip(r)
+		return tr.RoundTrip(r)
 	})
 }
 
@@ -69,11 +85,16 @@ func TestCredentialMonitor_ValidateAnthropic_AllStatusCodes(t *testing.T) {
 				"http://nextjs", "tok", time.Hour, testLogger())
 			cm.client = &http.Client{Transport: rerouteAnthropic(srv), Timeout: 5 * time.Second}
 
-			got, _ := cm.validateAnthropic(context.Background(), ProviderConnection{
+			// Keep the message. validateEndpoint returns StatusError both
+			// for an unexpected status AND for a transport failure, so
+			// discarding it turns "the request never arrived" into an
+			// indistinguishable "wrong status" — which is exactly the
+			// three-step diagnosis #1597 is about.
+			got, msg := cm.validateAnthropic(context.Background(), ProviderConnection{
 				ID: "c", Provider: ProviderAnthropic, AccessToken: "k", Status: StatusActive,
 			})
 			if got != tc.want {
-				t.Errorf("status %d → %q, want %q", tc.code, got, tc.want)
+				t.Errorf("status %d → %q, want %q (detail: %s)", tc.code, got, tc.want, msg)
 			}
 		})
 	}

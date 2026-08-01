@@ -29,9 +29,10 @@ import (
 // property under test is "this traffic is limited at all", not "limited at 120".
 var rlGeneralProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAPIPerMin) + 500
 
-// Same idea for the two narrower buckets.
+// Same idea for the auth bucket. The credential-test bucket had one too
+// until this file stopped racing its refill: that assertion now drains the
+// bucket into debt and probes once, so there is no probe count to derive.
 var rlAuthProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin) + 5
-var rlCredTestProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPCredTestPerMin) + 10
 
 const rlProbePath = "/api/v1/__ratelimit_cli_exemption_probe__"
 
