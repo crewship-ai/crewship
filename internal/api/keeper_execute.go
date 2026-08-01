@@ -439,7 +439,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// other one would leave the higher-consequence flow unguarded. The hard-gate
 	// branch in the gatekeeper already tests for RequestTypeExecute; without this
 	// it was a condition that could never be true.
-	execFacts, execHardGate, execFactKeys := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
+	execFacts, execHardGate, execFactKeys, execInPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:            req,
 		CredentialName:     credName,
@@ -451,6 +451,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		Evidence:           execFacts,
 		HardGate:           execHardGate,
 		EvidenceFacts:      execFactKeys,
+		EvidenceInPrompt:   execInPrompt,
 		PromptBudgetTokens: h.promptBudget(),
 		EscalateFrom:       h.escalateFrom(),
 	}

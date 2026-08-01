@@ -140,20 +140,31 @@ func (h *KeeperHandler) SetJudgeConfig(s *keepercfg.Store) { h.judgeCfg = s }
 // site: the gatekeeper treats a nil Facts as "not established" and never as a
 // set of negative facts, so a config change and a database outage both degrade
 // to the prose-only judgement rather than to a refusal.
-func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool, []string) {
+func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool, []string, bool) {
 	if h.judgeCfg == nil || h.db == nil || agentID == "" || credentialID == "" {
-		return nil, false, nil
+		return nil, false, nil, false
 	}
 	prof := h.judgeCfg.Effective().Profile
-	if !prof.Evidence.Value {
-		return nil, false, nil
+	// Gathered when EITHER capability wants it, because the two answer different
+	// questions. `evidence` is "how much context does my judge get" — an operator
+	// shrinks it because their model has a small window. `hard_gate` is "refuse a
+	// credential this agent is not bound to" — a deterministic refusal the model
+	// never sees. Tying the gate to the block meant trimming the prompt silently
+	// stopped the refusals while `profile get` still reported the gate as on.
+	//
+	// It costs one indexed query on agent_credentials, so the cheap answer is
+	// also the safe one.
+	if !prof.Evidence.Value && !prof.HardGate.Value {
+		return nil, false, nil, false
 	}
 	f := evidence.Gather(ctx, h.db, evidence.Query{AgentID: agentID, CredentialID: credentialID})
 	for _, om := range f.Omitted {
 		h.logger.Warn("keeper: evidence fact omitted",
 			"fact", om.Fact, "error", om.Err, "agent_id", agentID, "credential_id", credentialID)
 	}
-	return &f, prof.HardGate.Value, prof.EvidenceFacts.Value
+	// The block reaches the PROMPT only when the operator asked for it. Gathering
+	// for the gate is not permission to spend their context window.
+	return &f, prof.HardGate.Value, prof.EvidenceFacts.Value, prof.Evidence.Value
 }
 
 // NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.

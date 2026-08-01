@@ -152,6 +152,10 @@ type EvalRequest struct {
 	// toggles — see keeper.SecurityLevel.TierWithEscalateFrom for why this is a
 	// dial rather than relabelling the credential.
 	EscalateFrom keeper.SecurityLevel
+	// EvidenceInPrompt renders the facts block. Separate from Evidence itself
+	// because the hard gate needs the FACTS while the operator may have turned
+	// the BLOCK off to save context — two questions, two switches.
+	EvidenceInPrompt bool
 	// PromptBudgetTokens caps the assembled prompt. 0 means no cap, which is the
 	// pre-existing behaviour exactly.
 	//
@@ -834,7 +838,7 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	// is only credible if agent-authored text cannot precede, restate or
 	// contradict it. Render returns "" when nothing was established, so an
 	// instance with the capability off produces exactly the prompt it did before.
-	if req.Evidence != nil {
+	if req.Evidence != nil && req.EvidenceInPrompt {
 		sb.WriteString(req.Evidence.RenderOnly(req.EvidenceFacts))
 	}
 

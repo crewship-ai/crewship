@@ -240,7 +240,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
 	// Run gatekeeper evaluation
-	facts, hardGate, factKeys := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
+	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:            req,
 		CredentialName:     credName,
@@ -251,6 +251,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		Evidence:           facts,
 		HardGate:           hardGate,
 		EvidenceFacts:      factKeys,
+		EvidenceInPrompt:   inPrompt,
 		PromptBudgetTokens: h.promptBudget(),
 		EscalateFrom:       h.escalateFrom(),
 	}

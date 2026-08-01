@@ -24,13 +24,14 @@ func l3Request(f *evidence.Facts) gatekeeper.EvalRequest {
 			RequestingAgentID: "agt_riley",
 			Intent:            "Investigate the slow checkout queries by examining query plans on the orders table in production",
 		},
-		SecurityLevel:  keeper.SecurityLevelL3,
-		CredentialName: "PROD_DB_ADMIN",
-		AgentName:      "riley",
-		CrewName:       "ops",
-		ConvHistory:    "user: the checkout page is slow\nassistant: the logs show slow queries on orders",
-		Evidence:       f,
-		HardGate:       true,
+		SecurityLevel:    keeper.SecurityLevelL3,
+		CredentialName:   "PROD_DB_ADMIN",
+		AgentName:        "riley",
+		CrewName:         "ops",
+		ConvHistory:      "user: the checkout page is slow\nassistant: the logs show slow queries on orders",
+		Evidence:         f,
+		HardGate:         true,
+		EvidenceInPrompt: true,
 	}
 }
 

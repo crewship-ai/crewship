@@ -65,8 +65,54 @@ func TestRouter_KeeperHandlerWithoutAJudgeProfile(t *testing.T) {
 	if got := h.promptBudget(); got != 0 {
 		t.Errorf("promptBudget() = %d with no store, want 0", got)
 	}
-	facts, hardGate, factKeys := h.gatherEvidence(context.Background(), "agt_1", "cred_1")
-	if facts != nil || hardGate || factKeys != nil {
-		t.Errorf("gatherEvidence with no store = (%v, %v, %v), want (nil, false, nil)", facts, hardGate, factKeys)
+	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(context.Background(), "agt_1", "cred_1")
+	if facts != nil || hardGate || factKeys != nil || inPrompt {
+		t.Errorf("gatherEvidence with no store = (%v, %v, %v, %v), want all zero", facts, hardGate, factKeys, inPrompt)
+	}
+}
+
+// The hard gate is a POLICY check, not a prompt feature, and turning off the
+// evidence block must not silently turn it off too.
+//
+// The two settings answer different questions. `evidence` is "how much context
+// does my model get" — an operator shrinks it because their judge has a small
+// window. `hard_gate` is "refuse a credential the agent is not bound to" — a
+// deterministic refusal that never reaches the model at all. Someone trimming
+// the prompt has not asked to stop refusing unbound credentials, and
+// `keeper profile get` would go on reporting `Hard gate: on` while it did
+// nothing. That is the shape this branch's review found nine times.
+//
+// Gathering for the gate costs one indexed query on agent_credentials, so the
+// cheap answer is also the safe one.
+func TestGatherEvidence_HardGateSurvivesEvidenceOff(t *testing.T) {
+	db := setupTestDB(t)
+	store := keepercfg.New(db, keepercfg.Defaults{})
+	if err := store.Load(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// updated_by is an FK onto users; the actor has to exist.
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u_test','t@example.com','T')`); err != nil {
+		t.Fatalf("seed actor: %v", err)
+	}
+	off := keepercfg.TriOff
+	if _, err := store.Apply(context.Background(), keepercfg.Patch{Evidence: &off}, "u_test"); err != nil {
+		t.Fatalf("turn evidence off: %v", err)
+	}
+
+	prof := store.Effective().Profile
+	if prof.Evidence.Value {
+		t.Fatal("evidence did not turn off — the premise of this test")
+	}
+	if !prof.HardGate.Value {
+		t.Fatal("hard gate is not on by default — the premise of this test")
+	}
+
+	h := &KeeperHandler{db: db, logger: newTestLogger(), judgeCfg: store}
+	_, hardGate, _, inPrompt := h.gatherEvidence(context.Background(), "agt_1", "cred_1")
+	if !hardGate {
+		t.Error("hard gate was reported off because the evidence BLOCK was off — an operator shrinking the prompt did not ask to stop refusing unbound credentials")
+	}
+	if inPrompt {
+		t.Error("the block was rendered into the prompt anyway — gathering for the gate is not permission to spend the operator's context window")
 	}
 }

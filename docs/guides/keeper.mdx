@@ -621,7 +621,7 @@ measurement, not a rule, so nothing here is wired shut.
 |---|---|---|
 | `evidence` | a block of **computed facts** — is this credential bound to this agent, how many prior grants, how many denials in the last 7 days, is there open assigned work — placed **above** the conversation history, so facts outrank what the history claims | on |
 | `evidence-facts` | which of those facts to include | all |
-| `hard-gate` | refuse an L3/L4 credential the agent has no binding to **without calling the model at all** | on |
+| `hard-gate` | refuse an L3/L4 credential the agent has no binding to **without calling the model at all**. Independent of `evidence`: turning the block off to save context does not stop the refusals. | on |
 | `escalate-from` | where human approval starts. A judge ALLOW at this tier **and above** becomes an ESCALATE, so a person confirms it. `5` = **never** — the judge may grant every tier including L4. `0` leaves the tier table alone (L4 only). | 0 |
 | `precedent` | *(reserved — accepted and stored, not yet implemented)* attach the closest past decisions that a **human** resolved, as worked examples | off |
 | `precedent-n` | *(reserved — see `precedent`)* how many examples | 3 |
