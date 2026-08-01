@@ -27,53 +27,116 @@ import (
 // container exec costs ~85 ms), the emitted section is labelled with the
 // real date, and the prompt states the gap.
 
+// execOutcome is what the fake container reports for one exec: the bytes
+// on the merged stdout+stderr stream (both providers fold stderr into it)
+// and the exit status ExecInspect will report for that exec id.
+type execOutcome struct {
+	output   string
+	exitCode int
+}
+
 // wakeMemoryContainer answers `cat <path>` and `ls -1 <dir>` from a
 // path→content map, synthesising the listing from the map keys the way a
 // real container would, and records every command issued so a test can
 // assert on the exact read set (and on how many execs it took).
+//
+// #1637: failures are modelled the way a container actually produces them
+// — diagnostic text on the merged stream AND a non-zero exit status —
+// because "the text looked like a listing" was exactly the assumption that
+// lost an agent its daily memory on a glibc image.
 type wakeMemoryContainer struct {
 	*mockContainer
-	mu   sync.Mutex
-	cmds [][]string
+	mu    sync.Mutex
+	cmds  [][]string
+	files map[string]string
+	// listFail / readFail override the happy path for one dir / one file.
+	listFail map[string]execOutcome
+	readFail map[string]execOutcome
+	// exits maps an exec id to the status ExecInspect reports for it.
+	exits map[string]int
+	seq   int
 }
 
 func newWakeMemoryContainer(files map[string]string) *wakeMemoryContainer {
-	reply := func(body string) (*provider.ExecResult, error) {
-		return &provider.ExecResult{
-			ExecID: "wake",
-			Reader: io.NopCloser(strings.NewReader(body)),
-		}, nil
+	wc := &wakeMemoryContainer{
+		mockContainer: &mockContainer{},
+		files:         files,
+		listFail:      map[string]execOutcome{},
+		readFail:      map[string]execOutcome{},
+		exits:         map[string]int{},
 	}
-	wc := &wakeMemoryContainer{mockContainer: &mockContainer{}}
 	wc.mockContainer.execFn = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 		wc.mu.Lock()
+		defer wc.mu.Unlock()
 		wc.cmds = append(wc.cmds, append([]string(nil), cfg.Cmd...))
-		wc.mu.Unlock()
 
 		switch {
 		case len(cfg.Cmd) == 2 && cfg.Cmd[0] == "cat":
 			p := cfg.Cmd[1]
-			if body, ok := files[p]; ok {
-				return reply(body)
+			if out, ok := wc.readFail[p]; ok {
+				return wc.replyLocked(out)
 			}
-			return reply("cat: " + p + ": No such file or directory")
+			if body, ok := wc.files[p]; ok {
+				return wc.replyLocked(execOutcome{output: body})
+			}
+			// GNU coreutils: diagnostic on stderr, exit 1.
+			return wc.replyLocked(execOutcome{output: "cat: " + p + ": No such file or directory", exitCode: 1})
 		case len(cfg.Cmd) == 3 && cfg.Cmd[0] == "ls" && cfg.Cmd[1] == "-1":
 			dir := cfg.Cmd[2]
+			if out, ok := wc.listFail[dir]; ok {
+				return wc.replyLocked(out)
+			}
 			var names []string
-			for p := range files {
+			for p := range wc.files {
 				if path.Dir(p) == dir {
 					names = append(names, path.Base(p))
 				}
 			}
 			if len(names) == 0 {
-				return reply("ls: " + dir + ": No such file or directory")
+				return wc.replyLocked(execOutcome{output: "ls: " + dir + ": No such file or directory", exitCode: 2})
 			}
 			sort.Strings(names)
-			return reply(strings.Join(names, "\n"))
+			return wc.replyLocked(execOutcome{output: strings.Join(names, "\n")})
 		}
-		return reply("")
+		return wc.replyLocked(execOutcome{})
 	}
 	return wc
+}
+
+// replyLocked mints a per-exec id so ExecInspect can report that exec's own
+// exit status. Caller holds wc.mu.
+func (wc *wakeMemoryContainer) replyLocked(out execOutcome) (*provider.ExecResult, error) {
+	wc.seq++
+	id := fmt.Sprintf("wake-%d", wc.seq)
+	wc.exits[id] = out.exitCode
+	return &provider.ExecResult{
+		ExecID: id,
+		Reader: io.NopCloser(strings.NewReader(out.output)),
+	}, nil
+}
+
+func (wc *wakeMemoryContainer) ExecInspect(_ context.Context, execID string) (bool, int, error) {
+	wc.mu.Lock()
+	defer wc.mu.Unlock()
+	code, ok := wc.exits[execID]
+	if !ok {
+		return false, 0, fmt.Errorf("wake fake: unknown exec %q", execID)
+	}
+	return false, code, nil
+}
+
+// failList makes `ls -1 <dir>` behave like a real failed listing.
+func (wc *wakeMemoryContainer) failList(dir, output string, exitCode int) {
+	wc.mu.Lock()
+	defer wc.mu.Unlock()
+	wc.listFail[dir] = execOutcome{output: output, exitCode: exitCode}
+}
+
+// failRead makes `cat <path>` behave like a real failed read.
+func (wc *wakeMemoryContainer) failRead(p, output string, exitCode int) {
+	wc.mu.Lock()
+	defer wc.mu.Unlock()
+	wc.readFail[p] = execOutcome{output: output, exitCode: exitCode}
 }
 
 // catPaths returns every path the orchestrator issued a `cat` for.
@@ -122,6 +185,12 @@ func TestBuildMemoryContext_ScansBackToLastActiveDay(t *testing.T) {
 	today := now.Format("2006-01-02")
 	dayAgo := func(n int) string { return now.AddDate(0, 0, -n).Format("2006-01-02") }
 
+	// #1637: the boundary rows are written as literal day counts, NOT as
+	// dailyLogLookbackDays±n. Deriving them from the constant they guard
+	// made the pair pass for ANY value of it — a 5-day window and a 90-day
+	// window were equally "correct". 30 in / 31 out is the behaviour the
+	// PRD promises; if the constant moves, exactly one of these two rows
+	// goes red and the change has to be argued for.
 	tests := []struct {
 		name       string
 		lastActive int // days ago; 0 == today
@@ -132,8 +201,9 @@ func TestBuildMemoryContext_ScansBackToLastActiveDay(t *testing.T) {
 		{name: "yesterday", lastActive: 1, wantGap: true, wantRead: true},
 		{name: "three days", lastActive: 3, wantGap: true, wantRead: true},
 		{name: "a week idle", lastActive: 7, wantGap: true, wantRead: true},
-		{name: "at the lookback edge", lastActive: dailyLogLookbackDays, wantGap: true, wantRead: true},
-		{name: "beyond the lookback", lastActive: dailyLogLookbackDays + 15, wantGap: true, wantRead: false},
+		{name: "30 days back is still in the window", lastActive: 30, wantGap: true, wantRead: true},
+		{name: "31 days back is out of the window", lastActive: 31, wantGap: true, wantRead: false},
+		{name: "half a year back", lastActive: 180, wantGap: true, wantRead: false},
 	}
 
 	for _, tc := range tests {
@@ -259,16 +329,22 @@ func TestBuildMemoryContext_DailyWindowCostsOneListing(t *testing.T) {
 		}
 	}
 
-	dailyCats := 0
+	// #1637: this used to assert `dailyCats > 4` while the comment claimed
+	// "one agent daily + one crew daily" — a per-day probe loop could have
+	// doubled the reads and still passed. The listing already told us
+	// exactly which day holds notes and that no <today>.md exists, so the
+	// read set is fully determined: those two files and nothing else.
+	var dailyCats []string
 	for _, p := range mc.catPaths() {
 		if strings.Contains(p, "/daily/") {
-			dailyCats++
+			dailyCats = append(dailyCats, p)
 		}
 	}
-	// One agent daily + one crew daily. Anything materially larger means
-	// we went back to probing day-by-day.
-	if dailyCats > 4 {
-		t.Errorf("too many daily cat execs (%d) — the scan is probing per-day: %v", dailyCats, mc.catPaths())
+	sort.Strings(dailyCats)
+	want := []string{agentDaily + "/" + lastDate + ".md", crewDaily + "/" + lastDate + ".md"}
+	sort.Strings(want)
+	if strings.Join(dailyCats, ",") != strings.Join(want, ",") {
+		t.Errorf("daily reads should be exactly the two listed days\n got: %v\nwant: %v", dailyCats, want)
 	}
 }
 
@@ -333,7 +409,10 @@ func TestBuildMemoryContext_NoDailyLogsNoGap(t *testing.T) {
 // has been away, and the one an early return would silently drop.
 func TestBuildMemoryContext_GapSurvivesEmptySnapshot(t *testing.T) {
 	now := time.Now().UTC()
-	old := now.AddDate(0, 0, -(dailyLogLookbackDays + 60)).Format("2006-01-02")
+	// Literal, not dailyLogLookbackDays+n: a day count derived from the
+	// constant is out of window by construction and would assert nothing
+	// about where the boundary actually sits (#1637).
+	old := now.AddDate(0, 0, -120).Format("2006-01-02")
 
 	mc := newWakeMemoryContainer(map[string]string{
 		"/crew/agents/wake-agent/.memory/daily/" + old + ".md": "ancient notes",
