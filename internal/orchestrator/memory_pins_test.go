@@ -88,7 +88,7 @@ func TestBuildAgentMemoryBlock_InjectsAgentPins(t *testing.T) {
 		CrewID:      "crew1",
 		CrewSlug:    "alpha-crew",
 	}
-	block := o.buildAgentMemoryBlock(context.Background(), req, 4000, "2026-07-14")
+	block, _ := o.buildAgentMemoryBlock(context.Background(), req, 4000, "2026-07-14")
 	if !strings.Contains(block, "[AGENT MEMORY]") {
 		t.Fatalf("missing [AGENT MEMORY] header in %q", block)
 	}
@@ -114,7 +114,7 @@ func TestBuildAgentMemoryBlock_AgentPinsOnly_RendersBlock(t *testing.T) {
 	})
 	o := New(mc, newMemState(), slog.Default())
 	req := AgentRunRequest{ContainerID: "c1", AgentSlug: "agent-1", AgentID: "a1", CrewID: "crew1"}
-	block := o.buildAgentMemoryBlock(context.Background(), req, 4000, "2026-07-14")
+	block, _ := o.buildAgentMemoryBlock(context.Background(), req, 4000, "2026-07-14")
 	if !strings.Contains(block, "[AGENT MEMORY]") {
 		t.Fatalf("lone agent pin file should still render [AGENT MEMORY]: %q", block)
 	}

@@ -34,6 +34,16 @@ const (
 	minTruncationChars        = 100 // don't bother with sections smaller than this
 )
 
+// dailyLogLookbackDays bounds the backwards scan for the last day that
+// actually has daily notes (#1628). The old fixed yesterday/today pair
+// went blind the moment an agent idled for two days; an unbounded walk
+// would instead let a long-dormant agent boot on notes that predate
+// everything else in its prompt. 30 days matches the journal compaction
+// cutoff (consolidate/compact.go), so the eager snapshot and the
+// episodic tier fall off at the same horizon — past it the agent is told
+// the date and pointed at memory.read / memory.search instead.
+const dailyLogLookbackDays = 30
+
 // WorkspaceMemoryReader is the narrow interface buildWorkspaceMemoryBlock
 // uses to render a [WORKSPACE MEMORY] block. The concrete impl lives in
 // internal/memory.WorkspaceMemory; this interface keeps the orchestrator
@@ -113,7 +123,7 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 
 	// --- Agent memory gets remainder (dynamic reclaim from empty tiers) ---
 	agentBudget := remaining - workspaceUsed
-	agentBlock := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
+	agentBlock, gap := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
 
 	// If no memory files at all, the PERSONA + peer card blocks are
 	// still relevant — a fresh agent with no AGENT.md still has an
@@ -121,6 +131,11 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	// the instructions block.
 	if agentBlock == "" && crewBlock == "" && pinsBlock == "" && workspaceBlock == "" {
 		var early strings.Builder
+		// #1628: an agent whose only daily logs predate the lookback has
+		// nothing to render but is precisely the case that needs telling
+		// how long it has been away — otherwise the empty snapshot reads
+		// as "nothing ever happened".
+		early.WriteString(gap.render(today))
 		if pb := o.buildPersonaBlock(ctx, req); pb != "" {
 			early.WriteString(pb)
 		}
@@ -135,6 +150,15 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 
 	var b strings.Builder
+	// #1628: the gap notice leads, so the model reads "your last session
+	// was N days ago" before it reads the notes from that session and
+	// mistakes them for something it just finished. Unbudgeted like
+	// [PERSONA] — it is ~600 bytes, fully synthesized from a date this
+	// process parsed itself (never from file content), and it is the one
+	// line that stops a stale snapshot being read as a current one.
+	if gapBlock := gap.render(today); gapBlock != "" {
+		b.WriteString(gapBlock)
+	}
 	if agentBlock != "" {
 		b.WriteString(agentBlock)
 	}
@@ -245,11 +269,158 @@ func (o *Orchestrator) buildCostAwarenessBlock(ctx context.Context, req AgentRun
 	)
 }
 
+// memoryGap describes how long the agent has been away, derived from the
+// newest daily log that exists — not from a clock the orchestrator does
+// not have. Zero value means "no gap to report" and renders to "".
+type memoryGap struct {
+	lastActive string // YYYY-MM-DD of the newest day with notes; "" = unknown
+	days       int    // whole days between lastActive and today; >0 when set
+	injected   bool   // whether that day's notes made it into the prompt
+}
+
+// render formats the [MEMORY GAP] block. Every field is either a date
+// this process parsed with time.Parse or an int it computed, so the block
+// carries no file-authored bytes and needs no injection scan.
+func (g memoryGap) render(today string) string {
+	if g.lastActive == "" || g.days <= 0 {
+		return ""
+	}
+	unit := "days"
+	if g.days == 1 {
+		unit = "day"
+	}
+	var tail string
+	if g.injected {
+		tail = "The daily log below is from that day — it is not a session you just finished.\n" +
+			"Anything that happened since then is not in this snapshot."
+	} else {
+		tail = fmt.Sprintf(
+			"That day is older than the %d-day boot window, so its notes are NOT below.\n"+
+				"Pull it with memory.read tier=daily key=%s if you need it.",
+			dailyLogLookbackDays, g.lastActive)
+	}
+	return fmt.Sprintf(`[MEMORY GAP]
+Today is %s. Your last recorded activity was %s — %d %s ago.
+%s
+Before you start: memory.search the project or task you are picking up, and
+conversation.search what was last discussed with you. Do not assume the snapshot
+below is current.
+[END MEMORY GAP]
+
+`, today, g.lastActive, g.days, unit, tail)
+}
+
+// dailyWindow is the read plan for one daily-log directory, resolved from
+// a single `ls` (#1628). Probing candidate days with `cat` would cost one
+// container exec (~85 ms) per day walked back; one listing costs one.
+type dailyWindow struct {
+	listed   bool   // the listing succeeded and is authoritative
+	hasToday bool   // daily/<today>.md exists
+	prior    string // newest prior day WITHIN the lookback — safe to read
+	newest   string // newest prior day at all, lookback or not — for the gap notice
+}
+
+// resolveDailyWindow lists dailyDir once and picks which day files are
+// worth a read. On a listing failure — an old image without `ls`, a
+// directory that does not exist yet, a provider that swallows the output
+// — it degrades to the pre-#1628 behaviour (yesterday + today) rather
+// than emitting nothing, so a broken listing can never make an agent's
+// memory *worse* than it was before the backwards scan existed.
+func (o *Orchestrator) resolveDailyWindow(ctx context.Context, containerID, dailyDir, today string) dailyWindow {
+	todayT, err := time.Parse("2006-01-02", today)
+	if err != nil {
+		return dailyWindow{hasToday: true}
+	}
+	// Derived from the caller's `today`, not from a second clock read, so
+	// the fallback pair can never straddle a UTC midnight roll.
+	fallback := dailyWindow{
+		hasToday: true,
+		prior:    todayT.AddDate(0, 0, -1).Format("2006-01-02"),
+	}
+
+	names, err := o.listContainerDir(ctx, containerID, dailyDir)
+	if err != nil || len(names) == 0 {
+		return fallback
+	}
+
+	w := dailyWindow{listed: true}
+	oldest := todayT.AddDate(0, 0, -dailyLogLookbackDays)
+	for _, name := range names {
+		day, ok := parseDailyLogName(name)
+		if !ok {
+			continue
+		}
+		d, err := time.Parse("2006-01-02", day)
+		if err != nil || d.After(todayT) {
+			continue
+		}
+		if d.Equal(todayT) {
+			w.hasToday = true
+			continue
+		}
+		if day > w.newest {
+			w.newest = day
+		}
+		if !d.Before(oldest) && day > w.prior {
+			w.prior = day
+		}
+	}
+	return w
+}
+
+// parseDailyLogName accepts exactly `YYYY-MM-DD.md` and returns the date
+// part. The round-trip through time.Parse/Format is deliberate: the name
+// comes from a container-writable directory, and every downstream use
+// (section labels, the [MEMORY GAP] text, the path we then cat) embeds
+// it — so only a byte-stable, calendar-valid date is ever let through.
+func parseDailyLogName(name string) (string, bool) {
+	const suffix = ".md"
+	if len(name) != len("2006-01-02")+len(suffix) || !strings.HasSuffix(name, suffix) {
+		return "", false
+	}
+	day := strings.TrimSuffix(name, suffix)
+	d, err := time.Parse("2006-01-02", day)
+	if err != nil || d.Format("2006-01-02") != day {
+		return "", false
+	}
+	return day, true
+}
+
+// daysSince returns whole days between two YYYY-MM-DD dates.
+func daysSince(from, to string) (int, bool) {
+	f, err := time.Parse("2006-01-02", from)
+	if err != nil {
+		return 0, false
+	}
+	t, err := time.Parse("2006-01-02", to)
+	if err != nil {
+		return 0, false
+	}
+	return int(t.Sub(f).Hours() / 24), true
+}
+
+// priorDailyLabel labels a back-scanned daily section with its real date
+// and its age, so the model can tell week-old notes from this morning's.
+// The old label said "(yesterday)" whether or not the file was from
+// yesterday — after a scan that can land on any day, the date has to be
+// on the label or the agent has no way to place what it is reading.
+func priorDailyLabel(prefix, day, today string) string {
+	n, ok := daysSince(day, today)
+	switch {
+	case !ok || n <= 0:
+		return fmt.Sprintf("%s: %s", prefix, day)
+	case n == 1:
+		return fmt.Sprintf("%s: %s (yesterday)", prefix, day)
+	default:
+		return fmt.Sprintf("%s: %s (%d days ago — last day with notes)", prefix, day, n)
+	}
+}
+
 // buildAgentMemoryBlock reads per-agent memory files and returns a formatted
-// block with the [AGENT MEMORY] markers. Returns empty string if no files exist.
-func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) string {
+// block with the [AGENT MEMORY] markers, plus the gap between the newest day
+// with notes and today. Returns an empty string if no files exist.
+func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) (string, memoryGap) {
 	memoryDir := path.Join("/crew", "agents", req.AgentSlug, ".memory")
-	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
@@ -258,8 +429,18 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 	if err != nil {
 		o.logger.Warn("failed to read agent memory", "error", err, "agent", req.AgentSlug)
 	}
-	yesterdayLog, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", yesterday+".md"))
-	todayLog, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", today+".md"))
+	// #1628: the daily pair used to be hardcoded to yesterday+today, so an
+	// agent idle for two days booted with an empty daily section while its
+	// last working notes sat on disk. Resolve the real window from one
+	// listing and read only the days that actually hold something.
+	window := o.resolveDailyWindow(readCtx, req.ContainerID, path.Join(memoryDir, "daily"), today)
+	var priorLog, todayLog string
+	if window.prior != "" {
+		priorLog, _ = o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", window.prior+".md"))
+	}
+	if window.hasToday {
+		todayLog, _ = o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", today+".md"))
+	}
 	// PR-F7: BRIEF.md is written by a parent LEAD via ApplyBrief when
 	// it hires / assigns a sub-agent. Read it alongside AGENT.md so
 	// the curated brief surfaces on the sub-agent's first turn. Empty
@@ -279,11 +460,34 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 		{"PINNED (memory.write tier=pins — always in context)", pinsMD},
 		{"BRIEF.md (parent-issued brief)", briefMD},
 		{"AGENT.md (long-term memory)", agentMD},
-		{fmt.Sprintf("Daily log: %s (yesterday)", yesterday), yesterdayLog},
-		{fmt.Sprintf("Daily log: %s (today)", today), todayLog},
+	}
+	if priorLog != "" {
+		sections = append(sections, memorySection{priorDailyLabel("Daily log", window.prior, today), priorLog})
+	}
+	sections = append(sections, memorySection{fmt.Sprintf("Daily log: %s (today)", today), todayLog})
+
+	// The gap is derived from what actually has content, in order of
+	// confidence: notes written today mean no gap at all; otherwise the
+	// newest day we managed to read; otherwise — only when the listing was
+	// authoritative — the newest day we saw but could not read because it
+	// fell outside the lookback.
+	var gap memoryGap
+	switch {
+	case todayLog != "":
+	case priorLog != "":
+		gap = memoryGap{lastActive: window.prior, injected: true}
+	case window.listed && window.newest != "":
+		gap = memoryGap{lastActive: window.newest}
+	}
+	if gap.lastActive != "" {
+		if n, ok := daysSince(gap.lastActive, today); ok {
+			gap.days = n
+		} else {
+			gap = memoryGap{}
+		}
 	}
 
-	return assembleSections("[AGENT MEMORY]", "[END AGENT MEMORY]", sections, budget)
+	return assembleSections("[AGENT MEMORY]", "[END AGENT MEMORY]", sections, budget), gap
 }
 
 // buildCrewMemoryBlock reads crew shared memory files and returns a formatted
@@ -304,12 +508,25 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 	defer cancel()
 
 	crewMD, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "CREW.md"))
-	crewDaily, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "daily", today+".md"))
+	// #1628: this block used to read ONLY daily/<today>.md, so a crew that
+	// last worked on Friday handed a Monday-morning agent nothing. Same
+	// one-listing scan as the agent tier.
+	window := o.resolveDailyWindow(readCtx, req.ContainerID, path.Join(crewMemDir, "daily"), today)
+	var crewPrior, crewDaily string
+	if window.prior != "" {
+		crewPrior, _ = o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "daily", window.prior+".md"))
+	}
+	if window.hasToday {
+		crewDaily, _ = o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "daily", today+".md"))
+	}
 
 	sections := []memorySection{
 		{"CREW.md (crew-wide knowledge)", crewMD},
-		{fmt.Sprintf("Crew daily: %s", today), crewDaily},
 	}
+	if crewPrior != "" {
+		sections = append(sections, memorySection{priorDailyLabel("Crew daily", window.prior, today), crewPrior})
+	}
+	sections = append(sections, memorySection{fmt.Sprintf("Crew daily: %s (today)", today), crewDaily})
 
 	// LEAD-only F4.5 outcomes digest. Read lessons.md from the crew-
 	// shared dir, filter to source=mission_outcome (other sources are
@@ -528,17 +745,71 @@ GUIDELINES:
 - Before starting complex tasks, check your memory for relevant past context.
 - When updating AGENT.md, ADD new information. Do not delete existing entries unless outdated.
 
+RECALLING WHAT IS NOT SHOWN ABOVE:
+- The snapshot above is a bounded window, not your whole history. Three tools reach the rest:
+  - memory.search — keyword search across your memory tiers (AGENT, CREW, daily, pins, peers, lessons).
+  - conversation.search — keyword search across your own past chat sessions.
+  - memory.read tier=daily key=YYYY-MM-DD — one specific day's log, in full.
+- If a [MEMORY GAP] block appears above, time has passed since your last session.
+  Before you start the task, run memory.search for the project or task you are picking
+  up and conversation.search for what was last discussed with you. Treat the snapshot
+  as stale until you have.
+
 CREW SHARED MEMORY:
 - Crew-wide knowledge is stored at /crew/shared/.memory/
 - CREW.md: crew-level decisions, conventions, and shared context (Lead maintains).
 - /crew/shared/.memory/daily/{date}.md: crew daily log.
 - /crew/shared/.memory/topics/*.md: domain-specific crew knowledge.
-- The boot snapshot above already includes the relevant crew memory tier;
-  mid-session recall via native memory tools lands in PR-A (F1).
 - If you are the Lead: write important crew decisions to /crew/shared/.memory/CREW.md.
 - If you are an Agent: read crew memory for context. Write personal notes to YOUR agent memory.
 - Do not duplicate facts across agent and crew memory.
 [END MEMORY INSTRUCTIONS]`, today, today)
+}
+
+// listContainerDir lists a directory inside the container with a SINGLE
+// Exec("ls", "-1", dir). This is the whole point of the #1628 scan: one
+// round trip tells us every day that has notes, where probing candidate
+// dates with `cat` would cost one exec (~85 ms here) per day walked back.
+//
+// Returns an error when the directory does not exist or `ls` failed —
+// callers degrade to a fixed path list rather than assuming "no notes".
+// Entry names are returned raw; callers must validate them before using
+// them to build a path (see parseDailyLogName).
+func (o *Orchestrator) listContainerDir(ctx context.Context, containerID, dir string) ([]string, error) {
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"ls", "-1", dir},
+		User:        "1001:1001",
+	}
+
+	result, err := o.container.Exec(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("exec ls %s: %w", dir, err)
+	}
+	defer result.Reader.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, result.Reader); err != nil {
+		return nil, fmt.Errorf("read listing %s: %w", dir, err)
+	}
+
+	out := strings.TrimSpace(buf.String())
+	// Exec merges stderr into the stream, so a missing directory arrives
+	// as `ls: <dir>: No such file or directory` on an otherwise empty
+	// listing. Match the literal shape the same way readContainerFile
+	// matches cat's, so a file legitimately named "ls: ..." cannot make a
+	// real listing look like a failure.
+	if out == "" || strings.HasPrefix(out, "ls: "+dir+":") || strings.HasPrefix(out, "ls: cannot access") {
+		return nil, fmt.Errorf("list %s: no listing available", dir)
+	}
+
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 // readContainerFile reads a file from the container via Exec("cat", path).
