@@ -679,7 +679,9 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 	// the update survives the caller's deadline (auth has already
 	// been accepted); 5s bounds a wedged SQLite without leaking
 	// unbounded goroutines.
+	finish := beginBackgroundWork()
 	go func(id string) {
+		defer finish()
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if _, ierr := db.ExecContext(bgCtx,

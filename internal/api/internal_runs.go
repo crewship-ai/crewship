@@ -260,7 +260,9 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	// wired nil) or the workspace has the feature flag off.
 	if body.Status != "CANCELLED" && h.runVerdict != nil {
 		h.verdictWG.Add(1)
+		finish := beginBackgroundWork()
 		go func() {
+			defer finish()
 			defer h.verdictWG.Done()
 			h.generateRunVerdict(context.Background(), workspaceID, agentID, runID)
 		}()

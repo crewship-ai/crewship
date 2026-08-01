@@ -274,8 +274,13 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run the sub-agent asynchronously
+	// Both handles, for the reason given in auth.go's mail send: the
+	// per-handler WaitGroup serves callers that know about it, and
+	// beginBackgroundWork serves the fixture drain that does not.
 	h.dispatchWG.Add(1)
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		defer h.dispatchWG.Done()
 		h.runAssignment(context.Background(), assignmentID, body, target)
 	}()

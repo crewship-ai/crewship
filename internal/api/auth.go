@@ -559,8 +559,14 @@ func (h *AuthHandler) notifyExistingAccount(ctx context.Context, email string) {
 		return
 	}
 	sendCtx := context.WithoutCancel(ctx)
+	// Registered with both: mailWG is the caller-facing handle
+	// (WaitForPendingMail), beginBackgroundWork is the package-wide
+	// drain that covers tests which never learn this handler has a
+	// waiter of its own. See background.go.
 	h.mailWG.Add(1)
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		defer h.mailWG.Done()
 		sendCtx, cancel := context.WithTimeout(sendCtx, 30*time.Second)
 		defer cancel()

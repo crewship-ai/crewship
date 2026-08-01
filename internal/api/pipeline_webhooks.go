@@ -560,7 +560,9 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	exec := h.newExecutor()
 	dispatchCtx := h.webhookDispatchContext()
 	h.webhookDispatchWG.Add(1)
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		defer h.webhookDispatchWG.Done()
 		res, runErr := exec.Run(dispatchCtx, pipeline.RunInput{
 			PipelineID: wh.TargetPipelineID,

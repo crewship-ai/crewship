@@ -688,7 +688,9 @@ func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
 	// Preserve OTel + auth context from the request while shedding its
 	// cancellation -- the 202 has already been flushed when this fires.
 	parentCtx := context.WithoutCancel(r.Context())
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		ctx, cancel := context.WithTimeout(parentCtx, 2*time.Minute)
 		defer cancel()
 		if err := SyncMCPRegistry(ctx, h.db, h.logger); err != nil {

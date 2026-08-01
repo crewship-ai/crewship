@@ -292,7 +292,9 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Start mission engine (async)
 	if h.missionEngine != nil {
+		finish := beginBackgroundWork()
 		go func() {
+			defer finish()
 			if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
 				h.logger.Error("start issue: engine", "error", err, "issue", ident)
 			}

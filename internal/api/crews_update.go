@@ -458,7 +458,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Mirrors the pattern used in webhook / eval / consolidate
 		// handler-spawned goroutines (audit PR #481).
 		ctx := context.WithoutCancel(r.Context())
-		go h.restartCrewContainer(ctx, crewID)
+		finish := beginBackgroundWork()
+		go func() {
+			defer finish()
+			h.restartCrewContainer(ctx, crewID)
+		}()
 	}
 }
 

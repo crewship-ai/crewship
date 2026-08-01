@@ -123,7 +123,9 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	// fired, the DB write recording that failure still has a live
 	// context — otherwise the row is stuck in "running" forever.
 	parentCtx := context.WithoutCancel(r.Context())
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		workerCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 
@@ -246,7 +248,9 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 	// has 10 minutes, but each status write gets its own fresh 5s
 	// context so the terminal row write survives worker deadline hit.
 	parentCtx := context.WithoutCancel(r.Context())
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		workerCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
 
