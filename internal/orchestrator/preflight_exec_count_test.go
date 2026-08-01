@@ -224,9 +224,12 @@ func TestPreparePreflightDirs_ExecCountDoesNotScaleWithSkills(t *testing.T) {
 // other per-N fan-out the issue named: injectMCPOAuthTokens wrote one to two
 // execs PER OAuth MCP server, in a loop.
 //
-// fileCreds is false throughout: an `_OAUTH_ACCESS_TOKEN:<uuid>` credential
-// name fails buildCredFileScript's envVarNameRE, which is a live defect in
-// its own right (see the report on #1646) but not one this change touches.
+// fileCreds is false throughout, which keeps the count about the OAuth fan-out
+// alone. It used to be forced: an `_OAUTH_ACCESS_TOKEN:<uuid>` credential name
+// failed buildCredFileScript's envVarNameRE and aborted the batch, so a
+// fileCreds run could not reach this shape at all. That was #1652, fixed —
+// TestPreparePreflightDirs_OAuthMCPBindingDoesNotAbortAFileCredRun covers the
+// combination.
 func TestPreparePreflightDirs_ExecCountDoesNotScaleWithOAuthMCPServers(t *testing.T) {
 	o, c, req := preflightFixture(t)
 	req.Credentials = nil
