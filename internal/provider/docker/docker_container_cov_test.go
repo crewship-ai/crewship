@@ -986,15 +986,22 @@ func TestEnsureCrewRuntime_DefaultHardening(t *testing.T) {
 	// /tmp must be noexec,nosuid like /secrets (defense-in-depth against
 	// executing/setuid-escalating dropped binaries) — see secretsTmpfsSpec.
 	// Token-aware (not substring) so this can't pass with "exec"/"suid" also
-	// present, or with size=500m silently dropped.
+	// present.
 	tmpOpts := map[string]bool{}
 	for _, opt := range strings.Split(hc.Tmpfs["/tmp"], ",") {
 		tmpOpts[opt] = true
 	}
-	for _, want := range []string{"rw", "noexec", "nosuid", "size=500m"} {
+	for _, want := range []string{"rw", "noexec", "nosuid"} {
 		if !tmpOpts[want] {
 			t.Errorf("Tmpfs[/tmp] = %q, missing %q", hc.Tmpfs["/tmp"], want)
 		}
+	}
+	// size is derived from the crew's memory limit (#1636); covTeam leaves
+	// MemoryMB unset, so the provider's 8192 MiB fallback puts /tmp at its
+	// 500 MiB ceiling. The per-crew-size arithmetic is pinned in
+	// TestCrewContainer_TmpfsSizesScaleWithMemoryLimit.
+	if !tmpOpts["size=524288000"] {
+		t.Errorf("Tmpfs[/tmp] = %q, want size=524288000 (500 MiB) for an 8192 MiB crew", hc.Tmpfs["/tmp"])
 	}
 	for _, forbidden := range []string{"exec", "suid"} {
 		if tmpOpts[forbidden] {

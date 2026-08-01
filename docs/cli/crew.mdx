@@ -404,9 +404,6 @@ crewship crew config <slug-or-id> --privileged
 # directly; anything broader is refused with 400.
 crewship crew config <slug-or-id> --cap-add NET_BIND_SERVICE
 
-# Run a tiny init as PID 1 to reap zombies (docker --init)
-crewship crew config <slug-or-id> --init
-
 # Install a start hook that runs on EVERY container start
 crewship crew config <slug-or-id> --init-hook ./init.sh
 
@@ -418,7 +415,7 @@ crewship crew config <slug-or-id> --init-hook ""
 |------|------|---------|-------------|
 | `--privileged` | `bool` | `false` | Run the container privileged. Nulls `no-new-privileges`, drops the read-only rootfs, grants host device access. **Refused with `403`** unless the workspace has `allow_privileged_credentials` set. |
 | `--cap-add` | `[]string` | | Linux capabilities to add. Names normalize across `CAP_`/case forms. Only `NET_BIND_SERVICE` is accepted; broader caps are **refused with `400`** — use privileged mode so the escalation stays visible. Pass no values to clear. |
-| `--init` | `bool` | `false` | Run a tiny init as PID 1 (docker `--init`) to reap zombie processes. |
+| `--init` | `bool` | | **Deprecated no-op.** A tiny init as PID 1 (docker `--init`) is always enabled for crew containers, so there is nothing to switch. The flag is still accepted — it prints a warning and changes nothing — and will be removed in a future release. |
 | `--init-hook` | `string` | | Path to a shell script stored as `postStartCommand` and run on **every** container start as the agent user. Pass an empty value (`--init-hook ""`) to remove it. |
 
 <Warning>

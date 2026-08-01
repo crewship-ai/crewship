@@ -389,6 +389,81 @@ func TestCrewConfigRunE_ClearInitHook(t *testing.T) {
 	}
 }
 
+// #1636: --init is a no-op. HostConfig.Init is unconditional for every crew
+// container since #1630 — PID 1 is `exec sleep infinity`, which never reaps,
+// and every sidecar exec is reparented onto it, so honouring an "off" would
+// reintroduce a zombie leak that ends the crew in `fork: Resource temporarily
+// unavailable`. The flag went on succeeding and writing `"init"` into
+// devcontainer_config that the runtime then ignored: a stored setting the
+// operator can see, change, and never observe an effect from.
+//
+// It now warns and changes nothing. Both halves are asserted — a warning that
+// still PATCHes is the same lie in a friendlier tone.
+func TestCrewConfigRunE_InitFlagIsADeprecatedNoOp(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{
+		"id":                  covCrewIDCli5,
+		"name":                "Backend",
+		"slug":                "backend",
+		"devcontainer_config": `{"image":"debian:bookworm-slim"}`,
+	}))
+	stub.OnPatch("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{"ok": true}))
+	covSetFlagCli5(t, crewConfigCmd, "init", "true")
+
+	var err error
+	out := covCaptureAll(t, func() { err = crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "--init") || !strings.Contains(out, "no-op") {
+		t.Errorf("output = %q, want a warning naming --init and saying it is a no-op", out)
+	}
+	if calls := stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli5); len(calls) != 0 {
+		t.Errorf("--init issued %d PATCH call(s); it must not write anything", len(calls))
+	}
+}
+
+// --init must not suppress a real security change that rides along with it:
+// the other knobs still apply, and the stored config still must not gain an
+// "init" key.
+func TestCrewConfigRunE_InitFlagDoesNotBlockOtherSecurityFlags(t *testing.T) {
+	stub := covSetupCli5(t)
+	covResetCrewConfigFlags(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{
+		"id":                  covCrewIDCli5,
+		"name":                "Backend",
+		"slug":                "backend",
+		"devcontainer_config": `{"image":"debian:bookworm-slim"}`,
+	}))
+	stub.OnPatch("/api/v1/crews/"+covCrewIDCli5, clitest.JSONResponse(200, map[string]any{"ok": true}))
+	covSetFlagCli5(t, crewConfigCmd, "init", "true")
+	covSetCapAdd(t, "NET_BIND_SERVICE")
+
+	var err error
+	covCaptureAll(t, func() { err = crewConfigCmd.RunE(crewConfigCmd, []string{covCrewIDCli5}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	calls := stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli5)
+	if len(calls) != 1 {
+		t.Fatalf("PATCH calls = %d, want 1 (--cap-add must still apply)", len(calls))
+	}
+	var body map[string]string
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	var sent map[string]any
+	if jsonErr := json.Unmarshal([]byte(body["devcontainer_config"]), &sent); jsonErr != nil {
+		t.Fatalf("patched config not JSON: %v", jsonErr)
+	}
+	if _, present := sent["init"]; present {
+		t.Errorf("patched config carries init=%v; the runtime ignores it, so nothing may store it", sent["init"])
+	}
+	caps, _ := sent["capAdd"].([]any)
+	if len(caps) != 1 || caps[0] != "NET_BIND_SERVICE" {
+		t.Errorf("capAdd = %v, want [NET_BIND_SERVICE]", sent["capAdd"])
+	}
+}
+
 func TestCrewConfigRunE_InitHookMissingFile(t *testing.T) {
 	covSetupCli5(t)
 	covResetCrewConfigFlags(t)

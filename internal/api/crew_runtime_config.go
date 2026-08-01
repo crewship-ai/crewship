@@ -151,7 +151,18 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 	if reqs != nil {
 		cfg.LoginPath = reqs.LoginPath
 		cfg.Privileged = reqs.Privileged
-		cfg.Init = reqs.Init
+		// reqs.Init is deliberately NOT plumbed (#1636). The docker provider
+		// sets HostConfig.Init unconditionally for every crew container
+		// (#1630) because PID 1 is `exec sleep infinity`, which never calls
+		// wait(), and the sidecar is always an orphan reparented onto it —
+		// so an "init: false" would restore a monotonic zombie leak ending in
+		// `fork: Resource temporarily unavailable`, and an "init: true" is
+		// redundant. Carrying the value here made `crewship crew config
+		// <crew> --init` look like a working switch: the row changed and the
+		// runtime ignored it. The flag is now a warned no-op
+		// (cmd/crewship/cmd_crew_config.go) and the requirement stops here.
+		// AggregatedRequirements.Init is still read by isEmptyRequirements
+		// (crew_provisioning_jobs.go), which is why the field itself stays.
 		cfg.CapAdd = append(cfg.CapAdd, reqs.CapAdd...)
 		cfg.SecurityOpt = append(cfg.SecurityOpt, reqs.SecurityOpt...)
 		for _, m := range reqs.Mounts {

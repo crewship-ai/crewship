@@ -11,9 +11,12 @@ package docker
 
 import (
 	"context"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/moby/moby/api/types/container"
 )
 
@@ -21,15 +24,40 @@ import (
 // create request for the agent container.
 func crewCreate(t *testing.T, mutate func(cfg *covRT)) *container.CreateRequest {
 	t.Helper()
+	return crewCreateFor(t, covTeam(), mutate)
+}
+
+// crewCreateFor is crewCreate with a caller-supplied CrewConfig, so the
+// memory-derived sizing tests can drive several crew sizes through the real
+// buildCrewContainerConfig rather than calling the helper directly.
+func crewCreateFor(t *testing.T, team provider.CrewConfig, mutate func(cfg *covRT)) *container.CreateRequest {
+	t.Helper()
 	f := &covRT{}
 	if mutate != nil {
 		mutate(f)
 	}
 	p := f.provider(t, covRTConfig(t))
-	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err != nil {
+	if _, err := p.EnsureCrewRuntime(context.Background(), team); err != nil {
 		t.Fatalf("EnsureCrewRuntime: %v", err)
 	}
 	return f.realCreate(t)
+}
+
+// tmpfsSizeBytes extracts the size= option (in bytes) from a HostConfig.Tmpfs
+// spec such as "rw,noexec,nosuid,size=357913942".
+func tmpfsSizeBytes(t *testing.T, spec string) int64 {
+	t.Helper()
+	for _, opt := range strings.Split(spec, ",") {
+		if v, ok := strings.CutPrefix(opt, "size="); ok {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				t.Fatalf("tmpfs spec %q: size= is not a byte count: %v", spec, err)
+			}
+			return n
+		}
+	}
+	t.Fatalf("tmpfs spec %q carries no size= option", spec)
+	return 0
 }
 
 // PID 1 in the crew container is `exec sleep infinity` (scripts/entrypoint.sh)
@@ -60,18 +88,21 @@ func TestCrewContainer_InitIsAlwaysOn(t *testing.T) {
 // `uid=1001(agent) gid=1001(agent) groups=1001(agent)` — no supplementary
 // groups at all, because the `User: "1001:1001"` colon form makes moby's
 // Sgids branch unreachable.
+//
+// The gids are pinned as LITERALS, not as crewGroupGID/sidecarGroupGID: the
+// previous version of this test compared the request against the very
+// constants that produced it, so `crewGroupGID = "0"` — root as a
+// supplementary group on every crew exec — passed unchanged (#1636). 1001 is
+// the uid/gid buildChownInitCmd chowns the bind mounts to and 1002 is the
+// sidecar group the setgid .memory subtrees carry; changing either without
+// changing those is a bug, so this test is meant to fail on it.
 func TestCrewContainer_GroupAddCarriesCrewAndSidecarGIDs(t *testing.T) {
 	t.Parallel()
 
 	req := crewCreate(t, nil)
-	got := map[string]bool{}
-	for _, g := range req.HostConfig.GroupAdd {
-		got[g] = true
-	}
-	for _, want := range []string{crewGroupGID, sidecarGroupGID} {
-		if !got[want] {
-			t.Errorf("GroupAdd = %v, missing gid %s", req.HostConfig.GroupAdd, want)
-		}
+	want := []string{"1001", "1002"}
+	if !slices.Equal(req.HostConfig.GroupAdd, want) {
+		t.Errorf("GroupAdd = %v, want %v (crew gid then sidecar gid)", req.HostConfig.GroupAdd, want)
 	}
 }
 
@@ -103,6 +134,15 @@ func TestCrewContainer_SwapIsDisabled(t *testing.T) {
 // crashing agent writes a core dump containing every credential in its exec
 // environment straight onto host disk, defeating the entire /secrets-as-tmpfs
 // design (docker.go secretsTmpfsSpec).
+//
+// Every limit is pinned to its exact value. The first version of this test
+// checked nofile/nproc/fsize with an aggregate "positive, soft<=hard, nofile
+// hard below 1<<20" predicate, which survived every value-destroying mutation
+// that matters (#1636): `fsize 4<<10` SIGXFSZs the container on any write past
+// 4 KiB — npm install, git clone, any agent-authored file — and `nproc 1`
+// means no agent run can fork at all. Both satisfied that predicate. A rlimit
+// is a number, so the test asserts the number; the reasoning for each one is
+// at crewUlimits in docker.go.
 func TestCrewContainer_Ulimits(t *testing.T) {
 	t.Parallel()
 
@@ -113,16 +153,17 @@ func TestCrewContainer_Ulimits(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		wantSoft   int64
-		wantHard   int64
-		wantExact  bool // core must be exactly 0/0; the rest only need to be bounded
-		mustBeSane bool
+		name     string
+		wantSoft int64
+		wantHard int64
 	}{
-		{name: "core", wantSoft: 0, wantHard: 0, wantExact: true},
-		{name: "nofile", mustBeSane: true},
-		{name: "nproc", mustBeSane: true},
-		{name: "fsize", mustBeSane: true},
+		{name: "core", wantSoft: 0, wantHard: 0},
+		{name: "nofile", wantSoft: 8192, wantHard: 65536},
+		{name: "nproc", wantSoft: 4096, wantHard: 4096},
+		{name: "fsize", wantSoft: 4 << 30, wantHard: 4 << 30},
+	}
+	if len(req.HostConfig.Ulimits) != len(tests) {
+		t.Errorf("Ulimits = %v, want exactly %d entries", req.HostConfig.Ulimits, len(tests))
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -130,39 +171,82 @@ func TestCrewContainer_Ulimits(t *testing.T) {
 			if !ok {
 				t.Fatalf("Ulimits = %v, missing %q", req.HostConfig.Ulimits, tt.name)
 			}
-			if tt.wantExact {
-				if u.Soft != tt.wantSoft || u.Hard != tt.wantHard {
-					t.Errorf("%s = soft %d / hard %d, want %d/%d", tt.name, u.Soft, u.Hard, tt.wantSoft, tt.wantHard)
-				}
-				return
-			}
-			if tt.mustBeSane {
-				if u.Soft <= 0 || u.Hard <= 0 {
-					t.Errorf("%s = soft %d / hard %d, want a positive bound", tt.name, u.Soft, u.Hard)
-				}
-				if u.Soft > u.Hard {
-					t.Errorf("%s soft %d > hard %d", tt.name, u.Soft, u.Hard)
-				}
-				// containerd's inherited defaults are 1048576 (nofile) and
-				// unlimited (nproc/fsize); anything at or above that is not a
-				// bound.
-				if u.Hard >= 1<<20 && tt.name == "nofile" {
-					t.Errorf("nofile hard = %d, no tighter than the inherited containerd default", u.Hard)
-				}
+			if u.Soft != tt.wantSoft || u.Hard != tt.wantHard {
+				t.Errorf("%s = soft %d / hard %d, want %d/%d", tt.name, u.Soft, u.Hard, tt.wantSoft, tt.wantHard)
 			}
 		})
 	}
 }
 
 // /dev/shm defaults to 64 MB, verified live on dev1. Chromium (and therefore
-// Playwright, which this repo itself ships) crashes on that.
-func TestCrewContainer_ShmSizeIsOneGiB(t *testing.T) {
+// Playwright, which this repo itself ships) crashes on that. But /dev/shm and
+// /tmp are both unswappable shmem charged to the crew's memory cgroup, and
+// swap is off (MemorySwap == Memory), so their CAPS have to be sized against
+// the crew's memory limit or a crew that used to complete gets OOM-killed
+// instead (#1636). crewTmpfsSizes owns the arithmetic; this pins the results
+// per crew size.
+func TestCrewContainer_TmpfsSizesScaleWithMemoryLimit(t *testing.T) {
+	t.Parallel()
+
+	const mib = int64(1024 * 1024)
+	tests := []struct {
+		name     string
+		memoryMB int
+		wantShm  int64
+		wantTmp  int64
+	}{
+		// The product default (crews_create.go). Budget 1 GiB: 2/3 to
+		// /dev/shm, the rest to /tmp — total exactly a quarter of the limit.
+		{name: "default 4096 MB crew", memoryMB: 4096, wantShm: 715827882, wantTmp: 357913942},
+		// Budget 2 GiB, so both ceilings bind: 1 GiB shm and 500 MiB /tmp,
+		// i.e. the pre-#1636 values, reached only once the crew is big
+		// enough to absorb them.
+		{name: "8192 MB crew hits both ceilings", memoryMB: 8192, wantShm: 1024 * mib, wantTmp: 500 * mib},
+		{name: "16384 MB crew stays at the ceilings", memoryMB: 16384, wantShm: 1024 * mib, wantTmp: 500 * mib},
+		// Budget 256 MiB. A small crew gets a small /dev/shm rather than a
+		// cap three times its own memory limit.
+		{name: "1024 MB crew scales down", memoryMB: 1024, wantShm: 178956970, wantTmp: 89478486},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			team := covTeam()
+			team.MemoryMB = tt.memoryMB
+			req := crewCreateFor(t, team, nil)
+
+			if req.HostConfig.ShmSize != tt.wantShm {
+				t.Errorf("ShmSize = %d, want %d", req.HostConfig.ShmSize, tt.wantShm)
+			}
+			if got := tmpfsSizeBytes(t, req.HostConfig.Tmpfs["/tmp"]); got != tt.wantTmp {
+				t.Errorf("/tmp size = %d, want %d", got, tt.wantTmp)
+			}
+			// The invariant the numbers exist to hold: with swap off, the two
+			// caps together can never claim more than a quarter of the limit,
+			// so three quarters stay available to the workload itself.
+			limit := int64(tt.memoryMB) * mib
+			if total := req.HostConfig.ShmSize + tmpfsSizeBytes(t, req.HostConfig.Tmpfs["/tmp"]); total > limit/4 {
+				t.Errorf("shm+tmp = %d, exceeds a quarter of the %d-byte memory limit (%d)", total, limit, limit/4)
+			}
+			// …and the reason the ceilings are that high in the first place:
+			// Docker's own 64 MB /dev/shm is what Chromium cannot work in.
+			if req.HostConfig.ShmSize <= 64*mib {
+				t.Errorf("ShmSize = %d, at or below Docker's 64 MB default — Chromium/Playwright aborts on that", req.HostConfig.ShmSize)
+			}
+		})
+	}
+}
+
+// The /tmp tmpfs keeps its hardening flags whatever its size: noexec blocks
+// execve()-ing a staged payload directly and nosuid strips setuid bits.
+func TestCrewContainer_TmpTmpfsStaysNoexecNosuid(t *testing.T) {
 	t.Parallel()
 
 	req := crewCreate(t, nil)
-	const want = int64(1024 * 1024 * 1024)
-	if req.HostConfig.ShmSize != want {
-		t.Errorf("ShmSize = %d, want %d (1 GiB)", req.HostConfig.ShmSize, want)
+	spec := req.HostConfig.Tmpfs["/tmp"]
+	for _, want := range []string{"rw", "noexec", "nosuid"} {
+		if !slices.Contains(strings.Split(spec, ","), want) {
+			t.Errorf("/tmp tmpfs spec = %q, missing %q", spec, want)
+		}
 	}
 }
 
@@ -202,11 +286,19 @@ func TestCrewContainer_RestartPolicyAndStopTimeout(t *testing.T) {
 	if rp.MaximumRetryCount <= 0 {
 		t.Errorf("RestartPolicy.MaximumRetryCount = %d, want a bounded positive count", rp.MaximumRetryCount)
 	}
+	if rp.MaximumRetryCount != 3 {
+		t.Errorf("RestartPolicy.MaximumRetryCount = %d, want 3", rp.MaximumRetryCount)
+	}
 	if req.Config.StopTimeout == nil {
 		t.Fatal("Config.StopTimeout = nil, want an explicit grace period")
 	}
-	if *req.Config.StopTimeout != crewStopTimeoutSeconds {
-		t.Errorf("Config.StopTimeout = %d, want %d", *req.Config.StopTimeout, crewStopTimeoutSeconds)
+	// Pinned as a literal, not against crewStopTimeoutSeconds: comparing the
+	// request to the constant that produced it made the assertion a tautology
+	// that `crewStopTimeoutSeconds = 0` (SIGKILL with no grace period, killing
+	// a run mid-flush) passed unchanged (#1636). 30 s is the window
+	// StopCrewRuntime passes by hand; the two must not drift apart.
+	if *req.Config.StopTimeout != 30 {
+		t.Errorf("Config.StopTimeout = %d, want 30", *req.Config.StopTimeout)
 	}
 }
 
@@ -218,13 +310,26 @@ func TestCrewContainer_RestartPolicyAndStopTimeout(t *testing.T) {
 // never looks at State.Health (the only State.Health reader in the repo is
 // waitSidecarHealthy, which is scoped to sidecars). It cost one container exec
 // per crew per 30 s and bought nothing.
-func TestCrewContainer_NoHealthcheck(t *testing.T) {
+//
+// Dropping the field is NOT how you remove it. A nil Healthcheck — and an
+// empty Test — means "inherit", so the daemon falls back to the image's own
+// HEALTHCHECK directive (docker-image-spec, HealthcheckConfig.Test: "{} :
+// inherit healthcheck", `{"NONE"} : disable healthcheck`). A BYOI crew on an
+// app or devcontainer base that declares e.g. `HEALTHCHECK CMD curl -f
+// localhost:3000/health` then probes forever against a container whose PID 1
+// is `sleep infinity`: `docker ps` shows "Up 2 hours (unhealthy)" and the
+// per-crew exec load the removal set out to shed comes straight back, on the
+// IMAGE's interval (#1636). Only ["NONE"] actually turns it off.
+func TestCrewContainer_HealthcheckExplicitlyDisabled(t *testing.T) {
 	t.Parallel()
 
 	req := crewCreate(t, nil)
-	if req.Config.Healthcheck != nil {
-		t.Errorf("Config.Healthcheck = %+v, want nil — the /workspace/.ready probe is a tautology and nobody reads State.Health",
-			req.Config.Healthcheck)
+	hc := req.Config.Healthcheck
+	if hc == nil {
+		t.Fatal("Config.Healthcheck = nil — nil INHERITS the image's HEALTHCHECK; want an explicit Test [NONE]")
+	}
+	if !slices.Equal(hc.Test, []string{"NONE"}) {
+		t.Errorf("Healthcheck.Test = %v, want exactly [NONE] — anything else (including an empty slice) inherits the image directive", hc.Test)
 	}
 }
 
