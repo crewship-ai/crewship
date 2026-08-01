@@ -242,14 +242,15 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Run gatekeeper evaluation
 	facts, hardGate := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
-		Request:        req,
-		CredentialName: credName,
-		SecurityLevel:  keeper.SecurityLevel(secLevel),
-		AgentName:      agentName,
-		CrewName:       crewName,
-		ConvHistory:    convHistory,
-		Evidence:       facts,
-		HardGate:       hardGate,
+		Request:            req,
+		CredentialName:     credName,
+		SecurityLevel:      keeper.SecurityLevel(secLevel),
+		AgentName:          agentName,
+		CrewName:           crewName,
+		ConvHistory:        convHistory,
+		Evidence:           facts,
+		HardGate:           hardGate,
+		PromptBudgetTokens: h.promptBudget(),
 	}
 
 	var gkResp keeper.GatekeeperResponse

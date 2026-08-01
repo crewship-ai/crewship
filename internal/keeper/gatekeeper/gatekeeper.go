@@ -142,6 +142,16 @@ type EvalRequest struct {
 	// still reaches the judge with the facts in front of it, which is strictly
 	// more information than before and never less.
 	HardGate bool
+	// PromptBudgetTokens caps the assembled prompt. 0 means no cap, which is the
+	// pre-existing behaviour exactly.
+	//
+	// It exists because ConvHistory is bounded in MESSAGE COUNT and not in tokens,
+	// while the reference deployment runs num_ctx 4096. A model server truncates
+	// from the front, and this prompt is assembled policy → tier → evidence →
+	// history → request, so the first thing a long conversation pushes out is the
+	// operator's watch policy. That is not lost context, it is a security
+	// downgrade the response cannot be distinguished from a considered verdict.
+	PromptBudgetTokens int
 
 	// RequestType selects which prompt template buildPrompt renders.
 	// Empty defaults to RequestTypeAccess so existing callers (the
@@ -732,6 +742,43 @@ func (g *Gatekeeper) buildPrompt(req EvalRequest, watch string) string {
 // of the model's attention. The block is length-capped upstream (CompileWatchSpec).
 // A malicious admin authoring a policy that neuters the evaluator is out of the
 // M1 threat model — an OWNER/ADMIN can already disable the watchdog entirely.
+// charsPerToken is the estimator behind the prompt budget. Deliberately crude
+// and deliberately PESSIMISTIC — real tokenizers average nearer 4 characters per
+// token on English prose, so budgeting at 3.5 lands under the true limit rather
+// than over it. Being exactly right would need the model's own tokenizer, which
+// the judge does not have and which would change per model anyway; being
+// reliably under is what the budget is for.
+const charsPerToken = 3.5
+
+// criteriaBlockLen is the size of the fixed tail every access prompt carries —
+// the decision criteria plus the JSON contract. Reserved up front so the budget
+// cannot be spent on history and then overrun by the part that tells the model
+// what to answer.
+const criteriaBlockLen = 900
+
+// truncateHistory trims a conversation to fit budgetChars, keeping the END.
+//
+// The end, because recency is what corroborates a request: the message that says
+// "rotate the staging certs" is the last thing said, not the first. Cutting the
+// tail would leave the judge with the opening pleasantries.
+//
+// The cut is DISCLOSED. A judge shown three messages out of ninety with nothing
+// to mark the gap reads missing corroboration as absent corroboration — and the
+// decision criteria explicitly ask it whether the conversation supports the
+// request. Silence there manufactures a refusal.
+func truncateHistory(history string, budgetChars int) (string, bool) {
+	if budgetChars <= 0 || len(history) <= budgetChars {
+		return history, false
+	}
+	const notice = "[…earlier conversation truncated to fit the judge's context budget; " +
+		"absence of earlier corroboration here is not evidence it did not happen…]\n"
+	keep := budgetChars - len(notice)
+	if keep < 0 {
+		keep = 0
+	}
+	return notice + history[len(history)-keep:], true
+}
+
 func watchPolicyBlock(spec string) string {
 	if spec == "" {
 		return ""
@@ -768,10 +815,26 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	if req.ConvHistory != "" {
 		delim, ok := randomDelimiter()
 		if ok {
+			// The budget is spent on the history because the history is the only
+			// compressible section. Everything above it is policy and everything
+			// below is the question — trimming either would change what is being
+			// asked, which is the failure this budget exists to prevent.
+			history := req.ConvHistory
+			if req.PromptBudgetTokens > 0 {
+				spent := sb.Len() + len(req.Request.Intent) + len(req.Command) + criteriaBlockLen
+				remaining := int(float64(req.PromptBudgetTokens)*charsPerToken) - spent
+				var cut bool
+				history, cut = truncateHistory(history, remaining)
+				if cut {
+					g.logger.Info("keeper: conversation history truncated to fit the prompt budget",
+						"agent", req.AgentName, "budget_tokens", req.PromptBudgetTokens,
+						"original_chars", len(req.ConvHistory), "kept_chars", len(history))
+				}
+			}
 			sb.WriteString("[BACKGROUND — CONVERSATION HISTORY]\n")
 			sb.WriteString("This is the agent's recent conversation for context only. Use it to verify whether the agent's work genuinely requires the credential.\n")
 			fmt.Fprintf(&sb, "--- %s begin ---\n", delim)
-			sb.WriteString(req.ConvHistory)
+			sb.WriteString(history)
 			fmt.Fprintf(&sb, "--- %s end ---\n\n", delim)
 		} else {
 			g.logger.Warn("keeper: random delimiter unavailable; skipping conversation history")

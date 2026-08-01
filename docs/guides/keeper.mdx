@@ -377,6 +377,42 @@ and leaves the watchdog off:
 With no `KEEPER_OLLAMA_URL` set, the phase is skipped entirely and the instance
 comes up exactly as it did before. `KEEPER_MODEL` defaults to `qwen3.5:9b`.
 
+### The prompt budget, and why it protects the policy first
+
+The conversation history the judge sees is bounded in **message count**, not in
+tokens. A model server truncates from the front when a prompt overruns its
+context, and the judge's prompt is assembled in this order:
+
+```
+workspace watch policy  →  credential tier  →  computed facts  →  conversation  →  the request
+```
+
+So the first thing a long conversation pushes out is the operator's watch policy
+and the credential's tier. The judge keeps answering, in the right format, having
+never been told the rules it was meant to apply — and nothing in the response
+distinguishes that from a considered verdict.
+
+`prompt_budget_tokens` moves the decision to where the order is known. The policy,
+the tier, the facts and the request itself are **incompressible**; the budget is
+spent on the conversation, trimmed from the *front* so the most recent messages
+survive, and the cut is disclosed inside the prompt:
+
+```
+[…earlier conversation truncated to fit the judge's context budget; absence of
+earlier corroboration here is not evidence it did not happen…]
+```
+
+That notice is not decoration. The decision criteria ask the judge whether the
+conversation supports the request, so a silent cut turns "I was not shown it"
+into "it did not happen" — a manufactured refusal.
+
+<Note>
+  Set it to your judge's `num_ctx` minus the reply budget. On the reference
+  deployment (`qwen3.5:9b`, `num_ctx` 4096, 256-token verdict) around 3500 is
+  right. Leaving it at 0 keeps the pre-existing behaviour: no cap, and the model
+  server decides what to drop.
+</Note>
+
 ### Reasoning models: the judge turns thinking off
 
 The judge asks for one JSON verdict in a **256-token budget** and is fail-closed.

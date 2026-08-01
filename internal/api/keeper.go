@@ -91,6 +91,16 @@ type KeeperHandler struct {
 	judgeCfg *keepercfg.Store
 }
 
+// promptBudget is the operator's prompt ceiling, or 0 when none is configured.
+// Separate from gatherEvidence because it applies whether or not evidence is on:
+// an unbounded conversation truncates the watch policy either way.
+func (h *KeeperHandler) promptBudget() int {
+	if h.judgeCfg == nil {
+		return 0
+	}
+	return int(h.judgeCfg.Effective().Profile.PromptBudgetTokens.Value)
+}
+
 // SetJudgeConfig wires the instance judge configuration so the credential path
 // can honour the operator's profile (evidence, hard gate). Skip the call to keep
 // the pre-profile behaviour.
