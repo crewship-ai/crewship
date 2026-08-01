@@ -119,4 +119,19 @@ describe("KeeperProfileCard", () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalled())
     expect(screen.queryByTestId("autonomy-warning")).not.toBeInTheDocument()
   })
+
+
+// `min={0}` on a number input only drives the spinner and the native validity
+// flag — it does not stop somebody typing "-1". The server rejects it correctly
+// (keepercfg refuses anything below 512 that is not the 0 "clear" sentinel), so
+// nothing invalid is ever stored; the cost is a round-trip and an error toast to
+// learn what the field could have said immediately.
+  it("will not send a negative prompt budget", async () => {
+  render(<KeeperProfileCard workspaceId="ws1" />)
+  await screen.findByText(/computed facts/i)
+
+  const input = screen.getByTestId("keeper-profile-budget") as HTMLInputElement
+  fireEvent.change(input, { target: { value: "-1" } })
+  expect(input.value).not.toContain("-")
+})
 })

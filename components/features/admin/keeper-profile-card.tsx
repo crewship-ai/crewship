@@ -333,7 +333,11 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           type="number"
           min={0}
           value={form.draft.budget}
-          onChange={(e) => form.set("budget", e.target.value)}
+          // min={0} drives the spinner and the native validity flag; it does not
+          // stop a typed "-1". The server refuses it correctly, so nothing
+          // invalid is ever stored — the cost of leaving it is a round-trip and
+          // an error toast to learn what the field could have said at once.
+          onChange={(e) => form.set("budget", e.target.value.replace(/-/g, ""))}
           disabled={!canEdit}
           className="h-8 w-[110px] text-xs"
           aria-label="Prompt budget"
