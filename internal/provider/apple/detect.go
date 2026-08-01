@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +17,15 @@ type DetectResult struct {
 	HostIP  string // IP address the host is reachable at from containers
 }
 
+// minMacOSMajor is the macOS major version Apple's container runtime needs for
+// the networking model this provider is written against: every container gets
+// its own IPv4 address, routed through the host, which is what
+// discoverHostIP and the containerJSON networks parsing assume. Older macOS
+// releases can have the CLI installed and its system service answering while
+// providing none of that, so probing only the binary and the service reports a
+// runtime that cannot actually host a crew (#1647).
+const minMacOSMajor = 26
+
 // Detect probes for the Apple Container CLI and checks that the system
 // service is running. Returns an error if Apple Containers are not available.
 func Detect(ctx context.Context) (*DetectResult, error) {
@@ -23,6 +33,11 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 	_, err := exec.LookPath("container")
 	if err != nil {
 		return nil, fmt.Errorf("apple container CLI not found: %w", err)
+	}
+
+	// The host has to be new enough for the runtime's networking model
+	if err := checkMacOSProductVersion(macOSProductVersion(ctx)); err != nil {
+		return nil, err
 	}
 
 	// Get version
@@ -43,6 +58,49 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		Version: version,
 		HostIP:  hostIP,
 	}, nil
+}
+
+// macOSProductVersion reports the host's macOS product version (e.g. "26.1"),
+// or "" when it cannot be read — sw_vers is absent off macOS and its output is
+// Apple's to change.
+func macOSProductVersion(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "sw_vers", "-productVersion")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout.String())
+}
+
+// checkMacOSProductVersion rejects hosts older than minMacOSMajor. It compares
+// the major component numerically, so every future macOS satisfies the gate —
+// a lexical compare would read "9.9" as newer than "26.0" and would start
+// failing outright the first time the major grows a digit.
+//
+// A version it cannot parse is not evidence of an old host, so it fails open
+// and lets the CLI and system-status probes decide.
+func checkMacOSProductVersion(productVersion string) error {
+	major, ok := macOSMajor(productVersion)
+	if !ok {
+		return nil
+	}
+	if major < minMacOSMajor {
+		return fmt.Errorf("apple container runtime requires macOS %d or newer, host reports %s",
+			minMacOSMajor, strings.TrimSpace(productVersion))
+	}
+	return nil
+}
+
+// macOSMajor extracts the leading major version number, reporting false when
+// the string is not a version this code recognises.
+func macOSMajor(productVersion string) (int, bool) {
+	head, _, _ := strings.Cut(strings.TrimSpace(productVersion), ".")
+	major, err := strconv.Atoi(head)
+	if err != nil || major <= 0 {
+		return 0, false
+	}
+	return major, true
 }
 
 func getVersion(ctx context.Context) (string, error) {

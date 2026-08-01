@@ -143,8 +143,8 @@ container:
   | Provider | Description |
   |----------|-------------|
   | `docker` | Standard Docker (auto-detects Docker, Podman, Colima, OrbStack, Rancher) |
-  | `apple` | Apple Containers on macOS Tahoe+ (lightweight VMs) |
-  | `auto` | Auto-detect between docker and apple |
+  | `apple` | Apple Containers on macOS Tahoe+ (lightweight VMs); applies none of the crew isolation controls and does not enforce `restricted` egress |
+  | `auto` | Tries Docker first, falls back to Apple Containers — the hardened provider wins on a host with both |
 
   Kubernetes provider is on the v0.2 roadmap.
 </Accordion>
