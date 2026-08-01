@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,6 +20,92 @@ import (
 // qwen3:4b, whose /api/show capabilities include "thinking".
 //
 // The provider cannot fix the model choice, but it must stop hiding the reason.
+//
+// Reporting it, though, was only half the job: a caller that MUST have an answer
+// inside a small budget — the fail-closed judge, which allows 256 tokens — needs
+// to stop ASKING for reasoning in the first place. Ollama takes a top-level
+// "think" flag for exactly that. Request.Think carries it, and leaving it nil
+// omits the field entirely, so a model with no thinking capability never sees a
+// key it might reject.
+//
+// Measured 2026-08-01 against a live Ollama on qwen3.5:9b (Q4_K_M) at the
+// judge's own settings (temperature 0.1, num_predict 256):
+//
+//	no think field → done_reason "length", 1063 chars of thinking, content ""
+//	think:false    → done_reason "stop", 45 tokens, a parseable verdict
+//
+// The first column is a DENY on every credential request. That is the bug.
+
+// TestOllamaBuildRequestBody_ThinkOmittedUnlessSet pins the default: a request
+// that says nothing about thinking must not carry a "think" key at all. Sending
+// one unconditionally would push the flag at every model on the instance,
+// including those whose /api/show capabilities do not list "thinking".
+func TestOllamaBuildRequestBody_ThinkOmittedUnlessSet(t *testing.T) {
+	t.Parallel()
+	body, err := NewOllama("http://x", "m").buildRequestBody(Request{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got["think"]; present {
+		t.Errorf("think = %v, want the key absent when the caller did not ask", got["think"])
+	}
+}
+
+// TestOllamaBuildRequestBody_ThinkFalse is the fix the judge depends on: an
+// explicit false must reach Ollama as a top-level field, not inside "options"
+// (where it is silently ignored and the model reasons anyway).
+func TestOllamaBuildRequestBody_ThinkFalse(t *testing.T) {
+	t.Parallel()
+	body, err := NewOllama("http://x", "m").buildRequestBody(Request{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		Think:    func() *bool { b := false; return &b }(),
+	}, false)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	think, present := got["think"]
+	if !present {
+		t.Fatal("think key missing — the model will reason and blow the judge's 256-token budget")
+	}
+	if think != false {
+		t.Errorf("think = %v, want false", think)
+	}
+	if opts, ok := got["options"].(map[string]any); ok {
+		if _, leaked := opts["think"]; leaked {
+			t.Error("think landed in options, where Ollama ignores it")
+		}
+	}
+}
+
+// TestOllamaBuildRequestBody_ThinkTrue covers the other direction — a caller
+// with room for reasoning can still ask for it.
+func TestOllamaBuildRequestBody_ThinkTrue(t *testing.T) {
+	t.Parallel()
+	body, err := NewOllama("http://x", "m").buildRequestBody(Request{
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+		Think:    func() *bool { b := true; return &b }(),
+	}, true)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["think"] != true {
+		t.Errorf("think = %v, want true", got["think"])
+	}
+}
 
 func thinkingServer(t *testing.T, body string) *httptest.Server {
 	t.Helper()

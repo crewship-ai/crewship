@@ -444,6 +444,11 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		Messages:    []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 		Temperature: ptr(0.1),
 		MaxTokens:   256,
+		// Reasoning OFF. This budget has no room for a chain of thought: a
+		// thinking model spends all 256 tokens on one and returns an empty
+		// verdict, which this fail-closed path turns into a DENY on every
+		// request. The judge wants one JSON object, not deliberation.
+		Think: ptr(false),
 	})
 
 	if err != nil {

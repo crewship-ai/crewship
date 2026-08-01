@@ -41,6 +41,19 @@ type Request struct {
 	Tools       []ToolDef `json:"tools,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	Temperature *float64  `json:"temperature,omitempty"`
+	// Think opts a reasoning model's chain of thought in or out where the
+	// provider exposes that as a switch. nil means "don't mention it", which is
+	// the only safe default: the flag is not universal, and a model with no
+	// thinking capability should never be sent a key it may reject.
+	//
+	// It exists for callers whose answer must fit a budget too small to reason
+	// inside. The Keeper judge is the motivating one — 256 tokens, fail-closed —
+	// where a model that reasons returns an empty verdict, which reads as DENY
+	// (see internal/llm/ollama_thinking_test.go for the measured numbers).
+	//
+	// Only the Ollama provider acts on this today; Anthropic and OpenAI ignore
+	// it, so setting it is never a portability hazard, just a no-op there.
+	Think *bool `json:"think,omitempty"`
 }
 
 // StopReason indicates why the model stopped generating.

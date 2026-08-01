@@ -353,6 +353,59 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+### `crewship seed` brings the watchdog up with it
+
+A demo seed configures the Keeper as one of its phases, so a fresh instance has a
+working gate rather than a feature you still have to find.
+
+It reads `KEEPER_OLLAMA_URL` and `KEEPER_MODEL` from **the environment you run
+`crewship seed` in** (`.env.local` counts), pins them as the instance judge, and
+then runs the same four-stage check as `crewship keeper judge test`.
+
+**The watchdog is enabled only if that check passes.** This is the important
+part: Keeper is fail-closed, so a watchdog switched on against an endpoint that
+does not answer denies every credential request, and each denial looks exactly
+like a considered verdict. When the check fails the seed prints the failing stage
+and leaves the watchdog off:
+
+```
+! Keeper: judge at http://192.168.1.221:11434 is not usable — watchdog left OFF
+  failed stage "reach": connection refused
+  Once it answers: crewship keeper judge test && crewship keeper enable
+```
+
+With no `KEEPER_OLLAMA_URL` set, the phase is skipped entirely and the instance
+comes up exactly as it did before. `KEEPER_MODEL` defaults to `qwen3.5:9b`.
+
+### Reasoning models: the judge turns thinking off
+
+The judge asks for one JSON verdict in a **256-token budget** and is fail-closed.
+A reasoning model — Qwen 3.x, DeepSeek-R1, gpt-oss — spends that entire budget on
+its chain of thought and returns an empty answer, which the judge can only read
+as a `DENY`. Measured on `qwen3.5:9b`: 1063 characters of reasoning, no verdict.
+
+Crewship therefore sends Ollama `think: false` on the judge call, and a thinking
+model answers normally — the same request came back as a parseable verdict in 45
+tokens and 3.4s. **You do not need to pick a non-reasoning model**, and you do not
+need a custom Modelfile.
+
+Two things follow from this:
+
+- `crewship keeper judge test` exercises the real call, thinking suppressed, so
+  its stage-3 verdict is what production will get. Testing the same model by hand
+  with `ollama run` **without** `--think=false` will look broken when it is not.
+- The flag is judge-scoped. Background evaluators and chat are unaffected, and
+  models with no thinking capability never see the field.
+
+<Note>
+  Sizing, if you are running the judge on a laptop: `qwen3.5:9b` at Q4_K_M is
+  ~5.6GB resident and answers in ~3.4s on an M4 MacBook Air with 16GB — small
+  enough to stay loaded 24/7 next to everything else. Going bigger costs headroom
+  and latency for a 45-token classification; going much smaller costs judgement on
+  the one decision you wanted judged. Set `OLLAMA_KEEP_ALIVE` so the model does
+  not fall out of memory between requests and pay a cold load on the next verdict.
+</Note>
+
 ### Two judge scopes, and which one to configure
 
 "Which model judges credential access?" has two answers, at two scopes, set in
