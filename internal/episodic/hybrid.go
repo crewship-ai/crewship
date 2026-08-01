@@ -23,12 +23,23 @@ import (
 // cheap to implement, proven to lift recall quality by ~20% over
 // either lane alone.
 //
-// This function is safe to call as a drop-in for Recall. If the FTS5
-// virtual table is missing (pre-migration-55 DB), the BM25 lane
-// returns an empty set and the caller still gets dense-only results.
+// This function is safe to call as a drop-in for Recall. Either lane
+// may be absent and the other still answers: if the FTS5 virtual table
+// is missing (pre-migration-55 DB) the caller gets dense-only results,
+// and if emb is nil (no embedder configured — the "sparse-only" mode
+// /healthz reports) the caller gets BM25-only results. With neither,
+// the result is empty, not an error.
 func HybridRecall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, error) {
 	if q.WorkspaceID == "" {
 		return nil, fmt.Errorf("episodic: HybridRecall requires workspace_id")
+	}
+	// Both lanes read the journal from db. No db is not an error — it is
+	// a caller with no store wired (a test double, a degraded boot), and
+	// an empty recall is the graceful answer. Without this the sparse
+	// lane would nil-panic on QueryContext now that a nil embedder no
+	// longer short-circuits the whole call.
+	if db == nil {
+		return nil, nil
 	}
 	if q.K <= 0 || q.K > 50 {
 		q.K = 5
@@ -44,11 +55,21 @@ func HybridRecall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit
 	if denseK < 20 {
 		denseK = 20
 	}
-	denseQ := q
-	denseQ.K = denseK
-	denseHits, err := Recall(ctx, db, emb, denseQ)
-	if err != nil {
-		return nil, fmt.Errorf("episodic: dense lane: %w", err)
+	// No embedder configured — the "sparse-only" mode /healthz and
+	// `crewship doctor` already report — means the dense lane cannot
+	// run at all. Skip it rather than calling Recall, which takes emb
+	// straight into emb.Embed and would nil-panic. BM25 needs nothing
+	// from the embedder, so recall stays useful on an install with no
+	// Ollama instead of going silently empty (#1651).
+	var denseHits []Hit
+	if emb != nil {
+		denseQ := q
+		denseQ.K = denseK
+		var err error
+		denseHits, err = Recall(ctx, db, emb, denseQ)
+		if err != nil {
+			return nil, fmt.Errorf("episodic: dense lane: %w", err)
+		}
 	}
 
 	sparseHits, sparseErr := bm25Lane(ctx, db, q, denseK)

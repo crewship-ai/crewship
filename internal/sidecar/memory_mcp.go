@@ -212,7 +212,7 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	case "tools/list":
 		s.respondMemoryMCPToolsList(w, req)
 	case "tools/call":
-		s.respondMemoryMCPToolsCall(w, r, req, ac)
+		s.respondMemoryMCPToolsCall(w, r, req, ac, effectiveSlug)
 	case "notifications/initialized", "notifications/cancelled":
 		// Spec-compliant notification: no response body, ack with 200.
 		// Clients that send these MUST NOT wait for a JSON-RPC response.
@@ -254,10 +254,13 @@ func (s *Server) respondMemoryMCPInitialize(w http.ResponseWriter, req memoryMCP
 func (s *Server) respondMemoryMCPToolsList(w http.ResponseWriter, req memoryMCPRequest) {
 	schemas := memory.ToolSchemas()
 	tools := make([]memoryMCPToolDescriptor, 0, len(schemas))
-	// Stable order so adapters that snapshot the catalog see a deterministic
-	// payload — map iteration order is unspecified in Go, and a CLI that
-	// caches the tool list across runs would re-fetch on every change.
-	for _, name := range []string{"memory.read", "memory.write", "memory.search", "memory.append_daily"} {
+	// memory.AdvertisedTools() is the catalogue, in a fixed order: adapters
+	// that snapshot it see a deterministic payload (Go map order is
+	// unspecified, and a CLI caching the list across runs would re-fetch on
+	// every change). It used to be a literal slice here, which is how the
+	// wake prompt came to name a fifth tool this list never advertised
+	// (#1651) — the orchestrator's prompt test now reads the same function.
+	for _, name := range memory.AdvertisedTools() {
 		s, ok := schemas[name]
 		if !ok {
 			continue
@@ -276,7 +279,7 @@ func (s *Server) respondMemoryMCPToolsList(w http.ResponseWriter, req memoryMCPR
 	})
 }
 
-func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, ac memory.AgentContext) {
+func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, ac memory.AgentContext, slug string) {
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -292,7 +295,7 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	dispatcher := memory.NewDispatcher(ac)
+	dispatcher := memory.NewDispatcher(ac, memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)))
 	toolRes, err := dispatcher.Dispatch(r.Context(), memory.ToolCall{
 		Name: params.Name,
 		Args: params.Arguments,
@@ -324,6 +327,37 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		ID:      req.ID,
 		Result:  result,
 	})
+}
+
+// memoryIndexFor resolves the FTS5 engines the dispatcher ranks
+// memory.search against — the acting agent's own tier engine and, for a
+// lead, the crew one. Until #1651 the dispatcher was built without
+// them, so the tool the model calls ran a substring scan while these
+// indexes were maintained for nobody.
+//
+// Both returns are optional. An engine is handed over ONLY when it
+// indexes exactly the directory the AgentContext resolves tiers under:
+// a mismatch would have the dispatcher resolve index-relative paths
+// under the wrong root, and returning nil instead degrades that caller
+// to the substring scan rather than searching someone else's corpus.
+// The same guard covers the peer-engine construction failure (mkdir /
+// SQLite open), which is logged and otherwise ignored — a search that
+// is unranked beats a tool call that errors.
+func (s *Server) memoryIndexFor(r *http.Request, ac memory.AgentContext, slug string) (agent, crew *memory.Engine) {
+	eng, base, err := s.peerMemoryEngineFor(r.Context(), slug)
+	switch {
+	case err != nil:
+		if s.logger != nil {
+			s.logger.Warn("memory mcp: search index unavailable, falling back to unranked scan",
+				"error", err, "slug", slug)
+		}
+	case eng != nil && base == ac.AgentMemoryDir:
+		agent = eng
+	}
+	if s.crewMemoryEngine != nil && ac.CrewMemoryDir != "" && s.crewMemoryBase == ac.CrewMemoryDir {
+		crew = s.crewMemoryEngine
+	}
+	return agent, crew
 }
 
 // memoryAgentContext builds the per-call routing data the dispatcher needs.

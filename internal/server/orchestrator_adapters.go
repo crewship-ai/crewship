@@ -148,9 +148,8 @@ func (a *approvalGateAdapter) Check(ctx context.Context, in orchestrator.Approva
 // episodicRecallAdapter bridges orchestrator.EpisodicRecaller to the
 // episodic package. Role maps via episodic.ScopeForRole so LEAD /
 // COORDINATOR get crew-shared scope, everything else gets own.
-// Embedder is injected at construction time — nil embedder returns an
-// empty recall silently (used when Ollama isn't reachable so runs
-// don't fail on recall timeouts).
+// Embedder is injected at construction time and may be nil (Ollama not
+// reachable); recall then runs BM25-only rather than returning empty.
 type episodicRecallAdapter struct {
 	db       *sql.DB
 	embedder episodic.Embedder
@@ -248,14 +247,20 @@ func (a *memoryMetricsAdapter) AgentSpendLast24h(ctx context.Context, workspaceI
 }
 
 func (a *episodicRecallAdapter) Recall(ctx context.Context, in orchestrator.EpisodicRecallInput) (string, error) {
-	if a.embedder == nil {
-		return "", nil
-	}
 	scope := episodic.ScopeForRole(in.Role)
 	// HybridRecall fuses BM25 (FTS5) + cosine via Reciprocal Rank
 	// Fusion so paraphrased queries AND keyword-exact queries both
 	// land the right memories. Degrades gracefully to dense-only if
-	// the FTS5 index is missing (pre-migration-55 DBs).
+	// the FTS5 index is missing (pre-migration-55 DBs), and to
+	// BM25-only when no embedder is configured.
+	//
+	// That second degradation is why there is no `if a.embedder == nil`
+	// short-circuit here any more (#1651). There was one, and it turned
+	// "no Ollama" into "the whole episodic tier is empty" — on the tier
+	// the [MEMORY GAP] block sends a woken agent to, while /healthz
+	// reported a sparse-only recall mode that in practice recalled
+	// nothing. The nil embedder is now handled inside HybridRecall,
+	// which skips the dense lane instead of calling Embed on nil.
 	hits, err := episodic.HybridRecall(ctx, a.db, a.embedder, episodic.Query{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,

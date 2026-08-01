@@ -332,7 +332,21 @@ cascades the index row away as well.
 
 Most agents should search through the **memory MCP tools**, which every adapter
 injects automatically — `memory.search` resolves the acting agent from its token
-and searches that agent's own tier.
+and searches that agent's own tier (plus the crew tier, for a lead).
+
+`memory.search` is BM25-ranked against the same FTS5 index the HTTP routes use,
+so a query matches a chunk rather than a line: terms in a different order than
+the file wrote them, or spread across two lines of the same section, still hit.
+Each result carries a `source` tier label, a `score`, and the line the chunk
+starts on, so the model can follow up with `memory.read`. A write through
+`memory.write` / `memory.append_daily` re-indexes that one file immediately, so
+notes are searchable in the same session they were written.
+
+<Note>
+  If the sidecar could not open the tier's `index.sqlite`, `memory.search`
+  degrades to an unranked substring scan over the tier files instead of
+  failing — results carry no `score`. The sidecar logs the fallback.
+</Note>
 
 The sidecar HTTP API below takes a `scope` parameter and resolves `scope=agent`
 to the **acting** agent's own tier — the caller identified by its

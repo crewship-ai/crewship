@@ -248,6 +248,13 @@ type Dispatcher struct {
 	ctx        AgentContext
 	now        func() time.Time
 	convSearch ConvSearcher
+
+	// agentIndex / crewIndex are the FTS5 engines memory.search ranks
+	// against, one per memory root. Both optional: with neither wired
+	// the dispatcher falls back to the substring scan (see
+	// handleSearch), which is what a caller with no SQLite gets.
+	agentIndex *Engine
+	crewIndex  *Engine
 }
 
 // DispatcherOption configures a Dispatcher at construction. Variadic so
@@ -259,6 +266,44 @@ type DispatcherOption func(*Dispatcher)
 // explaining the tool is unavailable rather than failing the run.
 func WithConvSearcher(cs ConvSearcher) DispatcherOption {
 	return func(d *Dispatcher) { d.convSearch = cs }
+}
+
+// WithSearchIndex wires the FTS5 engines behind memory.search and keeps
+// them current on memory.write. agent MUST index AgentMemoryDir and crew
+// MUST index CrewMemoryDir — the dispatcher maps an index hit back to a
+// tier by resolving the engine's relative `file` under that root, and an
+// engine pointed somewhere else resolves to files that fail the memory-
+// root containment check and drop out. Either may be nil (a solo agent
+// has no crew tier; a sidecar whose SQLite open failed has no engine at
+// all), and with both nil memory.search falls back to the substring scan
+// so the tool degrades instead of going dark.
+func WithSearchIndex(agent, crew *Engine) DispatcherOption {
+	return func(d *Dispatcher) {
+		d.agentIndex = agent
+		d.crewIndex = crew
+	}
+}
+
+// AdvertisedTools is the ordered catalogue of memory tools the model is
+// told it can call. It is the single source of truth for the MCP
+// tools/list payload (internal/sidecar/memory_mcp.go) AND for what the
+// wake prompt is allowed to name (internal/orchestrator/memory.go) —
+// #1651 shipped a prompt telling a woken agent to run
+// conversation.search when tools/list did not advertise it and nothing
+// wired its backend, so the model was told to call a tool it could not
+// see. Anything added here must be dispatchable; anything the prompt
+// names must be here. Both directions are tested.
+//
+// Order is fixed, not map order: adapters that cache the catalogue
+// across runs would otherwise re-fetch on every Go map iteration.
+//
+// conversation.search is deliberately absent. Its handler and schema
+// ship (ToolSchemas, handleConversationSearch) but the searchable
+// mirror lives in the host database, which the in-container dispatcher
+// cannot reach — advertising it would mean advertising a tool that
+// answers "not available on this deployment".
+func AdvertisedTools() []string {
+	return []string{"memory.read", "memory.write", "memory.search", "memory.append_daily"}
 }
 
 // NewDispatcher builds a Dispatcher bound to the given AgentContext.
@@ -610,6 +655,7 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
 	}
 
+	label := d.pathToSourceLabel(path)
 	res := ToolResult{
 		Content: fmt.Sprintf("ok: %d bytes written to %s", len(data), a.Tier),
 		Metadata: map[string]any{
@@ -618,6 +664,25 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 			"cap_bytes":     cap,
 			"cap_pct":       capPct(len(data), cap),
 		},
+	}
+
+	// Keep the search index in step with the file we just wrote. Nothing
+	// else in the container does: memory.StartWatcher has no production
+	// caller, the sidecar's post-write ReindexPath only runs on the
+	// legacy HTTP route, and the crew ticker is 60s and crew-only. With
+	// memory.search ranking off the index (#1651), skipping this would
+	// make an agent's own notes unfindable for the rest of the session —
+	// precisely the recall the [MEMORY GAP] block sends it to look for.
+	// Incremental (O(this file), not O(corpus)) and best-effort: a failed
+	// reindex costs searchability of one file until the next boot, never
+	// the write, so it is reported in metadata rather than turned into an
+	// error the model has to handle.
+	if idx := d.indexForTier(a.Tier); idx != nil {
+		if _, err := idx.ReindexPath(ctx, label); err != nil {
+			res.Metadata["search_index_updated"] = false
+		} else {
+			res.Metadata["search_index_updated"] = true
+		}
 	}
 	if cap > 0 && float64(len(data)) >= float64(cap)*softCapPct {
 		// PR #6 parity with the hard-error branch: the write succeeded,
@@ -644,37 +709,63 @@ type searchArgs struct {
 	Limit int    `json:"limit"`
 }
 
-// handleSearch is a minimal substring search over the resolved tier
-// files. Replaces the curl /memory/search surface removed in PR-Z
-// Z.1. A follow-up commit will plumb this through the FTS5 engine
-// for keyword + semantic recall; the present implementation keeps
-// the wire contract stable while we get adapter wiring landed.
+// searchHit is one entry in the memory.search result envelope. Source
+// is the tier label ("AGENT.md", "daily/2026-05-21.md"), never the
+// absolute container path — leaking `/output/agent_xxx/.memory/...`
+// discloses the bind-mount layout and is symmetric to the read/write
+// metadata fix. Score is populated only on the ranked (FTS5) path; the
+// substring fallback has no ranking signal to report.
+type searchHit struct {
+	Source  string  `json:"source"`
+	Snippet string  `json:"snippet"`
+	Line    int     `json:"line"`
+	Score   float64 `json:"score,omitempty"`
+}
+
+// quarantineNote reports a file the injection scanner rejected. It
+// replaces that file's hits entirely — see searchScan / searchIndexed.
+type quarantineNote struct {
+	Source      string `json:"source"`
+	Category    string `json:"quarantine_category"`
+	Pattern     string `json:"quarantine_pattern"`
+	SHA256      string `json:"quarantine_sha256"`
+	Placeholder string `json:"placeholder"`
+}
+
+// errSearchCancelled is the sentinel the two search paths return when
+// the caller's context goes away mid-walk, so handleSearch can render
+// the one cancellation message both paths share.
+var errSearchCancelled = errors.New("cancelled")
+
+// handleSearch answers the memory.search tool call.
 //
-// TODO(PR-F5): wire memory.HybridSearch (FTS5 BM25 + episodic vec+BM25
-// via RRF) into this dispatcher path. The HybridSearch primitive ships
-// today (internal/memory/hybrid.go) and is reachable via the
-// /api/v1/memory/search/hybrid HTTP handler + the sidecar's
-// /memory/search-hybrid forwarder — see internal/api/
-// memory_hybrid_search_handler.go and internal/sidecar/memory.go. The
-// HOLE is the in-process tool dispatcher (this function), which would
-// need a *memory.Engine + *sql.DB + episodic.Embedder threaded through
-// AgentContext or NewDispatcher to call HybridSearch. That's >30 LOC of
-// wiring (constructor changes, sidecar handoff plumbing, test fixture
-// rework) and out of PR-F4 scope. Tombstoned in hybrid.go +
-// hybrid_dead_code_test.go; flip the sentinel when the wiring lands.
+// Ranked path (production): when an FTS5 engine is wired
+// (WithSearchIndex) the query runs through memory.HybridSearch, the
+// same RRF primitive the HTTP /api/v1/memory/search/hybrid handler
+// uses. Until #1651 this function walked candidateFiles(tier) and
+// matched lowercase substrings while the FTS5 index the sidecar builds
+// at boot — and rebuilds on every write — sat unread, so the
+// [MEMORY GAP] block woke an agent, told it to search, and handed it a
+// grep that could not match two words in the wrong order.
 //
-// Two security properties on the result envelope:
-//   - Hits carry the tier-label `source` (e.g. "AGENT.md",
-//     "daily/2026-05-21.md"), not the absolute container path —
-//     leaking `/output/agent_xxx/.memory/...` discloses the bind-
-//     mount layout and is symmetric to the read/write metadata fix.
-//   - Each candidate file is run through ScanContent BEFORE its
-//     lines feed the substring match. Injection-positive files are
-//     quarantined and surfaced in a separate `quarantined` array
-//     instead of contributing raw snippets to `hits`. This keeps
-//     search consistent with the read-path fail-closed contract —
-//     a poisoned file can never return its payload to the model
-//     via the search tool.
+// Fallback path: with no engine wired (LocalDispatcher, a sidecar whose
+// SQLite open failed, tests) the substring scan still answers, so the
+// tool degrades rather than going dark.
+//
+// The episodic half of HybridSearch (vec+BM25 over journal_entries)
+// stays unwired here on purpose: it needs a *sql.DB the in-container
+// dispatcher does not have. HybridSearch documents nil db/embedder as
+// the FTS-only fallback, so passing them costs nothing and the seam is
+// ready for a caller that does have a database.
+//
+// Two security properties hold on BOTH paths:
+//   - Hits carry the tier label, never the absolute path.
+//   - Every file that would contribute a snippet is run through
+//     ScanContent FIRST. Injection-positive files are quarantined and
+//     surfaced in a separate `quarantined` array instead of
+//     contributing raw snippets to `hits`, keeping search consistent
+//     with the read-path fail-closed contract: a poisoned file can
+//     never return its payload to the model via the search tool.
 func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return ToolResult{IsError: true, Content: "memory.search: cancelled: " + err.Error()}, nil
@@ -695,29 +786,296 @@ func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (Too
 		}
 	}
 
-	files := d.candidateFiles(a.Tier)
-	type hit struct {
-		Source  string `json:"source"`
-		Snippet string `json:"snippet"`
-		Line    int    `json:"line"`
+	var (
+		hits        []searchHit
+		quarantined []quarantineNote
+		err         error
+	)
+	if d.agentIndex != nil || d.crewIndex != nil {
+		hits, quarantined, err = d.searchIndexed(ctx, a)
+	} else {
+		hits, quarantined, err = d.searchScan(ctx, a)
 	}
-	type quarantineNote struct {
-		Source      string `json:"source"`
-		Category    string `json:"quarantine_category"`
-		Pattern     string `json:"quarantine_pattern"`
-		SHA256      string `json:"quarantine_sha256"`
-		Placeholder string `json:"placeholder"`
+	if err != nil {
+		return ToolResult{IsError: true, Content: "memory.search: cancelled: " + err.Error()}, nil
 	}
+
+	envelope := map[string]any{"hits": hits, "query": a.Q}
+	if len(quarantined) > 0 {
+		envelope["quarantined"] = quarantined
+	}
+	body, _ := json.MarshalIndent(envelope, "", "  ")
+	return ToolResult{Content: string(body)}, nil
+}
+
+// searchIndexed ranks the query with memory.HybridSearch over the wired
+// FTS5 engines and maps the winners back onto the tool's envelope.
+//
+// Two mapping jobs the index cannot do for us:
+//
+//   - Tier. An engine indexes a directory, not a tier, so the `tier`
+//     argument is applied here by resolving each hit's relative file
+//     back to the tier that owns it. A file under the memory root that
+//     belongs to no tier (a stray note some other tool dropped in) is
+//     dropped: the index walks every .md it finds, which is a wider set
+//     than candidateFiles ever exposed to the model.
+//   - Freshness of the fail-closed scan. The indexed chunk is a copy
+//     taken at index time; the quarantine decision has to be made
+//     against what is on disk NOW, so each source file is read (once)
+//     and scanned before any of its chunks are allowed through.
+func (d *Dispatcher) searchIndexed(ctx context.Context, a searchArgs) ([]searchHit, []quarantineNote, error) {
+	type indexSource struct {
+		engine *Engine
+		root   string
+		crew   bool
+	}
+	var sources []indexSource
+	if d.agentIndex != nil && d.ctx.AgentMemoryDir != "" {
+		sources = append(sources, indexSource{engine: d.agentIndex, root: d.ctx.AgentMemoryDir})
+	}
+	if d.crewIndex != nil && d.ctx.CrewMemoryDir != "" {
+		sources = append(sources, indexSource{engine: d.crewIndex, root: d.ctx.CrewMemoryDir, crew: true})
+	}
+
 	// Pre-size from the constant, never from a.Limit: a.Limit is
 	// request-controlled and feeding it to make() is an uncontrolled-
 	// allocation sink. maxSearchLimit is the same value a.Limit is
 	// clamped to above, so behaviour is unchanged.
-	hits := make([]hit, 0, maxSearchLimit)
+	hits := make([]searchHit, 0, maxSearchLimit)
+	var quarantined []quarantineNote
+
+	// Over-fetch from the engines. Tier filtering and quarantine
+	// suppression both remove rows AFTER ranking, so asking for exactly
+	// a.Limit would under-return on a scoped query. The multiplier is a
+	// constant applied to the already-clamped limit and the engine caps
+	// at 50 of its own accord, so this stays bounded — and it is a SQL
+	// LIMIT, not a slice capacity.
+	fetch := a.Limit * indexOverfetch
+	if fetch > maxIndexFetch {
+		fetch = maxIndexFetch
+	}
+
+	// One read + one scan per distinct file, shared across all of that
+	// file's chunks and across both engines.
+	seen := make(map[string]searchFileState)
+
+	for _, src := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, errSearchCancelled
+		}
+		ranked, err := HybridSearch(ctx, src.engine, nil, nil, HybridQuery{
+			WorkspaceID: d.ctx.WorkspaceID,
+			AgentID:     d.ctx.AgentID,
+			CrewID:      d.ctx.CrewID,
+			Text:        a.Q,
+			Limit:       fetch,
+		})
+		if err != nil {
+			// HybridSearch swallows single-engine failures by design;
+			// an error here is the whole call failing, and the other
+			// engine may still have something to say.
+			continue
+		}
+		for _, r := range ranked {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, errSearchCancelled
+			}
+			if r.FTS == nil {
+				// Episodic lane — not wired in-container, and its hits
+				// carry no memory-tier identity to render.
+				continue
+			}
+			rel := filepath.ToSlash(r.FTS.File)
+			tier, ok := tierForRelPath(rel, src.crew)
+			if !ok {
+				continue
+			}
+			if a.Tier != "" && tier != a.Tier {
+				continue
+			}
+
+			key := src.root + "\x00" + rel
+			st, cached := seen[key]
+			if !cached {
+				st = d.readForSearch(src.root, rel)
+				if st.poisoned {
+					note, _ := d.quarantineNoteFor(rel, st.body)
+					quarantined = append(quarantined, note)
+				}
+				seen[key] = st
+			}
+			if !st.readable || st.poisoned {
+				continue
+			}
+
+			hits = append(hits, searchHit{
+				Source:  rel,
+				Snippet: r.FTS.Snippet,
+				Line:    lineOfSnippet(st.body, r.FTS.Snippet),
+				Score:   r.Score,
+			})
+		}
+	}
+
+	// Merge the per-engine lists on their RRF scores so the agent's and
+	// the crew's best hits interleave by rank. Truncating per engine
+	// instead would let a run of mediocre agent-tier chunks push the
+	// crew's top hit out of a limit-sized result. Stable, so equal
+	// scores keep agent-before-crew order.
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
+	if len(hits) > a.Limit {
+		hits = hits[:a.Limit]
+	}
+	return hits, quarantined, nil
+}
+
+// indexOverfetch / maxIndexFetch bound how many ranked rows the indexed
+// path pulls per engine before tier + quarantine filtering. 50 is the
+// engine's own ceiling (search.go), so asking for more is wasted work.
+const (
+	indexOverfetch = 3
+	maxIndexFetch  = 50
+)
+
+// searchFileState is one indexed file as the search path sees it now:
+// its current on-disk body, whether it could be read at all, and the
+// scanner's verdict on it.
+type searchFileState struct {
+	body     string
+	poisoned bool
+	readable bool
+}
+
+// readForSearch reads one indexed file for the search path and reports
+// whether it is readable and whether the injection scanner rejects it.
+// The containment check runs first: the relative path comes out of the
+// index, and an engine pointed at the wrong directory (or a file that
+// became a symlink after it was indexed) must not turn into a read
+// primitive.
+func (d *Dispatcher) readForSearch(root, rel string) (st searchFileState) {
+	p := filepath.Join(root, filepath.FromSlash(rel))
+	if err := d.assertMemoryFile(p); err != nil {
+		return st
+	}
+	data, err := readRegularNoFollow(p)
+	if err != nil {
+		return st
+	}
+	st.readable = true
+	st.body = string(data)
+	st.poisoned = ScanContent(st.body) != nil
+	return st
+}
+
+// quarantineNoteFor moves a scanner-positive file into .quarantine and
+// builds the note that replaces its hits. A failed quarantine write
+// still yields a note (minus the payload-derived fields) because
+// suppressing the hits matters more than recording why.
+func (d *Dispatcher) quarantineNoteFor(label, body string) (quarantineNote, error) {
+	hit := ScanContent(body)
+	if hit == nil {
+		return quarantineNote{}, nil
+	}
+	placeholder, sha, err := Quarantine(d.ctx.AgentMemoryDir, label, body, hit)
+	if err != nil {
+		return quarantineNote{Source: label, Category: hit.Category, Pattern: hit.Pattern}, err
+	}
+	return quarantineNote{
+		Source:      label,
+		Category:    hit.Category,
+		Pattern:     hit.Pattern,
+		SHA256:      sha,
+		Placeholder: placeholder,
+	}, nil
+}
+
+// tierForRelPath maps an index-relative file path back to the tier that
+// owns it, mirroring candidateFiles in reverse. crew=true means the path
+// came from the crew engine, where CREW.md is the only tier that exists.
+// A path matching nothing returns ok=false and is dropped from results.
+func tierForRelPath(rel string, crew bool) (string, bool) {
+	if crew {
+		if rel == "CREW.md" {
+			return "CREW", true
+		}
+		return "", false
+	}
+	switch rel {
+	case "AGENT.md":
+		return "AGENT", true
+	case "PERSONA.md":
+		return "PERSONA", true
+	case "pins.md":
+		return "pins", true
+	case "lessons.md":
+		return "lessons", true
+	}
+	if !strings.HasSuffix(rel, ".md") {
+		return "", false
+	}
+	for _, t := range []string{"daily", "peers"} {
+		name, ok := strings.CutPrefix(rel, t+"/")
+		// One level deep only: the tiers are flat directories, and a
+		// nested path would not resolve through resolvePath either.
+		if ok && name != "" && !strings.Contains(name, "/") {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+// indexForTier returns the engine that indexes the tier's file, or nil
+// when no engine is wired for it. CREW lives in the crew root, every
+// other tier in the agent root.
+func (d *Dispatcher) indexForTier(tier string) *Engine {
+	if tier == "CREW" {
+		return d.crewIndex
+	}
+	return d.agentIndex
+}
+
+// lineOfSnippet locates a chunk's first line in the file body so a hit
+// can still say WHERE it came from. The FTS5 index stores chunk text
+// without line numbers (engine.Search returns LineStart=0), and the
+// model uses this to follow up with memory.read. Returns 0 when the
+// line cannot be located — the field is advisory, never a path.
+func lineOfSnippet(body, snippet string) int {
+	first := ""
+	for _, l := range strings.Split(snippet, "\n") {
+		if strings.TrimSpace(l) != "" {
+			first = l
+			break
+		}
+	}
+	if first == "" {
+		return 0
+	}
+	for i, l := range strings.Split(body, "\n") {
+		if l == first {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// searchScan is the unranked fallback: a lowercase substring match over
+// the tier's candidate files, in path order. It is what every caller
+// without an FTS5 engine gets, and it is the reason memory.search kept
+// working at all before #1651 — but it cannot match terms in a
+// different order than the file wrote them, which is most of what an
+// agent asks for after a week away.
+func (d *Dispatcher) searchScan(ctx context.Context, a searchArgs) ([]searchHit, []quarantineNote, error) {
+	files := d.candidateFiles(a.Tier)
+	// Pre-size from the constant, never from a.Limit: a.Limit is
+	// request-controlled and feeding it to make() is an uncontrolled-
+	// allocation sink. maxSearchLimit is the same value a.Limit is
+	// clamped to above, so behaviour is unchanged.
+	hits := make([]searchHit, 0, maxSearchLimit)
 	var quarantined []quarantineNote
 	needle := strings.ToLower(a.Q)
 	for _, p := range files {
 		if err := ctx.Err(); err != nil {
-			return ToolResult{IsError: true, Content: "memory.search: cancelled: " + err.Error()}, nil
+			return nil, nil, errSearchCancelled
 		}
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -729,28 +1087,14 @@ func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (Too
 		// can flow into `hits`. Quarantine the content and record a
 		// placeholder in the response instead — symmetric with the
 		// read path.
-		if scanHit := ScanContent(body); scanHit != nil {
-			placeholder, sha, qerr := Quarantine(d.ctx.AgentMemoryDir, label, body, scanHit)
-			if qerr != nil {
-				// Quarantine write failed: still suppress hits from
-				// this file. Record minimal note without payload.
-				quarantined = append(quarantined, quarantineNote{
-					Source: label, Category: scanHit.Category, Pattern: scanHit.Pattern,
-				})
-				continue
-			}
-			quarantined = append(quarantined, quarantineNote{
-				Source:      label,
-				Category:    scanHit.Category,
-				Pattern:     scanHit.Pattern,
-				SHA256:      sha,
-				Placeholder: placeholder,
-			})
+		if ScanContent(body) != nil {
+			note, _ := d.quarantineNoteFor(label, body)
+			quarantined = append(quarantined, note)
 			continue
 		}
 		for i, line := range strings.Split(body, "\n") {
 			if strings.Contains(strings.ToLower(line), needle) {
-				hits = append(hits, hit{Source: label, Snippet: line, Line: i + 1})
+				hits = append(hits, searchHit{Source: label, Snippet: line, Line: i + 1})
 				if len(hits) >= a.Limit {
 					break
 				}
@@ -760,13 +1104,7 @@ func (d *Dispatcher) handleSearch(ctx context.Context, raw json.RawMessage) (Too
 			break
 		}
 	}
-
-	envelope := map[string]any{"hits": hits, "query": a.Q}
-	if len(quarantined) > 0 {
-		envelope["quarantined"] = quarantined
-	}
-	body, _ := json.MarshalIndent(envelope, "", "  ")
-	return ToolResult{Content: string(body)}, nil
+	return hits, quarantined, nil
 }
 
 // pathToSourceLabel maps an absolute candidateFiles path back to the

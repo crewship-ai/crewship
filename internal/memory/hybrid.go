@@ -1,6 +1,6 @@
-// Package memory — hybrid.go status (PR-F5 tombstone)
+// Package memory — hybrid.go status
 //
-// HybridSearch ships and is wired into the HTTP / sidecar layers:
+// HybridSearch is reachable from every surface that searches memory:
 //
 //   - internal/api/memory_hybrid_search_handler.go exposes it at
 //     POST /api/v1/memory/search/hybrid (FTS5 BM25 markdown + episodic
@@ -9,20 +9,19 @@
 //     external-construction seam used by cmd/server bootstrap.
 //   - internal/sidecar/memory.go forwards from the in-container memory
 //     MCP at /memory/search-hybrid → the API handler above.
+//   - internal/memory/tools.go::handleSearch — the tool-call surface
+//     the model sees as "memory.search". Wired in #1651 via
+//     WithSearchIndex; before that it ran a substring scan over a fixed
+//     file list while the FTS5 index sat unread, so the [MEMORY GAP]
+//     block told a woken agent to search and handed it a grep. The
+//     dispatcher supplies an *Engine only — the episodic half needs a
+//     *sql.DB no in-container caller has, and nil db/embedder is the
+//     documented FTS-only mode below.
 //
-// What's NOT wired (intentional dead code from the in-process
-// dispatcher's POV): internal/memory/tools.go::handleSearch. The
-// tool-call surface the model sees as "memory.search" runs a substring
-// scan over candidate files and does NOT call HybridSearch — the
-// dispatcher would need a *memory.Engine + *sql.DB + episodic.Embedder
-// threaded through AgentContext or NewDispatcher, which is >30 LOC
-// of plumbing across constructor signatures, sidecar handoff, and
-// test fixtures. Deferred to PR-F5.
-//
-// Sentinel: TestHybridSearch_NotYetWiredToDispatcher in
-// hybrid_dead_code_test.go fails if HybridSearch starts appearing in
-// the handleSearch call graph — at that point flip the test and
-// remove this header so the comment doesn't lie about what ships.
+// Sentinel: TestHybridSearch_WiredIntoDispatcher in
+// hybrid_wiring_test.go fails if HybridSearch stops appearing in the
+// handleSearch call graph — the fallback is silent, so nothing else
+// would notice.
 package memory
 
 import (

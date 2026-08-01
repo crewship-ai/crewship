@@ -443,9 +443,17 @@ func TestBuildMemoryContext_GapSurvivesEmptySnapshot(t *testing.T) {
 }
 
 // TestRenderMemoryInstructions_NamesRecallTools is the §3.2 half of
-// #1628: the stale "lands in PR-A (F1)" sentence is gone and the two
-// recall tools are named in prompt text, with a wake-specific
-// instruction to use them when there is a gap.
+// #1628: the stale "lands in PR-A (F1)" sentence is gone and the recall
+// tools are named in prompt text, with a wake-specific instruction to
+// use them when there is a gap.
+//
+// #1651 removed conversation.search from that list. It was named here
+// but advertised in no tools/list the model sees, and its backend has
+// no in-container caller — the instruction pointed at a tool the agent
+// could not call. The tools named must be tools the agent HAS; that
+// invariant is enforced against the catalogue itself in
+// TestPromptNamesOnlyAdvertisedTools, so this test only pins that the
+// naming survived.
 func TestRenderMemoryInstructions_NamesRecallTools(t *testing.T) {
 	instr := renderMemoryInstructions("2026-08-01")
 
@@ -459,7 +467,7 @@ func TestRenderMemoryInstructions_NamesRecallTools(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{"memory.search", "conversation.search", "[MEMORY GAP]"} {
+	for _, want := range []string{"memory.search", "memory.read tier=daily", "[MEMORY GAP]"} {
 		if !strings.Contains(instr, want) {
 			t.Errorf("instructions must name %q\ninstr=%s", want, instr)
 		}

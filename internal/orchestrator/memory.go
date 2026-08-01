@@ -359,9 +359,9 @@ func (g memoryGap) render(today string) string {
 	return fmt.Sprintf(`[MEMORY GAP]
 Today is %s. Your last recorded activity was %s — %d %s ago.
 %s
-Before you start: memory.search the project or task you are picking up, and
-conversation.search what was last discussed with you. Do not assume the snapshot
-below is current.
+Before you start: memory.search the project or task you are picking up. The
+snapshot below is a bounded window and what you need may sit outside it. Do not
+assume it is current.
 [END MEMORY GAP]
 
 `, today, g.lastActive, g.days, unit, tail)
@@ -840,14 +840,13 @@ GUIDELINES:
 - When updating AGENT.md, ADD new information. Do not delete existing entries unless outdated.
 
 RECALLING WHAT IS NOT SHOWN ABOVE:
-- The snapshot above is a bounded window, not your whole history. Three tools reach the rest:
-  - memory.search — keyword search across your memory tiers (AGENT, CREW, daily, pins, peers, lessons).
-  - conversation.search — keyword search across your own past chat sessions.
+- The snapshot above is a bounded window, not your whole history. Two tools reach the rest:
+  - memory.search — ranked keyword search across your memory tiers (AGENT, CREW, daily, pins, peers, lessons).
   - memory.read tier=daily key=YYYY-MM-DD — one specific day's log, in full.
 - If a [MEMORY GAP] block appears above, time has passed since your last session.
   Before you start the task, run memory.search for the project or task you are picking
-  up and conversation.search for what was last discussed with you. Treat the snapshot
-  as stale until you have.
+  up, and read the daily logs around your last active date. Treat the snapshot as
+  stale until you have.
 
 CREW SHARED MEMORY:
 - Crew-wide knowledge is stored at /crew/shared/.memory/
