@@ -13,22 +13,26 @@ import (
 // 5 direct WriteStrings saves allocations on every non-LEAD agent run.
 const (
 	peerContextQueryPrefix = `
-To ask a crew member a question:
+To ask a crew member a question (auth comes from the fd-3 config — never -H, see SIDECAR AUTH):
   curl -s -X POST http://localhost:9119/query \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"target":"<slug>","question":"<question>","from":"`
 
-	peerContextEscalatePrefix = `"}'
+	peerContextEscalatePrefix = `"}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 The response will contain the crew member's answer.
 
 To escalate to the lead (when you discover something needs a decision):
   curl -s -X POST http://localhost:9119/escalate \
-    -H "Authorization: Bearer $CREWSHIP_AGENT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"from":"`
 
-	peerContextTail = `","reason":"<why>","context":"<optional details>"}'
+	peerContextTail = `","reason":"<why>","context":"<optional details>"}' \
+    -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
 [END PEER COMMUNICATION]`
 )
 

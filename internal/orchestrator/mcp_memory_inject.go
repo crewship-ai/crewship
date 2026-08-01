@@ -54,6 +54,13 @@ func memoryMCPSpec(agentSlug string) mcpSpec {
 		// form is expanded per-adapter from the agent's env — CREWSHIP_AGENT_TOKEN
 		// is set in exec_env by the orchestrator. When the env var is unset
 		// (internal auth off) the sidecar simply falls back to the URL-slug path.
+		//
+		// Unlike the shell recipes in exec.go/lead.go/peer.go, this one never
+		// reaches a command line: every mcp_writers.go path lands Headers in a
+		// config FILE (.mcp.json, .codex/config.toml, opencode.json, …) that the
+		// CLI reads and expands in-process, and collectMCPEnvRefs only reads the
+		// value to learn which env vars to inject. No writer passes a header as a
+		// CLI argument, so /proc/<pid>/cmdline never sees the token here.
 		Headers: map[string]string{"Authorization": "Bearer ${CREWSHIP_AGENT_TOKEN}"},
 	}
 }
