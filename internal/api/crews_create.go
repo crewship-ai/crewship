@@ -38,55 +38,6 @@ func (h *CrewHandler) workspaceAllowsPrivileged(ctx context.Context, workspaceID
 	return v == 1, nil
 }
 
-// Bounds for the two runtime values a crew can configure,
-// container_memory_mb and container_cpus (#1627).
-//
-// The floors are Docker's own. Below 0.01 NanoCPUs the daemon refuses the
-// container create with "Range of CPUs is from 0.01"; below 6 MiB with
-// "Minimum memory limit allowed is 6MB". Neither error names the crew or the
-// field, and nothing between the manifest and the daemon used to check —
-// so `container_cpus: 0.005` was accepted everywhere and then wedged EVERY
-// agent run for that crew on a message the operator could not act on.
-//
-// The ceilings are plain constants rather than a per-workspace quota. A quota
-// an operator can raise needs a workspaces column, an admin route and a CLI
-// command to go with it (docs/prd/crew-runtime-capacity.md §1.1 sketches
-// that), and none of it helps the case this guard exists for: a MANAGER
-// typing container_memory_mb: 999999. The numbers below sit well above any
-// host we expect to run on, so a legitimate large-host configuration is never
-// blocked, while a typo is.
-//
-// The CPU ceiling cannot be exact at this tier. The daemon's real upper limit
-// is the host's core count ("Range of CPUs is from 0.01 to 8.00"), which the
-// API does not know — a host-aware preflight belongs in the docker provider.
-// This catches the typo class only.
-const (
-	minCrewContainerMemoryMB = 6
-	maxCrewContainerMemoryMB = 262144 // 256 GiB
-
-	minCrewContainerCPUs float64 = 0.01
-	maxCrewContainerCPUs float64 = 512
-)
-
-// validateCrewContainerResources range-checks the container sizing fields on
-// create and update. nil means "field absent"; an explicit 0 is the long
-// standing "use the server default" sentinel (the CLI's `--memory-mb 0`, an
-// omitted `hostRequirements` block, and the provider's own `<= 0` fallback all
-// depend on it) and stays accepted.
-func validateCrewContainerResources(memoryMB *int, cpus *float64) error {
-	if memoryMB != nil && *memoryMB != 0 &&
-		(*memoryMB < minCrewContainerMemoryMB || *memoryMB > maxCrewContainerMemoryMB) {
-		return fmt.Errorf("container_memory_mb must be between %d and %d (0 = use the server default)",
-			minCrewContainerMemoryMB, maxCrewContainerMemoryMB)
-	}
-	if cpus != nil && *cpus != 0 &&
-		(*cpus < minCrewContainerCPUs || *cpus > maxCrewContainerCPUs) {
-		return fmt.Errorf("container_cpus must be between %g and %g (0 = use the server default)",
-			minCrewContainerCPUs, maxCrewContainerCPUs)
-	}
-	return nil
-}
-
 // replyDevcontainerSecurityError maps a Config.ValidateSecurity failure to the
 // right HTTP status: privileged-without-flag is an authorization failure (403);
 // a disallowed capability or mount is a bad request (400).
@@ -322,13 +273,13 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	memoryMB := 4096
-	if req.ContainerMemoryMB != nil && *req.ContainerMemoryMB > 0 {
-		memoryMB = *req.ContainerMemoryMB
+	memoryMB := defaultCrewContainerMemoryMB
+	if req.ContainerMemoryMB != nil {
+		memoryMB = resolveCrewContainerMemoryMB(*req.ContainerMemoryMB)
 	}
-	cpus := 2.0
-	if req.ContainerCPUs != nil && *req.ContainerCPUs > 0 {
-		cpus = *req.ContainerCPUs
+	cpus := defaultCrewContainerCPUs
+	if req.ContainerCPUs != nil {
+		cpus = resolveCrewContainerCPUs(*req.ContainerCPUs)
 	}
 	var ttlHours *int
 	if req.ContainerTTLHours != nil && *req.ContainerTTLHours > 0 {
@@ -372,26 +323,38 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name, "slug": req.Slug, "network_mode": networkMode,
 	})
 
-	writeJSON(w, http.StatusCreated, crewResponse{
-		ID:                    crewID,
-		WorkspaceID:           workspaceID,
-		Name:                  req.Name,
-		Slug:                  req.Slug,
-		Description:           req.Description,
-		Color:                 req.Color,
-		Icon:                  req.Icon,
-		ContainerMemoryMB:     memoryMB,
-		ContainerCPUs:         cpus,
-		ContainerTTLHours:     ttlHours,
-		NetworkMode:           networkMode,
-		AllowedDomains:        allowedDomainsOut,
-		AllowPrivateEndpoints: req.AllowPrivateEndpoints,
-		RuntimeImage:          req.RuntimeImage,
-		DevcontainerConfig:    req.DevcontainerConfig,
-		MiseConfig:            req.MiseConfig,
-		ServicesJSON:          req.ServicesJSON,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+	// #1638: an undersized crew is created, not refused — but the operator is
+	// told, on the response to the request that made it. Logged too, because
+	// the consequence (an OOM-killed agent, exit 137) surfaces far from here
+	// and the log is where someone debugging a failing run will be looking.
+	advisories := crewSizingAdvisories(r.Context(), h.db, memoryMB, cpus)
+	for _, a := range advisories {
+		h.logger.Warn("crew sized below the usable floor", "crew_id", crewID, "slug", req.Slug, "advisory", a)
+	}
+
+	writeJSON(w, http.StatusCreated, crewResponseWithAdvisories{
+		crewResponse: crewResponse{
+			ID:                    crewID,
+			WorkspaceID:           workspaceID,
+			Name:                  req.Name,
+			Slug:                  req.Slug,
+			Description:           req.Description,
+			Color:                 req.Color,
+			Icon:                  req.Icon,
+			ContainerMemoryMB:     memoryMB,
+			ContainerCPUs:         cpus,
+			ContainerTTLHours:     ttlHours,
+			NetworkMode:           networkMode,
+			AllowedDomains:        allowedDomainsOut,
+			AllowPrivateEndpoints: req.AllowPrivateEndpoints,
+			RuntimeImage:          req.RuntimeImage,
+			DevcontainerConfig:    req.DevcontainerConfig,
+			MiseConfig:            req.MiseConfig,
+			ServicesJSON:          req.ServicesJSON,
+			CreatedAt:             now,
+			UpdatedAt:             now,
+		},
+		Warnings: advisories,
 	})
 
 	h.broadcastCrewEvent("crew.created", workspaceID, map[string]string{

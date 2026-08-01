@@ -191,11 +191,17 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// #1638: an explicit 0 means "reset to the server default" — the wording
+	// docs/cli/crew.mdx uses for `--memory-mb 0`. This used to store the 0,
+	// and the runtime's `<= 0` fallback then sized the crew at 8 GiB: double
+	// what the identical request produces through Create, and double what the
+	// docs promise. Resolve it here, from the same constant Create uses, so
+	// the row always carries a real size.
 	if req.ContainerMemoryMB != nil {
-		ub.Set("container_memory_mb", *req.ContainerMemoryMB)
+		ub.Set("container_memory_mb", resolveCrewContainerMemoryMB(*req.ContainerMemoryMB))
 	}
 	if req.ContainerCPUs != nil {
-		ub.Set("container_cpus", *req.ContainerCPUs)
+		ub.Set("container_cpus", resolveCrewContainerCPUs(*req.ContainerCPUs))
 	}
 	if req.ContainerTTLHours != nil {
 		if *req.ContainerTTLHours < 0 {
@@ -437,7 +443,15 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"name": c.Name, "fields": changedCrewFields(&req),
 	})
 
-	writeJSON(w, http.StatusOK, c)
+	// #1638: same advisory as Create, computed from the row as it now stands
+	// rather than from the patch — a crew can be shrunk into the undersized
+	// band by a request that only mentions one of the two fields.
+	advisories := crewSizingAdvisories(r.Context(), h.db, c.ContainerMemoryMB, c.ContainerCPUs)
+	for _, a := range advisories {
+		h.logger.Warn("crew sized below the usable floor", "crew_id", crewID, "slug", c.Slug, "advisory", a)
+	}
+
+	writeJSON(w, http.StatusOK, crewResponseWithAdvisories{crewResponse: c, Warnings: advisories})
 
 	h.broadcastCrewEvent("crew.updated", workspaceID, map[string]string{
 		"id": crewID, "name": c.Name, "slug": c.Slug,

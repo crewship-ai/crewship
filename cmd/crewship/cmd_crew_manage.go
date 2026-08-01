@@ -226,12 +226,20 @@ var crewCreateCmd = &cobra.Command{
 		var created struct {
 			ID   string `json:"id"`
 			Slug string `json:"slug"`
+			// #1638: sizing advisories. The server accepts an undersized
+			// crew rather than refusing it, and says so here — the floor is
+			// an instance setting, so the CLI must report the server's
+			// answer rather than carry a second copy of the rule.
+			Warnings []string `json:"warnings"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
 
 		cli.PrintSuccess(fmt.Sprintf("Crew created: %s (%s)", created.Slug, created.ID))
+		for _, warning := range created.Warnings {
+			cli.PrintWarning(warning)
+		}
 		return nil
 	},
 }
@@ -342,9 +350,21 @@ var crewUpdateCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
+		// #1638: the response body used to be discarded. It carries the
+		// sizing advisories now — a crew shrunk below what one agent needs
+		// is accepted, and this is the only place the operator hears about
+		// it before the first OOM-killed run.
+		var updated struct {
+			Warnings []string `json:"warnings"`
+		}
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
 
 		cli.PrintSuccess("Crew updated successfully.")
+		for _, warning := range updated.Warnings {
+			cli.PrintWarning(warning)
+		}
 		return nil
 	},
 }

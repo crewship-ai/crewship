@@ -33,27 +33,27 @@ import (
 	"fmt"
 )
 
-// defaultAgentMemoryEstimateMB is the per-agent memory cost we assume
-// when deriving a budget from container_memory_mb. Claude / Gemini
-// CLIs warm up to 1.5-2 GiB once they've loaded their model token
-// caches; rounding to 2 GiB gives a budget that holds up under real
-// workload without forcing operators to think about it. Override per
-// crew via crews.max_concurrent_agents.
+// The per-agent memory cost used to derive a budget from
+// container_memory_mb used to be a private const of 2048 here.
 //
-// Lives as a package-level const (not a config knob yet) because
-// every dispatcher today wants the same number. When per-agent
-// observed RSS diverges enough to matter, promote this to a config
-// field and read from cfg.Container.AgentMemoryEstimateMB.
-const defaultAgentMemoryEstimateMB = 2048
+// #1638 made it one value with the crew-sizing advisory floor: both are
+// answering "how much memory does one agent need?", and two literals that
+// happened to agree meant moving one gave a scheduler that dispatches runs
+// into crews the API is warning are too small, or an advisory firing at a size
+// the scheduler is content with. The number now lives once, as the instance
+// setting behind agentMinMemoryMB — see crew_resource_policy.go, which also
+// carries the evidence for the 2048 default.
+//
+// Per-crew override is unchanged: crews.max_concurrent_agents.
 
 // computeCrewBudget returns the maximum concurrent agent runs for a
 // crew. The order of precedence:
 //
 //  1. crews.max_concurrent_agents if non-NULL — operator override.
-//  2. floor(crews.container_memory_mb / defaultAgentMemoryEstimateMB)
-//     — derived from the container's memory ceiling. Minimum of 1
-//     so a misconfigured tiny container is still dispatchable (a
-//     budget of 0 would deadlock the queue).
+//  2. floor(crews.container_memory_mb / agentMinMemoryMB) — derived
+//     from the container's memory ceiling. Minimum of 1 so a
+//     misconfigured tiny container is still dispatchable (a budget of
+//     0 would deadlock the queue).
 //
 // Returns 1 (not an error) if the crew row is missing or scan fails;
 // the caller can still attempt dispatch and SQLite will surface the
@@ -76,7 +76,9 @@ func computeCrewBudget(ctx context.Context, db *sql.DB, crewID string) (int, err
 		return int(override.Int64), nil
 	}
 	if memMB.Valid && memMB.Int64 > 0 {
-		budget := int(memMB.Int64) / defaultAgentMemoryEstimateMB
+		// agentMinMemoryMB is guaranteed >= dockerMinContainerMemoryMB, so
+		// this cannot divide by zero however the instance setting is written.
+		budget := int(memMB.Int64) / agentMinMemoryMB(ctx, db)
 		if budget < 1 {
 			return 1, nil
 		}

@@ -92,21 +92,68 @@ crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
 | `--description` | `string` | | Description. |
 | `--color` | `string` | | Hex color (e.g. `#3B82F6`). |
 | `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
-| `--memory-mb` | `int` | `0` | Container memory limit in MB. 6–262144; `0` uses the server default. |
-| `--cpus` | `float64` | `0` | Container CPU limit. 0.01–512; `0` uses the server default. |
+| `--memory-mb` | `int` | `0` | Container memory limit in MB. 6–262144; `0` uses the server default (`4096`). Below `2048` the crew is created with a warning — see [Sizing a crew](#sizing-a-crew). |
+| `--cpus` | `float64` | `0` | Container CPU limit. 0.01–512; `0` uses the server default (`2.0`). Below `0.5` the crew is created with a warning. |
 | `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. Supports `*.example.com` subdomain wildcards. |
 | `--allow-package-registries` | `bool` | `false` | Also allow the common package registries (npm, pip, cargo, go, apt, Docker Hub). Appended to `--allowed-domains`. |
 | `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
 
-`--memory-mb` and `--cpus` are range-checked by the server and a value
-outside the range comes back as a `400` naming it. The lower bounds are
-Docker's own, so a crew sized below them is refused here rather than
-accepted and then rejected by the daemon at wake time — which wedges
-every run of that crew until the value is corrected. Note the `--cpus`
-ceiling cannot be fully validated server-side, because the daemon's real
-upper bound is the host's core count.
+### Sizing a crew
+
+`--memory-mb` and `--cpus` are checked by the server against **two**
+different floors.
+
+**The hard floor is Docker's own** — `6` MB and `0.01` CPU. The daemon
+refuses to create a container below either, so a value under them comes
+back as a `400` naming the field. Failing here is strictly better than
+failing at wake time, where the daemon's own error ("Range of CPUs is
+from 0.01") names neither the crew nor the field and every run wedges on
+it. The `--cpus` ceiling cannot be fully validated server-side, because
+the daemon's real upper bound is the host's core count.
+
+**The usable floor is advisory** — `2048` MB and `0.5` CPU by default.
+A crew sized between the two is **created**, and the CLI prints a
+warning:
+
+```bash
+crewship crew create --name "Tiny" --memory-mb 512
+# ✓ Crew created: tiny (c...)
+# Warning: container_memory_mb 512 is below 2048, the memory one agent
+# needs: the container will be created, but the agent CLI is likely to be
+# OOM-killed (exit 137) on start. Raise the crew's memory, or lower the
+# floor with `crewship instance settings set runtime.agent_min_memory_mb <mb>`.
+```
+
+The numbers behind the default: a warmed agent CLI holds 1.5–2 GiB once
+its token caches load, and 512 MB was measured OOM-killing real runs.
+`0.5` CPU is a quarter of the shipped `2.0` default — the CPU limit is a
+hard quota, so a smaller fraction stretches toolchain startup
+proportionally, past the run timeout.
+
+This is a warning rather than a refusal because a small crew can be a
+deliberate choice, and refusing does not make an undersized crew any
+bigger — it only stops it existing. Memory is a cgroup *ceiling*, not a
+reservation, so sizing every crew at the floor does not commit that much
+RAM on an idle host.
+
+**Moving the floor.** Both values are instance settings, so an operator
+who knows their workload can change them:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `runtime.agent_min_memory_mb` | `2048` | Memory one agent needs. Also the divisor behind a crew's concurrent-run budget — a crew's memory divided by this is how many agents may run at once. |
+| `runtime.agent_min_cpus` | `0.5` | CPU one agent needs. Advisory only. |
+
+```bash
+crewship instance settings set runtime.agent_min_memory_mb 4096
+```
+
+Raising `runtime.agent_min_memory_mb` warns earlier **and** lowers every
+crew's concurrency budget; lowering it does the reverse. A value that
+does not parse, or that falls outside the hard bounds, is ignored in
+favour of the default.
 
 ---
 
@@ -124,8 +171,8 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--description` | `string` | | Description. |
 | `--color` | `string` | | Hex color. |
 | `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
-| `--memory-mb` | `int` | | Container memory limit in MB. 6–262144; `0` resets to the server default. |
-| `--cpus` | `float64` | | Container CPU limit. 0.01–512; `0` resets to the server default. |
+| `--memory-mb` | `int` | | Container memory limit in MB. 6–262144; `0` resets to the server default (`4096`). Shrinking below `2048` warns — see [Sizing a crew](#sizing-a-crew). |
+| `--cpus` | `float64` | | Container CPU limit. 0.01–512; `0` resets to the server default (`2.0`). Shrinking below `0.5` warns. |
 | `--ttl` | `int` | `-1` | Auto-stop after idle hours (0 = disable TTL). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |

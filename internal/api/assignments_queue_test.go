@@ -111,7 +111,11 @@ func TestQueue_ComputeCrewBudget_DerivesFromMemoryWhenNoOverride(t *testing.T) {
 		t.Fatalf("computeCrewBudget: %v", err)
 	}
 	if got != 2 {
-		t.Errorf("budget = %d, want 2 (4096 / %d)", got, defaultAgentMemoryEstimateMB)
+		// 2048 as a literal, not the constant it divides by: comparing the
+		// divisor with itself would pass whatever the divisor became.
+		// TestAgentMinMemory_IsOneValueForBudgetAndAdvisory covers the
+		// settable side.
+		t.Errorf("budget = %d, want 2 (4096 / 2048 per agent)", got)
 	}
 }
 
