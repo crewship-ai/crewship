@@ -1150,11 +1150,104 @@ func schedulerLeaderElectionEnabled() bool {
 	return true
 }
 
+// Container provider names as they appear in config and in the log lines an
+// operator reads at startup.
+const (
+	providerDocker = "docker"
+	providerApple  = "apple"
+)
+
+// containerProviderCandidate is one runtime `container.provider: auto` may
+// select, paired with the constructor that proves the runtime is usable. The
+// constructor is deliberately lazy: nothing is probed until the candidate is
+// reached, so probing order is the slice order and nothing else.
+type containerProviderCandidate struct {
+	name string
+	new  func() (provider.ContainerProvider, error)
+}
+
+// autoContainerCandidates returns the runtimes `auto` tries, in the order it
+// tries them.
+//
+// Docker first, Apple Containers second, because the two providers are not
+// interchangeable. Every crew isolation control — Init, the core-dump ulimit,
+// GroupAdd, ShmSize, MemorySwap, RestartPolicy, Labels, CapDrop ALL,
+// no-new-privileges, the /secrets tmpfs, the noexec mounts — and the whole
+// `restricted` egress fence are applied on the Docker path only. So on a host
+// with both installed, "pick the sensible one" has to mean the hardened one;
+// Apple Containers stay a fallback for hosts with nothing else (#1647).
+// docs/configuration/providers.mdx documents this order and
+// cmd_start_provider_order_test.go pins both sides against drift.
+func autoContainerCandidates(ctx context.Context, cfg *config.Config, logger *slog.Logger) []containerProviderCandidate {
+	return []containerProviderCandidate{
+		{name: providerDocker, new: func() (provider.ContainerProvider, error) {
+			d, err := docker.New(ctx, docker.Config{
+				RuntimeImage:      cfg.Container.RuntimeImage,
+				DefaultRuntime:    cfg.Container.DefaultRuntime,
+				Network:           cfg.Container.Network,
+				OutputBasePath:    cfg.Storage.BasePath,
+				ContainerPrefix:   cfg.Container.ContainerPrefix,
+				SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+				EntrypointPath:    cfg.Container.EntrypointPath,
+			}, logger)
+			if err != nil {
+				return nil, err
+			}
+			return d, nil
+		}},
+		{name: providerApple, new: func() (provider.ContainerProvider, error) {
+			a, err := apple.New(ctx, apple.Config{
+				RuntimeImage:    cfg.Container.RuntimeImage,
+				Network:         cfg.Container.Network,
+				OutputBasePath:  cfg.Storage.BasePath,
+				ContainerPrefix: cfg.Container.ContainerPrefix,
+			}, logger)
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		}},
+	}
+}
+
+// selectAutoContainerProvider returns the first candidate that constructs,
+// with the name it was selected under, or (nil, "") when none is available.
+func selectAutoContainerProvider(candidates []containerProviderCandidate, logger *slog.Logger) (provider.ContainerProvider, string) {
+	tried := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		tried = append(tried, c.name)
+		p, err := c.new()
+		if err != nil {
+			logger.Debug("container provider not available, trying the next one",
+				"provider", c.name, "error", err)
+			continue
+		}
+		if c.name == providerApple {
+			warnAppleProviderIsolationGap(logger)
+		}
+		return p, c.name
+	}
+	logger.Warn("no container provider available, running without containers",
+		"tried", strings.Join(tried, ", "))
+	return nil, ""
+}
+
+// warnAppleProviderIsolationGap says, at startup, what running crews on the
+// apple provider costs. "Apple Containers selected" on its own reads as an
+// equivalent choice; it is not, and the operator has to be told which controls
+// are simply not applied on that path (#1647, #1648).
+func warnAppleProviderIsolationGap(logger *slog.Logger) {
+	logger.Warn("apple container provider selected: crew containers run without the isolation the docker provider applies",
+		"not_enforced", "cap_drop ALL, no-new-privileges, /secrets tmpfs, noexec mounts, core-dump ulimit, memory-swap and shm limits, restart policy",
+		"egress", "a crew's restricted network mode is not enforced — crews reach the network unfiltered",
+		"remedy", "install Docker and set container.provider to docker for a hardened crew runtime")
+}
+
 func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
-	case "docker":
+	case providerDocker:
 		if skipDocker {
 			logger.Info("docker provider disabled via --no-docker")
 			break
@@ -1174,7 +1267,7 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			deps.Container = d
 		}
 
-	case "apple":
+	case providerApple:
 		if skipDocker {
 			logger.Info("apple container provider disabled via --no-docker")
 			break
@@ -1188,6 +1281,7 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 		if err != nil {
 			logger.Warn("apple container provider unavailable, running without containers", "error", err)
 		} else {
+			warnAppleProviderIsolationGap(logger)
 			deps.Container = a
 		}
 
@@ -1196,34 +1290,10 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			logger.Info("container provider disabled via --no-docker")
 			break
 		}
-		// Try Apple Containers first (native, lighter on macOS), fall back to Docker
-		a, appleErr := apple.New(ctx, apple.Config{
-			RuntimeImage:    cfg.Container.RuntimeImage,
-			Network:         cfg.Container.Network,
-			OutputBasePath:  cfg.Storage.BasePath,
-			ContainerPrefix: cfg.Container.ContainerPrefix,
-		}, logger)
-		if appleErr == nil {
-			logger.Info("auto-detected Apple Containers as container provider")
-			deps.Container = a
-			break
+		if c, name := selectAutoContainerProvider(autoContainerCandidates(ctx, cfg, logger), logger); c != nil {
+			logger.Info("auto-detected container provider", "provider", name)
+			deps.Container = c
 		}
-		logger.Debug("apple containers not available, trying docker", "error", appleErr)
-		d, dockerErr := docker.New(ctx, docker.Config{
-			RuntimeImage:      cfg.Container.RuntimeImage,
-			DefaultRuntime:    cfg.Container.DefaultRuntime,
-			Network:           cfg.Container.Network,
-			OutputBasePath:    cfg.Storage.BasePath,
-			ContainerPrefix:   cfg.Container.ContainerPrefix,
-			SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
-			EntrypointPath:    cfg.Container.EntrypointPath,
-		}, logger)
-		if dockerErr == nil {
-			logger.Info("auto-detected Docker as container provider")
-			deps.Container = d
-			break
-		}
-		logger.Warn("no container provider available (tried Apple Containers and Docker)", "apple_error", appleErr, "docker_error", dockerErr)
 
 	default:
 		if cfg.Container.Provider != "" && cfg.Container.Provider != "k8s" {

@@ -171,12 +171,36 @@ type containerJSON struct {
 | `ExecResize` | Resizes running exec TTY | No-op (CLI does not support resize) |
 | CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
 | Stop timeout | 30 seconds | 10 seconds |
+| Crew isolation controls | `CapDrop: ALL`, `no-new-privileges`, `/secrets` tmpfs, `noexec` mounts, `Init`, core-dump ulimit, `MemorySwap`/`ShmSize` limits, restart policy | None of them are applied |
+| `network_mode: "restricted"` egress fence | Enforced | Not enforced — crews reach the network unfiltered |
+
+<Warning>
+  The isolation rows above are not a feature gap to work around, they are the
+  reason `auto` prefers Docker. A crew on the Apple provider runs without the
+  container hardening and without the egress fence, whichever way that provider
+  was selected. `crewship start` logs a warning naming exactly what is not
+  enforced whenever it wires the Apple provider — treat that line as a
+  deployment decision, not noise.
+</Warning>
 
 ### Auto Provider
 
 **Config key:** `container.provider: "auto"`
 
 Auto-detection tries Docker first, then falls back to Apple Containers. Useful for development environments where the runtime may vary.
+
+The order is deliberate and not merely a preference: every crew isolation
+control and the `restricted` egress fence exist on the Docker path only (see
+the limitations table above). On a host with both runtimes installed, `auto`
+therefore selects the hardened one; Apple Containers are the fallback for hosts
+that have nothing else. Set `container.provider: "apple"` explicitly if you
+want that path regardless of what else is installed.
+
+Apple Containers additionally require macOS 26 (Tahoe) or newer. On an older
+host the `container` CLI can be installed and its system service can answer
+while providing none of the per-container networking this provider assumes, so
+detection rejects it and `auto` falls through as though the runtime were
+absent.
 
 ### Kubernetes Provider — v0.2 roadmap
 

@@ -35,6 +35,10 @@ func installFakeContainer(t *testing.T, body string) *fakeCLI {
 	if err := os.WriteFile(filepath.Join(dir, "container"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake container: %v", err)
 	}
+	// Detect also gates on the host macOS version (#1647). Pin a supported one
+	// so faking the CLI is enough to make a test hermetic; the tests that
+	// exercise the gate overwrite this stub.
+	writeFakeSwVers(t, dir, "26.0")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return &fakeCLI{dir: dir, log: logFile}
 }

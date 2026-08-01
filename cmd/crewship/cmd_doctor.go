@@ -237,8 +237,11 @@ counters or filter the per-check array.`,
 var preflightInstalled = preflight.Installed
 
 // checkContainerRuntime probes both Docker-compatible runtimes and Apple
-// Containers. We accept either one — they're functionally equivalent for
-// Crewship's purposes, so finding any container runtime is a PASS.
+// Containers. Either one is enough to run crews, so finding any container
+// runtime is a PASS — but they are not equivalent: the crew isolation controls
+// and the `restricted` egress fence are applied on the Docker path only, which
+// is why this reports Docker first, the same order `container.provider: auto`
+// selects in (#1647).
 func checkContainerRuntime(ctx context.Context) checkResult {
 	if d, err := docker.Detect(ctx); err == nil {
 		return checkResult{
