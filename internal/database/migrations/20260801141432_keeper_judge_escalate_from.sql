@@ -8,17 +8,27 @@
 -- relabel the credential L4 — which also imposes the four-eyes rule and L4's
 -- 35-character intent minimum, whether they wanted those or not.
 --
--- judge_escalate_from raises ONLY the human-approval floor, to a tier the
--- operator names. NULL (the default) leaves the tier table alone, so an
--- instance that does not set it behaves exactly as it did.
+-- judge_escalate_from SETS the human-approval floor, in either direction, to a
+-- tier the operator names. NULL (the default) leaves the tier table alone, so
+-- an instance that does not set it behaves exactly as it did — every L4 read
+-- still reaches a person.
 --
--- The CHECK is 1-4 rather than an open integer because it is a credential tier,
--- and a hand-edited 7 would otherwise resolve to "escalate nothing" — an
--- out-of-range floor that silently disables the control the row was added for.
+-- 5 means "never": no tier is escalated on the model's behalf, including L4.
+-- That is full autonomy, and it is the operator's call to make. The rule that a
+-- tier may only TIGHTEN a verdict still governs the tier table itself — no
+-- judge, prompt or intent talks its way past it. This column is a different
+-- thing: the operator's own configuration, on their own self-hosted instance,
+-- about their own credentials. Refusing them would not make the instance safer,
+-- it would make the product wrong about whose decision this is.
+--
+-- The CHECK is 1-5 rather than an open integer because it is a credential tier
+-- (plus the "never" sentinel), and a hand-edited 9 would otherwise resolve to
+-- "escalate nothing" by accident — an out-of-range floor silently disabling the
+-- control is the one reading that must not be possible.
 --
 -- Separate migration rather than an edit to 20260801113326: that one has already
 -- been applied on a dev instance, and rewriting an applied migration desyncs the
 -- ledger hash for the sake of saving one ALTER.
 
 ALTER TABLE keeper_runtime_settings ADD COLUMN judge_escalate_from INTEGER
-    CHECK (judge_escalate_from IS NULL OR (judge_escalate_from >= 1 AND judge_escalate_from <= 4));
+    CHECK (judge_escalate_from IS NULL OR (judge_escalate_from >= 1 AND judge_escalate_from <= 5));

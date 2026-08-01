@@ -223,3 +223,89 @@ func TestEvaluate_EscalateFromLeavesL1Alone(t *testing.T) {
 		t.Errorf("L1 decision = %q, want ALLOW — an L3 floor must not reach down", got.Decision)
 	}
 }
+
+// Full autonomy, end to end: with the floor set to "never", a judge ALLOW on an
+// L4 production-admin credential is GRANTED rather than escalated.
+//
+// This is the loosening direction, and it is asserted at the verdict because
+// that is the only place it is real. An operator who switched it on and still
+// got an escalation would have been told they had autonomy and not had it —
+// the mirror image of the bug this branch's review found nine times.
+func TestEvaluate_FullAutonomyGrantsL4(t *testing.T) {
+	p := &mockProvider{content: `{"decision":"ALLOW","reason":"migration is corroborated and scoped","risk":5}`}
+	g := gatekeeper.New(p, "qwen3.5:9b", newTestLogger())
+
+	req := gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			RequestingAgentID: "agt_riley",
+			Intent:            "Run the scheduled schema migration on the production orders database as agreed in the change window",
+		},
+		SecurityLevel:  keeper.SecurityLevelL4,
+		CredentialName: "PROD_DB_ADMIN",
+		AgentName:      "riley",
+		CrewName:       "ops",
+	}
+
+	// Default: the tier escalates it whatever the judge said.
+	base, err := g.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if base.Decision != string(keeper.DecisionEscalate) {
+		t.Fatalf("baseline decision = %q, want ESCALATE — the safe default is the premise of this test", base.Decision)
+	}
+
+	req.EscalateFrom = keeper.HumanApprovalNever
+	got, err := g.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if got.Decision != string(keeper.DecisionAllow) {
+		t.Errorf("decision = %q, want ALLOW — the operator asked for full autonomy and the judge approved", got.Decision)
+	}
+}
+
+// Autonomy does not disable the rest of the Keeper. A DENY is still a DENY, and
+// the tiers' intent minimums still refuse a thin justification before the model
+// is asked — "the model may grant it" is not "there is no gate".
+func TestEvaluate_FullAutonomyStillDenies(t *testing.T) {
+	p := &mockProvider{content: `{"decision":"DENY","reason":"no justification","risk":9}`}
+	g := gatekeeper.New(p, "qwen3.5:9b", newTestLogger())
+
+	got, err := g.Evaluate(context.Background(), gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			RequestingAgentID: "agt_riley",
+			Intent:            "Run the scheduled schema migration on the production orders database as agreed in the change window",
+		},
+		SecurityLevel:  keeper.SecurityLevelL4,
+		CredentialName: "PROD_DB_ADMIN",
+		AgentName:      "riley",
+		EscalateFrom:   keeper.HumanApprovalNever,
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if got.Decision != string(keeper.DecisionDeny) {
+		t.Errorf("decision = %q, want DENY — autonomy lets the judge grant, it does not stop it refusing", got.Decision)
+	}
+
+	// And a thin intent is still refused before the model is called at all.
+	p2 := &mockProvider{content: `{"decision":"ALLOW","reason":"sure","risk":1}`}
+	g2 := gatekeeper.New(p2, "qwen3.5:9b", newTestLogger())
+	thin, err := g2.Evaluate(context.Background(), gatekeeper.EvalRequest{
+		Request:        keeper.Request{RequestingAgentID: "agt_riley", Intent: "prod db"},
+		SecurityLevel:  keeper.SecurityLevelL4,
+		CredentialName: "PROD_DB_ADMIN",
+		AgentName:      "riley",
+		EscalateFrom:   keeper.HumanApprovalNever,
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if thin.Decision != string(keeper.DecisionDeny) {
+		t.Errorf("thin L4 intent = %q, want DENY — the tier minimum is not part of the autonomy dial", thin.Decision)
+	}
+	if p2.capturedPrompt != "" {
+		t.Error("the model was asked about a thin intent under autonomy")
+	}
+}

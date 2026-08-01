@@ -138,7 +138,13 @@ func printKeeperJudgeProfile(p keeperJudgeProfile) {
 		profileSourceNote(p.EvidenceFacts.Source))
 	fmt.Printf("  Hard gate:    %s %s\n", formatToggle(p.HardGate.Value), profileSourceNote(p.HardGate.Source))
 	escalate := "tier default (L4 only)"
-	if p.EscalateFrom.Value > 0 {
+	switch {
+	case p.EscalateFrom.Value == 5:
+		// Spelled out rather than shown as "L5": there is no L5, and an operator
+		// scanning this line must not have to work out that a tier above the
+		// highest one means the control is off.
+		escalate = cli.Red + "never — the judge may grant every tier, including L4" + cli.Reset
+	case p.EscalateFrom.Value > 0:
 		escalate = fmt.Sprintf("L%d and above — a human confirms", p.EscalateFrom.Value)
 	}
 	fmt.Printf("  Escalate:     %s %s\n", escalate, profileSourceNote(p.EscalateFrom.Source))
@@ -242,9 +248,11 @@ hands the toggle back to the profile, which is not the same as 'off'.
   --precedent-n <1-10>            RESERVED — "" to follow the profile
   --consistency-samples <odd 1-9> RESERVED — 1 = one verdict (sampling off),
                                   "" to follow the profile
-  --escalate-from <1-4>           a judge ALLOW at this tier and above becomes
-                                  an ESCALATE, so a person confirms it;
-                                  0 leaves the tier table alone
+  --escalate-from <1-5>           where human approval starts. A judge ALLOW at
+                                  this tier and above becomes an ESCALATE, so a
+                                  person confirms it. 5 = never (the judge may
+                                  grant every tier, including L4). 0 leaves the
+                                  tier table alone — L4 only.
   --prompt-budget <tokens>        "" to follow the profile, 0 for no cap
 
 Only what you pass is changed, so two operators editing different toggles do
@@ -387,7 +395,7 @@ func init() {
 	f.StringVar(&flagKeeperProfileSamples, "consistency-samples", "",
 		`RESERVED, not yet implemented: verdicts to take on L3/L4 before a majority vote, odd 1-9; 1 = off ("" to follow the profile)`)
 	f.StringVar(&flagKeeperProfileEscalateFrom, "escalate-from", "",
-		`put a human on every credential at this tier and above, 1-4 (0 = leave the tier table alone)`)
+		`human approval from this tier up: 1-4, 5 = never (full autonomy), 0 = leave the tier table alone`)
 	f.StringVar(&flagKeeperProfilePromptBudget, "prompt-budget", "",
 		`cap the assembled prompt in tokens ("" to follow the profile, 0 for no cap)`)
 

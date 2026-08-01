@@ -45,20 +45,47 @@ func TestTierPolicy_EscalateFromLeavesLowerTiersAlone(t *testing.T) {
 	}
 }
 
-// It can only tighten. A floor above L4 must not REMOVE the human L4 already
-// requires — that would be the dial loosening a rule, which the tier vocabulary
-// forbids outright.
-func TestTierPolicy_EscalateFromNeverLoosens(t *testing.T) {
-	p := SecurityLevelL4.TierWithEscalateFrom(SecurityLevel(0))
-	if !p.HumanApproval {
-		t.Error("L4 lost human approval to an unset floor")
+// It loosens too, at the operator's explicit instruction — and that is a
+// deliberate reversal of this file's usual direction, so it is worth being
+// precise about what changed and what did not.
+//
+// The rule "a tier may only tighten" still governs the TABLE: no judge, prompt
+// or intent talks its way past tierPolicies. This is the operator's own
+// configuration, on their own self-hosted instance, about their own
+// credentials. Someone who has decided their agents may hold production admin
+// unsupervised is not being tricked into it, and refusing them would not make
+// the instance safer — it would make the product wrong about whose decision
+// this is.
+//
+// What protects them is the DEFAULT, which this test also pins: an instance
+// nobody has configured escalates every L4 read to a person.
+func TestTierPolicy_EscalateFromCanGrantFullAutonomy(t *testing.T) {
+	if !SecurityLevelL4.Tier().HumanApproval {
+		t.Fatal("L4 does not require human approval by default — the safe default is the whole protection here")
 	}
-	if !p.SecondApprover {
-		t.Error("L4 lost the four-eyes rule")
+	if SecurityLevelL4.TierWithEscalateFrom(0).HumanApproval != true {
+		t.Error("an unset floor changed L4 — 0 must mean the tier table decides")
 	}
-	// And an unset floor is a no-op everywhere else.
-	if SecurityLevelL3.TierWithEscalateFrom(SecurityLevel(0)).HumanApproval {
-		t.Error("an unset floor escalated L3")
+
+	p := SecurityLevelL4.TierWithEscalateFrom(HumanApprovalNever)
+	if p.HumanApproval {
+		t.Error("HumanApprovalNever left L4 escalating — an operator asking for full autonomy did not get it")
+	}
+	// And it is the ONLY thing that moved.
+	l4 := SecurityLevelL4.Tier()
+	if p.SecondApprover != l4.SecondApprover || p.MinIntentChars != l4.MinIntentChars || p.MinRisk != l4.MinRisk {
+		t.Error("full autonomy also stripped the four-eyes rule, the intent minimum or the risk floor")
+	}
+}
+
+// An out-of-range floor is the tier table's answer, not a guess. A hand-edited
+// 9 must not resolve to "escalate nothing" — that is the one wrong reading that
+// silently disables the control.
+func TestTierPolicy_EscalateFromOutOfRangeIsANoOp(t *testing.T) {
+	for _, from := range []SecurityLevel{0, 6, 9, 255} {
+		if !SecurityLevelL4.TierWithEscalateFrom(from).HumanApproval {
+			t.Errorf("floor %d disabled L4 escalation; out of range must fall back to the tier table", from)
+		}
 	}
 }
 

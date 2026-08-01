@@ -396,9 +396,36 @@ A judge `ALLOW` on an L3 credential now comes back as `ESCALATE` and lands in th
 inbox. Nothing else about L3 changes: same intent minimum, same risk floor, same
 four-eyes setting.
 
-It can only tighten. A floor at L3 leaves L1 and L2 exactly as they were —
-including L1's no-model fast path — and it can never remove the human L4 already
-requires.
+A floor at L3 leaves L1 and L2 exactly as they were, including L1's no-model
+fast path. Nothing else about L3 moves either.
+
+### …and taking the human out entirely
+
+The dial goes the other way too:
+
+```bash
+crewship keeper profile set --escalate-from 5
+```
+
+`5` means **never**: no tier is escalated on the model's behalf, L4 included. An
+agent that satisfies the judge gets production admin without a person in the
+loop.
+
+That is a real choice and it is yours to make — this is your instance and your
+credentials, and a product that refused would not be safer, it would be wrong
+about whose decision this is. Two things are worth knowing before you make it:
+
+- **The default is the protection.** An instance nobody configures escalates
+  every L4 read. You have to ask for autonomy; you cannot arrive at it by
+  accident, and an out-of-range value falls back to the tier table rather than
+  guessing.
+- **It does not turn the Keeper off.** A `DENY` is still a `DENY`, the per-tier
+  intent minimums still refuse a thin justification before the model is asked,
+  the hard gate still applies, and every decision is still on the audit trail.
+  `escalate-from 5` removes the *human confirmation step*, not the gate.
+
+`crewship keeper profile get` prints this one in red, because "never" is the
+only setting on the page that removes a person from a production credential.
 
 <Note>
   This is the dial to reach for **before** moving to a bigger judge. A model that
@@ -595,7 +622,7 @@ measurement, not a rule, so nothing here is wired shut.
 | `evidence` | a block of **computed facts** — is this credential bound to this agent, how many prior grants, how many denials in the last 7 days, is there open assigned work — placed **above** the conversation history, so facts outrank what the history claims | on |
 | `evidence-facts` | which of those facts to include | all |
 | `hard-gate` | refuse an L3/L4 credential the agent has no binding to **without calling the model at all** | on |
-| `escalate-from` | a judge ALLOW at this tier **and above** becomes an ESCALATE, so a person confirms it. `0` leaves the tier table alone (L4 only). | 0 |
+| `escalate-from` | where human approval starts. A judge ALLOW at this tier **and above** becomes an ESCALATE, so a person confirms it. `5` = **never** — the judge may grant every tier including L4. `0` leaves the tier table alone (L4 only). | 0 |
 | `precedent` | *(reserved — accepted and stored, not yet implemented)* attach the closest past decisions that a **human** resolved, as worked examples | off |
 | `precedent-n` | *(reserved — see `precedent`)* how many examples | 3 |
 | `consistency-samples` | *(reserved — accepted and stored, not yet implemented)* take this many verdicts on L3/L4 and use the majority; `1` means one verdict, i.e. sampling off | 1 |

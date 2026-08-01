@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/evidence"
 )
 
@@ -133,7 +134,8 @@ const (
 type profileValues struct {
 	evidence bool
 	hardGate bool
-	// escalateFrom raises the HumanApproval floor to this credential tier (1-4).
+	// escalateFrom sets the HumanApproval floor to this credential tier (1-4),
+	// or 5 for "never" — full autonomy, no tier escalated on the model's behalf.
 	// 0 leaves the tier table alone, which is the default everywhere: this is a
 	// deliberate tightening an operator asks for, never something a preset
 	// imposes on a workspace that did not choose it.
@@ -252,7 +254,10 @@ func (p EffectiveProfile) Stamp() string {
 		budget = strconv.FormatInt(p.PromptBudgetTokens.Value, 10)
 	}
 	escalate := "tier"
-	if p.EscalateFrom.Value > 0 {
+	switch {
+	case p.EscalateFrom.Value == int64(keeper.HumanApprovalNever):
+		escalate = "never"
+	case p.EscalateFrom.Value > 0:
 		escalate = fmt.Sprintf("L%d", p.EscalateFrom.Value)
 	}
 	return fmt.Sprintf("%s evidence=%s facts=%s hard_gate=%s escalate_from=%s precedent=%s/%d samples=%d budget=%s",
@@ -461,8 +466,8 @@ func validateProfile(p profileSettings) error {
 		// 1-4 or 0. Refused rather than clamped, because a typo'd 5 silently
 		// clamping to L4 would put a human on every credential in the workspace
 		// and the operator would have no idea why.
-		if *p.escalateFrom < 1 || *p.escalateFrom > 4 {
-			return newValidation("escalate-from must be a credential tier 1-4, or 0 to leave the tier table alone")
+		if *p.escalateFrom < 1 || *p.escalateFrom > 5 {
+			return newValidation("escalate-from must be a credential tier 1-4, 5 for never, or 0 to leave the tier table alone")
 		}
 	}
 	if p.promptBudgetTokens != nil {

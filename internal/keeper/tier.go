@@ -158,27 +158,45 @@ func (l SecurityLevel) Tier() TierPolicy {
 	return tierPolicies[SecurityLevelL4]
 }
 
-// TierWithEscalateFrom is Tier() with the HumanApproval floor raised to `from`.
+// HumanApprovalNever is the escalation floor that turns human approval off
+// entirely: no tier is escalated on the model's behalf, including L4.
+const HumanApprovalNever SecurityLevel = 5
+
+// TierWithEscalateFrom is Tier() with the human-approval floor SET to `from`,
+// in either direction. 0 means the tier table decides, which is the default and
+// the pre-existing behaviour.
 //
-// It exists because the step between L3 and L4 is the largest single trust jump
-// in the product and there was no dial between them. L3 is "administrative
-// access to real infrastructure (SSH, database admin, cloud account)" and the
-// model grants it alone; L4 is the first tier a person always sees. An operator
-// running a 9B judge who wants a human to confirm SSH-to-production had exactly
-// one move: relabel the credential L4 — which also imposes the four-eyes rule
-// and L4's 35-character intent minimum, whether they wanted them or not.
+// It exists because the step between L3 and L4 was the largest single trust
+// jump in the product with no dial between. L3 is "administrative access to
+// real infrastructure (SSH, database admin, cloud account)" and the model
+// grants it alone; L4 is the first tier a person always sees. Relabelling the
+// credential L4 was the only move, and it also imposes the four-eyes rule and
+// L4's 35-character intent minimum whether the operator wanted them or not.
 //
-// So this raises ONLY HumanApproval, and only upward. Everything else about the
-// tier — its label, its intent minimum, its risk floor, its four-eyes setting —
-// is the tier's own, because bundling them is the problem being solved. And it
-// can never loosen: a floor above a tier that already requires a human leaves
-// that requirement standing, matching the one-directional rule the whole tier
-// vocabulary rests on. A zero or out-of-range `from` is a no-op.
+// # Why it also loosens
+//
+// The rest of this file says a tier may only tighten a verdict, and that rule
+// still governs the TABLE: no judge, prompt or intent can talk its way past
+// tierPolicies. This is a different thing — the operator's own configuration,
+// on their own self-hosted instance, about their own credentials. An operator
+// who has decided their agents may hold production admin unsupervised is not
+// being tricked into it; refusing them would not make the instance safer, it
+// would make the product wrong about whose decision this is.
+//
+// So `from` = HumanApprovalNever removes human approval from every tier, and
+// anything between 1 and 4 moves the floor there. What does NOT move is
+// everything else: the label, the intent minimum, the risk floor, the four-eyes
+// setting. Bundling those is the problem this dial was added to solve, and it
+// stays solved in both directions.
+//
+// The default is untouched, and deliberately so: an instance nobody has
+// configured still escalates every L4 read to a person.
 func (l SecurityLevel) TierWithEscalateFrom(from SecurityLevel) TierPolicy {
 	p := l.Tier()
-	if from >= SecurityLevelL1 && from <= SecurityLevelL4 && l >= from {
-		p.HumanApproval = true
+	if from < SecurityLevelL1 || from > HumanApprovalNever {
+		return p // 0 or out of range: the tier table's own answer
 	}
+	p.HumanApproval = l >= from
 	return p
 }
 
