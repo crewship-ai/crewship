@@ -353,6 +353,43 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+### Checking how the judge has been deciding
+
+Keeper is fail-closed, so a broken judge and a strict one produce the same
+response: `DENY`, in the right format, with a plausible reason. That is how
+crewship#1624 ran for milestones — nothing about a fail-closed denial looks
+different from a considered one.
+
+The decision monitor watches for it and raises an inbox item when the picture
+collapses. To look without waiting to be paged:
+
+```bash
+crewship keeper health
+```
+
+```
+Keeper decisions  rolling window
+  Decisions:    47
+  ALLOW:        31   66%
+  ESCALATE:     9    19%
+  DENY:         7    15%
+  Got somewhere: 85%  (granted or escalated; alarms under 5%)
+  p95 latency:  3.1s
+```
+
+**Read the "got somewhere" line, not the allow rate.** A workspace whose
+credentials are all L4 escalates every request by design and sits at an allow
+rate of exactly zero while working perfectly — which is why the alarm reads the
+granted-or-escalated share and not `ALLOW` alone.
+
+The window lives in memory, so it empties on restart. An empty window is not a
+claim that the judge is healthy, and the command says so rather than printing
+reassuring zeroes. Below the alarm's minimum sample count it also says the rates
+are a hint rather than a measurement.
+
+Exits non-zero while an alarm is standing, so it works in a cron. Same data over
+HTTP at `GET /api/v1/admin/keeper/health` (ADMIN+).
+
 ### Where to set this in the product
 
 **Admin → Keeper → Judge profile**, directly beneath the card that names the
