@@ -18,12 +18,34 @@ import (
 // running until I say otherwise", which is the difference between a test that
 // usually exercises a drain and one that always does.
 type fakeExecutor struct {
-	delay     time.Duration
-	gate      <-chan struct{}
+	delay time.Duration
+	gate  <-chan struct{}
+
+	// barrierN > 0 turns Run into a rendezvous: every call blocks until
+	// barrierN of them are in flight AT ONCE, then all are released.
+	//
+	// This exists so a concurrency test can assert concurrency instead of
+	// timing it. A dispatcher that serialises its work can never assemble
+	// the rendezvous, however fast or slow the machine is, so the
+	// assertion holds under `-race` on a loaded runner exactly as it does
+	// on an idle laptop — which a wall-clock upper bound does not (#1597).
+	barrierN    int32
+	barrierCh   chan struct{}
+	barrierOnce sync.Once
+
 	inFlight  int32
 	maxInWork int32
 	completed int32
 }
+
+// barrierAbandonAfter releases a rendezvous that will never assemble, so
+// a failing test reports its own assertion instead of hanging until the
+// package -timeout kills every other test's output with it.
+//
+// It is a FAILURE deadline, not a success one: on the passing path the
+// barrier closes as soon as the last participant arrives and this timer
+// is never read. Nothing about the assertion depends on its value.
+const barrierAbandonAfter = 10 * time.Second
 
 func (f *fakeExecutor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	cur := atomic.AddInt32(&f.inFlight, 1)
@@ -34,6 +56,15 @@ func (f *fakeExecutor) Run(ctx context.Context, in RunInput) (*RunResult, error)
 		}
 	}
 	switch {
+	case f.barrierN > 0:
+		if cur >= f.barrierN {
+			f.barrierOnce.Do(func() { close(f.barrierCh) })
+		}
+		select {
+		case <-f.barrierCh:
+		case <-ctx.Done():
+		case <-time.After(barrierAbandonAfter):
+		}
 	case f.gate != nil:
 		select {
 		case <-f.gate:
@@ -80,29 +111,42 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) bool {
 	return cond()
 }
 
-// TestPendingDispatcher_ConcurrentDispatch: 6 co-due runs each sleeping
-// 200ms must all start within ~one sweep, not drain serially at
-// 6×200ms. This is the #834 throughput cliff regression guard.
+// TestPendingDispatcher_ConcurrentDispatch: 6 co-due runs must all be in
+// flight at once, not drain serially. This is the #834 throughput cliff
+// regression guard.
+//
+// It used to prove that by timing the drain — 6 runs × a 200ms sleep,
+// asserting the whole thing finished inside 800ms. That measures the
+// machine as much as the dispatcher: under `-race` on a loaded CI runner
+// the same correct code exceeds the bound, which is a red `Go Race` that
+// reports no race and names a package the diff never touched (#1597).
+//
+// The rendezvous asserts the property directly instead. Each run blocks
+// until all six are in flight together, so a serialising dispatcher can
+// never satisfy it and a slow one still can. There is no duration in the
+// pass condition at all — the deadline below is only how long a FAILING
+// run waits before saying so.
 func TestPendingDispatcher_ConcurrentDispatch(t *testing.T) {
-	store := enqueueDue(t, 6)
-	exec := &fakeExecutor{delay: 200 * time.Millisecond}
+	const want = 6
+	store := enqueueDue(t, want)
+	exec := &fakeExecutor{barrierN: want, barrierCh: make(chan struct{})}
 	d := NewPendingRunDispatcher(store, exec, nil)
 
-	start := time.Now()
 	d.Start(context.Background())
-	if !waitFor(t, 3*time.Second, func() bool { return atomic.LoadInt32(&exec.completed) == 6 }) {
-		t.Fatalf("only %d/6 runs completed", atomic.LoadInt32(&exec.completed))
-	}
-	elapsed := time.Since(start)
-	d.Stop()
+	defer d.Stop()
 
-	// Serial would be ~1200ms; concurrent (pool ≥6) is ~200ms. Assert
-	// well under the serial floor.
-	if elapsed > 800*time.Millisecond {
-		t.Fatalf("dispatch took %v, expected concurrent (~200ms), not serial (~1200ms)", elapsed)
+	if !waitFor(t, barrierAbandonAfter, func() bool {
+		return atomic.LoadInt32(&exec.maxInWork) >= want
+	}) {
+		t.Fatalf("max concurrent dispatches was %d, want %d — the dispatcher is serialising "+
+			"(pool is %d, so all %d co-due runs should overlap)",
+			atomic.LoadInt32(&exec.maxInWork), want, defaultDispatchConcurrency, want)
 	}
-	if hw := atomic.LoadInt32(&exec.maxInWork); hw < 2 {
-		t.Fatalf("expected overlapping runs, max concurrency was %d", hw)
+	if !waitFor(t, barrierAbandonAfter, func() bool {
+		return atomic.LoadInt32(&exec.completed) == want
+	}) {
+		t.Fatalf("only %d/%d runs completed after the rendezvous released",
+			atomic.LoadInt32(&exec.completed), want)
 	}
 }
 

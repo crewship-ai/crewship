@@ -199,9 +199,30 @@ func TestPrintSmokeSummary_SomeFail(t *testing.T) {
 
 // ─── smokeTestAgent ──────────────────────────────────────────────────────
 
+// smokeDeadlineNotUnderTest is the timeout to pass when the deadline is
+// INPUT to the case rather than the thing being asserted.
+//
+// The three success/failure-path tests below assert what smokeTestAgent
+// returns for a subprocess that exits normally. The deadline is
+// incidental to all of them, and it used to be 5s — tight enough that
+// spawning a shell under `-race` on a loaded CI runner could exceed it.
+// It did: #1597 records the case failing at 5.003s, which is a red
+// `Go Race` that reports no race and names a test the diff never
+// touched. That is the flake shape the issue is about, and re-running
+// until green is how a real regression gets waved through.
+//
+// This is NOT "raise the timeout until it stops going red", which
+// #1597 rules out. The rule is narrower and checkable: a deadline that
+// is not the subject of a test must not be tight enough to decide it.
+// Nothing is weakened by the generous value — each case finishes the
+// instant its subprocess does — and TestSmokeTestAgent_Timeout below
+// keeps its own 50ms deadline, because there the deadline IS the
+// assertion.
+const smokeDeadlineNotUnderTest = 2 * time.Minute
+
 func TestSmokeTestAgent_OK(t *testing.T) {
 	bin := covWriteScript(t, `echo "hello from agent"`)
-	res := smokeTestAgent(context.Background(), bin, "viktor", "eng", "http://localhost:0", 5*time.Second)
+	res := smokeTestAgent(context.Background(), bin, "viktor", "eng", "http://localhost:0", smokeDeadlineNotUnderTest)
 	if !res.OK {
 		t.Fatalf("expected OK, got %+v", res)
 	}
@@ -215,7 +236,7 @@ func TestSmokeTestAgent_OK(t *testing.T) {
 
 func TestSmokeTestAgent_ExitFailure(t *testing.T) {
 	bin := covWriteScript(t, `exit 3`)
-	res := smokeTestAgent(context.Background(), bin, "viktor", "eng", "http://localhost:0", 5*time.Second)
+	res := smokeTestAgent(context.Background(), bin, "viktor", "eng", "http://localhost:0", smokeDeadlineNotUnderTest)
 	if res.OK || res.Timeout {
 		t.Fatalf("expected plain failure, got %+v", res)
 	}
@@ -226,7 +247,7 @@ func TestSmokeTestAgent_ExitFailure(t *testing.T) {
 
 func TestSmokeTestAgent_EmptyOutput(t *testing.T) {
 	bin := covWriteScript(t, `exit 0`)
-	res := smokeTestAgent(context.Background(), bin, "viktor", "eng", "http://localhost:0", 5*time.Second)
+	res := smokeTestAgent(context.Background(), bin, "viktor", "eng", "http://localhost:0", smokeDeadlineNotUnderTest)
 	if res.OK {
 		t.Fatal("empty output must not count as OK")
 	}

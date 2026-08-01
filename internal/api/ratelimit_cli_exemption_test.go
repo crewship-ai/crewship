@@ -29,9 +29,10 @@ import (
 // property under test is "this traffic is limited at all", not "limited at 120".
 var rlGeneralProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAPIPerMin) + 500
 
-// Same idea for the two narrower buckets.
+// Same idea for the auth bucket. The credential-test bucket had one too
+// until this file stopped racing its refill: that assertion now drains the
+// bucket into debt and probes once, so there is no probe count to derive.
 var rlAuthProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPAuthPerMin) + 5
-var rlCredTestProbes = ratelimitcfg.DefaultFor(ratelimitcfg.KeyHTTPCredTestPerMin) + 10
 
 const rlProbePath = "/api/v1/__ratelimit_cli_exemption_probe__"
 
@@ -273,18 +274,44 @@ func TestRouteWithRateLimiting_CredentialTestPath_ExemptionDoesNotApply(t *testi
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	saw429 := false
-	for i := 0; i < rlCredTestProbes; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/test", nil)
-		req.Header.Set("Authorization", "Bearer "+plaintext)
-		req.RemoteAddr = "127.0.0.4:1"
-		rr := httptest.NewRecorder()
-		r.ServeHTTP(rr, req)
-		if rr.Code == http.StatusTooManyRequests {
-			saw429 = true
-			break
-		}
+	// Put this IP's bucket into DEBT instead of trying to out-run it.
+	//
+	// The old version fired rlCredTestProbes (limit + 10) requests and
+	// hoped one would be refused. That is a race against the token
+	// bucket, not a test of the exemption: the bucket holds `limit`
+	// tokens and refills at limit/60 per second, so the ten spare probes
+	// buy a budget of exactly ONE SECOND for 610 full router round-trips,
+	// each with a DB-backed CLI-token lookup. Both CI failures on
+	// 2026-08-01 report the whole test at 1.26s and 1.28s against that
+	// 1.00s budget (#1597).
+	//
+	// Draining to zero is not enough either: refill hands a token back
+	// every 60/limit seconds, so an assertion made after a scheduler hiccup
+	// can find the bucket non-empty again. AllowN empties it and ReserveN
+	// then consumes `limit` more from the FUTURE, leaving a deficit of a
+	// full minute of refill. Every request inside that minute is refused,
+	// whatever the machine is doing.
+	//
+	// The router is built per test, so credTestRL is this test's own
+	// limiter and draining it races nobody. It is also the real production
+	// limiter on the real router path — nothing is swapped for a test
+	// double, so the wiring under test is the wiring that ships.
+	lim := r.credTestRL.getLimiter("127.0.0.4")
+	burst := r.credTestRL.burst
+	lim.AllowN(time.Now(), burst)
+	if res := lim.ReserveN(time.Now(), burst); !res.OK() {
+		t.Fatalf("could not reserve %d tokens to put the bucket in debt", burst)
 	}
+
+	// One request. With a minute of debt on the bucket there is no
+	// latency this could lose to, so the first one must already be refused.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/test", nil)
+	req.Header.Set("Authorization", "Bearer "+plaintext)
+	req.RemoteAddr = "127.0.0.4:1"
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	saw429 := rr.Code == http.StatusTooManyRequests
+
 	if !saw429 {
 		t.Error("the credential-test anti-oracle limiter must apply even to a valid CLI token — #1333 is scoped to bulk writes, not credential testing")
 	}
