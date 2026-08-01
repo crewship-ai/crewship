@@ -136,9 +136,14 @@ type profileValues struct {
 	precedent          bool
 	precedentN         int64
 	consistencySamples int64
-	// promptBudgetTokens 0 means "derive from the judge's num_ctx at prompt-build
-	// time". A profile cannot state a number here because the ceiling belongs to
-	// the model, and the model is settable independently of the profile.
+	// promptBudgetTokens 0 means NO CAP — the model server decides what to drop,
+	// which is the pre-P7 behaviour.
+	//
+	// An earlier draft said 0 would be "derived from the judge's num_ctx at
+	// prompt-build time". Nothing derived it, and deriving it honestly would mean
+	// asking the model server for its context length on the credential hot path.
+	// So the presets carry real numbers instead: the ceiling still belongs to the
+	// model, but an operator picks the profile that matches the model they have.
 	promptBudgetTokens int64
 	// evidenceFacts nil means every fact in EvidenceFacts. No preset narrows the
 	// selection today — narrowing is an operator's answer to a specific model
@@ -150,9 +155,14 @@ type profileValues struct {
 // defaults are provisional until P4 measures them, and a table is what makes
 // "we changed the standard profile" a one-line diff.
 var profilePresets = map[ProfileName]profileValues{
-	ProfileLean:     {evidence: true, hardGate: true, precedent: false, precedentN: 3, consistencySamples: 1},
-	ProfileStandard: {evidence: true, hardGate: true, precedent: true, precedentN: 3, consistencySamples: 1},
-	ProfileThorough: {evidence: true, hardGate: true, precedent: true, precedentN: 3, consistencySamples: 3},
+	// The budgets are the model classes each profile names, minus the 256-token
+	// verdict and a margin: lean targets a 4096-token judge (the reference
+	// deployment), standard an 8k one. Thorough is for hosted judges whose
+	// context is large enough that a cap would only ever fire on a runaway
+	// conversation the model server can handle itself.
+	ProfileLean:     {evidence: true, hardGate: true, precedent: false, precedentN: 3, consistencySamples: 1, promptBudgetTokens: 3500},
+	ProfileStandard: {evidence: true, hardGate: true, precedent: true, precedentN: 3, consistencySamples: 1, promptBudgetTokens: 7000},
+	ProfileThorough: {evidence: true, hardGate: true, precedent: true, precedentN: 3, consistencySamples: 3, promptBudgetTokens: 0},
 }
 
 // profileSettings is the stored half: which preset, plus per-toggle overrides.
@@ -197,7 +207,7 @@ type EffectiveProfile struct {
 	// ConsistencySamples is how many verdicts to take on L3/L4 before a majority
 	// vote (P5). 1 means single-sample, i.e. self-consistency off.
 	ConsistencySamples Field[int64] `json:"consistency_samples"`
-	// PromptBudgetTokens caps the assembled prompt (P7). 0 means derive it from
+	// PromptBudgetTokens caps the assembled prompt (P7). 0 means no cap; see
 	// the judge's context window.
 	PromptBudgetTokens Field[int64] `json:"prompt_budget_tokens"`
 
@@ -370,7 +380,7 @@ func setTri(dst **bool, patch *TriBool) {
 // It is safe for all three numbers here because none of them has 0 as a
 // meaningful setting: one sample means self-consistency off (not zero), zero
 // precedent examples means precedent off (the toggle), and a zero prompt budget
-// is already spelled "derive from num_ctx", which is what inheriting gives.
+// is already spelled "no cap", which is what inheriting gives.
 func setClearableInt(dst **int64, patch *int64) {
 	if patch == nil {
 		return
@@ -429,8 +439,8 @@ func validateProfile(p profileSettings) error {
 	if p.promptBudgetTokens != nil {
 		if *p.promptBudgetTokens < MinPromptBudgetTokens || *p.promptBudgetTokens > MaxPromptBudgetTokens {
 			return newValidation(fmt.Sprintf(
-				"the prompt budget must be between %d and %d tokens (set it to 0 to derive it from the judge's "+
-					"context window)", MinPromptBudgetTokens, MaxPromptBudgetTokens))
+				"the prompt budget must be between %d and %d tokens (set it to 0 for no cap, "+
+					"leaving the model server to decide what to drop)", MinPromptBudgetTokens, MaxPromptBudgetTokens))
 		}
 	}
 	return nil

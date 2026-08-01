@@ -231,18 +231,18 @@ hands the toggle back to the profile, which is not the same as 'off'.
   --evidence on|off|inherit
   --evidence-facts <a,b,c>        "" for every fact the judge can compute
   --hard-gate on|off|inherit
-  --precedent on|off|inherit
-  --precedent-n <1-10>            "" to follow the profile
-  --consistency-samples <odd 1-9> 1 = one verdict (sampling off), "" to follow
-                                  the profile
-  --prompt-budget <tokens>        "" or 0 to derive it from the context window
+  --precedent on|off|inherit      RESERVED — stored, not yet implemented
+  --precedent-n <1-10>            RESERVED — "" to follow the profile
+  --consistency-samples <odd 1-9> RESERVED — 1 = one verdict (sampling off),
+                                  "" to follow the profile
+  --prompt-budget <tokens>        "" to follow the profile, 0 for no cap
 
 Only what you pass is changed, so two operators editing different toggles do
 not clobber each other.
 
 Examples:
   crewship keeper profile set thorough
-  crewship keeper profile set lean --precedent on
+  crewship keeper profile set lean --prompt-budget 3500
   crewship keeper profile set --evidence-facts credential_bound_to_agent
   crewship keeper profile set --consistency-samples ""`,
 	Args: cobra.MaximumNArgs(1),
@@ -370,13 +370,13 @@ func init() {
 	f.StringVar(&flagKeeperProfileHardGate, "hard-gate", "",
 		"refuse an unbound L3/L4 credential without calling the model: on, off, or inherit")
 	f.StringVar(&flagKeeperProfilePrecedent, "precedent", "",
-		"few-shot examples from past human-resolved decisions: on, off, or inherit")
+		"RESERVED, not yet implemented: few-shot examples from past human-resolved decisions: on, off, or inherit")
 	f.StringVar(&flagKeeperProfilePrecedentN, "precedent-n", "",
-		`how many precedent examples, 1-10 ("" to follow the profile)`)
+		`RESERVED, not yet implemented: how many precedent examples, 1-10 ("" to follow the profile)`)
 	f.StringVar(&flagKeeperProfileSamples, "consistency-samples", "",
-		`verdicts to take on L3/L4 before a majority vote, odd 1-9; 1 = off ("" to follow the profile)`)
+		`RESERVED, not yet implemented: verdicts to take on L3/L4 before a majority vote, odd 1-9; 1 = off ("" to follow the profile)`)
 	f.StringVar(&flagKeeperProfilePromptBudget, "prompt-budget", "",
-		`cap the assembled prompt in tokens ("" or 0 to derive it from the context window)`)
+		`cap the assembled prompt in tokens ("" to follow the profile, 0 for no cap)`)
 
 	keeperProfileCmd.AddCommand(keeperProfileGetCmd)
 	keeperProfileCmd.AddCommand(keeperProfileSetCmd)

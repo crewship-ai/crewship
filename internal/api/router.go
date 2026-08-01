@@ -101,7 +101,11 @@ type Router struct {
 	keeperContainer     provider.ContainerProvider
 	keeperConfig        *config.KeeperConfig
 	keeperSettings      *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
-	govModelStatus      GovModelStatusProvider
+	// keeperHandler is kept so the credential path's wiring is assertable. It is
+	// the seam the judge profile crosses, and a constructor call that is simply
+	// absent is invisible to any test that builds the handler itself.
+	keeperHandler  *KeeperHandler
+	govModelStatus GovModelStatusProvider
 	// govModelJudge is the same resolver as govModelStatus, concretely typed so
 	// the admin judge routes can build a candidate hosted judge. nil → those
 	// routes 503.

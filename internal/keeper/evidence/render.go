@@ -28,10 +28,32 @@ const evidenceHeader = "[VERIFIED FACTS — computed from the database; they out
 // against a 4096-token context, with ~150 as the acceptance ceiling. Every
 // unbounded input here is clipped (titles by length, work items by count) so
 // the block cannot grow with the agent's backlog.
-func (f Facts) Render() string {
+func (f Facts) Render() string { return f.RenderOnly(nil) }
+
+// RenderOnly is Render restricted to the named fact keys. nil or empty means
+// every fact, so Render is the unrestricted case rather than a separate path.
+//
+// It exists because the judge profile lets an operator narrow the block
+// (`--evidence-facts`) for a small-context model, and a selection that is
+// stored, validated and echoed back by `profile get` while the prompt still
+// carries everything is worse than no setting at all: the operator believes
+// they have shrunk the prompt and has not.
+//
+// An unknown key selects nothing rather than erroring — keepercfg validates the
+// vocabulary against FactKeys before it is ever stored, so a name reaching here
+// that this package does not produce is already impossible by construction.
+func (f Facts) RenderOnly(only []string) string {
+	want := func(string) bool { return true }
+	if len(only) > 0 {
+		set := make(map[string]struct{}, len(only))
+		for _, k := range only {
+			set[k] = struct{}{}
+		}
+		want = func(k string) bool { _, ok := set[k]; return ok }
+	}
 	var lines []string
 
-	if b := f.Binding; b != nil {
+	if b := f.Binding; b != nil && want(FactBinding) {
 		if b.Bound {
 			lines = append(lines, fmt.Sprintf("- %s: yes (%s, since %s)",
 				FactBinding, strconv.Quote(b.EnvVarName), dateOnly(b.BoundAt)))
@@ -40,7 +62,7 @@ func (f Facts) Render() string {
 		}
 	}
 
-	if h := f.PairHistory; h != nil {
+	if h := f.PairHistory; h != nil && want(FactPairHistory) {
 		if h.FirstEncounter {
 			lines = append(lines, "- credential_first_seen_for_agent: never before")
 		} else {
@@ -51,11 +73,11 @@ func (f Facts) Render() string {
 		}
 	}
 
-	if d := f.RecentDenies; d != nil {
+	if d := f.RecentDenies; d != nil && want(FactRecentDenies) {
 		lines = append(lines, fmt.Sprintf("- %s: %d", FactRecentDenies, d.Count))
 	}
 
-	if w := f.OpenWork; w != nil {
+	if w := f.OpenWork; w != nil && want(FactOpenAssignedWork) {
 		lines = append(lines, "- "+FactOpenAssignedWork+": "+workSummary(w))
 	}
 

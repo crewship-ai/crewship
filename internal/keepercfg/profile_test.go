@@ -20,7 +20,7 @@ func TestProfile_UntouchedInstanceReportsBuiltIn(t *testing.T) {
 	}
 	// The PRD P0 table: evidence and the hard gate on, precedent off, three
 	// precedent examples if it were on, one sample (self-consistency off),
-	// prompt budget derived rather than fixed.
+	// prompt budget carried by the preset rather than uncapped.
 	if !p.Evidence.Value || p.Evidence.Source != SourceDefault {
 		t.Errorf("evidence = %v/%s, want true/default", p.Evidence.Value, p.Evidence.Source)
 	}
@@ -36,8 +36,11 @@ func TestProfile_UntouchedInstanceReportsBuiltIn(t *testing.T) {
 	if p.ConsistencySamples.Value != 1 {
 		t.Errorf("consistency_samples = %d, want 1", p.ConsistencySamples.Value)
 	}
-	if p.PromptBudgetTokens.Value != 0 {
-		t.Errorf("prompt_budget_tokens = %d, want 0 (derive from num_ctx)", p.PromptBudgetTokens.Value)
+	// The default profile is lean, which targets the 4096-token reference judge.
+	// A real number rather than 0: 0 means NO CAP, so an untouched instance would
+	// otherwise ship with the P7 protection off while the docs said it was on.
+	if p.PromptBudgetTokens.Value != 3500 {
+		t.Errorf("prompt_budget_tokens = %d, want lean's 3500", p.PromptBudgetTokens.Value)
 	}
 	if len(p.EvidenceFacts.Value) != len(EvidenceFacts) {
 		t.Errorf("evidence_facts = %v, want all %d facts", p.EvidenceFacts.Value, len(EvidenceFacts))

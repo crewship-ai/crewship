@@ -200,6 +200,12 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		WithSecrets(r.keeperSecrets).
 		WithContainer(r.keeperContainer).
 		WithConversations(r.keeperConvReader)
+	// The judge profile decides whether the credential path gathers evidence,
+	// enforces the binding hard gate and budgets the prompt. Without this line
+	// every one of those is off while the admin API reports it on — see
+	// TestRouter_KeeperHandlerReceivesTheJudgeProfile.
+	keeperH.SetJudgeConfig(r.keeperSettings)
+	r.keeperHandler = keeperH
 	if r.hub != nil {
 		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
 	}

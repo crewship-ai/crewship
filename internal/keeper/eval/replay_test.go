@@ -151,3 +151,33 @@ func TestReplayCandidate_ContextCancelled(t *testing.T) {
 		t.Fatal("want error on cancelled context")
 	}
 }
+
+// "Production settings" now includes constrained decoding. A replay without it
+// asks the candidate to volunteer well-formed JSON from prose, which is a harder
+// question than production asks: the model's reply opens with prose,
+// NormalizeRawResponse fails, and replayOnce records the fail-closed DENY at
+// risk 10 — so a model that works perfectly in production is scored as unusable
+// and the harness recommends against the judge the operator already has.
+func TestReplayCandidate_MirrorsProductionConstrainedDecoding(t *testing.T) {
+	prov := &stubProvider{respond: func(string) (string, error) {
+		return `{"decision":"allow","risk":1}`, nil
+	}}
+	_, err := ReplayCandidate(context.Background(), candidate(prov),
+		[]CorpusRow{{Prompt: "x", Label: Allow, LabelSource: LabelHuman}}, 1)
+	if err != nil {
+		t.Fatalf("ReplayCandidate: %v", err)
+	}
+	if prov.last.Format == nil {
+		t.Fatal("replay sent no Format — it measures a harder question than the gatekeeper asks")
+	}
+	obj, ok := prov.last.Format.(map[string]any)
+	if !ok {
+		t.Fatalf("Format is %T, want a JSON-schema object", prov.last.Format)
+	}
+	props, _ := obj["properties"].(map[string]any)
+	dec, _ := props["decision"].(map[string]any)
+	enum, _ := dec["enum"].([]string)
+	if len(enum) != 3 {
+		t.Errorf("decision enum = %v, want the credential path's three verbs", enum)
+	}
+}

@@ -240,7 +240,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
 	// Run gatekeeper evaluation
-	facts, hardGate := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
+	facts, hardGate, factKeys := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:            req,
 		CredentialName:     credName,
@@ -250,6 +250,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		ConvHistory:        convHistory,
 		Evidence:           facts,
 		HardGate:           hardGate,
+		EvidenceFacts:      factKeys,
 		PromptBudgetTokens: h.promptBudget(),
 	}
 
@@ -303,9 +304,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// semantics from "decided" to "retry", which is the wrong recovery for an
 	// outcome that has already happened.
 	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 		[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
 		keeperTransition{
 			RequestID:    reqID,
 			WorkspaceID:  body.WorkspaceID,

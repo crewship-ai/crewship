@@ -431,15 +431,27 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// Load agent's recent conversation history for Keeper context
 	execConvHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
-	// Gatekeeper evaluation (include the command so the LLM can reason about it)
+	// Gatekeeper evaluation (include the command so the LLM can reason about it).
+	//
+	// Same evidence, gate and budget as /keeper/request. The two paths share
+	// buildAccessPrompt and differ only in that this one also RUNS something with
+	// the credential — so it is the stricter of the two, and protecting only the
+	// other one would leave the higher-consequence flow unguarded. The hard-gate
+	// branch in the gatekeeper already tests for RequestTypeExecute; without this
+	// it was a condition that could never be true.
+	execFacts, execHardGate, execFactKeys := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
-		Request:        req,
-		CredentialName: credName,
-		SecurityLevel:  keeper.SecurityLevel(secLevel),
-		AgentName:      agentName,
-		CrewName:       crewName,
-		Command:        body.Command,
-		ConvHistory:    execConvHistory,
+		Request:            req,
+		CredentialName:     credName,
+		SecurityLevel:      keeper.SecurityLevel(secLevel),
+		AgentName:          agentName,
+		CrewName:           crewName,
+		Command:            body.Command,
+		ConvHistory:        execConvHistory,
+		Evidence:           execFacts,
+		HardGate:           execHardGate,
+		EvidenceFacts:      execFactKeys,
+		PromptBudgetTokens: h.promptBudget(),
 	}
 
 	var gkResp keeper.GatekeeperResponse
@@ -488,9 +500,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		// #1369: the PENDING→decided step is appended to the ledger in the same
 		// transaction as the in-place UPDATE.
 		if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
-			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 			[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-				nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+				nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
 			keeperTransition{
 				RequestID:    reqID,
 				WorkspaceID:  body.WorkspaceID,
@@ -721,9 +733,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	defer cancelAudit()
 
 	if err := updateKeeperDecisionWithTransition(auditCtx, h.db, `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 		[]any{string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now,
-			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
 		keeperTransition{
 			RequestID:    reqID,
 			WorkspaceID:  body.WorkspaceID,

@@ -101,6 +101,21 @@ func (h *KeeperHandler) promptBudget() int {
 	return int(h.judgeCfg.Effective().Profile.PromptBudgetTokens.Value)
 }
 
+// judgeProfileStamp is the compact description of the capability set a decision
+// was taken under, or "" when no profile is wired.
+//
+// It is recorded ON the decision because the eval harness replays recorded
+// prompts: a corpus mixing verdicts taken with the evidence block against
+// verdicts taken without it measures the difference between two regimes and
+// reports it as a difference between two models. Without the stamp there is no
+// way to tell the two kinds of row apart after the fact.
+func (h *KeeperHandler) judgeProfileStamp() string {
+	if h.judgeCfg == nil {
+		return ""
+	}
+	return h.judgeCfg.Effective().Profile.Stamp()
+}
+
 // SetJudgeConfig wires the instance judge configuration so the credential path
 // can honour the operator's profile (evidence, hard gate). Skip the call to keep
 // the pre-profile behaviour.
@@ -114,20 +129,20 @@ func (h *KeeperHandler) SetJudgeConfig(s *keepercfg.Store) { h.judgeCfg = s }
 // site: the gatekeeper treats a nil Facts as "not established" and never as a
 // set of negative facts, so a config change and a database outage both degrade
 // to the prose-only judgement rather than to a refusal.
-func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool) {
+func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool, []string) {
 	if h.judgeCfg == nil || h.db == nil || agentID == "" || credentialID == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	prof := h.judgeCfg.Effective().Profile
 	if !prof.Evidence.Value {
-		return nil, false
+		return nil, false, nil
 	}
 	f := evidence.Gather(ctx, h.db, evidence.Query{AgentID: agentID, CredentialID: credentialID})
 	for _, om := range f.Omitted {
 		h.logger.Warn("keeper: evidence fact omitted",
 			"fact", om.Fact, "error", om.Err, "agent_id", agentID, "credential_id", credentialID)
 	}
-	return &f, prof.HardGate.Value
+	return &f, prof.HardGate.Value, prof.EvidenceFacts.Value
 }
 
 // NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.

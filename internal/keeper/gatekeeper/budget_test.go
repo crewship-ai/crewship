@@ -129,3 +129,45 @@ func TestBuildPrompt_NoBudgetLeavesHistoryIntact(t *testing.T) {
 		t.Error("history was trimmed with no budget configured")
 	}
 }
+
+// The budget must not fail OPEN at its own documented floor. When the
+// incompressible sections already exceed the allowance there is nothing left to
+// spend on history — and the old code read that as "no budget configured" and
+// appended the whole conversation, silently, in exactly the case the setting
+// exists for. An operator who tightens the budget got LESS protection than one
+// who set it loosely.
+func TestBuildPrompt_OverspentBudgetDropsHistoryEntirely(t *testing.T) {
+	p := &mockProvider{content: `{"decision":"ALLOW","reason":"ok","risk":3}`}
+	g := gatekeeper.New(p, "qwen3.5:9b", newTestLogger(),
+		gatekeeper.WithWatchSpecResolver(func(context.Context, string) string {
+			return strings.Repeat("a long operator watch rule that eats the budget. ", 40)
+		}))
+
+	marker := "DISTINCTIVE-HISTORY-LINE"
+	_, err := g.Evaluate(context.Background(), gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			RequestingAgentID: "agt_riley",
+			Intent:            "Rotate the expiring TLS certificates on staging-web-01 and reload nginx",
+		},
+		SecurityLevel:  keeper.SecurityLevelL3,
+		CredentialName: "KT_SSH_STAGING",
+		AgentName:      "riley",
+		ConvHistory:    strings.Repeat(marker+" ", 400),
+		// 512 is the documented minimum; the watch policy alone overruns it.
+		PromptBudgetTokens: 512,
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if strings.Contains(p.capturedPrompt, marker) {
+		t.Errorf("history survived an already-overspent budget — the tighter setting protected less than a loose one (prompt %d chars)", len(p.capturedPrompt))
+	}
+	// The policy it was protecting must still be there.
+	if !strings.Contains(p.capturedPrompt, "WORKSPACE WATCH POLICY") {
+		t.Error("the watch policy was dropped instead of the history")
+	}
+	// And the judge must know the conversation is missing, not absent.
+	if !strings.Contains(strings.ToLower(p.capturedPrompt), "truncat") {
+		t.Error("history was dropped without telling the judge")
+	}
+}

@@ -142,6 +142,10 @@ type EvalRequest struct {
 	// still reaches the judge with the facts in front of it, which is strictly
 	// more information than before and never less.
 	HardGate bool
+	// EvidenceFacts narrows the rendered evidence block to these fact keys. Empty
+	// means every fact. Caller-supplied for the same reason HardGate is: it is an
+	// operator toggle and this package does not read configuration.
+	EvidenceFacts []string
 	// PromptBudgetTokens caps the assembled prompt. 0 means no cap, which is the
 	// pre-existing behaviour exactly.
 	//
@@ -756,6 +760,13 @@ const charsPerToken = 3.5
 // what to answer.
 const criteriaBlockLen = 900
 
+// historyTruncationNotice marks a cut conversation. It is not decoration: the
+// decision criteria ask the judge whether the conversation supports the request,
+// so an undisclosed truncation turns "I was not shown it" into "it did not
+// happen" — a refusal manufactured by a context limit.
+const historyTruncationNotice = "[…earlier conversation truncated to fit the judge's context budget; " +
+	"absence of earlier corroboration here is not evidence it did not happen…]\n"
+
 // truncateHistory trims a conversation to fit budgetChars, keeping the END.
 //
 // The end, because recency is what corroborates a request: the message that says
@@ -767,16 +778,23 @@ const criteriaBlockLen = 900
 // decision criteria explicitly ask it whether the conversation supports the
 // request. Silence there manufactures a refusal.
 func truncateHistory(history string, budgetChars int) (string, bool) {
-	if budgetChars <= 0 || len(history) <= budgetChars {
+	if len(history) <= budgetChars {
 		return history, false
 	}
-	const notice = "[…earlier conversation truncated to fit the judge's context budget; " +
-		"absence of earlier corroboration here is not evidence it did not happen…]\n"
-	keep := budgetChars - len(notice)
+	// Nothing left to spend: the incompressible sections already overran the
+	// allowance. Drop the history entirely rather than treating a negative
+	// remainder as "unbudgeted" — the old reading meant a TIGHTER budget
+	// protected less than a loose one, silently, in precisely the case the
+	// setting exists for. The notice still goes in, so the judge is told the
+	// conversation is missing rather than left to read it as absent.
+	if budgetChars <= 0 {
+		return historyTruncationNotice, true
+	}
+	keep := budgetChars - len(historyTruncationNotice)
 	if keep < 0 {
 		keep = 0
 	}
-	return notice + history[len(history)-keep:], true
+	return historyTruncationNotice + history[len(history)-keep:], true
 }
 
 func watchPolicyBlock(spec string) string {
@@ -809,7 +827,7 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	// contradict it. Render returns "" when nothing was established, so an
 	// instance with the capability off produces exactly the prompt it did before.
 	if req.Evidence != nil {
-		sb.WriteString(req.Evidence.Render())
+		sb.WriteString(req.Evidence.RenderOnly(req.EvidenceFacts))
 	}
 
 	if req.ConvHistory != "" {

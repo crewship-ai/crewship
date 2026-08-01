@@ -566,10 +566,10 @@ measurement, not a rule, so nothing here is wired shut.
 | `evidence` | a block of **computed facts** — is this credential bound to this agent, how many prior grants, how many denials in the last 7 days, is there open assigned work — placed **above** the conversation history, so facts outrank what the history claims | on |
 | `evidence-facts` | which of those facts to include | all |
 | `hard-gate` | refuse an L3/L4 credential the agent has no binding to **without calling the model at all** | on |
-| `precedent` | attach the closest past decisions that a **human** resolved, as worked examples | off |
-| `precedent-n` | how many examples | 3 |
-| `consistency-samples` | take this many verdicts on L3/L4 and use the majority; `1` means one verdict, i.e. sampling off | 1 |
-| `prompt-budget` | cap the assembled prompt in tokens; `0` derives it from the judge's context window | 0 |
+| `precedent` | *(reserved — accepted and stored, not yet implemented)* attach the closest past decisions that a **human** resolved, as worked examples | off |
+| `precedent-n` | *(reserved — see `precedent`)* how many examples | 3 |
+| `consistency-samples` | *(reserved — accepted and stored, not yet implemented)* take this many verdicts on L3/L4 and use the majority; `1` means one verdict, i.e. sampling off | 1 |
+| `prompt-budget` | cap the assembled prompt in tokens; `0` means **no cap**, leaving the model server to decide what to drop | 3500 (`lean`) |
 
 Three presets set them together, so it is not seven knobs:
 
@@ -1425,7 +1425,7 @@ covers failures nobody anticipated.
 
 | Alarm | Condition |
 |---|---|
-| `allow_rate_collapsed` | fewer than 5% of recent decisions were ALLOW |
+| `allow_rate_collapsed` | fewer than 5% of recent decisions **got somewhere** — granted **or** escalated to a human. Deliberately not the ALLOW share alone: an all-L4 workspace escalates every request by design and would otherwise sit at an ALLOW rate of zero while working perfectly. |
 | `judge_failure_spike` | 25% or more of recent decisions came from the fallback, not the judge |
 
 When both hold, only `judge_failure_spike` is raised: an unusable judge denies

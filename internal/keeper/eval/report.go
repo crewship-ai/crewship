@@ -35,7 +35,14 @@ type RankedCandidate struct {
 	AgreementHigh     float64 `json:"agreement_high"`
 	DangerousFlipRate float64 `json:"dangerous_flip_rate"`
 	DangerousFlipRows int     `json:"dangerous_flip_rows"`
-	RiskMAE           float64 `json:"risk_mae"`
+	// The same measure over the incumbent-labelled segment. Reported because the
+	// safety gate reads it: a candidate can be spotless on a handful of
+	// human-labelled rows and still downgrade guards across the recorded corpus,
+	// and a verdict of "no" whose number is nowhere in the output is a verdict an
+	// operator cannot check.
+	RecordedFlipRate float64 `json:"recorded_flip_rate"`
+	RecordedFlipRows int     `json:"recorded_flip_rows"`
+	RiskMAE          float64 `json:"risk_mae"`
 
 	// IncumbentLabelRows / IncumbentLabelAgreement describe the rows no human
 	// ever ruled on. Reported so a run is transparent about how much of the
@@ -101,6 +108,8 @@ func BuildReport(incumbent LabeledVerdict, candidates []LabeledVerdict, toleranc
 			AgreementHigh:           lv.Verdict.Human.AgreementHigh,
 			DangerousFlipRate:       lv.Verdict.Human.DangerousFlipRate,
 			DangerousFlipRows:       lv.Verdict.Human.DangerousFlipRows,
+			RecordedFlipRate:        lv.Verdict.ModelLabelled.DangerousFlipRate,
+			RecordedFlipRows:        lv.Verdict.ModelLabelled.DangerousFlipRows,
 			RiskMAE:                 lv.Verdict.Human.RiskMAE,
 			IncumbentLabelRows:      lv.Verdict.ModelLabelled.Rows,
 			IncumbentLabelAgreement: lv.Verdict.ModelLabelled.AgreementRate,

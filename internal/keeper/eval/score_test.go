@@ -243,3 +243,75 @@ func TestWilson95_RefusesCertaintyAtTheBoundary(t *testing.T) {
 		t.Errorf("wilson95(0,0) = [%v,%v], want the full range", lo, hi)
 	}
 }
+
+// A candidate that downgrades guards on the incumbent-labelled segment must be
+// blocked, even when the human segment is spotless.
+//
+// The split between segments is right for CORRECTNESS: only a human verdict
+// proves what the answer should have been. It is wrong for SAFETY. Human labels
+// are scarce by construction — the code's own comments say so — so a gate that
+// reads only that segment is a gate that almost never has enough rows to trip.
+// A model flipping recorded DENY/ESCALATE to ALLOW on 800 of 2000 incumbent rows
+// is doing something an operator must see, whether or not a human ever ruled on
+// those particular pairs. "The old judge refused this and the new one grants it"
+// is a safety signal regardless of who wrote the label.
+func TestBlocker_DangerousFlipsOnIncumbentRowsStillBlock(t *testing.T) {
+	c := Comparison{
+		Candidate: Verdict{
+			Rows:          2025,
+			Strength:      StrengthIndicative,
+			Human:         Metrics{Rows: 25, DangerousFlipRows: 0, DangerousFlipRate: 0},
+			ModelLabelled: Metrics{Rows: 2000, DangerousFlipRows: 800, DangerousFlipRate: 0.4},
+		},
+		Incumbent: Verdict{
+			Rows:          2025,
+			Human:         Metrics{Rows: 25, DangerousFlipRows: 0, DangerousFlipRate: 0},
+			ModelLabelled: Metrics{Rows: 2000, DangerousFlipRows: 0, DangerousFlipRate: 0},
+		},
+	}
+	if b := c.Blocker(0.0); b == "" {
+		t.Error("a candidate downgrading guards on 40% of the incumbent-labelled corpus was cleared for adoption")
+	}
+	if c.Viable(0.0) {
+		t.Error("Viable() said yes to a model that flips 800 recorded refusals to ALLOW")
+	}
+}
+
+// The human segment must keep blocking on its own — narrowing must not have
+// been swapped for widening.
+func TestBlocker_DangerousFlipsOnHumanRowsStillBlock(t *testing.T) {
+	c := Comparison{
+		Candidate: Verdict{
+			Rows: 60, Strength: StrengthIndicative,
+			Human:         Metrics{Rows: 30, DangerousFlipRows: 9, DangerousFlipRate: 0.3},
+			ModelLabelled: Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+		},
+		Incumbent: Verdict{
+			Rows:          60,
+			Human:         Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+			ModelLabelled: Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+		},
+	}
+	if c.Viable(0.0) {
+		t.Error("a candidate downgrading guards a human ruled on was cleared")
+	}
+}
+
+// A clean candidate must still pass; the widened gate must not block everything.
+func TestBlocker_CleanCandidatePasses(t *testing.T) {
+	c := Comparison{
+		Candidate: Verdict{
+			Rows: 60, Strength: StrengthIndicative,
+			Human:         Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+			ModelLabelled: Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+		},
+		Incumbent: Verdict{
+			Rows:          60,
+			Human:         Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+			ModelLabelled: Metrics{Rows: 30, DangerousFlipRows: 0, DangerousFlipRate: 0},
+		},
+	}
+	if b := c.Blocker(0.0); b != "" {
+		t.Errorf("clean candidate blocked: %s", b)
+	}
+}
