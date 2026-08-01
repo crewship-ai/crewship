@@ -27,11 +27,32 @@ var memoryInstructionsCache atomic.Pointer[memoryInstructionsEntry]
 
 const (
 	defaultMemoryContextChars = 15000
-	memoryReadTimeout         = 5 * time.Second
-	crewMemoryMaxPct          = 40  // crew memory capped at 40% of total budget
-	pinsMemoryMaxPct          = 10  // operator-pinned entries capped at 10%
-	workspaceMemoryMaxPct     = 15  // workspace tier capped at 15% of post-pins remainder
-	minTruncationChars        = 100 // don't bother with sections smaller than this
+	// memoryReadTimeout bounds ONE tier block's reads, not one exec. The
+	// agent tier is the widest: cat AGENT.md + ls daily + up to two daily
+	// cats + BRIEF.md + pins.md ≈ 6 execs at ~85 ms each ≈ 0.5 s, so 5 s
+	// is roughly 8× headroom on the observed cost (#1637 asked whether it
+	// should be raised — it should not, for two reasons).
+	//
+	// First, the blocks run sequentially, so the constant is already
+	// multiplied: pins + crew + workspace + agent means the wall-clock
+	// worst case for prompt assembly is ~4× this value. Raising 5 s to
+	// 10 s buys a slow container nothing it can use and doubles how long
+	// a wedged one stalls every wake.
+	//
+	// Second, a per-exec deadline would remove the bound that matters —
+	// twelve execs × 5 s is a 60 s prompt assembly. One deadline per tier
+	// is the budget that keeps the wake bounded.
+	//
+	// The failure mode is now honest rather than silent: when the deadline
+	// expires mid-scan the later reads come back empty, and the [MEMORY
+	// GAP] block says the day's notes could not be read and hands over the
+	// memory.read key (gapNotesWithheld) instead of claiming they are
+	// below.
+	memoryReadTimeout     = 5 * time.Second
+	crewMemoryMaxPct      = 40  // crew memory capped at 40% of total budget
+	pinsMemoryMaxPct      = 10  // operator-pinned entries capped at 10%
+	workspaceMemoryMaxPct = 15  // workspace tier capped at 15% of post-pins remainder
+	minTruncationChars    = 100 // don't bother with sections smaller than this
 )
 
 // dailyLogLookbackDays bounds the backwards scan for the last day that
@@ -269,18 +290,47 @@ func (o *Orchestrator) buildCostAwarenessBlock(ctx context.Context, req AgentRun
 	)
 }
 
+// gapEvidence says what this prompt can honestly claim about the last
+// active day's notes. #1637: this used to be a bool meaning "the read
+// returned bytes", which conflated two different reasons the notes are
+// absent and let the block promise a section the budget had dropped.
+//
+// The zero value is the conservative one: a memoryGap that nobody
+// classified never claims the notes are below.
+type gapEvidence uint8
+
+const (
+	// gapNotesWithheld: the day is inside the boot window and we know it
+	// holds notes — the listing said so, or we read them — but they are
+	// NOT in this prompt. The read failed, the read deadline expired, or
+	// assembleSections dropped the section for budget.
+	gapNotesWithheld gapEvidence = iota
+	// gapNotesBelow: that day's daily-log section was emitted into this
+	// prompt and the model can read it below.
+	gapNotesBelow
+	// gapNotesOutOfWindow: the day is older than dailyLogLookbackDays, so
+	// it was never a candidate for injection in the first place.
+	gapNotesOutOfWindow
+)
+
 // memoryGap describes how long the agent has been away, derived from the
 // newest daily log that exists — not from a clock the orchestrator does
 // not have. Zero value means "no gap to report" and renders to "".
 type memoryGap struct {
-	lastActive string // YYYY-MM-DD of the newest day with notes; "" = unknown
-	days       int    // whole days between lastActive and today; >0 when set
-	injected   bool   // whether that day's notes made it into the prompt
+	lastActive string      // YYYY-MM-DD of the newest day with notes; "" = unknown
+	days       int         // whole days between lastActive and today; >0 when set
+	evidence   gapEvidence // what the prompt may claim about that day's notes
 }
 
 // render formats the [MEMORY GAP] block. Every field is either a date
 // this process parsed with time.Parse or an int it computed, so the block
 // carries no file-authored bytes and needs no injection scan.
+//
+// The wording is behaviour, not decoration: an LLM reads this at every
+// wake, so each branch has to be true of THIS prompt and has to leave the
+// agent with a next step. Two of the three branches hand over the exact
+// memory.read key, because in both of them the notes are missing and the
+// agent is the only one who can go get them.
 func (g memoryGap) render(today string) string {
 	if g.lastActive == "" || g.days <= 0 {
 		return ""
@@ -290,14 +340,21 @@ func (g memoryGap) render(today string) string {
 		unit = "day"
 	}
 	var tail string
-	if g.injected {
+	switch g.evidence {
+	case gapNotesBelow:
 		tail = "The daily log below is from that day — it is not a session you just finished.\n" +
 			"Anything that happened since then is not in this snapshot."
-	} else {
+	case gapNotesOutOfWindow:
 		tail = fmt.Sprintf(
 			"That day is older than the %d-day boot window, so its notes are NOT below.\n"+
 				"Pull it with memory.read tier=daily key=%s if you need it.",
 			dailyLogLookbackDays, g.lastActive)
+	default: // gapNotesWithheld
+		tail = fmt.Sprintf(
+			"That day's log exists but is NOT below — it could not be read, or it did not\n"+
+				"fit this snapshot. Pull it with memory.read tier=daily key=%s before you\n"+
+				"rely on anything below.",
+			g.lastActive)
 	}
 	return fmt.Sprintf(`[MEMORY GAP]
 Today is %s. Your last recorded activity was %s — %d %s ago.
@@ -461,23 +518,41 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 		{"BRIEF.md (parent-issued brief)", briefMD},
 		{"AGENT.md (long-term memory)", agentMD},
 	}
+	priorIdx := -1
 	if priorLog != "" {
+		priorIdx = len(sections)
 		sections = append(sections, memorySection{priorDailyLabel("Daily log", window.prior, today), priorLog})
 	}
 	sections = append(sections, memorySection{fmt.Sprintf("Daily log: %s (today)", today), todayLog})
 
+	block, emitted := assembleSectionsEmitted("[AGENT MEMORY]", "[END AGENT MEMORY]", sections, budget)
+
 	// The gap is derived from what actually has content, in order of
 	// confidence: notes written today mean no gap at all; otherwise the
-	// newest day we managed to read; otherwise — only when the listing was
-	// authoritative — the newest day we saw but could not read because it
-	// fell outside the lookback.
+	// newest prior day either we read or the listing vouched for; otherwise
+	// — only when the listing was authoritative — the newest day we saw but
+	// never offered to read because it fell outside the lookback.
+	//
+	// #1637: whether that day's notes are BELOW is a separate question from
+	// whether we read them, and it is answered by assembleSections, not by
+	// the read. A tight budget drops the prior-daily section (it is
+	// second-to-last in the ordering) while priorLog is still full of text
+	// — the block used to promise a log that was not in the prompt, and
+	// took the branch that withholds the memory.read recovery key.
 	var gap memoryGap
 	switch {
 	case todayLog != "":
-	case priorLog != "":
-		gap = memoryGap{lastActive: window.prior, injected: true}
+		// Notes from today: no elapsed-time claim to make.
+	case priorLog != "", window.listed && window.prior != "":
+		gap = memoryGap{lastActive: window.prior, evidence: gapNotesWithheld}
+		// A section replaced by the [BLOCKED: …] injection notice still
+		// counts as emitted: the label and the notice are below, and the
+		// notice explains itself better than "could not be read" would.
+		if priorIdx >= 0 && emitted[priorIdx] {
+			gap.evidence = gapNotesBelow
+		}
 	case window.listed && window.newest != "":
-		gap = memoryGap{lastActive: window.newest}
+		gap = memoryGap{lastActive: window.newest, evidence: gapNotesOutOfWindow}
 	}
 	if gap.lastActive != "" {
 		if n, ok := daysSince(gap.lastActive, today); ok {
@@ -487,7 +562,7 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 		}
 	}
 
-	return assembleSections("[AGENT MEMORY]", "[END AGENT MEMORY]", sections, budget), gap
+	return block, gap
 }
 
 // buildCrewMemoryBlock reads crew shared memory files and returns a formatted
@@ -624,6 +699,24 @@ func (o *Orchestrator) buildPinsBlock(ctx context.Context, req AgentRunRequest, 
 // assembleSections builds a memory block from sections with budget-aware truncation.
 // Returns empty string if all sections are empty.
 func assembleSections(startMarker, endMarker string, sections []memorySection, budget int) string {
+	block, _ := assembleSectionsEmitted(startMarker, endMarker, sections, budget)
+	return block
+}
+
+// assembleSectionsEmitted is assembleSections plus the per-section record
+// of what actually landed in the returned block. Callers that make a
+// claim ABOUT the block — the [MEMORY GAP] notice says whether the last
+// active day's log is below it — have to read this rather than infer from
+// the inputs they passed in (#1637): budget truncation silently drops
+// whole trailing sections, so "I read it" and "the model can see it" are
+// different facts.
+//
+// emitted[i] reports whether sections[i] contributed a section body to the
+// block. A section whose body was swapped for the [BLOCKED: …] injection
+// notice counts as emitted — its label and the notice are in the prompt.
+func assembleSectionsEmitted(startMarker, endMarker string, sections []memorySection, budget int) (string, []bool) {
+	emitted := make([]bool, len(sections))
+
 	// Check if any section has content
 	hasContent := false
 	for _, s := range sections {
@@ -633,7 +726,7 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 		}
 	}
 	if !hasContent {
-		return ""
+		return "", emitted
 	}
 
 	// Untrusted-hints header: AGENT.md / CREW.md content is written by
@@ -655,7 +748,7 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 	const truncSuffix = "\n...(truncated)"
 	wrapperLen := len(startMarker) + 1 + len(untrustedHeader) + len(endMarker) + 2
 	if budget <= wrapperLen {
-		return ""
+		return "", emitted
 	}
 	contentBudget := budget - wrapperLen
 
@@ -664,7 +757,7 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 	// flagged.
 	var content strings.Builder
 	totalChars := 0
-	for _, s := range sections {
+	for i, s := range sections {
 		if s.content == "" || totalChars >= contentBudget {
 			continue
 		}
@@ -701,9 +794,10 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 		}
 		content.WriteString(section)
 		totalChars += len(section)
+		emitted[i] = true
 	}
 	if totalChars == 0 {
-		return ""
+		return "", emitted
 	}
 
 	var b strings.Builder
@@ -711,7 +805,7 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 	b.WriteString(untrustedHeader)
 	b.WriteString(content.String())
 	b.WriteString(endMarker + "\n\n")
-	return b.String()
+	return b.String(), emitted
 }
 
 // buildMemoryInstructions returns the instruction block that teaches the agent
@@ -766,6 +860,36 @@ CREW SHARED MEMORY:
 [END MEMORY INSTRUCTIONS]`, today, today)
 }
 
+// execExitStatus reports whether a finished exec ended cleanly, and turns
+// anything else into an error the caller can degrade on.
+//
+// Both providers merge stderr into the single output stream (docker via
+// stdcopy into one pipe, apple by pointing Stdout and Stderr at the same
+// writer), so the bytes on the stream cannot distinguish a listing from a
+// diagnostic. #1637: the previous code tried anyway, by matching two
+// English error prefixes, and every other shape — `ls: cannot open
+// directory '<dir>': Permission denied` on a glibc base, a translated
+// diagnostic under a container LANG — was read back as a successful
+// one-entry listing. The exit status is the only signal that is complete.
+//
+// An inspect that fails, or a process still reported running after the
+// stream reached EOF, is an UNKNOWN outcome and is treated as failure:
+// every caller here degrades to reading a fixed path list, which is
+// strictly the pre-#1628 behaviour, so a false negative costs one extra
+// `cat` while a false positive costs the agent its memory.
+func (o *Orchestrator) execExitStatus(ctx context.Context, execID, what string) error {
+	running, code, err := o.container.ExecInspect(ctx, execID)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%s: exec inspect failed, outcome unknown: %w", what, err)
+	case running:
+		return fmt.Errorf("%s: still running after stream EOF, outcome unknown", what)
+	case code != 0:
+		return fmt.Errorf("%s: exited %d", what, code)
+	}
+	return nil
+}
+
 // listContainerDir lists a directory inside the container with a SINGLE
 // Exec("ls", "-1", dir). This is the whole point of the #1628 scan: one
 // round trip tells us every day that has notes, where probing candidate
@@ -793,14 +917,20 @@ func (o *Orchestrator) listContainerDir(ctx context.Context, containerID, dir st
 		return nil, fmt.Errorf("read listing %s: %w", dir, err)
 	}
 
+	// Status first, text second: whatever is on the stream is only a
+	// listing if `ls` said so by exiting 0.
+	if err := o.execExitStatus(ctx, result.ExecID, "list "+dir); err != nil {
+		return nil, err
+	}
+
 	out := strings.TrimSpace(buf.String())
-	// Exec merges stderr into the stream, so a missing directory arrives
-	// as `ls: <dir>: No such file or directory` on an otherwise empty
-	// listing. Match the literal shape the same way readContainerFile
-	// matches cat's, so a file legitimately named "ls: ..." cannot make a
-	// real listing look like a failure.
-	if out == "" || strings.HasPrefix(out, "ls: "+dir+":") || strings.HasPrefix(out, "ls: cannot access") {
-		return nil, fmt.Errorf("list %s: no listing available", dir)
+	// An empty stream on a clean exit is ambiguous — an empty directory
+	// and a provider that dropped the output look identical — so it stays
+	// a failure and the caller falls back to the fixed pair. Claiming "this
+	// directory is empty" on a swallowed listing would suppress the read of
+	// today's own log.
+	if out == "" {
+		return nil, fmt.Errorf("list %s: empty listing", dir)
 	}
 
 	var names []string
@@ -833,13 +963,29 @@ func (o *Orchestrator) readContainerFile(ctx context.Context, containerID, fileP
 		return "", fmt.Errorf("read %s: %w", filePath, err)
 	}
 
+	// Same merged-stream problem as the listing (#1637): a missing or
+	// unreadable file puts cat's diagnostic on the *content* stream. The
+	// literal-shape match below only ever caught GNU's `cat: <path>: ...`;
+	// busybox says `cat: can't open '<path>': ...`, which used to be
+	// returned as if it were the file's content and injected into the
+	// prompt as memory. A non-zero exit is "no content", not an error —
+	// a missing daily log is the normal case, and callers already treat
+	// ("", nil) as absent.
+	if err := o.execExitStatus(ctx, result.ExecID, "read "+filePath); err != nil {
+		// Debug, not Warn: a missing BRIEF.md / pins.md / daily log is the
+		// normal case on most wakes. It is logged at all because "the file
+		// is there but uid 1001 cannot read it" is otherwise invisible —
+		// the prompt just quietly holds less memory.
+		o.logger.Debug("memory file not readable", "path", filePath, "reason", err)
+		return "", nil
+	}
+
 	content := strings.TrimSpace(buf.String())
 
-	// "cat" on a non-existent file writes to stderr, stdout is empty.
-	// Match the literal cat error shape — "cat: <filePath>:" — so a
-	// legitimate memory file whose first non-whitespace line happens to
-	// start with the substring "cat:" (notes mentioning the command) is
-	// not silently treated as missing.
+	// Belt and braces for a provider that reports exit 0 on a failed cat:
+	// the literal GNU shape — "cat: <filePath>:" — still reads as missing.
+	// Anchoring on the full path keeps a legitimate memory file whose first
+	// line merely mentions "cat:" out of it.
 	if content == "" || strings.HasPrefix(content, "cat: "+filePath+":") {
 		return "", nil
 	}
