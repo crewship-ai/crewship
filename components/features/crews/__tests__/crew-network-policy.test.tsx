@@ -119,3 +119,74 @@ describe("<CrewNetworkPolicy> — private endpoints toggle", () => {
     expect(screen.queryByRole("switch", { name: /private endpoints/i })).toBeNull()
   })
 })
+
+// #1648 — the card rendered the CONFIGURED egress mode as though it were the
+// effective one. On a container provider with no egress proxy that produced a
+// "Restricted" badge and the sentence "All other traffic is blocked" over a
+// crew whose traffic was not being blocked at all. The operator's intent is
+// still stored and still shown; what changed is that the card no longer
+// reports it as being in force when the server says it is not.
+describe("<CrewNetworkPolicy> — configured vs enforced", () => {
+  const REASON =
+    "egress is enforced by the in-container crewship-sidecar proxy, whose binary this provider does not mount"
+
+  it("marks a restricted crew the provider cannot fence, and gives the reason", () => {
+    render(
+      <CrewNetworkPolicy
+        networkMode="restricted"
+        enforced={false}
+        unenforcedReason={REASON}
+        allowedDomains={["github.com"]}
+        canEdit
+        onSave={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/not enforced/i)).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent(/crewship-sidecar/)
+    // The claim that made the card a liar must be gone.
+    expect(screen.queryByText(/All other traffic is blocked/i)).toBeNull()
+  })
+
+  it("says nothing extra when the provider does enforce the mode", () => {
+    render(
+      <CrewNetworkPolicy
+        networkMode="restricted"
+        enforced={true}
+        allowedDomains={[]}
+        canEdit
+        onSave={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.queryByText(/not enforced/i)).toBeNull()
+    expect(screen.getByText(/All other traffic is blocked/i)).toBeInTheDocument()
+  })
+
+  it("renders unchanged against a server that does not report enforcement", () => {
+    render(
+      <CrewNetworkPolicy
+        networkMode="restricted"
+        allowedDomains={[]}
+        canEdit
+        onSave={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByText(/All other traffic is blocked/i)).toBeInTheDocument()
+  })
+
+  it("does not mark a free crew — there is nothing to enforce", () => {
+    render(
+      <CrewNetworkPolicy
+        networkMode="free"
+        enforced={false}
+        unenforcedReason={REASON}
+        allowedDomains={[]}
+        canEdit
+        onSave={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.queryByText(/not enforced/i)).toBeNull()
+  })
+})

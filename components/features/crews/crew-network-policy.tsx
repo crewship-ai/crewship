@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Globe, Shield, Package, Network } from "lucide-react"
+import { Globe, Shield, ShieldOff, Package, Network } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -34,7 +34,17 @@ const DEFAULT_DOMAINS = [
 ]
 
 interface CrewNetworkPolicyProps {
+  /** The CONFIGURED mode — what the operator asked for and what is stored. */
   networkMode: string
+  /** #1648 — whether the server's container provider actually applies
+   *  networkMode. This card used to render the configured value as though it
+   *  were the effective one, so a crew on a provider with no egress proxy
+   *  showed a green-lit "Restricted" fence that nothing was checking.
+   *  Undefined means the backend did not report it (older server): the card
+   *  renders as before rather than claiming either state. */
+  enforced?: boolean
+  /** The provider's own explanation, shown when enforced === false. */
+  unenforcedReason?: string
   allowedDomains: string[]
   /** #1377 gap 3 — crews.allow_private_endpoints (migration v135). Undefined
    *  means the caller didn't load the field; the toggle stays hidden rather
@@ -50,6 +60,8 @@ interface CrewNetworkPolicyProps {
 
 export function CrewNetworkPolicy({
   networkMode,
+  enforced,
+  unenforcedReason,
   allowedDomains,
   allowPrivateEndpoints,
   canEdit,
@@ -67,6 +79,11 @@ export function CrewNetworkPolicy({
   useEffect(() => { setPrivateEndpoints(Boolean(allowPrivateEndpoints)) }, [allowPrivateEndpoints])
 
   const isFree = mode === "free"
+  // Keyed on the SAVED mode, not the editor's `mode`: the server reported
+  // enforcement for what is stored, and predicting the answer for a mode the
+  // operator has only clicked would be guessing. Flipping to restricted and
+  // saving surfaces it on the next render, plus a warning on the PATCH.
+  const isUnenforced = enforced === false && networkMode === "restricted"
   const showPrivateEndpoints = allowPrivateEndpoints !== undefined
   // Compare parsed domain arrays instead of raw strings to avoid false dirty state
   const parsedDomains = isFree ? [] : domains.split(/[,\n]+/).map((d) => d.trim().toLowerCase()).filter(Boolean)
@@ -96,6 +113,8 @@ export function CrewNetworkPolicy({
         <div className="flex items-center gap-2">
           {isFree ? (
             <Globe className="h-4 w-4 text-success" />
+          ) : isUnenforced ? (
+            <ShieldOff className="h-4 w-4 text-destructive" />
           ) : (
             <Shield className="h-4 w-4 text-warn" />
           )}
@@ -103,9 +122,11 @@ export function CrewNetworkPolicy({
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
             isFree
               ? "bg-success text-success dark:bg-success dark:text-success"
-              : "bg-warn text-warn dark:bg-warn dark:text-warn"
+              : isUnenforced
+                ? "bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive"
+                : "bg-warn text-warn dark:bg-warn dark:text-warn"
           }`}>
-            {isFree ? "Unrestricted" : "Restricted"}
+            {isFree ? "Unrestricted" : isUnenforced ? "Restricted — not enforced" : "Restricted"}
           </span>
         </div>
         <CardDescription>
@@ -113,6 +134,20 @@ export function CrewNetworkPolicy({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {isUnenforced && (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            <p className="font-medium">This crew&apos;s egress is not being restricted.</p>
+            <p className="mt-1 text-destructive/90">{unenforcedReason}</p>
+            <p className="mt-1 text-destructive/90">
+              The setting below is kept as your intent and takes effect on a provider that can
+              apply it — it is not being applied right now.
+            </p>
+          </div>
+        )}
+
         {canEdit && (
           <div className="flex gap-2">
             <Button
@@ -147,7 +182,9 @@ export function CrewNetworkPolicy({
         {!isFree && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Agents can only access the domains listed below. All other traffic is blocked.
+              {isUnenforced
+                ? "Configured to allow only the domains listed below — but nothing is blocking the rest on this provider."
+                : "Agents can only access the domains listed below. All other traffic is blocked."}
             </p>
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Always Allowed (LLM APIs)</Label>

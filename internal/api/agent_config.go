@@ -330,6 +330,25 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		crewSlugStr = data.crewSlug.String
 	}
 
+	// [NETWORK POLICY — NOT ENFORCED] (#1648). Every other surface that
+	// reports network_mode tells a person; this one tells the agent, and the
+	// agent acts on it — an agent that believes its egress is fenced will
+	// treat an outbound call as contained and may skip a precaution because
+	// "the allowlist will catch it". So when the container provider cannot
+	// apply the configured mode, the agent is told to work as though the
+	// network were open, in the same voice as the other prompt blocks.
+	//
+	// Derived from the provider's capability report through the same helper
+	// the crew read paths use — one rule, one place. When the mode IS
+	// enforced the block is empty and nothing is appended, so the prompt for
+	// a fenced crew is byte-identical to what it was before this existed.
+	egress := egressEnforcementFor(h.container, crewIDStr, crewSlugStr, networkMode, allowedDomains)
+	if block := buildNetworkPolicyBlock(networkMode, egress); block != "" {
+		h.logger.Warn("agent is being told its egress fence is not enforced",
+			"agent_id", agentID, "crew_id", crewIDStr, "network_mode", networkMode)
+		sysPrompt += "\n\n" + block
+	}
+
 	llmModelStr := ""
 	if data.llmModel.Valid {
 		llmModelStr = data.llmModel.String
@@ -360,26 +379,31 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	}
 
 	resp := map[string]interface{}{
-		"agent_id":                agentID,
-		"agent_slug":              data.agentSlug,
-		"agent_role":              roleStr,
-		"agent_status":            data.agentStatus,
-		"crew_id":                 crewIDStr,
-		"crew_slug":               crewSlugStr,
-		"container_id":            "",
-		"cli_adapter":             data.cliAdapter,
-		"llm_model":               llmModelStr,
-		"llm_provider":            data.llmProvider.String,
-		"system_prompt":           sysPrompt,
-		"tool_profile":            data.toolProfile,
-		"credentials":             creds,
-		"timeout_seconds":         data.timeoutSecs,
-		"workspace_id":            data.wsID,
-		"preferred_language":      data.preferredLanguage,
-		"memory_enabled":          data.memoryEnabled,
-		"crew_members":            crewMembers,
-		"connected_crews":         connectedCrews,
+		"agent_id":           agentID,
+		"agent_slug":         data.agentSlug,
+		"agent_role":         roleStr,
+		"agent_status":       data.agentStatus,
+		"crew_id":            crewIDStr,
+		"crew_slug":          crewSlugStr,
+		"container_id":       "",
+		"cli_adapter":        data.cliAdapter,
+		"llm_model":          llmModelStr,
+		"llm_provider":       data.llmProvider.String,
+		"system_prompt":      sysPrompt,
+		"tool_profile":       data.toolProfile,
+		"credentials":        creds,
+		"timeout_seconds":    data.timeoutSecs,
+		"workspace_id":       data.wsID,
+		"preferred_language": data.preferredLanguage,
+		"memory_enabled":     data.memoryEnabled,
+		"crew_members":       crewMembers,
+		"connected_crews":    connectedCrews,
+		// network_mode is the CONFIGURED policy; network_mode_enforced says
+		// whether this instance's runtime actually applies it. Always
+		// present, for the same reason as on the crew response: an absent
+		// key reads as "yes", which is the assumption the defect was made of.
 		"network_mode":            networkMode,
+		"network_mode_enforced":   egress.Enforced,
 		"allowed_domains":         allowedDomains,
 		"allow_private_endpoints": data.crewAllowPrivateEndpoints != 0,
 		"memory_mb":               memoryMB,
@@ -397,6 +421,11 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		"installed_skills":        installedSkills,
 		"crew_resources":          crewResources,
 		"approval_mode":           approvalMode,
+	}
+	// Only when there is something to explain — mirrors the omitempty on the
+	// crew response so an enforcing instance's payload is unchanged.
+	if egress.Reason != "" {
+		resp["network_mode_unenforced_reason"] = egress.Reason
 	}
 	// #955/#961: the local-model endpoint resolved from the vault (per-agent
 	// ENDPOINT_URL cred → workspace default), replacing the server-global

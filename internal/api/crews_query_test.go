@@ -167,12 +167,19 @@ func TestCrewListCountsGoldenFixture(t *testing.T) {
 	// Response shape lock: the exact JSON key set of a fully-populated row.
 	// crewResponse omitempty fields are absent when NULL, so use crew-empty
 	// (all optional columns NULL) as the minimal shape.
+	//
+	// network_mode_enforced (#1648) is always present: it is the answer to
+	// "is the mode next to it actually in effect", and an absent key would be
+	// read by a client as "yes" — the exact assumption that made a configured
+	// fence pass for an enforced one. Its reason field IS omitempty, because
+	// there is nothing to explain when the answer is yes; these crews are all
+	// on a nil provider, so it is absent here.
 	wantKeys := []string{
 		"_count", "allow_private_endpoints", "allowed_domains", "avatar_style",
 		"color", "container_cpus", "container_memory_mb", "container_ttl_hours",
 		"created_at", "description", "icon", "id", "issue_prefix",
-		"max_ephemeral_agents", "name", "network_mode", "slug", "updated_at",
-		"workspace_id",
+		"max_ephemeral_agents", "name", "network_mode", "network_mode_enforced",
+		"slug", "updated_at", "workspace_id",
 	}
 	gotKeys := make([]string, 0, len(raw[3]))
 	for k := range raw[3] {

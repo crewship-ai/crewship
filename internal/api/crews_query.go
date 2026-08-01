@@ -71,6 +71,10 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "scan crew", err)
 			return
 		}
+		// The list is where an operator scans a fleet for "which of these is
+		// actually fenced", so it carries the effective egress state too — a
+		// detail-page-only answer would need one request per crew to ask.
+		h.annotateEgressEnforcement(&c)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -118,6 +122,8 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "get crew", err)
 		return
 	}
+
+	h.annotateEgressEnforcement(&c)
 
 	writeJSON(w, http.StatusOK, c)
 }

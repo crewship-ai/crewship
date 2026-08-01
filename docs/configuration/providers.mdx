@@ -172,6 +172,69 @@ type containerJSON struct {
 | CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
 | Stop timeout | 30 seconds | 10 seconds |
 
+#### Crew settings the Apple provider does not apply
+
+Starting a crew hands the provider the crew's full runtime configuration. The
+Apple Containers provider acts on the crew id, slug, memory and CPU count; the
+remaining settings below are not applied. None of them blocks the crew — it
+starts either way — but none of them is dropped in silence any more.
+
+| Crew setting | Behaviour on Apple Containers |
+|---|---|
+| `network_mode: restricted` | Not enforced — the crew runs with unrestricted egress. See below. |
+| `container_ttl_hours` | No idle auto-stop; the container runs until stopped. |
+| `runtime_image` / provisioned image | Ignored — the container is created from `container.image`, so tools baked into the crew's provisioned image are missing at exec time. |
+| devcontainer `containerEnv` | Not set on the container; only `CREWSHIP_CREW_ID` is. |
+| Captured login `PATH` | Not set, so feature/pipx tool directories are off `PATH` for a non-login exec. |
+| Feature `privileged`, `capAdd`, `securityOpt` | Not applied; features that need them (e.g. docker-in-docker) will not work. |
+| Feature mounts | Not attached; only `/workspace`, `/output` and `/crew` are bound. |
+| `postStartCommand` hooks | Not executed on create or restart. |
+| `/crew/init.sh` init hook | Not executed on container start. |
+| Sidecar `services:` | Not started; the agent cannot reach them by name. |
+
+Each of these is logged at `WARN` by the daemon when the crew starts, naming
+the setting and what was lost, and is streamed into the chat as a status line.
+
+<Warning>
+**`network_mode: restricted` is not enforced here, and every surface says so.**
+Egress restriction is enforced by the in-container `crewship-sidecar` proxy,
+whose binary reaches the container only through a bind mount the Apple provider
+does not create. A crew configured `restricted` on this provider **runs with
+unrestricted egress**.
+
+The crew still starts — Crewship runs on every platform it can, and refusing
+would not make the crew any more contained. What it does not do is let the
+configured value pass for the effective one:
+
+- `GET /api/v1/crews` and `GET /api/v1/crews/{id}` return
+  `network_mode_enforced: false` alongside `network_mode: "restricted"`, plus a
+  `network_mode_unenforced_reason` explaining what is missing.
+- `crewship crew list` shows `restricted (NOT ENFORCED)` in the NETWORK column;
+  `crewship crew get` adds a **Why Not Enforced** line.
+- The dashboard's Network Policy card reads **Restricted — not enforced** and
+  carries the reason.
+- Creating or updating a crew to `restricted` on such an instance returns the
+  same explanation in the response's `warnings` array.
+- **The agent is told too.** Its system prompt gains a
+  `[NETWORK POLICY — NOT ENFORCED]` section instructing it to work as if on an
+  open network: assume outbound requests leave the machine, redact secrets
+  before sending anything, and never describe the crew to you as sandboxed or
+  network-isolated. An agent that believes it is fenced makes different
+  *choices*, not just different statements, so this is the surface that changes
+  behaviour rather than only reporting.
+
+A crew whose egress **is** enforced sees none of the above — its prompt is
+byte-for-byte what it was, and its API payload gains only
+`network_mode_enforced: true`.
+
+The stored `network_mode` is **not** rewritten. It is your intent, and it takes
+effect the moment the crew runs on the Docker provider — so moving a crew there
+restores the fence without you having to remember what it used to be set to.
+</Warning>
+
+To get enforced egress on macOS, run the crew on the Docker provider
+(`container.provider: "docker"`).
+
 ### Auto Provider
 
 **Config key:** `container.provider: "auto"`

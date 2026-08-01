@@ -451,6 +451,16 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("crew sized below the usable floor", "crew_id", crewID, "slug", c.Slug, "advisory", a)
 	}
 
+	// Same as Create: computed from the row as it now stands, so switching a
+	// crew TO restricted on an instance that cannot apply it is answered by
+	// the response to the request that switched it.
+	h.annotateEgressEnforcement(&c)
+	if adv := h.egressEnforcementAdvisory(&c); adv != "" {
+		h.logger.Warn("crew egress mode is not enforced by this instance's provider",
+			"crew_id", crewID, "slug", c.Slug, "network_mode", c.NetworkMode)
+		advisories = append(advisories, adv)
+	}
+
 	writeJSON(w, http.StatusOK, crewResponseWithAdvisories{crewResponse: c, Warnings: advisories})
 
 	h.broadcastCrewEvent("crew.updated", workspaceID, map[string]string{
