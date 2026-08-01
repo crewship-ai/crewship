@@ -72,9 +72,29 @@ func seedKeeper(ctx context.Context, client *cli.Client, endpoint, model string)
 		return nil
 	}
 
+	// Twice, because the first call on a fresh instance pays a COLD MODEL LOAD.
+	// Pulling ~6GB of weights into memory before the first token takes longer
+	// than the CLI's HTTP timeout, so attempt one can time out client-side while
+	// the server call keeps going and finishes the load. Attempt two then meets a
+	// resident model and answers in seconds.
+	//
+	// Observed on a fresh dev2 seed against a cold Ollama: attempt one exceeded
+	// the client timeout, the same check by hand seconds later took 2.8s of a 20s
+	// budget. Without the retry the watchdog stayed off for a judge that works.
 	var probe keeperJudgeTestResult
-	if err := postJSON(client, "/api/v1/admin/keeper/judge/test", map[string]any{}, &probe); err != nil {
-		fmt.Fprintf(os.Stderr, "  ! Keeper: judge check could not run (continuing): %v\n", err)
+	var probeErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		probe = keeperJudgeTestResult{}
+		probeErr = postJSON(client, "/api/v1/admin/keeper/judge/test", map[string]any{}, &probe)
+		if probeErr == nil {
+			break
+		}
+		if attempt == 1 {
+			fmt.Fprintln(os.Stderr, "  … Keeper: first judge check timed out (cold model load) — retrying once")
+		}
+	}
+	if probeErr != nil {
+		fmt.Fprintf(os.Stderr, "  ! Keeper: judge check could not run (continuing): %v\n", probeErr)
 		fmt.Fprintf(os.Stderr, "    Watchdog left OFF. Fix, then: crewship keeper judge test && crewship keeper enable\n")
 		return nil
 	}

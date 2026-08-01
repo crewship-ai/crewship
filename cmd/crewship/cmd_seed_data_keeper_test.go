@@ -117,6 +117,84 @@ func TestSeedKeeper_LeavesWatchdogOffWhenTheJudgeIsUnreachable(t *testing.T) {
 	}
 }
 
+// The first judge check on a fresh instance pays a cold model load — ~6GB of
+// weights before the first token — which can outlast the CLI's HTTP timeout
+// while the server call finishes the load anyway. Observed on a real dev2 seed:
+// attempt one timed out, the same check by hand seconds later passed in 2.8s of
+// a 20s budget. One retry is the difference between a watchdog that comes up and
+// one that stays off for a judge that works.
+func TestSeedKeeper_RetriesTheJudgeCheckAfterAColdLoad(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPut(seedKeeperConfigPath, func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(seedKeeperCfgResponse), "application/json"
+	})
+	s.OnPut(seedKeeperGovPath, func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"enabled":true,"configured":true}`), "application/json"
+	})
+	// First call fails the way a cold load does; the second finds it resident.
+	attempt := 0
+	s.OnPost(seedKeeperJudgePath, func(*http.Request, []byte) (int, []byte, string) {
+		attempt++
+		if attempt == 1 {
+			return 504, []byte(`{"title":"timeout"}`), "application/json"
+		}
+		return 200, []byte(judgeOK), "application/json"
+	})
+	client := cli.NewClient(s.URL(), "tok", covWorkspaceIDCli10)
+
+	stderr, err := captureStderrCov(t, func() error {
+		return seedKeeper(context.Background(), client, "http://air.local:11434", "qwen3.5:9b")
+	})
+	if err != nil {
+		t.Fatalf("seedKeeper: %v", err)
+	}
+	if attempt != 2 {
+		t.Errorf("judge check attempts = %d, want 2", attempt)
+	}
+	if gov := s.CallsFor("PUT", seedKeeperGovPath); len(gov) != 1 {
+		t.Fatalf("watchdog not enabled after the retry succeeded (gov PUTs = %d)", len(gov))
+	}
+	if !strings.Contains(stderr, "retrying once") {
+		t.Errorf("the retry was silent: %q", stderr)
+	}
+}
+
+// Two timeouts in a row is a judge that is genuinely not answering, and the
+// watchdog must stay off rather than gate every credential on it.
+func TestSeedKeeper_GivesUpAfterTwoFailedChecks(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPut(seedKeeperConfigPath, func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(seedKeeperCfgResponse), "application/json"
+	})
+	s.OnPut(seedKeeperGovPath, func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"enabled":true}`), "application/json"
+	})
+	attempt := 0
+	s.OnPost(seedKeeperJudgePath, func(*http.Request, []byte) (int, []byte, string) {
+		attempt++
+		return 504, []byte(`{"title":"timeout"}`), "application/json"
+	})
+	client := cli.NewClient(s.URL(), "tok", covWorkspaceIDCli10)
+
+	stderr, err := captureStderrCov(t, func() error {
+		return seedKeeper(context.Background(), client, "http://air.local:11434", "qwen3.5:9b")
+	})
+	if err != nil {
+		t.Fatalf("seedKeeper should not fail the seed: %v", err)
+	}
+	if attempt != 2 {
+		t.Errorf("judge check attempts = %d, want exactly 2 — no unbounded retry in a seed", attempt)
+	}
+	if gov := s.CallsFor("PUT", seedKeeperGovPath); len(gov) != 0 {
+		t.Error("watchdog enabled against a judge that never answered")
+	}
+	if !strings.Contains(stderr, "keeper judge test") {
+		t.Errorf("no recovery hint: %q", stderr)
+	}
+}
+
 // An instance with no Ollama configured anywhere must not have the seed invent
 // an endpoint for it: the step is skipped whole, and the demo comes up exactly
 // as it did before this step existed.
