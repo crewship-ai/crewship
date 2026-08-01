@@ -517,6 +517,80 @@ Turning Keeper on or off also changes how SECRET credentials reach agents
 started after the change — a container already running keeps the environment it
 was handed.
 
+### The judge profile: how much work per decision
+
+The endpoint and model say *what* decides. The **profile** says *how much it
+does* to decide. Each capability is a separate toggle, because each one makes the
+prompt bigger or the decision more expensive — and a small model given more
+context decides **worse**, not better. Which way that goes for your model is a
+measurement, not a rule, so nothing here is wired shut.
+
+| Capability | What it does | Default |
+|---|---|---|
+| `evidence` | a block of **computed facts** — is this credential bound to this agent, how many prior grants, how many denials in the last 7 days, is there open assigned work — placed **above** the conversation history, so facts outrank what the history claims | on |
+| `evidence-facts` | which of those facts to include | all |
+| `hard-gate` | refuse an L3/L4 credential the agent has no binding to **without calling the model at all** | on |
+| `precedent` | attach the closest past decisions that a **human** resolved, as worked examples | off |
+| `precedent-n` | how many examples | 3 |
+| `consistency-samples` | take this many verdicts on L3/L4 and use the majority; `1` means one verdict, i.e. sampling off | 1 |
+| `prompt-budget` | cap the assembled prompt in tokens; `0` derives it from the judge's context window | 0 |
+
+Three presets set them together, so it is not seven knobs:
+
+| Preset | Capabilities | Suits |
+|---|---|---|
+| `lean` | evidence + hard gate | ~3–9B models, short context |
+| `standard` | lean + precedent | 9–14B with `num_ctx` ≥ 8k |
+| `thorough` | everything, 3-sample self-consistency | hosted judges |
+
+```bash
+# What the judge is allowed to use right now, and what decided each toggle
+crewship keeper profile get
+
+# Pick a preset
+crewship keeper profile set standard
+
+# Override one capability on top of the preset
+crewship keeper profile set --precedent off
+crewship keeper profile set --consistency-samples 3
+crewship keeper profile set --evidence-facts credential_bound_to_agent,agent_denies_last_7d
+
+# Hand a capability back to the preset — NOT the same as turning it off
+crewship keeper profile set --precedent inherit
+
+# Back to the built-in profile (leaves the endpoint and model alone)
+crewship keeper profile reset
+```
+
+Two things to know:
+
+- **`inherit` is not `off`.** Every toggle has three states for the same reason
+  `enabled` does. Switching one capability off must not pin the other six to
+  whatever they happened to be that afternoon — otherwise your instance is frozen
+  out of every later default change. `profile get` shows a third provenance value
+  for exactly this, alongside `instance`, `env` and `default`:
+
+  | Source | Means |
+  |---|---|
+  | `profile` | the preset you selected decided this — clearing the override returns it here |
+
+- **A decision is only comparable to another taken under the same profile.** So
+  the profile is identified by a *stamp* — the preset name plus every toggle in
+  force — rather than by its name: a `standard` with precedent switched off by
+  hand is a different judge from `standard`. `profile get` prints the stamp,
+  every change to it is journalled with the acting user, and it is what
+  `keeper_requests.judge_profile` carries on the decision record.
+
+Same surface over HTTP: the `judge_profile` block of
+`GET`/`PUT /api/v1/admin/keeper/config`. `PUT` is a partial update, the three
+boolean toggles take `true` / `false` / `null` (null = follow the profile), and
+the numbers clear to the profile at `0`.
+
+Defaults are **provisional on purpose**. They are a starting point to be replaced
+by measurement against your own decision history, not a recommendation — it is
+entirely possible that on your model `precedent` hurts, which is why it ships off
+and why it is a toggle rather than a constant.
+
 ### The one-minute setup
 
 1. **Point it at Ollama.** Enter the endpoint in Admin → Keeper → Credential
@@ -1289,6 +1363,60 @@ and timestamps.
 | `DENY` | Request rejected | Error returned to agent |
 | `ESCALATE` | Needs human review | Request queued for approval |
 | `PENDING` | Awaiting decision | Used during async flows |
+
+## Keeper watches its own decisions
+
+A fail-closed security layer that denies *everything* looks exactly like a
+working one from the outside — the only person who can tell the difference is
+the agent being refused, and agents do not file bugs. That is how #1624 shipped
+a Keeper which denied every credential request and survived several milestones
+before anyone noticed.
+
+So Keeper now keeps a rolling window of its **own** verdicts, per workspace, and
+raises an inbox item when the shape of them stops making sense. It watches the
+output, not any particular input, which is what makes it the one check that also
+covers failures nobody anticipated.
+
+**What is tracked** (the last 200 decisions per workspace, `/keeper/request` and
+`/keeper/execute` together):
+
+- the ALLOW / DENY / ESCALATE share
+- how often the judge failed to supply a verdict at all — unreachable, over its
+  time budget, or unparseable — leaving the fail-closed fallback to decide
+- p95 verdict latency
+
+**When it alarms:**
+
+| Alarm | Condition |
+|---|---|
+| `allow_rate_collapsed` | fewer than 5% of recent decisions were ALLOW |
+| `judge_failure_spike` | 25% or more of recent decisions came from the fallback, not the judge |
+
+When both hold, only `judge_failure_spike` is raised: an unusable judge denies
+everything by construction, so the collapsed allow rate is its symptom and
+pointing you at the watch policy instead of the model would waste the
+investigation.
+
+**It will not page you on a quiet instance.** Nothing fires until at least 20
+decisions are in the window. Four refusals on a fresh install is not evidence of
+a malfunction, and an alarm that cries wolf in week one is an alarm that gets
+muted before the week it matters. Instances with no judge configured at all are
+not counted either — those deny by configuration, not by fault.
+
+**The alarm lands as a non-blocking inbox item for OWNER/ADMIN**, under the
+`system.health` notification category (so it can reach Slack/email if that
+category is switched on for a channel — see [Integrations](/guides/integrations)).
+There is nothing to approve on it; the card carries the distribution that raised
+it and points at `crewship keeper judge test`. Repeats for the same workspace and
+the same alarm are collapsed to one card per 6 hours, so an outage that persists
+does not bury the inbox.
+
+<Note>
+  The window lives in memory. Restarting the server clears it, which delays an
+  alarm by 20 decisions and can never invent a false one. It is a rolling
+  window by count, not by time, so an instance that was broken and got fixed
+  goes quiet on its own once healthy decisions have pushed the bad ones out.
+</Note>
 
 ## What's Next
 
