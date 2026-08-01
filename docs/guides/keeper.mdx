@@ -377,6 +377,35 @@ and leaves the watchdog off:
 With no `KEEPER_OLLAMA_URL` set, the phase is skipped entirely and the instance
 comes up exactly as it did before. `KEEPER_MODEL` defaults to `qwen3.5:9b`.
 
+### Putting a human on L3
+
+The step from L3 to L4 is the largest trust jump in the product. L3 is
+*administrative access to real infrastructure — SSH, database admin, cloud
+account* and **the model grants it alone**; L4 is the first tier a person always
+confirms. On a local 9B judge that is a lot of authority resting on one verdict.
+
+Until now the only way to put a human in front of an L3 credential was to
+relabel it L4 — which also imposes the four-eyes rule and L4's 35-character
+intent minimum, whether you wanted those or not.
+
+```bash
+crewship keeper profile set --escalate-from 3
+```
+
+A judge `ALLOW` on an L3 credential now comes back as `ESCALATE` and lands in the
+inbox. Nothing else about L3 changes: same intent minimum, same risk floor, same
+four-eyes setting.
+
+It can only tighten. A floor at L3 leaves L1 and L2 exactly as they were —
+including L1's no-model fast path — and it can never remove the human L4 already
+requires.
+
+<Note>
+  This is the dial to reach for **before** moving to a bigger judge. A model that
+  is right most of the time plus a person on the tier that matters is usually a
+  better trade than a model that is right slightly more often and unsupervised.
+</Note>
+
 ### The prompt budget, and why it protects the policy first
 
 The conversation history the judge sees is bounded in **message count**, not in
@@ -566,6 +595,7 @@ measurement, not a rule, so nothing here is wired shut.
 | `evidence` | a block of **computed facts** — is this credential bound to this agent, how many prior grants, how many denials in the last 7 days, is there open assigned work — placed **above** the conversation history, so facts outrank what the history claims | on |
 | `evidence-facts` | which of those facts to include | all |
 | `hard-gate` | refuse an L3/L4 credential the agent has no binding to **without calling the model at all** | on |
+| `escalate-from` | a judge ALLOW at this tier **and above** becomes an ESCALATE, so a person confirms it. `0` leaves the tier table alone (L4 only). | 0 |
 | `precedent` | *(reserved — accepted and stored, not yet implemented)* attach the closest past decisions that a **human** resolved, as worked examples | off |
 | `precedent-n` | *(reserved — see `precedent`)* how many examples | 3 |
 | `consistency-samples` | *(reserved — accepted and stored, not yet implemented)* take this many verdicts on L3/L4 and use the majority; `1` means one verdict, i.e. sampling off | 1 |

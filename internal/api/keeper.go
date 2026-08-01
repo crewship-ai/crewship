@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/evidence"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
@@ -99,6 +100,16 @@ func (h *KeeperHandler) promptBudget() int {
 		return 0
 	}
 	return int(h.judgeCfg.Effective().Profile.PromptBudgetTokens.Value)
+}
+
+// escalateFrom is the operator's human-approval floor, or 0 for the tier table's
+// own. Like promptBudget it applies regardless of the evidence toggle: it is a
+// policy dial, not part of the evidence block.
+func (h *KeeperHandler) escalateFrom() keeper.SecurityLevel {
+	if h.judgeCfg == nil {
+		return 0
+	}
+	return keeper.SecurityLevel(h.judgeCfg.Effective().Profile.EscalateFrom.Value)
 }
 
 // judgeProfileStamp is the compact description of the capability set a decision

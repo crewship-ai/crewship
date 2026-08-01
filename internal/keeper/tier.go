@@ -158,6 +158,30 @@ func (l SecurityLevel) Tier() TierPolicy {
 	return tierPolicies[SecurityLevelL4]
 }
 
+// TierWithEscalateFrom is Tier() with the HumanApproval floor raised to `from`.
+//
+// It exists because the step between L3 and L4 is the largest single trust jump
+// in the product and there was no dial between them. L3 is "administrative
+// access to real infrastructure (SSH, database admin, cloud account)" and the
+// model grants it alone; L4 is the first tier a person always sees. An operator
+// running a 9B judge who wants a human to confirm SSH-to-production had exactly
+// one move: relabel the credential L4 — which also imposes the four-eyes rule
+// and L4's 35-character intent minimum, whether they wanted them or not.
+//
+// So this raises ONLY HumanApproval, and only upward. Everything else about the
+// tier — its label, its intent minimum, its risk floor, its four-eyes setting —
+// is the tier's own, because bundling them is the problem being solved. And it
+// can never loosen: a floor above a tier that already requires a human leaves
+// that requirement standing, matching the one-directional rule the whole tier
+// vocabulary rests on. A zero or out-of-range `from` is a no-op.
+func (l SecurityLevel) TierWithEscalateFrom(from SecurityLevel) TierPolicy {
+	p := l.Tier()
+	if from >= SecurityLevelL1 && from <= SecurityLevelL4 && l >= from {
+		p.HumanApproval = true
+	}
+	return p
+}
+
 // Label is the operator-facing tier name, e.g. "L3 · high".
 func (l SecurityLevel) Label() string { return l.Tier().Label }
 
@@ -212,7 +236,17 @@ func (p TierPolicy) RefusalRisk() int {
 // refusing is already the strictest outcome, and re-labelling it would lose the
 // reason the human needs.
 func ApplyTierFloor(level SecurityLevel, decision string, risk int) (string, int, string) {
-	p := level.Tier()
+	return ApplyTierPolicyFloor(level.Tier(), decision, risk)
+}
+
+// ApplyTierPolicyFloor is ApplyTierFloor against an already-resolved policy.
+//
+// The distinction is load-bearing: ApplyTierFloor re-derives the policy from the
+// level, so any caller that adjusted the policy first — the operator's
+// EscalateFrom dial is the one that exists — would have its adjustment silently
+// discarded at the moment the floor is applied. Taking the policy makes "which
+// tier rules am I enforcing" a single decision made once by the caller.
+func ApplyTierPolicyFloor(p TierPolicy, decision string, risk int) (string, int, string) {
 	note := ""
 
 	if risk < p.MinRisk {

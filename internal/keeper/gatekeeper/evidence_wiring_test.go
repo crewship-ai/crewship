@@ -157,3 +157,69 @@ func TestEvaluate_UnestablishedBindingDoesNotGate(t *testing.T) {
 		t.Error("gated on a binding that was never established — an outage must not deny every L3 request")
 	}
 }
+
+// P8 end to end: with the escalation floor at L3, a judge ALLOW on an L3
+// credential must come back as ESCALATE — a person confirms it.
+//
+// The check that matters is the VERDICT, not that a field was carried. The
+// review on this branch found nine capabilities plumbed through config, CLI and
+// docs with no consumer on the decision path; a test asserting the floor was
+// stored would have passed against exactly that bug.
+func TestEvaluate_EscalateFromPutsAHumanOnL3(t *testing.T) {
+	p := &mockProvider{content: `{"decision":"ALLOW","reason":"cert rotation is corroborated","risk":4}`}
+	g := gatekeeper.New(p, "qwen3.5:9b", newTestLogger())
+
+	req := gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			RequestingAgentID: "agt_riley",
+			Intent:            "Rotate the expiring TLS certificates on staging-web-01 and reload nginx",
+		},
+		SecurityLevel:  keeper.SecurityLevelL3,
+		CredentialName: "KT_SSH_STAGING",
+		AgentName:      "riley",
+		CrewName:       "ops",
+	}
+
+	// Without the floor the model's ALLOW stands.
+	base, err := g.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if base.Decision != string(keeper.DecisionAllow) {
+		t.Fatalf("baseline decision = %q, want ALLOW — the premise of this test", base.Decision)
+	}
+
+	// With it, the same ALLOW becomes an escalation.
+	req.EscalateFrom = keeper.SecurityLevelL3
+	got, err := g.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if got.Decision != string(keeper.DecisionEscalate) {
+		t.Errorf("decision = %q, want ESCALATE — the operator asked for a human on L3 and the model granted it alone", got.Decision)
+	}
+}
+
+// The floor must not reach down. An operator putting a human on L3 has not asked
+// for one on every npm read token, and L1's no-model fast path must survive.
+func TestEvaluate_EscalateFromLeavesL1Alone(t *testing.T) {
+	p := &mockProvider{content: `{"decision":"ALLOW","reason":"ok","risk":1}`}
+	g := gatekeeper.New(p, "qwen3.5:9b", newTestLogger())
+
+	got, err := g.Evaluate(context.Background(), gatekeeper.EvalRequest{
+		Request: keeper.Request{
+			RequestingAgentID: "agt_riley",
+			Intent:            "publish the release tarball to npm",
+		},
+		SecurityLevel:  keeper.SecurityLevelL1,
+		CredentialName: "npm-token",
+		AgentName:      "riley",
+		EscalateFrom:   keeper.SecurityLevelL3,
+	})
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if got.Decision != string(keeper.DecisionAllow) {
+		t.Errorf("L1 decision = %q, want ALLOW — an L3 floor must not reach down", got.Decision)
+	}
+}

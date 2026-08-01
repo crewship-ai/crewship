@@ -131,8 +131,13 @@ const (
 // profileValues is one fully-decided set of toggles — a preset, or the built-in.
 // No provenance: this is the input to layering, not its output.
 type profileValues struct {
-	evidence           bool
-	hardGate           bool
+	evidence bool
+	hardGate bool
+	// escalateFrom raises the HumanApproval floor to this credential tier (1-4).
+	// 0 leaves the tier table alone, which is the default everywhere: this is a
+	// deliberate tightening an operator asks for, never something a preset
+	// imposes on a workspace that did not choose it.
+	escalateFrom       int64
 	precedent          bool
 	precedentN         int64
 	consistencySamples int64
@@ -173,6 +178,7 @@ type profileSettings struct {
 	evidence           *bool
 	evidenceFacts      string
 	hardGate           *bool
+	escalateFrom       *int64
 	precedent          *bool
 	precedentN         *int64
 	consistencySamples *int64
@@ -201,6 +207,15 @@ type EffectiveProfile struct {
 	// HardGate is the deterministic refusal of an unbound credential, taken
 	// before the model is called at all (P1).
 	HardGate Field[bool] `json:"hard_gate"`
+	// EscalateFrom is the tier from which a judge ALLOW becomes an ESCALATE, so a
+	// human confirms it (P8). 0 = the tier table decides.
+	//
+	// It exists because the step from L3 (the model grants administrative access
+	// to real infrastructure alone) to L4 (a person always confirms) was the
+	// largest trust jump in the product with no dial between. The alternative was
+	// relabelling the credential L4, which also imposes the four-eyes rule and
+	// L4's intent minimum whether the operator wanted them or not.
+	EscalateFrom Field[int64] `json:"escalate_from"`
 	// Precedent is the few-shot block of past human-resolved decisions (P3).
 	Precedent  Field[bool]  `json:"precedent"`
 	PrecedentN Field[int64] `json:"precedent_n"`
@@ -236,8 +251,12 @@ func (p EffectiveProfile) Stamp() string {
 	if p.PromptBudgetTokens.Value > 0 {
 		budget = strconv.FormatInt(p.PromptBudgetTokens.Value, 10)
 	}
-	return fmt.Sprintf("%s evidence=%s facts=%s hard_gate=%s precedent=%s/%d samples=%d budget=%s",
-		p.Name.Value, onOff(p.Evidence.Value), facts, onOff(p.HardGate.Value),
+	escalate := "tier"
+	if p.EscalateFrom.Value > 0 {
+		escalate = fmt.Sprintf("L%d", p.EscalateFrom.Value)
+	}
+	return fmt.Sprintf("%s evidence=%s facts=%s hard_gate=%s escalate_from=%s precedent=%s/%d samples=%d budget=%s",
+		p.Name.Value, onOff(p.Evidence.Value), facts, onOff(p.HardGate.Value), escalate,
 		onOff(p.Precedent.Value), p.PrecedentN.Value, p.ConsistencySamples.Value, budget)
 }
 
@@ -279,6 +298,7 @@ func resolveProfile(cur profileSettings) EffectiveProfile {
 	}
 	eff.Evidence = pickBool(cur.evidence, base.evidence, inherited)
 	eff.HardGate = pickBool(cur.hardGate, base.hardGate, inherited)
+	eff.EscalateFrom = pickInt(cur.escalateFrom, base.escalateFrom, inherited)
 	eff.Precedent = pickBool(cur.precedent, base.precedent, inherited)
 	eff.PrecedentN = pickInt(cur.precedentN, base.precedentN, inherited)
 	eff.ConsistencySamples = pickInt(cur.consistencySamples, base.consistencySamples, inherited)
@@ -349,6 +369,7 @@ func applyProfilePatch(next *profileSettings, p Patch) {
 	}
 	setTri(&next.evidence, p.Evidence)
 	setTri(&next.hardGate, p.HardGate)
+	setClearableInt(&next.escalateFrom, p.EscalateFrom)
 	setTri(&next.precedent, p.Precedent)
 	setClearableInt(&next.precedentN, p.PrecedentN)
 	setClearableInt(&next.consistencySamples, p.ConsistencySamples)
@@ -434,6 +455,14 @@ func validateProfile(p profileSettings) error {
 			// letting an operator pay for a sample that buys nothing.
 			return newValidation("the number of consistency samples must be odd — an even count has no majority, " +
 				"so the extra sample only produces more ties")
+		}
+	}
+	if p.escalateFrom != nil && *p.escalateFrom != 0 {
+		// 1-4 or 0. Refused rather than clamped, because a typo'd 5 silently
+		// clamping to L4 would put a human on every credential in the workspace
+		// and the operator would have no idea why.
+		if *p.escalateFrom < 1 || *p.escalateFrom > 4 {
+			return newValidation("escalate-from must be a credential tier 1-4, or 0 to leave the tier table alone")
 		}
 	}
 	if p.promptBudgetTokens != nil {

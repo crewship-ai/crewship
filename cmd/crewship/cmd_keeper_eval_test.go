@@ -270,6 +270,7 @@ func newKeeperSettingsDB(t *testing.T) *sql.DB {
 			judge_evidence INTEGER,
 			judge_evidence_facts TEXT NOT NULL DEFAULT '',
 			judge_hard_gate INTEGER,
+			judge_escalate_from INTEGER,
 			judge_precedent INTEGER,
 			judge_precedent_n INTEGER,
 			judge_consistency_samples INTEGER,

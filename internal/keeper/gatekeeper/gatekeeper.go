@@ -146,6 +146,12 @@ type EvalRequest struct {
 	// means every fact. Caller-supplied for the same reason HardGate is: it is an
 	// operator toggle and this package does not read configuration.
 	EvidenceFacts []string
+	// EscalateFrom raises the HumanApproval floor to this tier: a judge ALLOW at
+	// or above it becomes an ESCALATE. Zero means the tier table decides, which
+	// is the pre-existing behaviour. Caller-supplied, like the other operator
+	// toggles — see keeper.SecurityLevel.TierWithEscalateFrom for why this is a
+	// dial rather than relabelling the credential.
+	EscalateFrom keeper.SecurityLevel
 	// PromptBudgetTokens caps the assembled prompt. 0 means no cap, which is the
 	// pre-existing behaviour exactly.
 	//
@@ -447,7 +453,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// what extra questions the judge is asked, and what may be done with the
 	// answer. An unknown level resolves to L4, so a corrupt row is the strictest
 	// case rather than the cheapest bypass.
-	tier := req.SecurityLevel.Tier()
+	tier := req.SecurityLevel.TierWithEscalateFrom(req.EscalateFrom)
 
 	if isAccessFlow &&
 		req.Command == "" &&
@@ -644,7 +650,9 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// the safer path only.
 	if isAccessFlow || rt == keeper.RequestTypeExecute {
 		var note string
-		decision, risk, note = keeper.ApplyTierFloor(req.SecurityLevel, decision, risk)
+		// The resolved policy, not the bare level: the operator's EscalateFrom
+		// dial lives on `tier` and re-deriving it here would drop it.
+		decision, risk, note = keeper.ApplyTierPolicyFloor(tier, decision, risk)
 		if note != "" {
 			reason += note
 			g.logger.Info("keeper: tier floor applied to the judge's verdict",

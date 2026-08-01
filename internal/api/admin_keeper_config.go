@@ -85,6 +85,7 @@ type keeperProfileResponse struct {
 	Evidence           keeperConfigField[bool]     `json:"evidence"`
 	EvidenceFacts      keeperConfigField[[]string] `json:"evidence_facts"`
 	HardGate           keeperConfigField[bool]     `json:"hard_gate"`
+	EscalateFrom       keeperConfigField[int64]    `json:"escalate_from"`
 	Precedent          keeperConfigField[bool]     `json:"precedent"`
 	PrecedentN         keeperConfigField[int64]    `json:"precedent_n"`
 	ConsistencySamples keeperConfigField[int64]    `json:"consistency_samples"`
@@ -109,6 +110,7 @@ func keeperProfilePayload(p keepercfg.EffectiveProfile) keeperProfileResponse {
 		Evidence:           keeperConfigField[bool]{Value: p.Evidence.Value, Source: string(p.Evidence.Source), Editable: true},
 		EvidenceFacts:      keeperConfigField[[]string]{Value: p.EvidenceFacts.Value, Source: string(p.EvidenceFacts.Source), Editable: true},
 		HardGate:           keeperConfigField[bool]{Value: p.HardGate.Value, Source: string(p.HardGate.Source), Editable: true},
+		EscalateFrom:       keeperConfigField[int64]{Value: p.EscalateFrom.Value, Source: string(p.EscalateFrom.Source), Editable: true},
 		Precedent:          keeperConfigField[bool]{Value: p.Precedent.Value, Source: string(p.Precedent.Source), Editable: true},
 		PrecedentN:         keeperConfigField[int64]{Value: p.PrecedentN.Value, Source: string(p.PrecedentN.Source), Editable: true},
 		ConsistencySamples: keeperConfigField[int64]{Value: p.ConsistencySamples.Value, Source: string(p.ConsistencySamples.Source), Editable: true},
@@ -194,6 +196,7 @@ type keeperConfigRequest struct {
 	Precedent          json.RawMessage `json:"judge_precedent"`
 	PrecedentN         *int64          `json:"judge_precedent_n"`
 	ConsistencySamples *int64          `json:"judge_consistency_samples"`
+	EscalateFrom       *int64          `json:"judge_escalate_from"`
 	PromptBudgetTokens *int64          `json:"judge_prompt_budget_tokens"`
 }
 
@@ -223,6 +226,7 @@ func (h *AdminKeeperConfigHandler) Put(w http.ResponseWriter, r *http.Request) {
 		EvidenceFacts:      body.EvidenceFacts,
 		PrecedentN:         body.PrecedentN,
 		ConsistencySamples: body.ConsistencySamples,
+		EscalateFrom:       body.EscalateFrom,
 		PromptBudgetTokens: body.PromptBudgetTokens,
 	}
 	if len(body.Enabled) > 0 {

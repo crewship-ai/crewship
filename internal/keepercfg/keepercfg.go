@@ -272,6 +272,7 @@ type Patch struct {
 	Evidence           *TriBool
 	EvidenceFacts      *string
 	HardGate           *TriBool
+	EscalateFrom       *int64
 	Precedent          *TriBool
 	PrecedentN         *int64
 	ConsistencySamples *int64
@@ -282,7 +283,7 @@ type Patch struct {
 func (p Patch) empty() bool {
 	return p.Enabled == nil && p.Provider == nil && p.EndpointURL == nil && p.Wire == nil &&
 		p.Model == nil && p.TimeoutMS == nil && p.Profile == nil && p.Evidence == nil &&
-		p.EvidenceFacts == nil && p.HardGate == nil && p.Precedent == nil &&
+		p.EvidenceFacts == nil && p.HardGate == nil && p.EscalateFrom == nil && p.Precedent == nil &&
 		p.PrecedentN == nil && p.ConsistencySamples == nil && p.PromptBudgetTokens == nil
 }
 
@@ -330,7 +331,7 @@ func (s *Store) Load(ctx context.Context) error {
 const settingsSelect = `
 	SELECT enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
 	       judge_timeout_ms, judge_profile, judge_evidence, judge_evidence_facts,
-	       judge_hard_gate, judge_precedent, judge_precedent_n,
+	       judge_hard_gate, judge_escalate_from, judge_precedent, judge_precedent_n,
 	       judge_consistency_samples, judge_prompt_budget_tokens,
 	       updated_at, updated_by
 	  FROM keeper_runtime_settings WHERE id = ?`
@@ -344,12 +345,13 @@ func scanSettings(row *sql.Row) (settings, error) {
 		provider, endpointURL, wire, mdl string
 		profile, evidenceFacts           string
 		evidence, hardGate, precedent    sql.NullInt64
+		escalateFrom                     sql.NullInt64
 		precedentN, samples, budget      sql.NullInt64
 		updatedAt                        string
 		updatedBy                        sql.NullString
 	)
 	err := row.Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &timeoutMS,
-		&profile, &evidence, &evidenceFacts, &hardGate, &precedent, &precedentN, &samples, &budget,
+		&profile, &evidence, &evidenceFacts, &hardGate, &escalateFrom, &precedent, &precedentN, &samples, &budget,
 		&updatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return settings{}, nil
@@ -377,6 +379,7 @@ func scanSettings(row *sql.Row) (settings, error) {
 	}
 	next.profile.evidence = nullBool(evidence)
 	next.profile.hardGate = nullBool(hardGate)
+	next.profile.escalateFrom = nullInt(escalateFrom)
 	next.profile.precedent = nullBool(precedent)
 	next.profile.precedentN = nullInt(precedentN)
 	next.profile.consistencySamples = nullInt(samples)
@@ -641,10 +644,10 @@ func persistTx(ctx context.Context, tx *sql.Tx, next settings, actor string) err
 		INSERT INTO keeper_runtime_settings
 			(id, enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
 			 judge_timeout_ms, judge_profile, judge_evidence, judge_evidence_facts,
-			 judge_hard_gate, judge_precedent, judge_precedent_n,
+			 judge_hard_gate, judge_escalate_from, judge_precedent, judge_precedent_n,
 			 judge_consistency_samples, judge_prompt_budget_tokens,
 			 updated_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		ON CONFLICT(id) DO UPDATE SET
 			enabled                    = excluded.enabled,
 			judge_provider             = excluded.judge_provider,
@@ -656,6 +659,7 @@ func persistTx(ctx context.Context, tx *sql.Tx, next settings, actor string) err
 			judge_evidence             = excluded.judge_evidence,
 			judge_evidence_facts       = excluded.judge_evidence_facts,
 			judge_hard_gate            = excluded.judge_hard_gate,
+			judge_escalate_from        = excluded.judge_escalate_from,
 			judge_precedent            = excluded.judge_precedent,
 			judge_precedent_n          = excluded.judge_precedent_n,
 			judge_consistency_samples  = excluded.judge_consistency_samples,
@@ -664,7 +668,7 @@ func persistTx(ctx context.Context, tx *sql.Tx, next settings, actor string) err
 			updated_at                 = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		singletonID, enabled, next.provider, next.endpointURL, next.wire, next.model,
 		timeout, p.profile, boolColumn(p.evidence), p.evidenceFacts,
-		boolColumn(p.hardGate), boolColumn(p.precedent), intColumn(p.precedentN),
+		boolColumn(p.hardGate), intColumn(p.escalateFrom), boolColumn(p.precedent), intColumn(p.precedentN),
 		intColumn(p.consistencySamples), intColumn(p.promptBudgetTokens),
 		nullIfEmpty(actor))
 	if err != nil {

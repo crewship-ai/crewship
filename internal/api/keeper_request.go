@@ -252,6 +252,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		HardGate:           hardGate,
 		EvidenceFacts:      factKeys,
 		PromptBudgetTokens: h.promptBudget(),
+		EscalateFrom:       h.escalateFrom(),
 	}
 
 	var gkResp keeper.GatekeeperResponse

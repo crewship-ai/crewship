@@ -99,6 +99,7 @@ type keeperJudgeProfile struct {
 	Evidence           keeperProfileBoolField `json:"evidence"`
 	EvidenceFacts      keeperProfileListField `json:"evidence_facts"`
 	HardGate           keeperProfileBoolField `json:"hard_gate"`
+	EscalateFrom       keeperProfileIntField  `json:"escalate_from"`
 	Precedent          keeperProfileBoolField `json:"precedent"`
 	PrecedentN         keeperProfileIntField  `json:"precedent_n"`
 	ConsistencySamples keeperProfileIntField  `json:"consistency_samples"`
@@ -136,6 +137,11 @@ func printKeeperJudgeProfile(p keeperJudgeProfile) {
 	fmt.Printf("  Facts:        %s %s\n", formatEvidenceFacts(p.EvidenceFacts.Value, p.Facts),
 		profileSourceNote(p.EvidenceFacts.Source))
 	fmt.Printf("  Hard gate:    %s %s\n", formatToggle(p.HardGate.Value), profileSourceNote(p.HardGate.Source))
+	escalate := "tier default (L4 only)"
+	if p.EscalateFrom.Value > 0 {
+		escalate = fmt.Sprintf("L%d and above — a human confirms", p.EscalateFrom.Value)
+	}
+	fmt.Printf("  Escalate:     %s %s\n", escalate, profileSourceNote(p.EscalateFrom.Source))
 	fmt.Printf("  Precedent:    %s (%d examples) %s\n", formatToggle(p.Precedent.Value), p.PrecedentN.Value,
 		profileSourceNote(p.Precedent.Source))
 	fmt.Printf("  Samples:      %s %s\n", formatConsistencySamples(p.ConsistencySamples.Value),
@@ -213,6 +219,7 @@ var (
 	flagKeeperProfileEvidence     string
 	flagKeeperProfileFacts        string
 	flagKeeperProfileHardGate     string
+	flagKeeperProfileEscalateFrom string
 	flagKeeperProfilePrecedent    string
 	flagKeeperProfilePrecedentN   string
 	flagKeeperProfileSamples      string
@@ -235,6 +242,9 @@ hands the toggle back to the profile, which is not the same as 'off'.
   --precedent-n <1-10>            RESERVED — "" to follow the profile
   --consistency-samples <odd 1-9> RESERVED — 1 = one verdict (sampling off),
                                   "" to follow the profile
+  --escalate-from <1-4>           a judge ALLOW at this tier and above becomes
+                                  an ESCALATE, so a person confirms it;
+                                  0 leaves the tier table alone
   --prompt-budget <tokens>        "" to follow the profile, 0 for no cap
 
 Only what you pass is changed, so two operators editing different toggles do
@@ -290,6 +300,7 @@ Examples:
 		}{
 			{"precedent-n", "judge_precedent_n", flagKeeperProfilePrecedentN},
 			{"consistency-samples", "judge_consistency_samples", flagKeeperProfileSamples},
+			{"escalate-from", "judge_escalate_from", flagKeeperProfileEscalateFrom},
 			{"prompt-budget", "judge_prompt_budget_tokens", flagKeeperProfilePromptBudget},
 		} {
 			if !cmd.Flags().Changed(n.flag) {
@@ -375,6 +386,8 @@ func init() {
 		`RESERVED, not yet implemented: how many precedent examples, 1-10 ("" to follow the profile)`)
 	f.StringVar(&flagKeeperProfileSamples, "consistency-samples", "",
 		`RESERVED, not yet implemented: verdicts to take on L3/L4 before a majority vote, odd 1-9; 1 = off ("" to follow the profile)`)
+	f.StringVar(&flagKeeperProfileEscalateFrom, "escalate-from", "",
+		`put a human on every credential at this tier and above, 1-4 (0 = leave the tier table alone)`)
 	f.StringVar(&flagKeeperProfilePromptBudget, "prompt-budget", "",
 		`cap the assembled prompt in tokens ("" to follow the profile, 0 for no cap)`)
 

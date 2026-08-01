@@ -32,6 +32,7 @@ CREATE TABLE keeper_runtime_settings (
     judge_evidence             INTEGER CHECK (judge_evidence IN (0, 1)),
     judge_evidence_facts       TEXT NOT NULL DEFAULT '',
     judge_hard_gate            INTEGER CHECK (judge_hard_gate IN (0, 1)),
+    judge_escalate_from        INTEGER CHECK (judge_escalate_from IS NULL OR (judge_escalate_from >= 1 AND judge_escalate_from <= 4)),
     judge_precedent            INTEGER CHECK (judge_precedent IN (0, 1)),
     judge_precedent_n          INTEGER CHECK (judge_precedent_n IS NULL OR (judge_precedent_n >= 1 AND judge_precedent_n <= 10)),
     judge_consistency_samples  INTEGER CHECK (judge_consistency_samples IS NULL OR (judge_consistency_samples >= 1 AND judge_consistency_samples <= 9)),
