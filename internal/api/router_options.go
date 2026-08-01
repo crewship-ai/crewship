@@ -314,21 +314,18 @@ func WithConsolidator(c *consolidate.Consolidator) RouterOption {
 	}
 }
 
-// WithConsolidateMemoryRoot sets the parent directory manual consolidation
-// runs write learned-*.md into. Should match consolidate.RunnerOptions.
-// CrewMemoryRoot so scheduled + manual runs share an output tree.
-func WithConsolidateMemoryRoot(path string) RouterOption {
-	return func(r *Router) {
-		r.consolidateMemoryRoot = path
-	}
-}
-
 // WithOutputBasePath sets the host-side output root the container
 // provider bind-mounts (i.e. cfg.Storage.BasePath). PR-E F6
 // PersonaHandler + PeerHandler use this to resolve per-agent and
 // per-crew memory paths without going through the container exec
 // path. Should mirror the cfg.Storage.BasePath the docker provider
 // is started with.
+//
+// The manual-consolidation and skills-proposed surfaces resolve their
+// per-crew memory output from this too — they used to take a separate
+// "crew memory root" that was set to the container-absolute
+// /crew/shared/.memory and therefore wrote outside every bind source
+// (#1663).
 func WithOutputBasePath(path string) RouterOption {
 	return func(r *Router) {
 		r.outputBasePath = path

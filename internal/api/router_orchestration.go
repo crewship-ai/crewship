@@ -400,21 +400,21 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	conH := NewConsolidateHandler(r.db, r.logger)
 	conH.SetJournal(r.Journal())
 	conH.SetConsolidator(r.consolidator)
-	conH.SetMemoryRoot(r.consolidateMemoryRoot)
+	conH.SetStorageBasePath(r.outputBasePath)
 	r.authedMut("POST", "/api/v1/consolidate/run", roleManage, conH.Run)
 
 	// PostRunTrigger — sleep-time consolidator hook (PRD §8.1). Built
-	// only when a consolidator + memory root are wired; otherwise we
+	// only when a consolidator + storage root are wired; otherwise we
 	// leave the trigger nil and InternalHandler.UpdateRun no-ops on
 	// the call site. The trigger does its own per-(workspace, crew)
 	// debouncing (default 30 min) so a chatty crew with many short
 	// runs doesn't dogpile the LLM extractor.
 	var postRunTrigger postRunTriggerHook
-	if r.consolidator != nil && r.consolidateMemoryRoot != "" {
+	if r.consolidator != nil && r.outputBasePath != "" {
 		postRunTrigger = consolidate.NewPostRunTrigger(r.consolidator, consolidate.PostRunTriggerOptions{
-			CrewMemoryRoot: r.consolidateMemoryRoot,
-			BlobRoot:       r.memoryVersionsBlobRoot,
-			Logger:         r.logger,
+			StorageBasePath: r.outputBasePath,
+			BlobRoot:        r.memoryVersionsBlobRoot,
+			Logger:          r.logger,
 		})
 	}
 
@@ -447,7 +447,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// to match the canonical skill-import permission.
 	skillPropH := NewSkillProposedHandler(r.db, r.logger)
 	skillPropH.SetJournal(r.Journal())
-	skillPropH.SetCrewMemoryRoot(r.consolidateMemoryRoot)
+	skillPropH.SetStorageBasePath(r.outputBasePath)
 	// Stash for registerInternalRoutes (runs after this) so the internal
 	// agent-authoring route can reuse this instance (shared db/journal/root).
 	r.skillPropHandler = skillPropH

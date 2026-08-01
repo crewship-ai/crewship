@@ -141,7 +141,7 @@ func TestConsolidateRunOnce_NonSkippedRunCounted(t *testing.T) {
 		Journal: noopEmitter{},
 		Logger:  newTestLogger(),
 	})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	h.runOnce(context.Background(), wsID, crewID, 24*time.Hour, "wkr-full")
 

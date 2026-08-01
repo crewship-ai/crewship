@@ -577,7 +577,8 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 // Non-LEAD members can still pull the same data on demand via
 // memory.read tier=lessons if they need it mid-session.
 func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) (string, int) {
-	crewMemDir := "/crew/shared/.memory"
+	// Container path: this block reads through a container exec.
+	crewMemDir := memory.ContainerCrewMemoryRoot
 
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
@@ -684,7 +685,11 @@ func (o *Orchestrator) buildPinsBlock(ctx context.Context, req AgentRunRequest, 
 	}
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
-	pinsPath := path.Join("/crew/shared/.memory", req.CrewSlug, "topics", "pins.md")
+	// Container path on purpose — this read goes through a container
+	// exec. Its host twin, memory.HostCrewTopicsDir, is what the
+	// consolidator writes; keeping both in one file is what stops the
+	// writer and the reader drifting apart again (#1663).
+	pinsPath := path.Join(memory.ContainerCrewTopicsDir(req.CrewSlug), "pins.md")
 	content, err := o.readContainerFile(readCtx, req.ContainerID, pinsPath)
 	if err != nil || content == "" {
 		return "", 0

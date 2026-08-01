@@ -3,9 +3,46 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"path"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
+
+// TestBuildPinsBlock_ReadsTheHostWritersTwin ties the reader to the
+// writer. buildPinsBlock cats a container path; the consolidator, a host
+// process, writes memory.HostCrewTopicsDir — the host side of that same
+// mount. The two used to be independent literals in two packages, which
+// is how #1663 survived: the writer's copy was used on the host, where
+// it means the filesystem root.
+//
+// Deriving the expected path from memory.ContainerCrewTopicsDir here
+// means renaming or relocating the pair moves reader and writer
+// together, or fails loudly.
+func TestBuildPinsBlock_ReadsTheHostWritersTwin(t *testing.T) {
+	const crewSlug = "alpha-crew"
+	want := path.Join(memory.ContainerCrewTopicsDir(crewSlug), "pins.md")
+
+	mc := mockContainerForMemory(map[string]string{
+		want: "- **j_7** — twin-path-canary\n",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	block, used := o.buildPinsBlock(context.Background(), AgentRunRequest{
+		ContainerID: "c1",
+		AgentSlug:   "agent-1",
+		AgentID:     "a1",
+		CrewID:      "crew1",
+		CrewSlug:    crewSlug,
+		WorkspaceID: "ws1",
+	}, 2000)
+
+	if used == 0 || !strings.Contains(block, "twin-path-canary") {
+		t.Fatalf(`buildPinsBlock did not read %s — the prompt builder and the consolidator
+disagree about where pins.md lives, which is #1663.
+block=%q`, want, block)
+	}
+}
 
 // TestBuildPinsBlock_ReadsContainerPath asserts that buildPinsBlock
 // resolves the correct in-container path

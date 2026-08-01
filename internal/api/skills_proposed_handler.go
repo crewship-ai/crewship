@@ -14,14 +14,19 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 // SkillProposedHandler serves the HITL surface for the memory→Skills
 // bridge (PRD §8.2). The handler is stateless against the database —
-// truth lives on disk under {crewMemoryRoot}/{crew-slug}/topics/.proposed/
-// skill-*.md, the same directory the consolidator writes to in
-// proposal mode. There is no skill_proposals table because the
+// truth lives on disk under the crew's host memory tree —
+// {storageBasePath}/crews/{crew-id}/shared/.memory/{crew-slug}/topics/
+// .proposed/skill-*.md, the same directory the consolidator writes to in
+// proposal mode, and the host side of what the container sees at
+// /crew/shared/.memory/{crew-slug}/topics/.proposed/.
+//
+// There is no skill_proposals table because the
 // lifecycle is short: a staged skill is either approved (the canonical
 // importer ingests it into the skills table and the staging file is
 // removed) or rejected (file deleted). Audit is via journal entries
@@ -41,15 +46,20 @@ import (
 // (canRole("create") in the CASL config); auto-promoted skills are
 // just one more import surface.
 type SkillProposedHandler struct {
-	db             *sql.DB
-	logger         *slog.Logger
-	journal        journal.Emitter
-	crewMemoryRoot string
-	importer       *skills.Importer
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
+	// storageBasePath is cfg.Storage.BasePath. The per-crew directory is
+	// resolved from it by memory.HostCrewTopicsDir — it used to be a
+	// single "crew memory root" set to the container-absolute
+	// /crew/shared/.memory, which put every staged skill outside every
+	// bind source (#1663).
+	storageBasePath string
+	importer        *skills.Importer
 }
 
 // NewSkillProposedHandler constructs the handler with stub journal.
-// Call SetJournal, SetCrewMemoryRoot, and SetImporter at router-mount
+// Call SetJournal, SetStorageBasePath, and SetImporter at router-mount
 // time to wire production dependencies.
 func NewSkillProposedHandler(db *sql.DB, logger *slog.Logger) *SkillProposedHandler {
 	return &SkillProposedHandler{
@@ -69,11 +79,12 @@ func (h *SkillProposedHandler) SetJournal(j journal.Emitter) {
 	h.journal = j
 }
 
-// SetCrewMemoryRoot pins the parent directory for crew memory files.
-// Path layout: {root}/{crew-slug}/topics/.proposed/skill-*.md, which
-// matches the consolidator's OutputDir convention.
-func (h *SkillProposedHandler) SetCrewMemoryRoot(root string) {
-	h.crewMemoryRoot = root
+// SetStorageBasePath pins the host storage root the crew memory tree is
+// resolved under. Layout:
+// {base}/crews/{crew-id}/shared/.memory/{crew-slug}/topics/.proposed/skill-*.md,
+// which matches the consolidator's OutputDir convention.
+func (h *SkillProposedHandler) SetStorageBasePath(base string) {
+	h.storageBasePath = base
 }
 
 // SetImporter overrides the default importer. Used by tests; production
@@ -367,14 +378,21 @@ func (h *SkillProposedHandler) requireSkillManagerRole(w http.ResponseWriter, r 
 	return true
 }
 
+// errStorageNotConfigured is returned when no storage base path was
+// wired, i.e. SetStorageBasePath was never called. A sentinel rather
+// than a string compare: mapDirError used to match the message text,
+// which meant renaming the message silently downgraded the 503 to a
+// generic 500.
+var errStorageNotConfigured = errors.New("storage base path not configured")
+
 // proposedDirForCrew resolves the on-disk .proposed directory for a
-// crew. Looks up the crew slug from the DB and joins it with the
-// crewMemoryRoot. Returns ErrNotExist semantics so callers can map to
-// 404 — a crew the caller can't see or doesn't exist is the same to
-// the response shape.
+// crew. Looks up the crew slug from the DB and resolves it under the
+// crew's host memory tree. Returns ErrNotExist semantics so callers can
+// map to 404 — a crew the caller can't see or doesn't exist is the same
+// to the response shape.
 func (h *SkillProposedHandler) proposedDirForCrew(ctx context.Context, workspaceID, crewID string) (string, error) {
-	if h.crewMemoryRoot == "" {
-		return "", errors.New("crew memory root not configured")
+	if h.storageBasePath == "" {
+		return "", errStorageNotConfigured
 	}
 	var slug string
 	err := h.db.QueryRowContext(ctx,
@@ -386,20 +404,17 @@ func (h *SkillProposedHandler) proposedDirForCrew(ctx context.Context, workspace
 		}
 		return "", err
 	}
-	// Slug comes from the DB, but the DB layer enforces only the
-	// uniqueness constraint — not the filesystem-safety contract this
-	// path join needs. A historical row with "../foo" or "x/y" slug
-	// would let the .proposed directory escape crewMemoryRoot. Reject
-	// these explicitly so the bug surfaces as "crew not found" (the
-	// caller's UX wouldn't change), not as a path leak.
-	if slug == "" ||
-		strings.ContainsAny(slug, `/\`) ||
-		strings.Contains(slug, "..") ||
-		filepath.Clean(slug) != slug ||
-		filepath.IsAbs(slug) {
+	// Slug and crew id come from the DB, but the DB layer enforces only
+	// the uniqueness constraint — not the filesystem-safety contract this
+	// path join needs. A historical row with "../foo" or "x/y" slug would
+	// let the .proposed directory escape the crew tree. HostCrewTopicsDir
+	// runs both through safepath; a rejection surfaces as "crew not
+	// found" (the caller's UX doesn't change), not as a path leak.
+	topics, err := memory.HostCrewTopicsDir(h.storageBasePath, crewID, slug)
+	if err != nil {
 		return "", os.ErrNotExist
 	}
-	return filepath.Join(h.crewMemoryRoot, slug, "topics", ".proposed"), nil
+	return filepath.Join(topics, ".proposed"), nil
 }
 
 // mapDirError maps the proposedDirForCrew error palette onto HTTP.
@@ -410,7 +425,7 @@ func (h *SkillProposedHandler) mapDirError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		replyError(w, http.StatusNotFound, "crew not found")
-	case err.Error() == "crew memory root not configured":
+	case errors.Is(err, errStorageNotConfigured):
 		replyError(w, http.StatusServiceUnavailable, "skills proposal listing not configured on this server")
 	default:
 		// Log the raw error server-side; surface a generic message to

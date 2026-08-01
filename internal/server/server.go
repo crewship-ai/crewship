@@ -774,10 +774,13 @@ func (s *Server) mountAPIRouter(
 		Logger:     logger,
 	}
 	opts = append(opts, goapi.WithConsolidator(s.consolidator))
-	opts = append(opts, goapi.WithConsolidateMemoryRoot("/crew/shared/.memory"))
 	// PR-E F6: persona + peer card endpoints resolve host paths
 	// using cfg.Storage.BasePath, which mirrors what the docker
-	// provider hands to buildMounts as outputPath/crewPath.
+	// provider hands to buildMounts as outputPath/crewPath. The
+	// consolidate + skills-proposed surfaces resolve their per-crew
+	// memory output from the same value — they used to be handed the
+	// container-absolute "/crew/shared/.memory", which this host process
+	// then created at the host filesystem root (#1663).
 	opts = append(opts, goapi.WithOutputBasePath(cfg.Storage.BasePath))
 	if cfg.Storage.MemoryRoot != "" {
 		// Same {MemoryRoot}/versions path the consolidator's

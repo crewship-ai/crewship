@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
@@ -941,7 +942,8 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			}
 			// Lead agents own the crew shared memory FTS5 index
 			if req.CrewID != "" {
-				memoryCfg.CrewMemoryPath = "/crew/shared/.memory"
+				// Container path: handed to the in-container sidecar.
+				memoryCfg.CrewMemoryPath = memory.ContainerCrewMemoryRoot
 			}
 		}
 		// Build IPC config for agents in a crew so the sidecar can forward
@@ -1194,7 +1196,8 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 
 		// Create crew shared memory dirs for lead agents (if in a crew)
 		if req.CrewID != "" {
-			crewMemDir := "/crew/shared/.memory"
+			// Container path: this mkdir runs inside the container.
+			crewMemDir := memory.ContainerCrewMemoryRoot
 			crewMemDailyDir := path.Join(crewMemDir, "daily")
 			crewMemTopicsDir := path.Join(crewMemDir, "topics")
 			batch.add(preflightStepCrewMemoryDirs, "",

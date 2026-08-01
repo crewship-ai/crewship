@@ -9,13 +9,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // ConsolidateHandler triggers manual memory consolidation runs. The
@@ -32,7 +32,11 @@ type ConsolidateHandler struct {
 	logger       *slog.Logger
 	journal      journal.Emitter
 	consolidator *consolidate.Consolidator
-	memoryRoot   string
+	// storageBasePath is cfg.Storage.BasePath — the host root the
+	// container provider bind-mounts. The per-crew output dir is
+	// resolved from it by memory.HostCrewTopicsDir; there is no single
+	// host directory that serves every crew (#1663).
+	storageBasePath string
 
 	mu      sync.Mutex
 	running map[string]struct{} // workspace_id → in-flight
@@ -41,7 +45,7 @@ type ConsolidateHandler struct {
 	// runOnce goroutine (kicked off by Run) finishes. Production leaves
 	// this nil; tests that exercise the real async Run path set it so
 	// they can wait for the goroutine before returning — otherwise a
-	// t.TempDir() MemoryRoot can still be mid-write when the test's own
+	// t.TempDir() storage base can still be mid-write when the test's own
 	// cleanup tries to remove it (flaky "directory not empty" on macOS).
 	testRunDone chan struct{}
 }
@@ -72,11 +76,12 @@ func (h *ConsolidateHandler) SetConsolidator(c *consolidate.Consolidator) {
 	h.consolidator = c
 }
 
-// SetMemoryRoot sets the parent directory for learned-*.md files. Must
-// match what the background runner uses so manual + scheduled writes
-// land in the same place.
-func (h *ConsolidateHandler) SetMemoryRoot(root string) {
-	h.memoryRoot = root
+// SetStorageBasePath sets the host storage root manual consolidation
+// resolves each crew's learned-*.md directory under. Must match what the
+// background runner uses (consolidate.RunnerOptions.StorageBasePath) so
+// manual + scheduled writes land in the same place.
+func (h *ConsolidateHandler) SetStorageBasePath(base string) {
+	h.storageBasePath = base
 }
 
 // Run serves POST /api/v1/consolidate/run. Body is optional:
@@ -288,18 +293,24 @@ func (h *ConsolidateHandler) runOnce(ctx context.Context, workspaceID, crewID st
 		_ = rows.Close()
 	}
 
-	memoryRoot := h.memoryRoot
-	if memoryRoot == "" {
-		memoryRoot = "/crew/shared/.memory"
-	}
-
 	var crewsRun, rulesAppended int
 	for _, c := range crews {
+		// Per-crew: the container's /crew is a bind of
+		// {storageBasePath}/crews/{crewID}, so the host output dir
+		// cannot be precomputed once for the workspace. A crew whose
+		// path will not resolve is skipped rather than written to a
+		// guessed root — that guess is what #1663 was.
+		outputDir, oerr := memory.HostCrewTopicsDir(h.storageBasePath, c.ID, c.Slug)
+		if oerr != nil {
+			h.logger.Warn("consolidate run: cannot resolve crew memory output dir",
+				"err", oerr, "workspace_id", workspaceID, "crew_id", c.ID)
+			continue
+		}
 		cfg := consolidate.Config{
 			WorkspaceID: workspaceID,
 			CrewID:      c.ID,
 			Since:       since,
-			OutputDir:   filepath.Join(memoryRoot, c.Slug, "topics"),
+			OutputDir:   outputDir,
 		}
 		res, err := h.consolidator.Run(ctx, cfg)
 		if err != nil {

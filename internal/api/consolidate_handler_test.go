@@ -101,7 +101,7 @@ func TestConsolidateRun_HappyPath_ReturnsWorkerID(t *testing.T) {
 		Summarizer: &stubSummarizer{},
 		Logger:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	// Run kicks the actual work off in a background goroutine (see
 	// consolidate_handler.go) and returns 202 immediately. Wait for it
@@ -217,7 +217,7 @@ func TestConsolidateRun_AlreadyRunning_RejectsWithClearError(t *testing.T) {
 		Journal:    noopEmitter{},
 		Summarizer: &stubSummarizer{},
 	})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	// Simulate an in-flight run for this workspace directly, rather than
 	// racing a goroutine against the handler.
@@ -260,7 +260,7 @@ func TestConsolidateRun_EmitsAuditLogOnCompletion(t *testing.T) {
 		Journal:    noopEmitter{},
 		Summarizer: &stubSummarizer{},
 	})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	// Drive runOnce directly (synchronous) rather than through Run's
 	// background goroutine, so the audit row is guaranteed to exist by

@@ -15,6 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // --- listCrews / listWorkspaces ---------------------------------------------
@@ -140,7 +141,7 @@ func TestConsolidateAllCrews_HappyPath(t *testing.T) {
 
 	root := t.TempDir()
 	err := consolidateAllCrews(context.Background(), db, c, applyDefaults(RunnerOptions{
-		CrewMemoryRoot:     root,
+		StorageBasePath:    root,
 		ConsolidationSince: time.Hour,
 		Logger:             quietLogger(),
 	}))
@@ -148,8 +149,12 @@ func TestConsolidateAllCrews_HappyPath(t *testing.T) {
 		t.Fatalf("consolidateAllCrews: %v", err)
 	}
 
-	// The output dir is derived from CrewMemoryRoot + crew slug + topics.
-	outDir := filepath.Join(root, "crew-test", "topics")
+	// The output dir is resolved per crew from the storage base: the
+	// crew container's /crew is a bind of {base}/crews/{crewID}.
+	outDir, oerr := memory.HostCrewTopicsDir(root, "crew_test", "crew-test")
+	if oerr != nil {
+		t.Fatalf("HostCrewTopicsDir: %v", oerr)
+	}
 	entries, derr := os.ReadDir(outDir)
 	if derr != nil {
 		t.Fatalf("expected learned output dir %s: %v", outDir, derr)
@@ -184,7 +189,7 @@ func TestConsolidateAllCrews_PerCrewErrorAggregated(t *testing.T) {
 		}},
 	}
 	err := consolidateAllCrews(context.Background(), db, c, applyDefaults(RunnerOptions{
-		CrewMemoryRoot:     t.TempDir(),
+		StorageBasePath:    t.TempDir(),
 		ConsolidationSince: time.Hour,
 		Logger:             quietLogger(),
 	}))
@@ -243,7 +248,7 @@ func TestConsolidateAllCrews_CtxCancelledMidLoop(t *testing.T) {
 		}},
 	}
 	err := consolidateAllCrews(ctx, db, c, applyDefaults(RunnerOptions{
-		CrewMemoryRoot:     t.TempDir(),
+		StorageBasePath:    t.TempDir(),
 		ConsolidationSince: time.Hour,
 		Logger:             quietLogger(),
 	}))
@@ -417,11 +422,14 @@ func TestStartBackground_ConsolidationTickProducesOutput(t *testing.T) {
 	cancel := StartBackground(context.Background(), db, w, &stubSummarizer{Reply: reply}, RunnerOptions{
 		ConsolidationInterval: 20 * time.Millisecond,
 		ConsolidationSince:    time.Hour,
-		CrewMemoryRoot:        root,
+		StorageBasePath:       root,
 		Logger:                quietLogger(),
 	})
 
-	outDir := filepath.Join(root, "crew-test", "topics")
+	outDir, oerr := memory.HostCrewTopicsDir(root, "crew_test", "crew-test")
+	if oerr != nil {
+		t.Fatalf("HostCrewTopicsDir: %v", oerr)
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	var found string
 	for time.Now().Before(deadline) {
@@ -472,7 +480,7 @@ func TestStartBackground_CancelStopsIdleLoops(t *testing.T) {
 
 	cancel := StartBackground(context.Background(), db, w, nil, RunnerOptions{
 		ConsolidationInterval: time.Hour, // never fires inside the test
-		CrewMemoryRoot:        t.TempDir(),
+		StorageBasePath:       t.TempDir(),
 		Logger:                quietLogger(),
 	})
 	done := make(chan struct{})
@@ -504,7 +512,7 @@ func TestStartBackground_ConsolidationTickLogsErrors(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	cancel := StartBackground(context.Background(), db, w, nil, RunnerOptions{
 		ConsolidationInterval: 15 * time.Millisecond,
-		CrewMemoryRoot:        t.TempDir(),
+		StorageBasePath:       t.TempDir(),
 		Logger:                logger,
 	})
 	deadline := time.Now().Add(5 * time.Second)

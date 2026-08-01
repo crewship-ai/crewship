@@ -114,8 +114,18 @@ remember it and how prominently should it surface at recall time?"*.
 |---|---|
 | `normal` (default) | No special treatment. |
 | `high` | Recall importance floors at 0.85; subject to normal compaction. |
-| `pin` | Snapshot to `/crew/shared/.memory/pins.md` at next consolidate run; recall importance floors at 0.80. |
-| `permanent` | Never compacted. Extracted to `learned-*.md` on the next consolidator run, skipping the 10-entry threshold (extraction happens on the cadence, not the instant the marker is set). Recall importance floors at 0.95. |
+| `pin` | Snapshot to `/crew/shared/.memory/<crew-slug>/topics/pins.md` at next consolidate run, and force-injected into every agent's boot prompt as a `[PINS]` block; recall importance floors at 0.80. |
+| `permanent` | Never compacted. Extracted to `<crew-slug>/topics/learned-*.md` on the next consolidator run, skipping the 10-entry threshold (extraction happens on the cadence, not the instant the marker is set). Recall importance floors at 0.95. |
+
+<Note>
+Both files live under the crew-slug-qualified `topics/` directory, not
+directly under `/crew/shared/.memory/`. Earlier builds resolved that
+directory against a container-absolute path while the consolidator ran on
+the host, so the files landed outside the crew's mount and the `[PINS]`
+block was always empty. If you pinned entries on an older build and never
+saw them in an agent's context, that is why — the next consolidator run
+re-snapshots them into the right place.
+</Note>
 
 <Note>
 Markers are set via the HTTP endpoint or CLI — agents cannot mark their

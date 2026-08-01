@@ -24,28 +24,29 @@ import (
 // THE FINDING these tests pin down: approving a memory proposal writes a
 // canonical learned-YYYY-MM-DD.md file that NOTHING ever delivers to the
 // agent. The write path is real and well-tested; the read path does not
-// exist. Four independent gaps stack, any one of which alone would be
+// exist. Three independent gaps stack, any one of which alone would be
 // enough to make the rule undeliverable:
 //
-// GAP 0 — the file never even lands inside the container.
+// GAP 0 — CLOSED by #1663. It used to be that the file never landed
 //
-//	The runner's default output root is the container-absolute
-//	"/crew/shared/.memory" (runner.go:179-181, server.go:704) written by
-//	a HOST process, while /crew is a bind of host
-//	{Storage.BasePath}/crews/{crewID} (docker.go:702). Pinned in
-//	internal/consolidate/learned_rules_output_root_test.go. The three
-//	gaps below are what you hit even after assuming GAP 0 away — which
-//	is what the container-path tests in this file do, by placing the
-//	learned file at the container path the orchestrator would read if
-//	it read it at all.
+//	inside the container at all: the runner's default output root was
+//	the container-absolute "/crew/shared/.memory" written by a HOST
+//	process, while /crew is a bind of host
+//	{Storage.BasePath}/crews/{crewID}. The consolidator now resolves its
+//	output through memory.HostCrewTopicsDir, the host twin of the
+//	container path this file's tests use, so the learned file really is
+//	where these tests place it. Positive coverage:
+//	internal/consolidate/crew_memory_host_path_test.go and
+//	internal/memory/crewpaths_test.go. The gaps below are what remains.
 //
 // GAP 1 — the boot prompt never reads it.
 //
 //	consolidate.ApproveProposal appends to
 //	{OutputDir}/learned-YYYY-MM-DD.md (approve.go:179, mirrored by the
 //	exported consolidate.CanonicalPathForProposal at approve.go:503),
-//	where OutputDir is {CrewMemoryRoot}/{crewSlug}/topics
-//	(runner.go:250, consolidate_handler.go:300, post_run_trigger.go:146).
+//	where OutputDir is memory.HostCrewTopicsDir(basePath, crewID,
+//	crewSlug) — the host side of
+//	/crew/shared/.memory/{crewSlug}/topics.
 //	Orchestrator.buildMemoryContext reads a CLOSED LIST of container
 //	paths — /crew/agents/{slug}/.memory/{pins,BRIEF,AGENT}.md +
 //	daily/* (memory.go:251-277), /crew/shared/.memory/{CREW.md,
