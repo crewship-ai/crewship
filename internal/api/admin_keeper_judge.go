@@ -20,6 +20,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// judgeNoThink is the address of a false the probe's requests point at. The
+// gatekeeper sends think:false on every judge call regardless of provider, and
+// the probe only answers a useful question if it does the same — see the Think
+// comments at each call site.
+var judgeNoThink = false
+
 // AdminKeeperJudgeHandler is the two things that turn "paste a URL and hope"
 // into a setup you can finish in a minute:
 //
@@ -278,6 +284,12 @@ func (h *AdminKeeperJudgeHandler) run(ctx context.Context, root, model string) j
 		// A security verdict must be reproducible; an audit trail of sampled
 		// decisions is not defensible.
 		Temperature: &zero,
+		// Reasoning OFF, because the gatekeeper turns it off. A probe that asks
+		// differently from the credential path measures a different call: with
+		// thinking on, a live qwen3.5:9b spent 13.2s reasoning and returned no
+		// verdict, so this check failed a model that answers correctly in 3.4s
+		// when asked the way production asks.
+		Think: &judgeNoThink,
 	})
 	stage3 := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {
@@ -566,6 +578,12 @@ func (h *AdminKeeperJudgeHandler) TestHosted(w http.ResponseWriter, r *http.Requ
 		// A security verdict must be reproducible; an audit trail of sampled
 		// decisions is not defensible.
 		Temperature: &zero,
+		// Reasoning OFF, because the gatekeeper turns it off. A probe that asks
+		// differently from the credential path measures a different call: with
+		// thinking on, a live qwen3.5:9b spent 13.2s reasoning and returned no
+		// verdict, so this check failed a model that answers correctly in 3.4s
+		// when asked the way production asks.
+		Think: &judgeNoThink,
 	})
 	stage2 := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {
@@ -767,6 +785,12 @@ func (h *AdminKeeperJudgeHandler) ProbeModel(w http.ResponseWriter, r *http.Requ
 		// A security verdict must be reproducible; an audit trail of sampled
 		// decisions is not defensible.
 		Temperature: &zero,
+		// Reasoning OFF, because the gatekeeper turns it off. A probe that asks
+		// differently from the credential path measures a different call: with
+		// thinking on, a live qwen3.5:9b spent 13.2s reasoning and returned no
+		// verdict, so this check failed a model that answers correctly in 3.4s
+		// when asked the way production asks.
+		Think: &judgeNoThink,
 	})
 	st := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {
