@@ -2,6 +2,7 @@ package api
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,10 +47,27 @@ import (
 // third would have been the wrong answer; the class needs one
 // chokepoint, not another special case.
 //
-// Production cost is one WaitGroup Add/Done per detached goroutine and
-// nothing else: nothing in crewshipd ever calls the wait, so the
-// counter is written and never read outside tests.
-var backgroundWork sync.WaitGroup
+// Production cost is one atomic increment/decrement per detached
+// goroutine and nothing else: nothing in crewshipd ever calls the wait,
+// so the counter is written and never read outside tests.
+//
+// NOT a sync.WaitGroup, and this is not a style choice. A WaitGroup has
+// generation semantics — "calls with a positive delta that start when
+// the counter is zero must happen before a Wait" — and this counter has
+// no generations at all: handlers add work continuously while test
+// teardowns wait continuously, with nothing ordering "counter reached
+// zero" against "next request starts work". That is precisely the
+// interleaving the runtime refuses, and the first draft of this file
+// got it wrong. Reproduced with the same shape (8 producers registering
+// work, 8 waiters draining):
+//
+//	panic: sync: WaitGroup is reused before previous Wait has returned
+//
+// It panics the whole test BINARY, so it would have been a far worse
+// flake than the one this file exists to remove — and internal/api runs
+// 479 parallel tests, every one of which registers a drain. An atomic
+// counter has no generations, so there is nothing to misuse.
+var backgroundWorkInFlight atomic.Int64
 
 // beginBackgroundWork registers one detached goroutine and returns the
 // function that marks it finished. Call it on the REQUEST goroutine,
@@ -68,9 +86,9 @@ var backgroundWork sync.WaitGroup
 // is about to start — which is precisely the window that produces
 // "sql: database is closed" today.
 func beginBackgroundWork() func() {
-	backgroundWork.Add(1)
+	backgroundWorkInFlight.Add(1)
 	var once sync.Once
-	return func() { once.Do(backgroundWork.Done) }
+	return func() { once.Do(func() { backgroundWorkInFlight.Add(-1) }) }
 }
 
 // waitForBackgroundWork blocks until every goroutine registered with
@@ -83,15 +101,14 @@ func beginBackgroundWork() func() {
 // until CI's job cap fires would hide it. Callers in tests should fail
 // the test on false and say which test was waiting.
 func waitForBackgroundWork(timeout time.Duration) bool {
-	drained := make(chan struct{})
-	go func() {
-		backgroundWork.Wait()
-		close(drained)
-	}()
-	select {
-	case <-drained:
-		return true
-	case <-time.After(timeout):
-		return false
+	deadline := time.Now().Add(timeout)
+	for {
+		if backgroundWorkInFlight.Load() == 0 {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return backgroundWorkInFlight.Load() == 0
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
