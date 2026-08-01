@@ -102,6 +102,43 @@ func TestBuildCrewRuntimeConfig(t *testing.T) {
 	}
 }
 
+// The docker provider forces HostConfig.Init on for EVERY crew container
+// (#1630: PID 1 is `exec sleep infinity`, which never reaps, and the sidecar
+// is always an orphan reparented onto it — an unreaped zombie leak that ends
+// in `fork: Resource temporarily unavailable`). Nothing may hand it an "init:
+// false", and an "init: true" is redundant, so the requirement is no longer
+// plumbed onto CrewConfig at all (#1636).
+//
+// This is asserted, rather than left implicit, because the flag survived the
+// runtime change: `crewship crew config <crew> --init` still succeeded and
+// still wrote the row while buildCrewContainerConfig ignored it, which is
+// exactly the API/CLI-parity break CONTRIBUTING forbids. If someone re-adds
+// `cfg.Init = reqs.Init`, this test is the thing that says why not.
+func TestBuildCrewRuntimeConfig_InitIsNotPlumbedFromRequirements(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedCrewRow(t, db, "crew-init", wsID, "Init", "init")
+
+	if _, err := db.Exec(`UPDATE crews SET cached_requirements = ? WHERE id = ?`,
+		`{"init":true,"privileged":true}`, crewID); err != nil {
+		t.Fatalf("update crew: %v", err)
+	}
+
+	cfg, err := buildCrewRuntimeConfig(context.Background(), db, crewID, wsID)
+	if err != nil {
+		t.Fatalf("buildCrewRuntimeConfig: %v", err)
+	}
+	if cfg.Init {
+		t.Error("CrewConfig.Init = true — the docker provider ignores it and init is unconditional; carrying the value keeps a dead knob alive")
+	}
+	// Its neighbour in the same block still is plumbed, so this is a pin on
+	// Init specifically and not on the block having been deleted.
+	if !cfg.Privileged {
+		t.Error("Privileged = false, want true (from cached_requirements)")
+	}
+}
+
 // fakeEnqueuer records EnqueueForCrew calls for the proactive-provision tests.
 type fakeEnqueuer struct {
 	calls int

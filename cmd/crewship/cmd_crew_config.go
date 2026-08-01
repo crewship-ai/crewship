@@ -28,9 +28,11 @@ Container-privilege controls (#1380) merge onto the stored devcontainer_config
 and are validated server-side on save:
   crewship crew config my-crew --privileged          # needs allow_privileged_credentials
   crewship crew config my-crew --cap-add NET_BIND_SERVICE
-  crewship crew config my-crew --init                # docker --init (PID 1 reaper)
   crewship crew config my-crew --init-hook ./init.sh # runs on every container start
-  crewship crew config my-crew --init-hook ""        # remove the start hook`,
+  crewship crew config my-crew --init-hook ""        # remove the start hook
+
+--init is deprecated and does nothing: a PID 1 reaper (docker --init) is
+always enabled for crew containers.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -54,12 +56,27 @@ and are validated server-side on save:
 		// workspace flag; disallowed cap → 400). They form their own set mode so
 		// they never clobber image/features on the round-trip.
 		privileged, _ := cmd.Flags().GetBool("privileged")
-		initFlag, _ := cmd.Flags().GetBool("init")
 		capAdd, _ := cmd.Flags().GetStringSlice("cap-add")
 		initHookPath, _ := cmd.Flags().GetString("init-hook")
 		secChanged := cmd.Flags().Changed("privileged") ||
-			cmd.Flags().Changed("init") || cmd.Flags().Changed("cap-add") ||
+			cmd.Flags().Changed("cap-add") ||
 			cmd.Flags().Changed("init-hook")
+
+		// --init is a deprecated no-op (#1636). The runtime sets
+		// HostConfig.Init for every crew container unconditionally (#1630):
+		// PID 1 is `exec sleep infinity`, which never calls wait(), and every
+		// sidecar is an orphan reparented onto it, so a crew without a reaper
+		// leaks zombies until `fork: Resource temporarily unavailable`. There
+		// is therefore no correct "off" to honour, and "on" is what already
+		// happens. The flag used to succeed and write `"init"` into the crew's
+		// devcontainer_config, which buildCrewContainerConfig then ignored —
+		// a setting an operator could set, read back, and never see take
+		// effect. It is accepted so existing scripts do not start failing,
+		// warns, and forms no mode of its own.
+		if cmd.Flags().Changed("init") {
+			fmt.Fprintln(cmd.ErrOrStderr(),
+				"warning: --init is a no-op and is ignored — a PID 1 reaper (docker --init) is always enabled for crew containers; the flag will be removed in a future release")
+		}
 
 		// Mutual exclusion: show / export / clear / set / security-set.
 		modeCount := 0
@@ -79,10 +96,16 @@ and are validated server-side on save:
 			modeCount++
 		}
 		if modeCount == 0 {
-			return fmt.Errorf("specify one of --show, --export, --clear, a set flag (--devcontainer, --mise, --runtime-image), or a security flag (--privileged, --cap-add, --init, --init-hook)")
+			// A lone --init is not "no mode chosen" — it is a request the
+			// runtime already satisfies. The warning above is the whole
+			// outcome; erroring here would fail scripts that pass it.
+			if cmd.Flags().Changed("init") {
+				return nil
+			}
+			return fmt.Errorf("specify one of --show, --export, --clear, a set flag (--devcontainer, --mise, --runtime-image), or a security flag (--privileged, --cap-add, --init-hook)")
 		}
 		if modeCount > 1 {
-			return fmt.Errorf("--show, --export, --clear, set flags (--devcontainer/--mise/--runtime-image), and security flags (--privileged/--cap-add/--init/--init-hook) are mutually exclusive")
+			return fmt.Errorf("--show, --export, --clear, set flags (--devcontainer/--mise/--runtime-image), and security flags (--privileged/--cap-add/--init-hook) are mutually exclusive")
 		}
 
 		client := newAPIClient()
@@ -113,7 +136,6 @@ and are validated server-side on save:
 			}
 			return setCrewSecurity(client, crewID,
 				cmd.Flags().Changed("privileged"), privileged,
-				cmd.Flags().Changed("init"), initFlag,
 				cmd.Flags().Changed("cap-add"), capAdd,
 				setHook, initHook)
 		default:
@@ -304,15 +326,19 @@ func setCrewConfig(client *cli.Client, crewID, devcontainerPath, misePath, runti
 	return patchCrew(client, crewID, body, "Crew configuration updated.")
 }
 
-// setCrewSecurity merges the #1380 container-privilege knobs (privileged / init
-// / capAdd / the start hook) onto the crew's stored devcontainer_config and
+// setCrewSecurity merges the #1380 container-privilege knobs (privileged /
+// capAdd / the start hook) onto the crew's stored devcontainer_config and
 // PATCHes it back. The keys are top-level devcontainer.json fields the runtime
 // honours; the server re-validates them on write (privileged requires the
 // workspace allow_privileged_credentials flag → 403; capAdd is bounded to the
 // NET_BIND_SERVICE allowlist → 400). We GET-merge rather than replace so image
 // / features / mise stay intact.
+//
+// `init` is deliberately absent from this list (#1636): the runtime forces it
+// on for every crew, so there is nothing here to set. See the --init handling
+// in RunE.
 func setCrewSecurity(client *cli.Client, crewID string,
-	setPriv, privileged, setInit, initFlag, setCap bool, capAdd []string,
+	setPriv, privileged, setCap bool, capAdd []string,
 	setHook bool, initHook string) error {
 	info, err := fetchCrewInfo(client, crewID)
 	if err != nil {
@@ -331,13 +357,6 @@ func setCrewSecurity(client *cli.Client, crewID string,
 			cfg["privileged"] = true
 		} else {
 			delete(cfg, "privileged")
-		}
-	}
-	if setInit {
-		if initFlag {
-			cfg["init"] = true
-		} else {
-			delete(cfg, "init")
 		}
 	}
 	if setCap {
@@ -415,7 +434,7 @@ func init() {
 	crewConfigCmd.Flags().String("mise", "", "Path to mise config JSON file to upload")
 	crewConfigCmd.Flags().String("runtime-image", "", "Custom base image reference (e.g. debian:bookworm-slim)")
 	crewConfigCmd.Flags().Bool("privileged", false, "Run the crew container privileged (server-validated: requires the workspace allow_privileged_credentials flag)")
-	crewConfigCmd.Flags().Bool("init", false, "Run a docker --init reaper (PID 1) inside the crew container")
+	crewConfigCmd.Flags().Bool("init", false, "Deprecated no-op: a docker --init reaper (PID 1) is always enabled for crew containers")
 	crewConfigCmd.Flags().StringSlice("cap-add", nil, "Linux capabilities to add (server-validated against the NET_BIND_SERVICE allowlist)")
 	crewConfigCmd.Flags().String("init-hook", "", "Path to a start-hook script run on every container start (postStartCommand); pass an empty value to remove it")
 

@@ -735,7 +735,47 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
-				if c.State == "running" {
+				// Restart backoff is its own state and it is neither
+				// "running" nor startable (#1636). A crew container gained a
+				// RestartPolicy in #1630, which made `restarting` reachable
+				// for the first time; the code below only asked "is it
+				// running?" and fell through to ContainerStart for everything
+				// else. The daemon answers a start during backoff with 304 Not
+				// Modified — State.Running is true the whole time — and the
+				// moby Go client turns 304 into a nil error, so this function
+				// returned (id, true, nil), logged "restarted stopped
+				// container" and setWarm()'d it. Every agent exec for the rest
+				// of the warm-TTL window then failed with "container is
+				// restarting" while the provider reported the crew ready.
+				//
+				// Tear down rather than wait for backoff to settle. Waiting
+				// looks cheaper but returns a container that is at best about
+				// to die again: PID 1 is `exec sleep infinity`, which never
+				// exits on its own, so a container in backoff has had PID 1
+				// killed (OOM, host reboot, an external docker kill). Moby
+				// resets the on-failure retry count once a container has run
+				// for 10 s, so a crew that crashes every ~15 s crash-loops
+				// forever with short `restarting` windows in between — waiting
+				// there succeeds within ~100 ms and hands the caller a runtime
+				// that dies mid-exec. Recreating is deterministic, costs one
+				// container create, and loses nothing: /workspace, /output and
+				// /crew are host binds and /home/agent and /opt/crew-tools are
+				// named volumes, so only the container's own ephemeral layer
+				// and tmpfs go — which a daemon-driven restart wipes anyway.
+				//
+				// Checked on the inspect, not only on the host-wide list: that
+				// list is a snapshot and a container that entered backoff
+				// between the list and this inspect still reads "running"
+				// there.
+				if c.State == container.StateRestarting || (inspect.State != nil && inspect.State.Restarting) {
+					p.logger.Info("recreating container (in restart backoff)",
+						"container", containerName,
+						"restart_count", inspect.RestartCount,
+					)
+					p.forceTeardown(ctx, c.ID, team.ID)
+					break // fall through to create new container
+				}
+				if c.State == container.StateRunning {
 					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
@@ -1024,16 +1064,28 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 		// shutdown and the restart policy all use the same window
 		// StopCrewRuntime passes by hand, instead of Docker's 10 s default.
 		StopTimeout: &stopTimeout,
-		// No Healthcheck. There used to be one — `test -f /workspace/.ready`
-		// every 30 s — and it was a tautology: /workspace is a host-persistent
-		// bind, so entrypoint.sh's marker outlives the container that wrote it
-		// and a freshly created container reports healthy at t=0 without
-		// having booted anything. Nothing read the answer either:
-		// ContainerStatus below switches on State.Running / Restarting / Dead
-		// / OOMKilled and never touches State.Health (waitSidecarHealthy, the
-		// repo's only State.Health reader, is scoped to sidecars). It cost one
-		// container exec per crew per 30 s — at 50 crews, ~1.7 execs/s of pure
-		// daemon load — and bought nothing.
+		// Health checking off. There used to be a probe — `test -f
+		// /workspace/.ready` every 30 s — and it was a tautology: /workspace
+		// is a host-persistent bind, so entrypoint.sh's marker outlives the
+		// container that wrote it and a freshly created container reports
+		// healthy at t=0 without having booted anything. Nothing read the
+		// answer either: ContainerStatus below switches on State.Running /
+		// Restarting / Dead / OOMKilled and never touches State.Health
+		// (waitSidecarHealthy, the repo's only State.Health reader, is scoped
+		// to sidecars). It cost one container exec per crew per 30 s — at 50
+		// crews, ~1.7 execs/s of pure daemon load — and bought nothing.
+		//
+		// Test: ["NONE"] and not a nil/omitted field. Per the image spec
+		// (docker-image-spec HealthcheckConfig.Test) an absent or empty Test
+		// means INHERIT, so leaving the field off hands health checking back
+		// to the image's own HEALTHCHECK directive — common on app images and
+		// several devcontainer bases. PID 1 here is `exec sleep infinity`, so
+		// an inherited `HEALTHCHECK CMD curl -f localhost:3000/health` never
+		// passes: the crew sits at "Up N hours (unhealthy)" forever and the
+		// per-crew exec load comes back on the image's interval, which may be
+		// far tighter than the 30 s we removed. ["NONE"] is the only value
+		// that disables it (#1636).
+		Healthcheck: &container.HealthConfig{Test: []string{"NONE"}},
 	}
 	// Force the bind-mounted entrypoint.sh so custom base images (debian,
 	// ubuntu) use our init script instead of their default (typically
@@ -1105,6 +1157,11 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	// documented way to say "no swap"; swappiness 0 additionally stops the
 	// kernel from paging out anonymous memory under host pressure.
 	memorySwappiness := int64(0)
+	// /dev/shm and /tmp are tmpfs, so their contents are unswappable shmem
+	// charged to the memory cgroup we just closed swap on — their caps have to
+	// be derived from the same budget rather than set as free-standing
+	// constants. crewTmpfsSizes owns the arithmetic and the reasoning.
+	shmSize, tmpTmpfsSize := crewTmpfsSizes(memoryBytes)
 	hostConfig := &container.HostConfig{
 		Runtime:        runtime,
 		ReadonlyRootfs: readonlyRoot,
@@ -1136,7 +1193,7 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 		// with a bounded retry count so a container whose PID 1 dies comes back
 		// without a crash-looping container pinning a CPU forever.
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyOnFailure, MaximumRetryCount: 3},
-		ShmSize:       crewShmSizeBytes,
+		ShmSize:       shmSize,
 		Resources: container.Resources{
 			Memory:           memoryBytes,
 			MemorySwap:       memoryBytes,
@@ -1154,7 +1211,10 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 			// invokes files under /tmp via an explicit interpreter
 			// (`sh <path>`, `bash <path>`, …), never execve()s them
 			// directly, so noexec does not break those paths.
-			"/tmp": "rw,noexec,nosuid,size=500m",
+			//
+			// size is in bytes and scales with the memory limit alongside
+			// ShmSize above; see crewTmpfsSizes.
+			"/tmp": fmt.Sprintf("rw,noexec,nosuid,size=%d", tmpTmpfsSize),
 			// In-memory /secrets owned by the agent UID; must be here and
 			// not in Mounts — the daemon rejects uid/gid TmpfsOptions on a
 			// Mounts-API tmpfs (see secretsTmpfsSpec).

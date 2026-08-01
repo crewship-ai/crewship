@@ -646,12 +646,99 @@ const (
 // 10 s, which is short for a container that may be flushing an agent run.
 const crewStopTimeoutSeconds = 30
 
-// crewShmSizeBytes sizes /dev/shm. Docker's default is 64 MB (verified live on
-// dev1), which is below what Chromium needs for its renderer shared memory —
-// headless Chrome/Playwright aborts with "Target closed"/bus errors on it, and
-// this repo ships Playwright. 1 GiB is the widely used remediation and is
-// charged against the crew's memory cgroup only as pages are actually touched.
+// crewShmSizeBytes is the CEILING for /dev/shm. Docker's default is 64 MB
+// (verified live on dev1), which is below what Chromium needs for its renderer
+// shared memory — headless Chrome/Playwright aborts with "Target closed"/bus
+// errors on it, and this repo ships Playwright. 1 GiB is the widely used
+// remediation. See crewTmpfsSizes for when a crew actually gets it.
 const crewShmSizeBytes int64 = 1024 * 1024 * 1024
+
+// crewTmpTmpfsBytes is the CEILING for the /tmp tmpfs — enough for build
+// artefacts and unpacked archives, which is what agent toolchains put there.
+// Anything larger belongs on /workspace or /output, which are disk-backed
+// binds and cost no RAM at all.
+const crewTmpTmpfsBytes int64 = 500 * 1024 * 1024
+
+// crewTmpfsMemoryDivisor caps the COMBINED /dev/shm + /tmp allowance at 1/4 of
+// the crew's memory limit. See crewTmpfsSizes.
+const crewTmpfsMemoryDivisor int64 = 4
+
+// crewTmpfsShmShareNum / crewTmpfsShmShareDen split that allowance: /dev/shm
+// takes two thirds, /tmp the remainder. /dev/shm gets the larger share because
+// it is the one Docker's default gets wrong for our workloads (64 MB vs
+// Chromium's needs) and because a process cannot spill out of it, whereas a
+// toolchain that outgrows /tmp can be pointed at the disk-backed binds.
+const (
+	crewTmpfsShmShareNum int64 = 2
+	crewTmpfsShmShareDen int64 = 3
+)
+
+// crewTmpfsFloorBytes stops the derivation from emitting 0 for an absurdly
+// small crew. Zero is not "no tmpfs": HostConfig.ShmSize 0 means "use the
+// daemon default" (64 MB) and `size=0` on a tmpfs mount means "unlimited, up
+// to half of RAM" — both the opposite of what a 6 MiB crew should get.
+const crewTmpfsFloorBytes int64 = 1024 * 1024
+
+// crewTmpfsSizes derives the /dev/shm and /tmp tmpfs sizes for a crew with the
+// given memory limit, returning bytes.
+//
+// Why these are derived rather than constant (#1636). /dev/shm and /tmp are
+// both tmpfs, i.e. shmem, and shmem pages are charged to the container's
+// memory cgroup as they are touched. Swap is off for crew containers
+// (MemorySwap == Memory, MemorySwappiness 0 — see buildCrewContainerConfig),
+// and unlike ordinary page cache, shmem cannot be reclaimed without swap. So
+// every byte written into /dev/shm or /tmp is permanently subtracted from the
+// crew's usable memory until something deletes it.
+//
+// The three settings previously did not know about each other, and the
+// arithmetic was bad on the default crew: 4096 MiB limit, 1024 MiB of
+// /dev/shm and 500 MiB of /tmp left 2572 MiB for the workload, and the
+// workload the shm ceiling was raised FOR — Playwright — routinely fills
+// several hundred MiB of /dev/shm plus build output in /tmp. Before swap was
+// disabled the same container had an equal amount of swap behind it, so the
+// identical run completed; afterwards it OOM-kills and the operator sees only
+// state="error".
+//
+// The rule: the two caps together may claim at most a quarter of the memory
+// limit, leaving three quarters to the processes. Within that quarter
+// /dev/shm takes two thirds and /tmp the rest, and neither exceeds its own
+// ceiling. Worked through:
+//
+//	  6 MiB   shm   1 MiB   tmp   1 MiB    (both at the floor)
+//	1024 MiB  shm 170 MiB   tmp  85 MiB
+//	4096 MiB  shm 682 MiB   tmp 341 MiB    (the product default)
+//	8192 MiB  shm   1 GiB   tmp 500 MiB    (both ceilings bind)
+//
+// So a crew reaches the full 1 GiB /dev/shm at ~6 GiB of memory and above,
+// and the default 4 GiB crew gets 682 MiB — still an order of magnitude over
+// Docker's 64 MB default and comfortably over the ~256 MiB where Chromium
+// starts failing, while returning 342 MiB of headroom to the workload.
+//
+// /secrets is deliberately outside this budget: it is a fixed 16 MiB
+// (secretsTmpfsSpec), holds a handful of credential files, and shrinking it
+// would trade a security-critical mount against a memory concern it does not
+// meaningfully contribute to. Note the floors mean a crew configured near the
+// 6 MiB API minimum (crews_create.go) is over-committed by /secrets alone —
+// such a crew cannot run an agent regardless, and the floors keep the
+// derivation honest rather than silently handing it the daemon defaults.
+func crewTmpfsSizes(memoryBytes int64) (shm, tmp int64) {
+	budget := memoryBytes / crewTmpfsMemoryDivisor
+	shm = clampInt64(budget*crewTmpfsShmShareNum/crewTmpfsShmShareDen, crewTmpfsFloorBytes, crewShmSizeBytes)
+	// The remainder, not a second fraction: when /dev/shm is held at its
+	// ceiling the leftover budget goes to /tmp rather than being lost.
+	tmp = clampInt64(budget-shm, crewTmpfsFloorBytes, crewTmpTmpfsBytes)
+	return shm, tmp
+}
+
+func clampInt64(v, lo, hi int64) int64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
 
 // crewInitAlways is the addressable `true` behind HostConfig.Init. Taking its
 // address is safe because nothing writes it.

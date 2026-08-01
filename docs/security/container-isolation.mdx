@@ -172,7 +172,7 @@ client, a hand-edited config) hits the same gate.
 | **Privileged mode** | `privileged` | Nulls `no-new-privileges`, drops the read-only rootfs, grants ~all Linux capabilities and host device access. An agent can escape to the host. **Refused on save with `403` unless the workspace has `allow_privileged_credentials` set** (the same flag that governs handing credentials to a privileged crew, #1032). Prefer adding a single capability instead. |
 | **Added capabilities** | `capAdd` | Re-adds specific Linux capabilities on top of `--cap-drop=ALL`. Only **`NET_BIND_SERVICE`** may be granted directly — it is the *same* allowlist the devcontainer-feature path enforces. Any broader capability (`SYS_ADMIN`, `NET_RAW`, `DAC_OVERRIDE`, …) is **rejected on save with `400`**; if a crew genuinely needs more, that is what privileged mode (workspace-gated) is for, so the escalation stays visible. Names normalize across `CAP_`/case forms. |
 | **Extra mounts** | `mounts` | Bind/volume mounts into the container. The allowlist mirrors `internal/devcontainer/mount_validate.go`: only `/dev/fuse` and valid named volumes are permitted. The Docker socket (`/var/run/docker.sock`), `/var/lib/docker`, `/tmp` and arbitrary host paths are **rejected on save with `400`** — each is a container-escape primitive. The runtime re-filters through the same allowlist (defense in depth). |
-| **Init process (PID 1)** | `init` | Runs a tiny init as PID 1 to reap zombie processes (docker `--init`). Low risk. |
+| **Init process (PID 1)** | `init` | **Ignored — a tiny init always runs as PID 1.** The crew entrypoint ends in `exec sleep infinity`, which never reaps, and every sidecar process is reparented onto it, so a crew without an init leaks zombies until it can no longer fork. The runtime therefore sets docker `--init` unconditionally and neither the stored key nor `--init` changes anything. |
 | **Container environment** | `containerEnv` | Extra env vars injected at start. `CREWSHIP_*` keys are reserved and ignored. |
 | **Start hook (init script)** | `postStartCommand` | Shell commands run on **every** container start as the agent user (UID 1001). Note the crew's `/crew` directory is an agent-writable host bind that **survives container removal** — a script auto-executed from there is a persistence surface, so treat everything it runs as code you wrote or audited. |
 
@@ -236,10 +236,12 @@ crewship crew config my-crew --privileged
 
 # Grant a capability (only NET_BIND_SERVICE is accepted; anything else → 400)
 crewship crew config my-crew --cap-add NET_BIND_SERVICE
-
-# Run a docker --init reaper as PID 1
-crewship crew config my-crew --init
 ```
+
+<Note>
+`crewship crew config --init` is a deprecated no-op — the PID 1 reaper is
+always on. The flag still parses, warns, and changes nothing.
+</Note>
 
 These flags merge onto the crew's stored `devcontainer_config` (image and
 features are preserved) and PATCH it back. Uploading a full config file with
