@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper/evidence"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -82,6 +84,40 @@ type KeeperHandler struct {
 	// execDedup is the single chokepoint (#1329) that gives POST
 	// /keeper/execute an idempotency key — see keeperExecuteDedup.
 	execDedup *keeperExecuteDedup
+	// judgeCfg supplies the judge profile — which capabilities the credential
+	// judge may use. nil until SetJudgeConfig wires it, and nil means every
+	// capability is off: an instance that has not been told otherwise behaves
+	// exactly as it did before the profile existed.
+	judgeCfg *keepercfg.Store
+}
+
+// SetJudgeConfig wires the instance judge configuration so the credential path
+// can honour the operator's profile (evidence, hard gate). Skip the call to keep
+// the pre-profile behaviour.
+func (h *KeeperHandler) SetJudgeConfig(s *keepercfg.Store) { h.judgeCfg = s }
+
+// gatherEvidence computes the verified facts for one request, or returns nil
+// when the operator has the capability off, the wiring is absent, or the ids are
+// not both known.
+//
+// nil is deliberately indistinguishable from "gathered nothing" at the call
+// site: the gatekeeper treats a nil Facts as "not established" and never as a
+// set of negative facts, so a config change and a database outage both degrade
+// to the prose-only judgement rather than to a refusal.
+func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool) {
+	if h.judgeCfg == nil || h.db == nil || agentID == "" || credentialID == "" {
+		return nil, false
+	}
+	prof := h.judgeCfg.Effective().Profile
+	if !prof.Evidence.Value {
+		return nil, false
+	}
+	f := evidence.Gather(ctx, h.db, evidence.Query{AgentID: agentID, CredentialID: credentialID})
+	for _, om := range f.Omitted {
+		h.logger.Warn("keeper: evidence fact omitted",
+			"fact", om.Fact, "error", om.Err, "agent_id", agentID, "credential_id", credentialID)
+	}
+	return &f, prof.HardGate.Value
 }
 
 // NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.

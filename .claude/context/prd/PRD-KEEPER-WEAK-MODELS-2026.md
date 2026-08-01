@@ -46,6 +46,38 @@ inboxu.
 
 Cena bloku faktů: **+131 tokenů** (357 → 488 `prompt_eval_count`).
 
+> ### ⚠️ OPRAVA 2026-08-01 (po implementaci): efekt nese fakt, který nemůže být nepravdivý
+>
+> Při zapojování do API vrstvy se ukázalo, že **obě cesty ke Keeperovi už vazbu
+> vynucují SQL JOINem** — `internal/api/keeper_request.go:149` a
+> `keeper_execute.go:289` obě dělají `JOIN agent_credentials ac ON
+> ac.credential_id = c.id WHERE ... ac.agent_id = ?`. Nevázaný credential
+> vrátí 404 dřív, než se soudce vůbec zeptá.
+>
+> `credential_bound_to_agent` tedy **v produkci nikdy nemůže být „no"**. A když
+> se měření zopakuje jen s fakty, která přes API reálně dosažitelná jsou
+> (historie dvojice, zamítnutí za 7 dní, přiřazená práce), efekt **mizí úplně**:
+>
+> | Vstup | Verdikt (3 běhy) |
+> |---|---|
+> | Próza | ALLOW, ALLOW, ALLOW |
+> | Próza + **dosažitelná** fakta | ALLOW, ALLOW, ALLOW |
+>
+> Původní obrat 3×ALLOW → 3×DENY nesl řádek `credential_bound_to_agent: NO`,
+> tedy scénář, který nastat nemůže. **Tvrzení „fakta obracejí rozhodnutí" není
+> podložené.** Zbylá fakta na tomhle případu tímhle modelem nepohnula.
+>
+> Co z toho plyne pro plán:
+> - **P1 ztrácí doloženou hodnotu.** Kód zůstává (je správný a je za přepínačem),
+>   ale nesmí se prezentovat jako prokázané zlepšení, dokud to neřekne P4.
+> - **P4 stoupá na první místo.** Přesně tohle by chytilo — a chytilo to až
+>   implementace, ne měření.
+> - Tvrdá brána na nevázaný klíč je **defence-in-depth, ne primární kontrola**;
+>   primární je ten SQL JOIN.
+> - Poučení, které stojí za zapsání: měřil jsem scénář, který jsem si vymyslel,
+>   místo abych ověřil, že je dosažitelný. Stejná chyba jako `crew scope`, jen
+>   o patro výš — tam neexistoval sloupec, tady neexistuje cesta.
+
 > **Metodická poctivost.** n=3, jeden scénář, jeden model — je to indikace,
 > ne benchmark. Velikost efektu (3/3 obrat opačným směrem) je ale mimo
 > rozsah šumu. Bod P4 tohoto PRD existuje právě proto, aby se tohle

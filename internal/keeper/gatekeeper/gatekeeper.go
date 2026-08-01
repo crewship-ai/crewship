@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/keeper/evidence"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/lookout"
 )
@@ -122,6 +123,25 @@ type EvalRequest struct {
 	AgentName      string
 	CrewName       string
 	Command        string // non-empty for /execute requests: the command to run with the credential
+	// Evidence is the computed, database-sourced facts about this request
+	// (internal/keeper/evidence). Supplied by the CALLER, exactly as ConvHistory
+	// is, so this package stays free of database access and the collection can be
+	// tested on its own.
+	//
+	// nil means "not gathered" — the operator turned the capability off, or every
+	// query failed. It is never treated as a set of negative facts: an absence
+	// that denied requests would turn a database blip into the #1624 outage with
+	// a new cause.
+	Evidence *evidence.Facts
+	// HardGate enables the deterministic refusal of an unbound credential at the
+	// tiers that reach real infrastructure. Caller-controlled, because it is an
+	// operator toggle (keepercfg judge profile, hard_gate) and this package must
+	// not read configuration.
+	//
+	// false is the safe default for a caller that has not decided: the request
+	// still reaches the judge with the facts in front of it, which is strictly
+	// more information than before and never less.
+	HardGate bool
 
 	// RequestType selects which prompt template buildPrompt renders.
 	// Empty defaults to RequestTypeAccess so existing callers (the
@@ -456,6 +476,42 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		}, nil
 	}
 
+	// The binding gate, for the same reason the intent minimum sits above it:
+	// some questions do not need a model.
+	//
+	// agent_credentials is the operator's standing answer to "may this agent hold
+	// this credential at all". Asking a 9B judge to weigh it against a persuasive
+	// intent is asking the wrong question.
+	//
+	// DEFENCE IN DEPTH, not the primary control. Both API paths into this
+	// package already enforce the binding in SQL — internal/api/keeper_request.go
+	// and keeper_execute.go both JOIN agent_credentials and answer 404 for an
+	// unbound credential — so this branch cannot fire through them today. It
+	// exists for a caller that does not, and it is deliberately cheap. Do not
+	// mistake it for the reason unbound credentials are refused.
+	//
+	// Only at the tiers that reach real infrastructure. L1/L2 are self-service
+	// (their value is handed to the agent for the whole run anyway), and inventing
+	// a refusal there would be this file deciding policy that tier.go owns — a
+	// tier may only tighten a verdict.
+	//
+	// Bound==false is a VERIFIED absence; a nil Binding is a failed query, and
+	// gating on it would turn a database blip into a blanket denial of every
+	// L3/L4 request. Omission over guessing, on the enforcement side too.
+	if (isAccessFlow || rt == keeper.RequestTypeExecute) &&
+		req.HardGate && !tier.SelfServiceDelivery && req.Evidence != nil &&
+		req.Evidence.Binding != nil && !req.Evidence.Binding.Bound {
+		g.logger.Info("keeper: agent holds no binding for this credential — denied without a model call",
+			"agent", req.AgentName, "credential", req.CredentialName, "tier", tier.Label)
+		return keeper.GatekeeperResponse{
+			Decision: string(keeper.DecisionDeny),
+			Reason: fmt.Sprintf(
+				"%s credential (%s): %q is not bound to this credential, so there is nothing for the judge to weigh — an operator grants the binding, an intent cannot. Bind it in the agent's credentials, or ask for one this agent already holds.",
+				tier.Label, tier.Blast, req.AgentName),
+			RiskScore: tier.RefusalRisk(),
+		}, nil
+	}
+
 	// Resolve the effective provider+model for this request. When a
 	// per-workspace governance model is configured (M2a #1001), it overrides the
 	// construction-time default; the resolver has already degraded a
@@ -700,6 +756,14 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	// Then the credential's tier, for the same reason: it is our policy, derived
 	// from an operator-set level, and it has to outrank anything the history says.
 	sb.WriteString(tierPolicyBlock(req.SecurityLevel))
+	// Computed facts, ABOVE the conversation fence and alongside the policy for
+	// the same reason those are there: the block's claim to outrank the history
+	// is only credible if agent-authored text cannot precede, restate or
+	// contradict it. Render returns "" when nothing was established, so an
+	// instance with the capability off produces exactly the prompt it did before.
+	if req.Evidence != nil {
+		sb.WriteString(req.Evidence.Render())
+	}
 
 	if req.ConvHistory != "" {
 		delim, ok := randomDelimiter()

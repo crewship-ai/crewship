@@ -240,6 +240,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
 	// Run gatekeeper evaluation
+	facts, hardGate := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:        req,
 		CredentialName: credName,
@@ -247,6 +248,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		AgentName:      agentName,
 		CrewName:       crewName,
 		ConvHistory:    convHistory,
+		Evidence:       facts,
+		HardGate:       hardGate,
 	}
 
 	var gkResp keeper.GatekeeperResponse
