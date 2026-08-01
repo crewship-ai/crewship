@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/keeper/health"
 )
 
 type keeperRequestBody struct {
@@ -249,6 +250,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var gkResp keeper.GatekeeperResponse
+	judgeStart := time.Now()
 	if h.gatekeeper != nil {
 		var evalErr error
 		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
@@ -260,6 +262,18 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				RiskScore: 10,
 			}
 		}
+		// PR-P6: nothing watched Keeper's own verdicts, so #1624 denied every
+		// credential request for several milestones unnoticed. Recorded only
+		// when a judge actually ran — an instance with no gatekeeper wired
+		// denies by configuration, not by malfunction, and counting that would
+		// alarm on every unconfigured install. Fire-and-forget by contract;
+		// see health.Record.
+		health.Record(r.Context(), h.db, h.logger, health.Verdict{
+			WorkspaceID: body.WorkspaceID,
+			Decision:    gkResp.Decision,
+			JudgeFailed: gkResp.InfraFailure || evalErr != nil,
+			Latency:     time.Since(judgeStart),
+		})
 	} else {
 		gkResp = keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),

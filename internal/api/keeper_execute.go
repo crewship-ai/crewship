@@ -27,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/keeper/health"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -442,6 +443,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var gkResp keeper.GatekeeperResponse
+	judgeStart := time.Now()
 	if h.gatekeeper != nil {
 		var evalErr error
 		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
@@ -453,6 +455,16 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 				RiskScore: 10,
 			}
 		}
+		// PR-P6: /execute shares the /request window deliberately. Both flows
+		// are the same judge answering the same way, so splitting them would
+		// halve each sample count and delay the alarm on an instance that
+		// spreads its credential traffic across the two. See health.Record.
+		health.Record(r.Context(), h.db, h.logger, health.Verdict{
+			WorkspaceID: body.WorkspaceID,
+			Decision:    gkResp.Decision,
+			JudgeFailed: gkResp.InfraFailure || evalErr != nil,
+			Latency:     time.Since(judgeStart),
+		})
 	} else {
 		gkResp = keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
