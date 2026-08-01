@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http/httptest"
@@ -92,13 +93,14 @@ func TestMapDirError_WrappedErrNotExist_404(t *testing.T) {
 }
 
 func TestMapDirError_NotConfigured_503(t *testing.T) {
-	// The "crew memory root not configured" string literal is the
-	// signal proposedDirForCrew uses when SetCrewMemoryRoot was never
-	// called. Pin the 503 mapping AND the exact body so an operator
-	// triaging "why is the proposals tab empty" sees the right hint.
+	// errStorageNotConfigured is the sentinel proposedDirForCrew returns
+	// when SetStorageBasePath was never called. Pin the 503 mapping AND
+	// the exact body so an operator triaging "why is the proposals tab
+	// empty" sees the right hint. Wrapped, because errors.Is must keep
+	// working through a caller's fmt.Errorf.
 	h := newProposedHandlerForHelperTest(t)
 	rr := httptest.NewRecorder()
-	h.mapDirError(rr, errors.New("crew memory root not configured"))
+	h.mapDirError(rr, fmt.Errorf("resolve: %w", errStorageNotConfigured))
 	if rr.Code != 503 {
 		t.Errorf("status = %d, want 503 (server-side setup gap)", rr.Code)
 	}

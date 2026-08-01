@@ -9,15 +9,32 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
+
+// hostProposedDir is the on-disk .proposed directory for a crew, derived
+// the same way the handler derives it: the crew tree is keyed by crew ID
+// (it is the host side of the container's /crew bind), with the slug only
+// a subdirectory inside it. These tests used to hardcode
+// {root}/{slug}/topics — which is exactly what the handler wrongly did
+// before #1663.
+func hostProposedDir(t *testing.T, root, crewID, crewSlug string) string {
+	t.Helper()
+	topics, err := memory.HostCrewTopicsDir(root, crewID, crewSlug)
+	if err != nil {
+		t.Fatalf("HostCrewTopicsDir(%q, %q, %q): %v", root, crewID, crewSlug, err)
+	}
+	return filepath.Join(topics, ".proposed")
+}
 
 // stagedSkillFixture writes a parseable SKILL.md under the crew's
 // .proposed directory. Returns (root, file name) so the test can build
 // approve/reject request bodies without re-deriving the layout.
-func stagedSkillFixture(t *testing.T, crewSlug, name string) (string, string) {
+func stagedSkillFixture(t *testing.T, crewID, crewSlug, name string) (string, string) {
 	t.Helper()
 	root := t.TempDir()
-	dir := filepath.Join(root, crewSlug, "topics", ".proposed")
+	dir := hostProposedDir(t, root, crewID, crewSlug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir staged: %v", err)
 	}
@@ -60,16 +77,15 @@ func newSkillProposedHandlerTest(t *testing.T, crewSlug string) (*SkillProposedH
 
 func TestSkillProposed_List_HappyPath(t *testing.T) {
 	h, _, userID, wsID, crewID, slug := newSkillProposedHandlerTest(t, "alpha-crew")
-	root, _ := stagedSkillFixture(t, slug, "rule-one")
-	stagedSkillFixture(t, slug, "rule-two") // second file under same dir; t.TempDir dedupe — re-use root
+	root, _ := stagedSkillFixture(t, crewID, slug, "rule-one")
 	// stagedSkillFixture builds its own root; write a second file into
 	// the same crew dir by hand.
-	dir := filepath.Join(root, slug, "topics", ".proposed")
+	dir := hostProposedDir(t, root, crewID, slug)
 	body := "---\nname: rule-two\ndescription: Use when something else is encountered in the codebase\n---\n"
 	if err := os.WriteFile(filepath.Join(dir, "skill-rule-two.md"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write 2: %v", err)
 	}
-	h.SetCrewMemoryRoot(root)
+	h.SetStorageBasePath(root)
 
 	req := httptest.NewRequest("GET", "/api/v1/skills/proposed?crew_id="+crewID, nil)
 	req = withWorkspaceUser(req, userID, wsID, "MANAGER")
@@ -96,7 +112,7 @@ func TestSkillProposed_List_HappyPath(t *testing.T) {
 
 func TestSkillProposed_List_EmptyCrew_ReturnsEmptyArray(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "no-skills-crew")
-	h.SetCrewMemoryRoot(t.TempDir()) // root exists but crew dir doesn't
+	h.SetStorageBasePath(t.TempDir()) // root exists but crew dir doesn't
 
 	req := httptest.NewRequest("GET", "/api/v1/skills/proposed?crew_id="+crewID, nil)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
@@ -113,7 +129,7 @@ func TestSkillProposed_List_EmptyCrew_ReturnsEmptyArray(t *testing.T) {
 
 func TestSkillProposed_List_NonManager_Returns403(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "rbac-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	req := httptest.NewRequest("GET", "/api/v1/skills/proposed?crew_id="+crewID, nil)
 	req = withWorkspaceUser(req, userID, wsID, "MEMBER")
@@ -127,8 +143,8 @@ func TestSkillProposed_List_NonManager_Returns403(t *testing.T) {
 
 func TestSkillProposed_Approve_HappyPath_ImportsAndDeletesFile(t *testing.T) {
 	h, db, userID, wsID, crewID, slug := newSkillProposedHandlerTest(t, "approve-crew")
-	root, fileName := stagedSkillFixture(t, slug, "approval-test")
-	h.SetCrewMemoryRoot(root)
+	root, fileName := stagedSkillFixture(t, crewID, slug, "approval-test")
+	h.SetStorageBasePath(root)
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: fileName})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/approve", bytes.NewReader(bodyBytes))
@@ -151,7 +167,7 @@ func TestSkillProposed_Approve_HappyPath_ImportsAndDeletesFile(t *testing.T) {
 	}
 
 	// Staging file removed.
-	if _, err := os.Stat(filepath.Join(root, slug, "topics", ".proposed", fileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(hostProposedDir(t, root, crewID, slug), fileName)); !os.IsNotExist(err) {
 		t.Errorf("staging file should be removed; stat err=%v", err)
 	}
 	// Imported skill row exists.
@@ -166,7 +182,7 @@ func TestSkillProposed_Approve_HappyPath_ImportsAndDeletesFile(t *testing.T) {
 
 func TestSkillProposed_Approve_Missing_Returns404(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "missing-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: "skill-does-not-exist.md"})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/approve", bytes.NewReader(bodyBytes))
@@ -181,7 +197,7 @@ func TestSkillProposed_Approve_Missing_Returns404(t *testing.T) {
 
 func TestSkillProposed_Approve_PathTraversal_Rejected(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "traversal-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: "../../../etc/passwd"})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/approve", bytes.NewReader(bodyBytes))
@@ -196,8 +212,8 @@ func TestSkillProposed_Approve_PathTraversal_Rejected(t *testing.T) {
 
 func TestSkillProposed_Reject_DeletesFile(t *testing.T) {
 	h, _, userID, wsID, crewID, slug := newSkillProposedHandlerTest(t, "reject-crew")
-	root, fileName := stagedSkillFixture(t, slug, "to-reject")
-	h.SetCrewMemoryRoot(root)
+	root, fileName := stagedSkillFixture(t, crewID, slug, "to-reject")
+	h.SetStorageBasePath(root)
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: fileName})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/reject", bytes.NewReader(bodyBytes))
@@ -208,14 +224,14 @@ func TestSkillProposed_Reject_DeletesFile(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(root, slug, "topics", ".proposed", fileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(hostProposedDir(t, root, crewID, slug), fileName)); !os.IsNotExist(err) {
 		t.Errorf("reject must delete the file; stat err=%v", err)
 	}
 }
 
 func TestSkillProposed_Reject_AlreadyGone_Idempotent(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "idem-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: "skill-gone.md"})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/reject", bytes.NewReader(bodyBytes))

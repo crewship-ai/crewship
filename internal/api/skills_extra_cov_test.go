@@ -16,10 +16,11 @@ import (
 // table. Local to this file so it can't collide with package symbols.
 func covSkErr(msg string) error { return errors.New(msg) }
 
-// covSkWriteProposed overwrites a staged skill file under
-// {root}/{crewSlug}/topics/.proposed/{fileName}.
-func covSkWriteProposed(root, crewSlug, fileName, content string) error {
-	full := filepath.Join(root, crewSlug, "topics", ".proposed", fileName)
+// covSkWriteProposed overwrites a staged skill file in the crew's host
+// .proposed directory.
+func covSkWriteProposed(t *testing.T, root, crewID, crewSlug, fileName, content string) error {
+	t.Helper()
+	full := filepath.Join(hostProposedDir(t, root, crewID, crewSlug), fileName)
 	return os.WriteFile(full, []byte(content), 0o644)
 }
 
@@ -353,15 +354,15 @@ func TestCovSkProposedListNotConfigured503(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	crewID := seedCrewRow(t, db, "cov-crew-503", wsID, "Crew", "crew-503")
-	// SetCrewMemoryRoot deliberately NOT called → proposedDirForCrew
-	// returns "crew memory root not configured" → mapDirError 503.
+	// SetStorageBasePath deliberately NOT called → proposedDirForCrew
+	// returns errStorageNotConfigured → mapDirError 503.
 
 	req := httptest.NewRequest("GET", "/api/v1/skills/proposed?crew_id="+crewID, nil)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.List(rr, req)
 	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503 (memory root not configured)", rr.Code)
+		t.Errorf("status = %d, want 503 (storage base path not configured)", rr.Code)
 	}
 }
 
@@ -370,7 +371,7 @@ func TestCovSkProposedListUnknownCrew404(t *testing.T) {
 	h := NewSkillProposedHandler(db, newTestLogger())
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	req := httptest.NewRequest("GET", "/api/v1/skills/proposed?crew_id=ghost-crew", nil)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
@@ -421,12 +422,12 @@ func TestCovSkProposedApproveImportFailure422(t *testing.T) {
 
 	// Stage a file that exists but contains content the importer's parser
 	// rejects (no valid YAML frontmatter) → importer error → 422.
-	root, fileName := stagedSkillFixture(t, "bad-content-crew", "broken")
+	root, fileName := stagedSkillFixture(t, crewID, "bad-content-crew", "broken")
 	// Overwrite with junk that fails ParseSKILLMD inside the importer.
-	if err := covSkWriteProposed(root, "bad-content-crew", fileName, "this is not a valid SKILL.md"); err != nil {
+	if err := covSkWriteProposed(t, root, crewID, "bad-content-crew", fileName, "this is not a valid SKILL.md"); err != nil {
 		t.Fatalf("overwrite staged: %v", err)
 	}
-	h.SetCrewMemoryRoot(root)
+	h.SetStorageBasePath(root)
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: fileName})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/approve", bytes.NewReader(bodyBytes))
@@ -474,7 +475,7 @@ func TestCovSkProposedRejectPathTraversal400(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	crewID := seedCrewWithSlug(t, db, wsID, "rej-traverse-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	bodyBytes, _ := json.Marshal(approveBody{CrewID: crewID, FileName: "../../etc/passwd"})
 	req := httptest.NewRequest("POST", "/api/v1/skills/proposed/reject", bytes.NewReader(bodyBytes))

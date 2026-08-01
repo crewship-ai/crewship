@@ -2,11 +2,15 @@ package consolidate
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // TestPostRunTrigger_FiresOnFirstCall asserts the trigger kicks off
@@ -24,10 +28,10 @@ func TestPostRunTrigger_FiresOnFirstCall(t *testing.T) {
 	c := &Consolidator{DB: db, Journal: w, Summarizer: summ, Logger: quietLogger()}
 
 	tr := NewPostRunTrigger(c, PostRunTriggerOptions{
-		Debounce:       time.Minute,
-		CrewMemoryRoot: t.TempDir(),
-		Since:          time.Hour,
-		MinEntries:     5,
+		Debounce:        time.Minute,
+		StorageBasePath: t.TempDir(),
+		Since:           time.Hour,
+		MinEntries:      5,
 	})
 
 	fired := tr.OnRunCompleted(context.Background(), "ws_x", "crew_y", "crew-y-slug")
@@ -67,11 +71,11 @@ func TestPostRunTrigger_DebouncesSecondCall(t *testing.T) {
 	clock := &fakeClock{now: nowAt}
 
 	tr := NewPostRunTrigger(c, PostRunTriggerOptions{
-		Debounce:       time.Minute,
-		CrewMemoryRoot: t.TempDir(),
-		Since:          time.Hour,
-		MinEntries:     5,
-		Now:            clock.Now,
+		Debounce:        time.Minute,
+		StorageBasePath: t.TempDir(),
+		Since:           time.Hour,
+		MinEntries:      5,
+		Now:             clock.Now,
 	})
 
 	if !tr.OnRunCompleted(context.Background(), "ws_x", "crew_y", "slug") {
@@ -99,11 +103,11 @@ func TestPostRunTrigger_FiresAfterDebounceWindow(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)}
 
 	tr := NewPostRunTrigger(c, PostRunTriggerOptions{
-		Debounce:       time.Minute,
-		CrewMemoryRoot: t.TempDir(),
-		Since:          time.Hour,
-		MinEntries:     5,
-		Now:            clock.Now,
+		Debounce:        time.Minute,
+		StorageBasePath: t.TempDir(),
+		Since:           time.Hour,
+		MinEntries:      5,
+		Now:             clock.Now,
 	})
 
 	if !tr.OnRunCompleted(context.Background(), "ws_x", "crew_y", "slug") {
@@ -131,10 +135,10 @@ func TestPostRunTrigger_PerCrewIsolation(t *testing.T) {
 
 	c := &Consolidator{DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: `[]`}, Logger: quietLogger()}
 	tr := NewPostRunTrigger(c, PostRunTriggerOptions{
-		Debounce:       time.Minute,
-		CrewMemoryRoot: t.TempDir(),
-		Since:          time.Hour,
-		MinEntries:     5,
+		Debounce:        time.Minute,
+		StorageBasePath: t.TempDir(),
+		Since:           time.Hour,
+		MinEntries:      5,
 	})
 
 	if !tr.OnRunCompleted(context.Background(), "ws_x", "crew_a", "a") {
@@ -188,4 +192,90 @@ type countingSummarizer struct {
 func (s *countingSummarizer) Summarize(_ context.Context, _ string) (string, error) {
 	s.counter.Add(1)
 	return s.reply, nil
+}
+
+// TestPostRunTrigger_WritesIntoTheCrewBindSource is the post-run half of
+// #1663: the sleep-time trigger derived its OutputDir from the same
+// container-absolute root the cron runner did, so an idle-time
+// consolidation wrote pins.md at the host filesystem root too.
+func TestPostRunTrigger_WritesIntoTheCrewBindSource(t *testing.T) {
+	t.Setenv("CREWSHIP_CONSOLIDATE_HITL", "")
+	db := openDB(t)
+	defer db.Close()
+	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
+	defer w.Close()
+	applyV89Schema(t, db)
+
+	const (
+		crewID   = "crew_y"
+		crewSlug = "crew-y-slug"
+		needle   = "post-run-pins-canary"
+	)
+	seedPriorityEntry(t, db, "j_pin_postrun", crewID, journal.PriorityPin, needle)
+
+	basePath := t.TempDir()
+	c := &Consolidator{DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: `[]`}, Logger: quietLogger()}
+	tr := NewPostRunTrigger(c, PostRunTriggerOptions{
+		Debounce:        time.Minute,
+		StorageBasePath: basePath,
+		Since:           time.Hour,
+		MinEntries:      5,
+	})
+
+	if !tr.OnRunCompleted(context.Background(), "ws_test", crewID, crewSlug) {
+		t.Fatalf("first call should fire")
+	}
+
+	wantPins := filepath.Join(
+		hostPathForContainerPath(t, basePath, crewID, memory.ContainerCrewTopicsDir(crewSlug)),
+		"pins.md",
+	)
+	deadline := time.Now().Add(2 * time.Second)
+	var body []byte
+	for time.Now().Before(deadline) {
+		b, err := os.ReadFile(wantPins)
+		if err == nil {
+			body = b
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if body == nil {
+		t.Fatalf("post-run consolidation never wrote pins.md at %s — the trigger is not resolving the host side of %s",
+			wantPins, memory.ContainerCrewTopicsDir(crewSlug))
+	}
+	if !strings.Contains(string(body), needle) {
+		t.Errorf("pins.md missing the pinned entry:\n%s", body)
+	}
+}
+
+// TestPostRunTrigger_RefusesUnresolvablePaths: an unsafe slug or an
+// unconfigured storage root must not fire, and — the part that is easy
+// to get wrong — must not burn the crew's debounce window either, so a
+// later well-formed call still gets through.
+func TestPostRunTrigger_RefusesUnresolvablePaths(t *testing.T) {
+	db := openDB(t)
+	defer db.Close()
+	c := &Consolidator{DB: db, Summarizer: &stubSummarizer{Reply: `[]`}, Logger: quietLogger()}
+
+	unconfigured := NewPostRunTrigger(c, PostRunTriggerOptions{Debounce: time.Minute})
+	if unconfigured.OnRunCompleted(context.Background(), "ws", "crew", "slug") {
+		t.Errorf("no storage base path configured → must not fire (writing to a guessed root is #1663)")
+	}
+
+	tr := NewPostRunTrigger(c, PostRunTriggerOptions{
+		Debounce:        time.Minute,
+		StorageBasePath: t.TempDir(),
+		Since:           time.Hour,
+		MinEntries:      5,
+	})
+	for _, slug := range []string{"", "..", "a/b", `a\b`, "/etc"} {
+		if tr.OnRunCompleted(context.Background(), "ws_test", "crew_test", slug) {
+			t.Errorf("slug %q escapes the crew tree and must be refused", slug)
+		}
+	}
+	// The refusals did not stamp the debounce map.
+	if !tr.OnRunCompleted(context.Background(), "ws_test", "crew_test", "ok-slug") {
+		t.Errorf("a refused call consumed the debounce window — a malformed slug must not suppress the next good run")
+	}
 }

@@ -20,7 +20,7 @@ func authorRequestFor(crewID, body string) *http.Request {
 func TestSkillAuthor_StagesSkillForReview(t *testing.T) {
 	h, _, userID, wsID, crewID, slug := newSkillProposedHandlerTest(t, "author-crew")
 	root := t.TempDir()
-	h.SetCrewMemoryRoot(root)
+	h.SetStorageBasePath(root)
 
 	req := withWorkspaceUser(authorRequestFor(crewID, authoredSkillBody), userID, wsID, "AGENT")
 	rr := httptest.NewRecorder()
@@ -45,7 +45,7 @@ func TestSkillAuthor_StagesSkillForReview(t *testing.T) {
 	}
 	// The skill must land in the crew's .proposed directory, where the
 	// existing review/approve flow already looks.
-	staged := filepath.Join(root, slug, "topics", ".proposed", "skill-deploy-staging.md")
+	staged := filepath.Join(hostProposedDir(t, root, crewID, slug), "skill-deploy-staging.md")
 	if _, err := os.Stat(staged); err != nil {
 		t.Fatalf("expected staged file at %s: %v", staged, err)
 	}
@@ -53,7 +53,7 @@ func TestSkillAuthor_StagesSkillForReview(t *testing.T) {
 
 func TestSkillAuthor_MissingContent_400(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "empty-author-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	req := withWorkspaceUser(authorRequestFor(crewID, `{"content":""}`), userID, wsID, "AGENT")
 	rr := httptest.NewRecorder()
@@ -66,7 +66,7 @@ func TestSkillAuthor_MissingContent_400(t *testing.T) {
 
 func TestSkillAuthor_UnknownCrew_404(t *testing.T) {
 	h, _, userID, wsID, _, _ := newSkillProposedHandlerTest(t, "real-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	req := withWorkspaceUser(authorRequestFor("crew_does_not_exist", authoredSkillBody), userID, wsID, "AGENT")
 	rr := httptest.NewRecorder()
@@ -82,7 +82,7 @@ func TestSkillAuthor_UnknownCrew_404(t *testing.T) {
 // casing. This exercises author -> approve end to end.
 func TestSkillAuthor_StagedSkillIsApprovable(t *testing.T) {
 	h, db, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "promote-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	// 1. Agent authors the skill (staged).
 	authReq := withWorkspaceUser(authorRequestFor(crewID, authoredSkillBody), userID, wsID, "AGENT")
@@ -125,7 +125,7 @@ func TestSkillAuthor_StagedSkillIsApprovable(t *testing.T) {
 // review item, so a human approves it in the UI (not only via the CLI).
 func TestSkillAuthor_SurfacesInboxReviewItem(t *testing.T) {
 	h, db, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "inbox-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	req := withWorkspaceUser(authorRequestFor(crewID, authoredSkillBody), userID, wsID, "AGENT")
 	rr := httptest.NewRecorder()
@@ -161,7 +161,7 @@ func TestSkillAuthor_SurfacesInboxReviewItem(t *testing.T) {
 // from the inbox card or the CLI), so it leaves the manager's queue.
 func TestSkillAuthor_ApproveResolvesInboxItem(t *testing.T) {
 	h, db, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "inbox-resolve-crew")
-	h.SetCrewMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	authReq := withWorkspaceUser(authorRequestFor(crewID, authoredSkillBody), userID, wsID, "AGENT")
 	authRR := httptest.NewRecorder()

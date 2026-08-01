@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -51,11 +50,19 @@ type RunnerOptions struct {
 	// payload. No runtime meaning.
 	LLMModel string
 
-	// CrewMemoryRoot is the parent directory under which each crew's
-	// learned-*.md files are written. The effective output directory for
-	// a crew is filepath.Join(CrewMemoryRoot, crewSlug, "topics"). If
-	// empty the runner defaults to "/crew/shared/.memory".
-	CrewMemoryRoot string
+	// StorageBasePath is the host-side storage root — cfg.Storage.BasePath,
+	// the same value the container provider receives as OutputBasePath.
+	// Each crew's output directory is resolved from it per crew, by
+	// memory.HostCrewTopicsDir, because the tree the container sees at
+	// /crew is a bind of {StorageBasePath}/crews/{crewID}: there is no
+	// single host directory that is "the crew memory root" for all crews.
+	//
+	// Empty means storage is unconfigured, and consolidation writes
+	// nothing. It deliberately has no default: the previous default was
+	// the container-absolute "/crew/shared/.memory", which a host process
+	// MkdirAll'd at the host filesystem root, outside every bind source
+	// (#1663).
+	StorageBasePath string
 
 	// BlobRoot is propagated to every per-crew Config as the content-
 	// addressed memory version blob directory. Empty disables
@@ -176,9 +183,6 @@ func applyDefaults(opts RunnerOptions) RunnerOptions {
 	if opts.MinEntries <= 0 {
 		opts.MinEntries = 10
 	}
-	if opts.CrewMemoryRoot == "" {
-		opts.CrewMemoryRoot = "/crew/shared/.memory"
-	}
 	if opts.MemoryVersionsRetention < 0 {
 		opts.MemoryVersionsRetention = 0
 	} else if opts.MemoryVersionsRetention == 0 {
@@ -241,13 +245,24 @@ func consolidateAllCrews(ctx context.Context, db *sql.DB, c *Consolidator, opts 
 			return ctx.Err()
 		default:
 		}
+		// Resolve the output dir per crew: the container's
+		// /crew/shared/.memory is a bind of
+		// {StorageBasePath}/crews/{crewID}, so the host path depends on
+		// the crew id and cannot be precomputed once for the tick. A
+		// crew we cannot resolve a path for is an error, not a fallback
+		// — writing to a guessed root is how #1663 happened.
+		outputDir, oerr := memory.HostCrewTopicsDir(opts.StorageBasePath, cr.ID, cr.Slug)
+		if oerr != nil {
+			errs = append(errs, fmt.Errorf("crew %s: resolve output dir: %w", cr.ID, oerr))
+			continue
+		}
 		cfg := Config{
 			WorkspaceID:  cr.WorkspaceID,
 			CrewID:       cr.ID,
 			Since:        opts.ConsolidationSince,
 			MinEntries:   opts.MinEntries,
 			LLMModel:     opts.LLMModel,
-			OutputDir:    filepath.Join(opts.CrewMemoryRoot, cr.Slug, "topics"),
+			OutputDir:    outputDir,
 			ProposalMode: hitlEnabled(),
 			BlobRoot:     opts.BlobRoot,
 		}

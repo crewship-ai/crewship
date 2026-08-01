@@ -156,21 +156,26 @@ type Router struct {
 	// the wrapped muxes above, retained so a runtime override from the admin
 	// Rate Limiters console (ratelimitStore.OnChange) can retune them in place
 	// — SetReqPerMin — without rebuilding the handler chain.
-	authRL                *RateLimiter
-	apiRL                 *RateLimiter
-	credTestRL            *RateLimiter
-	credRevealRL          *RateLimiter
-	ratelimitStore        *ratelimitcfg.Store // runtime-tunable limiter values; nil → shipped defaults
-	cappedMux             http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
-	cliExemptNeg          *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
-	journal               journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
-	consolidator          *consolidate.Consolidator
-	consolidateMemoryRoot string
+	authRL         *RateLimiter
+	apiRL          *RateLimiter
+	credTestRL     *RateLimiter
+	credRevealRL   *RateLimiter
+	ratelimitStore *ratelimitcfg.Store // runtime-tunable limiter values; nil → shipped defaults
+	cappedMux      http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
+	cliExemptNeg   *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
+	journal        journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
+	consolidator   *consolidate.Consolidator
 	// outputBasePath is the host-side root that the container
 	// provider bind-mounts. PR-E F6 uses this to resolve per-agent
 	// and per-crew PERSONA + peers/ paths without going through the
 	// container. Empty → persona / peers endpoints respond 503
 	// "storage not configured" rather than 404.
+	//
+	// It is also the root the consolidator surfaces resolve their
+	// per-crew memory output from: there used to be a second field
+	// holding a supposed "crew memory root", but a host process has no
+	// such thing — /crew/shared/.memory is per-crew bind of
+	// {outputBasePath}/crews/{crewID} (#1663).
 	outputBasePath string
 	// memoryVersionsBlobRoot is the v90 content-addressed blob
 	// directory ApproveProposal records under. Empty disables

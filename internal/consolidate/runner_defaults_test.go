@@ -27,8 +27,11 @@ func TestApplyDefaults_AllZeroValues(t *testing.T) {
 	if got.MinEntries != 10 {
 		t.Errorf("MinEntries = %d, want 10", got.MinEntries)
 	}
-	if got.CrewMemoryRoot != "/crew/shared/.memory" {
-		t.Errorf("CrewMemoryRoot = %q, want default path", got.CrewMemoryRoot)
+	// StorageBasePath has no default on purpose — see
+	// TestRunnerDefaults_NoContainerAbsoluteMemoryRoot. Defaulting it was
+	// #1663.
+	if got.StorageBasePath != "" {
+		t.Errorf("StorageBasePath = %q, want empty (no default)", got.StorageBasePath)
 	}
 	if got.MemoryVersionsRetention != 30*24*time.Hour {
 		t.Errorf("MemoryVersionsRetention = %v, want 30d default", got.MemoryVersionsRetention)
@@ -50,7 +53,7 @@ func TestApplyDefaults_PreservesExplicitValues(t *testing.T) {
 		CompactionHourUTC:     7,
 		CompactionOlderThan:   60 * 24 * time.Hour,
 		MinEntries:            100,
-		CrewMemoryRoot:        "/custom/path",
+		StorageBasePath:       "/custom/path",
 	}
 	got := applyDefaults(in)
 	if got.ConsolidationInterval != in.ConsolidationInterval {
@@ -68,8 +71,8 @@ func TestApplyDefaults_PreservesExplicitValues(t *testing.T) {
 	if got.CompactionHourUTC != 7 {
 		t.Errorf("CompactionHourUTC overwritten: %d", got.CompactionHourUTC)
 	}
-	if got.CrewMemoryRoot != in.CrewMemoryRoot {
-		t.Errorf("CrewMemoryRoot overwritten: %q", got.CrewMemoryRoot)
+	if got.StorageBasePath != in.StorageBasePath {
+		t.Errorf("StorageBasePath overwritten: %q", got.StorageBasePath)
 	}
 }
 

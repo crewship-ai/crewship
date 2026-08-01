@@ -3,10 +3,10 @@ package consolidate
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // PostRunTrigger fires the consolidator opportunistically when an
@@ -30,14 +30,14 @@ import (
 // against the same journal window). The debounce exists for cost,
 // not correctness.
 type PostRunTrigger struct {
-	consolidator   *Consolidator
-	debounce       time.Duration
-	crewMemoryRoot string
-	blobRoot       string
-	since          time.Duration
-	minEntries     int
-	logger         *slog.Logger
-	now            func() time.Time
+	consolidator    *Consolidator
+	debounce        time.Duration
+	storageBasePath string
+	blobRoot        string
+	since           time.Duration
+	minEntries      int
+	logger          *slog.Logger
+	now             func() time.Time
 
 	mu       sync.Mutex
 	lastFire map[string]time.Time
@@ -46,12 +46,15 @@ type PostRunTrigger struct {
 // PostRunTriggerOptions parameterises the trigger. Zero values yield
 // production defaults (30 min debounce, 6h look-back, MinEntries 10).
 type PostRunTriggerOptions struct {
-	Debounce       time.Duration
-	CrewMemoryRoot string
-	BlobRoot       string
-	Since          time.Duration
-	MinEntries     int
-	Logger         *slog.Logger
+	Debounce time.Duration
+	// StorageBasePath is cfg.Storage.BasePath. The per-crew output dir is
+	// resolved from it by memory.HostCrewTopicsDir — see the field of the
+	// same name on RunnerOptions for why there is no single root.
+	StorageBasePath string
+	BlobRoot        string
+	Since           time.Duration
+	MinEntries      int
+	Logger          *slog.Logger
 	// Now overrides time.Now for testability. Production leaves
 	// nil and the trigger uses the real clock.
 	Now func() time.Time
@@ -64,9 +67,6 @@ type PostRunTriggerOptions struct {
 func NewPostRunTrigger(c *Consolidator, opts PostRunTriggerOptions) *PostRunTrigger {
 	if opts.Debounce <= 0 {
 		opts.Debounce = 30 * time.Minute
-	}
-	if opts.CrewMemoryRoot == "" {
-		opts.CrewMemoryRoot = "/crew/shared/.memory"
 	}
 	if opts.Since <= 0 {
 		opts.Since = 6 * time.Hour
@@ -81,15 +81,15 @@ func NewPostRunTrigger(c *Consolidator, opts PostRunTriggerOptions) *PostRunTrig
 		opts.Now = time.Now
 	}
 	return &PostRunTrigger{
-		consolidator:   c,
-		debounce:       opts.Debounce,
-		crewMemoryRoot: opts.CrewMemoryRoot,
-		blobRoot:       opts.BlobRoot,
-		since:          opts.Since,
-		minEntries:     opts.MinEntries,
-		logger:         opts.Logger,
-		now:            opts.Now,
-		lastFire:       make(map[string]time.Time),
+		consolidator:    c,
+		debounce:        opts.Debounce,
+		storageBasePath: opts.StorageBasePath,
+		blobRoot:        opts.BlobRoot,
+		since:           opts.Since,
+		minEntries:      opts.MinEntries,
+		logger:          opts.Logger,
+		now:             opts.Now,
+		lastFire:        make(map[string]time.Time),
 	}
 }
 
@@ -110,17 +110,16 @@ func (t *PostRunTrigger) OnRunCompleted(ctx context.Context, workspaceID, crewID
 	if workspaceID == "" || crewID == "" {
 		return false
 	}
-	// crewSlug becomes a path segment in OutputDir below. Reject any
-	// value that could escape crewMemoryRoot. The DB-side slug column
-	// is unique-per-workspace but its filesystem-safety contract is
-	// owned by this layer.
-	if crewSlug == "" ||
-		strings.ContainsAny(crewSlug, `/\`) ||
-		strings.Contains(crewSlug, "..") ||
-		filepath.Clean(crewSlug) != crewSlug ||
-		filepath.IsAbs(crewSlug) {
-		t.logger.Warn("post-run consolidator: rejected malformed crew slug",
-			"workspace_id", workspaceID, "crew_id", crewID, "crew_slug", crewSlug)
+	// crewID and crewSlug both become path segments in OutputDir. The DB
+	// columns carry a uniqueness constraint, not a filesystem-safety one,
+	// so the barrier lives here — inside HostCrewTopicsDir, which is the
+	// same resolver the cron runner uses, so the two paths cannot drift.
+	// Resolved before the debounce is stamped: a run we refuse to write
+	// must not consume the crew's debounce window.
+	outputDir, err := memory.HostCrewTopicsDir(t.storageBasePath, crewID, crewSlug)
+	if err != nil {
+		t.logger.Warn("post-run consolidator: cannot resolve crew memory output dir",
+			"workspace_id", workspaceID, "crew_id", crewID, "crew_slug", crewSlug, "err", err)
 		return false
 	}
 	key := workspaceID + ":" + crewID
@@ -143,7 +142,7 @@ func (t *PostRunTrigger) OnRunCompleted(ctx context.Context, workspaceID, crewID
 		CrewID:       crewID,
 		Since:        t.since,
 		MinEntries:   t.minEntries,
-		OutputDir:    filepath.Join(t.crewMemoryRoot, crewSlug, "topics"),
+		OutputDir:    outputDir,
 		BlobRoot:     t.blobRoot,
 		ProposalMode: hitlEnabled(),
 	}

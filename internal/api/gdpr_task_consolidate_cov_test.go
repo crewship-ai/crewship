@@ -376,7 +376,7 @@ func TestCovGTC_ConsolidateRun_ValidCrew_HappyPath_202(t *testing.T) {
 		Journal:    noopEmitter{},
 		Summarizer: &stubSummarizer{},
 	})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	body := bytes.NewBufferString(`{"crew_id":"` + crewID + `","since":"6h"}`)
 	req := httptest.NewRequest("POST", "/api/v1/consolidate/run", body)
@@ -435,7 +435,7 @@ func TestCovGTC_ConsolidateRunOnce_CrewScoped_OK(t *testing.T) {
 	h := NewConsolidateHandler(db, newTestLogger())
 	h.SetJournal(capJ)
 	h.SetConsolidator(&consolidate.Consolidator{DB: db, Journal: noopEmitter{}, Summarizer: &stubSummarizer{}})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	// Drive runOnce synchronously: crew-scoped success path → emits "ok".
 	h.runOnce(context.Background(), wsID, crewID, time.Hour, "worker-cov")
@@ -478,7 +478,7 @@ func TestCovGTC_ConsolidateRunOnce_Workspacewide_OK(t *testing.T) {
 	h := NewConsolidateHandler(db, newTestLogger())
 	h.SetJournal(capJ)
 	h.SetConsolidator(&consolidate.Consolidator{DB: db, Journal: noopEmitter{}, Summarizer: &stubSummarizer{}})
-	h.SetMemoryRoot(t.TempDir())
+	h.SetStorageBasePath(t.TempDir())
 
 	// Empty crew id → enumerate all crews in the workspace, success path.
 	h.runOnce(context.Background(), wsID, "", time.Hour, "worker-cov")

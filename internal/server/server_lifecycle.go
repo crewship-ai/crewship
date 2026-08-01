@@ -275,8 +275,16 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.cfg.Storage.MemoryRoot != "" {
 			blobRoot = filepath.Join(s.cfg.Storage.MemoryRoot, "versions")
 		}
+		// StorageBasePath is the host root the container provider
+		// bind-mounts per crew; the runner resolves each crew's
+		// learned-*.md / pins.md directory under it. Leaving it unset
+		// used to fall back to the container-absolute
+		// "/crew/shared/.memory", so this host process wrote the crew's
+		// consolidated memory at the host filesystem root where no
+		// container could read it (#1663).
 		consolidate.StartBackground(ctx, s.db, s.journalWriter, summarizer, consolidate.RunnerOptions{
-			BlobRoot: blobRoot,
+			BlobRoot:        blobRoot,
+			StorageBasePath: s.cfg.Storage.BasePath,
 		})
 
 		// Memory audit watcher: catches direct filesystem writes by
