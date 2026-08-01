@@ -353,6 +353,21 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+### Where to set this in the product
+
+**Admin → Keeper → Judge profile**, directly beneath the card that names the
+model. That card answers *what decides*; the profile answers *under what rules*.
+
+Every row shows where its value came from — a built-in default, the preset you
+picked, or an override somebody set here — because "off by default" and
+"somebody turned this off" look identical without it. Saving sends only what you
+changed, so it will not overwrite a setting made from the CLI or by another
+admin.
+
+Two switches the CLI accepts are deliberately absent from the page: `precedent`
+and `consistency-samples` are stored but not yet implemented, and a control that
+does nothing is a promise the product does not keep.
+
 ### `crewship seed` brings the watchdog up with it
 
 A demo seed configures the Keeper as one of its phases, so a fresh instance has a

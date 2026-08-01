@@ -10,6 +10,7 @@ import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
 import { KeeperJudgeCard } from "@/components/features/admin/keeper-judge-card"
+import { KeeperProfileCard } from "@/components/features/admin/keeper-profile-card"
 import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
 import { cn } from "@/lib/utils"
 import { redactSecrets } from "../utils"
@@ -293,6 +294,12 @@ export const KeeperTab = React.memo(function KeeperTab({
       </div>
 
       <KeeperJudgeCard workspaceId={workspaceId} />
+
+      {/* Directly beneath the judge, because it is the same subject at a
+          different question: that card says WHAT decides, this one says under
+          what rules. Above the workspace override for the same reason the judge
+          card is — instance-wide first, then the narrower scope. */}
+      <KeeperProfileCard workspaceId={workspaceId} />
 
       {/* The same question at the narrower scope, directly beneath the answer it
           overrides — including the hosted-provider + vault-key choice. */}
