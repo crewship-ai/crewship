@@ -36,6 +36,12 @@ type keeperLogEntry struct {
 	OllamaRawResponse *string `json:"ollama_raw_response,omitempty"`
 	CreatedAt         string  `json:"created_at"`
 	DecidedAt         *string `json:"decided_at"`
+	// JudgeProfile is the capability set the verdict was taken under, stamped at
+	// decision time. Surfaced because a stamp nothing can read is not provenance:
+	// the eval harness replays these rows, and a corpus mixing verdicts taken
+	// with the evidence block against verdicts taken without it measures two
+	// regimes and reports the difference as a difference between models.
+	JudgeProfile *string `json:"judge_profile,omitempty"`
 }
 
 // List returns the most recent keeper requests with agent and credential names.
@@ -79,7 +85,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 			kr.intent, kr.request_type, kr.command,
 			kr.decision, kr.reason, kr.risk_score, kr.exit_code,
 			kr.ollama_prompt, kr.ollama_raw_response,
-			kr.created_at, kr.decided_at
+			kr.created_at, kr.decided_at, kr.judge_profile
 		FROM keeper_requests kr
 		LEFT JOIN agents a ON a.id = kr.requesting_agent_id
 		LEFT JOIN credentials c ON c.id = kr.credential_id
@@ -102,7 +108,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 			&e.Intent, &e.RequestType, &e.Command,
 			&e.Decision, &e.Reason, &e.RiskScore, &e.ExitCode,
 			&e.OllamaPrompt, &e.OllamaRawResponse,
-			&e.CreatedAt, &e.DecidedAt,
+			&e.CreatedAt, &e.DecidedAt, &e.JudgeProfile,
 		); err != nil {
 			h.logger.Error("keeper log: scan failed", "error", err)
 			continue

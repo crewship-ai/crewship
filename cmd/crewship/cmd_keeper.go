@@ -505,6 +505,7 @@ type keeperRequestEntry struct {
 	Decision     *string `json:"decision"`
 	Reason       *string `json:"reason"`
 	RiskScore    *int    `json:"risk_score"`
+	JudgeProfile *string `json:"judge_profile,omitempty"`
 	ExitCode     *int    `json:"exit_code,omitempty"`
 	CreatedAt    string  `json:"created_at"`
 	DecidedAt    *string `json:"decided_at"`
