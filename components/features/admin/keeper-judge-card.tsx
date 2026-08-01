@@ -524,8 +524,16 @@ export function KeeperJudgeCard({ workspaceId }: { workspaceId: string | null | 
             onClick={() => { void handleReset() }}
             disabled={resetting}
             data-testid="keeper-judge-reset"
+            // Names its real scope. DELETE /admin/keeper/config drops the whole
+            // keeper_runtime_settings row, and since the judge profile landed
+            // that row also holds the evidence block, the unbound-credential
+            // refusal, the escalation floor and the prompt budget — settings
+            // shown on the card BENEATH this one, two of which are security
+            // controls. "Reset to inherited" scoped to the fields above it when
+            // it was written and stopped being true when that card was added.
+            title="Clears every Keeper override on this instance — the judge above AND the judge profile below it (computed facts, unbound-credential refusal, human-approval floor, prompt budget)."
           >
-            {resetting ? "Resetting…" : "Reset to inherited"}
+            {resetting ? "Resetting…" : "Reset all Keeper overrides"}
           </Button>
         ) : undefined
       }
