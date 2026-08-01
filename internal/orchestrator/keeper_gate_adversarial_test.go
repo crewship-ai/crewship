@@ -54,7 +54,7 @@ func TestBuildCredFileScript_KeeperMatrix_AllTypes(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
-				script, count, err := buildCredFileScript([]Credential{r.cred}, "/secrets/agent-a", keeper)
+				script, count, _, err := buildCredFileScript([]Credential{r.cred}, "/secrets/agent-a", keeper)
 				if err != nil {
 					t.Fatalf("buildCredFileScript: %v", err)
 				}
@@ -101,7 +101,7 @@ func TestBuildCredFileScript_DuplicateSecretEnvVars(t *testing.T) {
 		{Type: "SECRET", EnvVarName: "DUP", PlainValue: "b"},
 	}
 
-	onScript, onCount, err := buildCredFileScript(creds, "/secrets/agent-a", true)
+	onScript, onCount, _, err := buildCredFileScript(creds, "/secrets/agent-a", true)
 	if err != nil {
 		t.Fatalf("keeper on: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestBuildCredFileScript_DuplicateSecretEnvVars(t *testing.T) {
 		t.Errorf("keeper ON: duplicate SECRETs must both be withheld; count=%d script=%q", onCount, onScript)
 	}
 
-	offScript, offCount, err := buildCredFileScript(creds, "/secrets/agent-a", false)
+	offScript, offCount, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
 	if err != nil {
 		t.Fatalf("keeper off: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestBuildCredFileScript_EmptySecretBothKeeperStates(t *testing.T) {
 		emptyVal := []Credential{{Type: "SECRET", EnvVarName: "X", PlainValue: ""}}
 		emptyName := []Credential{{Type: "SECRET", EnvVarName: "", PlainValue: "v"}}
 		for _, creds := range [][]Credential{emptyVal, emptyName} {
-			s, c, err := buildCredFileScript(creds, "/secrets/agent-a", keeper)
+			s, c, _, err := buildCredFileScript(creds, "/secrets/agent-a", keeper)
 			if err != nil {
 				t.Fatalf("keeper=%v: unexpected error: %v", keeper, err)
 			}
@@ -158,7 +158,7 @@ func TestBuildCredFileScript_FullMixKeeperOn(t *testing.T) {
 		{Type: "CERTIFICATE", EnvVarName: "CA", PlainValue: "cert"},
 		{Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk"}, // always skipped
 	}
-	script, count, err := buildCredFileScript(creds, "/secrets/agent-a", true)
+	script, count, _, err := buildCredFileScript(creds, "/secrets/agent-a", true)
 	if err != nil {
 		t.Fatalf("buildCredFileScript: %v", err)
 	}

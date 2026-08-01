@@ -284,23 +284,29 @@ func TestFieldDelivery_FieldCannotShadowAnotherFieldsName(t *testing.T) {
 
 // TestFieldDelivery_InvalidDerivedNameIsDropped covers the legacy crew-link
 // source, which delivers under credentials.name — a NAME, not a slot, so it may
-// contain characters no environment variable can. "github-acme" + region
-// derives "github-acme_REGION", which is not a legal env var name.
+// contain characters no environment variable can.
 //
-// Dropping it here is load-bearing beyond tidiness: buildCredFileScript returns
-// an error for the first invalid name it sees, and that error aborts the whole
-// credential-file script — one malformed field would leave the agent with NO
-// secrets at all.
+// This test used to seed "github-acme" and assert that the credential arrived
+// under its raw name while its part was dropped, because "github-acme_REGION"
+// is not a legal identifier. #1657 removed that case: the slot is normalised to
+// GITHUB_ACME before parts are attached, so the part now derives
+// GITHUB_ACME_REGION and lands (see TestCrewDelivery_FieldsHangOffTheNormalisedSlot).
+//
+// What survives is the name from which no variable can be derived at all. The
+// credential has no slot, so its parts have nothing to hang off — and the
+// credential itself is not delivered either, so the agent gets neither half
+// rather than a part whose prefix names nothing.
 func TestFieldDelivery_InvalidDerivedNameIsDropped(t *testing.T) {
 	db := setupTestDB(t)
 	e := seedCrewDeliveryEnv(t, db)
-	seedCredentialEnc(t, db, e.wsID, e.userID, "fd-dash", "github-acme", "tok")
+	seedCredentialEnc(t, db, e.wsID, e.userID, "fd-dash", "github acme", "tok")
 	seedCredentialField(t, db, "fd-dash", "region", "eu-central-1", false, 0)
 	linkCredToCrew(t, db, "fd-dash", e.crewA)
 
 	for name, got := range allConsumers(t, db, e.agentA) {
-		if len(got) != 1 || got["github-acme"] != "tok" {
-			t.Errorf("%s: delivered %v, want only the credential itself — no derivable env var name exists for its field", name, got)
+		if len(got) != 0 {
+			t.Errorf("%s: delivered %v, want nothing — no variable can be derived from the "+
+				"credential's name, so neither it nor its part has a name to arrive under", name, got)
 		}
 	}
 }

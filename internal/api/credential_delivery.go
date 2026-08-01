@@ -194,6 +194,23 @@ type deliveredCredential struct {
 	FieldConflicts []deliveredFieldConflict
 }
 
+// deliveredSlotNotice records what happened to one credential's delivery slot:
+// it was normalised onto a legal environment variable name, or it could not be
+// and the credential is not delivered at all.
+//
+// Delivered is the name the container will actually see, or "" when the
+// credential is not delivered. Requested is what the operator's row said — a
+// display name from the crew link, a binding's slot, or an explicit grant's
+// env_var_name — so the report can name the thing the operator typed rather
+// than the thing we derived from it. Never a value: this is a map, not a
+// reveal (§2.6 L9).
+type deliveredSlotNotice struct {
+	CredentialID string
+	Requested    string
+	Delivered    string
+	Reason       string
+}
+
 // loadDeliveredCredentials runs the shared derivation for one agent.
 //
 // Notes on the SQL that are easy to lose in review:
@@ -233,11 +250,20 @@ type deliveredCredential struct {
 //     depth behind trg_credential_bindings_workspace_check and its
 //     credential_crews twin. Tested directly (the triggers are dropped in those
 //     tests) so it cannot be deleted as "obviously redundant".
-func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) ([]deliveredCredential, error) {
+//
+// The second return is every credential whose slot was NOT the string the query
+// produced — normalised onto a legal environment variable name, or refused one
+// and dropped from the set entirely (#1657). It is a return value rather than a
+// field on the rows because a dropped credential has no row left to hang it on:
+// leaving it in the slice with a blank slot would ship its ciphertext to the
+// sidecar under no name at all. Every caller must do something with it; the
+// three boot/delegation paths log it, the resolution view reports it to the
+// operator.
+func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) ([]deliveredCredential, []deliveredSlotNotice, error) {
 	rows, err := db.QueryContext(ctx, agentDeliveredCredentialsSQL,
 		agentID, agentID, leaseComparisonNow())
 	if err != nil {
-		return nil, fmt.Errorf("query delivered credentials: %w", err)
+		return nil, nil, fmt.Errorf("query delivered credentials: %w", err)
 	}
 	defer rows.Close()
 
@@ -246,13 +272,19 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 		var d deliveredCredential
 		if err := rows.Scan(&d.ID, &d.EnvVar, &d.Priority, &d.EncryptedValue,
 			&d.Type, &d.Username, &d.LeaseExpiresAt, &d.Source); err != nil {
-			return nil, fmt.Errorf("scan delivered credential: %w", err)
+			return nil, nil, fmt.Errorf("scan delivered credential: %w", err)
 		}
 		out = append(out, d)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	// Slots are settled BEFORE the parts are attached, because a part's name is
+	// derived from its credential's slot (<SLOT>_<KEY>). Attaching first would
+	// derive AWS_REGION off a slot that is about to change, and seed the field
+	// claim table with names no container will ever see.
+	out, notices := resolveDeliverySlots(out)
 
 	// The parts of a multi-part credential hang off the row's resolved EnvVar,
 	// so they are attached HERE — after the set and its slots are final and
@@ -266,7 +298,7 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 	// path acquires a deadlock nobody can reproduce.
 	rows.Close()
 	if err := attachDeliveredCredentialFields(ctx, db, out); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	return out, notices, nil
 }

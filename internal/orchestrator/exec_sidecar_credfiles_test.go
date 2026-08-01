@@ -217,7 +217,7 @@ func TestBuildCredFileScript_PerType(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			script, count, err := buildCredFileScript(tc.creds, "/secrets/agent-a", tc.keeper)
+			script, count, _, err := buildCredFileScript(tc.creds, "/secrets/agent-a", tc.keeper)
 			if err != nil {
 				t.Fatalf("buildCredFileScript: %v", err)
 			}
@@ -291,7 +291,7 @@ func TestBuildCredFileScript_DeliveryChannelIsTableDriven(t *testing.T) {
 			base.Type = ty
 			// Keeper OFF so the delivery-channel decision (not the Keeper gate)
 			// is what's under test.
-			script, count, err := buildCredFileScript([]Credential{base}, "/secrets/agent-a", false)
+			script, count, _, err := buildCredFileScript([]Credential{base}, "/secrets/agent-a", false)
 			if err != nil {
 				t.Fatalf("buildCredFileScript(%s): %v", ty, err)
 			}
@@ -314,7 +314,7 @@ func TestBuildCredFileScript_USERPASSMissingUsername(t *testing.T) {
 	creds := []Credential{
 		{EnvVarName: "GMAIL", PlainValue: "pa55", Type: "USERPASS"}, // no Username
 	}
-	_, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
+	_, _, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
 	if err == nil {
 		t.Fatal("expected error for USERPASS without Username, got nil")
 	}
@@ -323,17 +323,25 @@ func TestBuildCredFileScript_USERPASSMissingUsername(t *testing.T) {
 	}
 }
 
-// TestBuildCredFileScript_RejectsBadEnvVarName confirms the existing
-// envVarNameRE sanitiser still gates injection — a credential with a
-// shell-metachar in its env var name must not produce a runnable script.
+// TestBuildCredFileScript_RejectsBadEnvVarName confirms the name sanitiser
+// still gates injection — a credential with a shell-metachar in its env var
+// name must not produce a runnable script. Since #1657 the refusal is a skip
+// rather than an error (the error abandoned every other credential and killed
+// the run), so "rejects" now means "writes nothing for it and says so".
 func TestBuildCredFileScript_RejectsBadEnvVarName(t *testing.T) {
 	t.Parallel()
 	creds := []Credential{
 		{EnvVarName: "GH;rm -rf /", PlainValue: "x", Type: "SECRET"},
 	}
-	_, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
-	if err == nil {
-		t.Fatal("expected error for malicious env var name, got nil")
+	script, count, skipped, err := buildCredFileScript(creds, "/secrets/agent-a", false)
+	if err != nil {
+		t.Fatalf("buildCredFileScript: %v", err)
+	}
+	if script != "" || count != 0 {
+		t.Fatalf("a malicious env var name produced a script: count=%d script=%q", count, script)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped = %+v, want the refused name reported", skipped)
 	}
 }
 

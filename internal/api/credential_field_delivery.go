@@ -41,13 +41,17 @@ package api
 //	no slot            — the credential has no delivery name at all, so "_REGION"
 //	                     is the only thing derivable, and that is a variable
 //	                     nobody asked for rather than a part of anything.
-//	not an env var     — the legacy crew-link source delivers under
-//	                     credentials.name, a NAME, which may hold a dash:
-//	                     "github-acme_REGION" is not a legal identifier. This one
-//	                     is load-bearing beyond tidiness — buildCredFileScript
-//	                     returns an error for the first bad name it sees and that
-//	                     error aborts the WHOLE credential-file script, so one
-//	                     malformed part would leave the agent with no secrets.
+//	not an env var     — the slot a part hangs off can still be one no container
+//	                     can export. Since #1657 the crew-link slot is normalised
+//	                     before parts are attached, so "github-acme_REGION" is now
+//	                     derived as "GITHUB_ACME_REGION" and lands; what remains
+//	                     for this branch is the credential whose name could not be
+//	                     normalised at all (its slot is then empty, caught by the
+//	                     "no slot" rule above) and any part name a future caller
+//	                     hands us raw. buildCredFileScript now skips such a name
+//	                     rather than aborting the script, but a part refused HERE
+//	                     is refused with the whole delivery set in view, which is
+//	                     the only place a collision can be judged.
 //	reserved           — the agent runtime sets these itself (identity, the proxy
 //	                     fence, the OAuth destination). A part landing on one is
 //	                     not "a variable got clobbered", it is an agent lying
@@ -65,17 +69,17 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/credname"
 )
 
-// deliveryEnvVarRE is the shape a name must have to be exported into a
-// container. Deliberately the same expression as the orchestrator's
-// envVarNameRE (internal/orchestrator/exec.go), which is the gate that actually
-// rejects a name at mount time — duplicated rather than exported because the
-// point is to refuse HERE, where a refusal costs one dropped part, instead of
-// there, where it costs the whole script.
-var deliveryEnvVarRE = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+// The shape a name must have to be exported into a container used to be a
+// regexp here, copied from the orchestrator's on the reasoning that a refusal
+// costs less at this end. The copy was the problem: #1657 found five such
+// statements of the rule and two of them allowed lowercase. It is now
+// credname.Valid, stated once, and this file still refuses HERE — the reason
+// for refusing early stands, it just does not need its own regexp to do it.
 
 // reservedDeliveryEnvVarPrefix marks the namespace the server issues to the
 // agent about itself (CREWSHIP_AGENT_ID, CREWSHIP_CREW_ID, CREWSHIP_CHAT_ID,
@@ -234,7 +238,7 @@ func attachDeliveredCredentialFields(ctx context.Context, db *sql.DB, delivered 
 			switch {
 			case delivered[i].EnvVar == "":
 				reason = "the credential has no delivery slot to hang the field off"
-			case !deliveryEnvVarRE.MatchString(name):
+			case !credname.Valid(name):
 				reason = "derived name is not a valid environment variable name"
 			case isReservedDeliveryEnvVar(name):
 				reason = "derived name is reserved by the agent runtime"

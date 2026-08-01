@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -246,6 +247,20 @@ type credFileSpec struct {
 	Mode   string // octal string for chmod, e.g. "0400" or "0600"
 }
 
+// credNameSkip is one credential — or one part of one — that was NOT written
+// because its name cannot be an environment variable (#1657).
+//
+// Carried out of buildCredFileScript rather than logged inside it, for the
+// reason credential_field_delivery.go already records on its own conflicts:
+// the function is a pure builder that tests call directly, and the caller is
+// the one holding a logger and the agent's identity. It never carries a value.
+type credNameSkip struct {
+	CredentialID string
+	EnvVar       string
+	Type         string
+	Reason       string
+}
+
 // buildCredFileScript translates a slice of decrypted credentials into
 // the shell script that mounts them into the agent container and the
 // list of .env entries the agent reads at startup.
@@ -291,14 +306,15 @@ type credFileSpec struct {
 //	CERTIFICATE                    → file at secretsAgentDir/certs/<envvar>.pem,
 //	                                 mode 0400. Same _PATH helper env var.
 //
-// Returns the joined-with-&& script ready for `sh -c`, the count of
-// files mounted (for logging), or an error if a FILE-DELIVERED credential's
-// env var name fails the sanitiser. A skipped credential's name is never
-// checked — see the ordering note in the loop (#1652). Empty input yields
-// ("", 0, nil) so callers can early-exit without a noop exec.
-func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabled bool) (string, int, error) {
+// Returns the joined-with-&& script ready for `sh -c`, the count of files
+// mounted (for logging), and every credential or part that was DROPPED for an
+// unusable name so the caller can report it. A skipped credential's name is
+// never checked — see the ordering note in the loop (#1652). Empty input yields
+// ("", 0, nil, nil) so callers can early-exit without a noop exec.
+func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabled bool) (string, int, []credNameSkip, error) {
 	var specs []credFileSpec
 	var envLines []string
+	var skipped []credNameSkip
 
 	for _, c := range creds {
 		if c.EnvVarName == "" || c.PlainValue == "" {
@@ -340,19 +356,33 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 		// synthetic `_OAUTH_ACCESS_TOKEN:<credID>` entry for every OAuth MCP
 		// binding (agent_config.go resolveOAuthAccessTokens) so
 		// injectMCPOAuthTokens can write the server's tokens.json; the colon
-		// and the uuid fail envVarNameRE, and validating first turned an
-		// OAUTH2 credential this function was about to skip into a hard error
-		// that abandoned every OTHER credential in the slice. Worse than
-		// silent: `fileCreds` runs are fail-loud, so an agent holding an SSH
-		// key alongside an OAuth binding did not start at all, and the error
-		// named an env-var-name violation rather than the OAuth entry.
+		// and the uuid fail the charset, and validating first turned an OAUTH2
+		// credential this function was about to skip into a hard error that
+		// abandoned every OTHER credential in the slice.
 		//
-		// Still a hard error for a credential that IS file-delivered: dropping
-		// one silently would be a half-delivery that fails later at the point
-		// of use, blaming the tool instead of the name.
-		if !envVarNameRE.MatchString(c.EnvVarName) {
-			return "", 0, fmt.Errorf("invalid env var name %q on file-mounted credential (type %s)",
-				c.EnvVarName, c.Type)
+		// #1657: skipping rather than erroring is now the answer for a
+		// file-delivered credential too, and for the same reason one level up.
+		// Reordering fixed the synthetic OAuth entry; it did nothing for a
+		// `CLI_TOKEN` a user had named `github-token` in the UI, which IS
+		// file-delivered and so reached this line for real. A hard error here
+		// is fatal at the caller — preparePreflightDirs treats a failed
+		// credential write on a fileCreds run as a dead run — so one badly
+		// named credential cost the agent every other credential AND the run,
+		// with an error that also advised upgrading Docker Engine because that
+		// advice is appended to the same string.
+		//
+		// This function does not RENAME. The API tier normalises names against
+		// a claim table covering the agent's whole delivery set
+		// (internal/api/credential_delivery.go); a rename invented here would
+		// have no such table and could quietly point two credentials at one
+		// file. Everything that arrives already named is either writable or
+		// dropped, and a drop is reported by the caller.
+		if !credname.Valid(c.EnvVarName) {
+			skipped = append(skipped, credNameSkip{
+				CredentialID: c.ID, EnvVar: c.EnvVarName, Type: c.Type,
+				Reason: "not a valid environment variable name, so it cannot become a file under /secrets",
+			})
+			continue
 		}
 
 		switch c.Type {
@@ -364,7 +394,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			// data-shape regression we'd rather surface than silently
 			// inject "" as the username.
 			if c.Username == "" {
-				return "", 0, fmt.Errorf("USERPASS credential %q missing username", c.EnvVarName)
+				return "", 0, skipped, fmt.Errorf("USERPASS credential %q missing username", c.EnvVarName)
 			}
 			userPath := secretsAgentDir + "/" + c.EnvVarName + "_USERNAME"
 			passPath := secretsAgentDir + "/" + c.EnvVarName + "_PASSWORD"
@@ -436,13 +466,19 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 			if f.EnvVar == "" || f.Value == "" {
 				continue
 			}
-			if !envVarNameRE.MatchString(f.EnvVar) {
-				// Same hard failure as the primary name. It matters more here:
-				// the API tier already drops any part it could not name
-				// legally, so a bad name arriving at this point means an
-				// unsanitised value reached the delivery path — and this
-				// script is about to be interpolated into `sh -c`.
-				return "", 0, fmt.Errorf("invalid credential field env var name: %q", f.EnvVar)
+			if !credname.Valid(f.EnvVar) {
+				// Same treatment as the primary name, and the reasoning is the
+				// same one level down: the API tier already drops any part it
+				// could not name legally, so a bad name arriving here means an
+				// unsanitised value reached the delivery path — and this script
+				// is about to be interpolated into `sh -c`. The part is dropped
+				// before it can be, and the credential it belongs to still
+				// lands rather than taking the batch with it.
+				skipped = append(skipped, credNameSkip{
+					CredentialID: c.ID, EnvVar: f.EnvVar, Type: c.Type,
+					Reason: "credential field name is not a valid environment variable name",
+				})
+				continue
 			}
 			fieldPath := secretsAgentDir + "/" + f.EnvVar
 			specs = append(specs, credFileSpec{
@@ -453,7 +489,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 	}
 
 	if len(specs) == 0 {
-		return "", 0, nil
+		return "", 0, skipped, nil
 	}
 
 	// Pre-create the ssh/ and certs/ subdirectories with restrictive
@@ -526,7 +562,7 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 		fmt.Sprintf("chmod 0700 %s", secretsAgentDir),
 	)
 
-	return strings.Join(scriptParts, " && "), len(specs), nil
+	return strings.Join(scriptParts, " && "), len(specs), skipped, nil
 }
 
 // writeCredentialFiles writes file-mountable credentials into the
@@ -575,7 +611,18 @@ func writeCredentialFiles(
 	keeperEnabled bool,
 	logger *slog.Logger,
 ) error {
-	script, fileCount, err := buildCredFileScript(creds, secretsAgentDir, keeperEnabled)
+	script, fileCount, skipped, err := buildCredFileScript(creds, secretsAgentDir, keeperEnabled)
+	// The skips are reported before the error check on purpose: a name that
+	// could not be written is worth saying even on a run that then fails for an
+	// unrelated reason, and it is the only trace an operator gets. A credential
+	// that vanishes silently is the quieter half of the defect #1657 fixed —
+	// the run survives, and the agent finds no GITHUB_TOKEN with nothing
+	// anywhere connecting that to the name someone typed in the UI.
+	for _, s := range skipped {
+		logger.Warn("credential not delivered — its name cannot be an environment variable",
+			"agent_slug", agentSlug, "credential_id", s.CredentialID,
+			"env_var", s.EnvVar, "credential_type", s.Type, "reason", s.Reason)
+	}
 	if err != nil {
 		return fmt.Errorf("build credential script: %w", err)
 	}

@@ -216,6 +216,20 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Length only, any charset — and deliberately still so after #1657, which
+	// listed this as one of five disagreeing statements of "what is a legal
+	// name". The other four were about ENVIRONMENT VARIABLES and now share one
+	// rule (internal/credname). This one is not: a credential's name is the
+	// human identity of an ACCOUNT (`github-acme`), and PRD-CREDENTIALS-V2
+	// §2.5b exists precisely to stop it from also being a variable — that
+	// fusion is why a workspace could hold exactly one GitHub account.
+	//
+	// The name only acts as a variable when a credential has neither a binding
+	// nor an explicit grant, and that case is handled where it arises: the
+	// delivery path normalises it onto a legal variable and reports what it
+	// did (credential_slot_delivery.go). Refusing `github-token` here would
+	// reject a perfectly good account name, break every existing row, and
+	// still not be the rule the reader applies.
 	if req.Name == "" || len(req.Name) < 1 || len(req.Name) > 255 {
 		replyError(w, http.StatusBadRequest, "name is required")
 		return
