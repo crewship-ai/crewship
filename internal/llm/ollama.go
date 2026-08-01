@@ -229,6 +229,14 @@ func (o *Ollama) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		"stream":   stream,
 	}
 
+	// "think" is a TOP-LEVEL Ollama field, not an option — putting it in the
+	// options map is accepted and then ignored, which looks like the flag not
+	// working. Omitted entirely unless the caller decided, so models without the
+	// thinking capability keep the request shape they had before.
+	if req.Think != nil {
+		body["think"] = *req.Think
+	}
+
 	opts := map[string]any{}
 	if req.Temperature != nil {
 		opts["temperature"] = *req.Temperature

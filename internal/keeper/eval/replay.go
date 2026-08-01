@@ -82,6 +82,11 @@ func replayOnce(ctx context.Context, c Candidate, prompt string, temp *float64) 
 		Messages:    []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 		Temperature: temp,
 		MaxTokens:   replayMaxTokens,
+		// Matches the live judge: reasoning off. Replaying a thinking model with
+		// it on burns the same budget on a chain of thought and scores it as a
+		// blanket DENY — the eval would then rank it for its truncation, not its
+		// judgement.
+		Think: func() *bool { b := false; return &b }(),
 	})
 	if err != nil {
 		// Unavailable model → deny-by-default, mirroring the live gatekeeper.

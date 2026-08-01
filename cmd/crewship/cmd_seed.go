@@ -312,6 +312,19 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
 	}
 
+	// ── Phase 9c: Keeper watchdog ──
+	// After credentials + integrations exist, so the thing the Keeper guards is
+	// already there when it comes on. Non-fatal by construction: seedKeeper
+	// leaves the watchdog OFF rather than enabling a fail-closed gate whose
+	// judge cannot answer, and reports which stage failed.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	keeperEndpoint, keeperModel := seedKeeperEnv()
+	if err := seedKeeper(ctx, client, keeperEndpoint, keeperModel); err != nil {
+		return err
+	}
+
 	// ── Phase 10: Issues ──
 	if !skipIssues {
 		if err := ctx.Err(); err != nil {

@@ -23,9 +23,13 @@ type mockProvider struct {
 	content        string
 	err            error
 	capturedPrompt string
+	// capturedReq is the whole request, for assertions about the settings the
+	// judge sends rather than the prompt it renders.
+	capturedReq llm.Request
 }
 
 func (m *mockProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	m.capturedReq = req
 	if len(req.Messages) > 0 {
 		m.capturedPrompt = req.Messages[0].Content
 	}

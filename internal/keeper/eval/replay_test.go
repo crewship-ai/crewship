@@ -93,6 +93,13 @@ func TestReplayOnce_UsesProductionSettings(t *testing.T) {
 	if prov.last.Model != "test-model" {
 		t.Errorf("Model = %q, want test-model", prov.last.Model)
 	}
+	// "Production settings" includes reasoning being off. A candidate replayed
+	// with thinking ON spends the same 256 tokens the live judge has on a chain
+	// of thought and scores as a blanket DENY — so the eval would rank every
+	// thinking model as maximally conservative and rank it for the wrong reason.
+	if prov.last.Think == nil || *prov.last.Think {
+		t.Errorf("Think = %v, want false — replay must score candidates the way production calls them", prov.last.Think)
+	}
 }
 
 func TestReplayOnce_ProviderErrorIsFailClosedDeny(t *testing.T) {
