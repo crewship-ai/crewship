@@ -292,9 +292,10 @@ type credFileSpec struct {
 //	                                 mode 0400. Same _PATH helper env var.
 //
 // Returns the joined-with-&& script ready for `sh -c`, the count of
-// files mounted (for logging), or an error if any env var name fails
-// the sanitiser. Empty input yields ("", 0, nil) so callers can early-
-// exit without a noop exec.
+// files mounted (for logging), or an error if a FILE-DELIVERED credential's
+// env var name fails the sanitiser. A skipped credential's name is never
+// checked — see the ordering note in the loop (#1652). Empty input yields
+// ("", 0, nil) so callers can early-exit without a noop exec.
 func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabled bool) (string, int, error) {
 	var specs []credFileSpec
 	var envLines []string
@@ -302,9 +303,6 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 	for _, c := range creds {
 		if c.EnvVarName == "" || c.PlainValue == "" {
 			continue
-		}
-		if !envVarNameRE.MatchString(c.EnvVarName) {
-			return "", 0, fmt.Errorf("invalid credential env var name: %q", c.EnvVarName)
 		}
 
 		// #1364: Keeper-gated types are withheld from ALL delivery when Keeper
@@ -330,6 +328,31 @@ func buildCredFileScript(creds []Credential, secretsAgentDir string, keeperEnabl
 		// cleanup yet never written here.
 		if !credpolicy.For(c.Type).FileMounted() {
 			continue
+		}
+
+		// The name check runs AFTER both skips, and the order is the fix for
+		// #1652 rather than a tidiness preference. A name is validated here
+		// because it becomes a path component and is interpolated into `sh -c`
+		// — a credential that writes no file has neither, so holding it to the
+		// env-var charset is a rule with no subject.
+		//
+		// It had one anyway, and the cost was the whole batch. The API mints a
+		// synthetic `_OAUTH_ACCESS_TOKEN:<credID>` entry for every OAuth MCP
+		// binding (agent_config.go resolveOAuthAccessTokens) so
+		// injectMCPOAuthTokens can write the server's tokens.json; the colon
+		// and the uuid fail envVarNameRE, and validating first turned an
+		// OAUTH2 credential this function was about to skip into a hard error
+		// that abandoned every OTHER credential in the slice. Worse than
+		// silent: `fileCreds` runs are fail-loud, so an agent holding an SSH
+		// key alongside an OAuth binding did not start at all, and the error
+		// named an env-var-name violation rather than the OAuth entry.
+		//
+		// Still a hard error for a credential that IS file-delivered: dropping
+		// one silently would be a half-delivery that fails later at the point
+		// of use, blaming the tool instead of the name.
+		if !envVarNameRE.MatchString(c.EnvVarName) {
+			return "", 0, fmt.Errorf("invalid env var name %q on file-mounted credential (type %s)",
+				c.EnvVarName, c.Type)
 		}
 
 		switch c.Type {
