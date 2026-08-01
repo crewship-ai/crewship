@@ -16,6 +16,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
@@ -607,6 +608,143 @@ func (p *Provider) toolsVolumeName(id, slug string) string {
 // mkdir-preflight / writeCredentialFiles failure paths) instead of starting
 // the agent with zero credentials or persisting secrets anywhere.
 const secretsTmpfsSpec = "rw,noexec,nosuid,size=16m,mode=0700,uid=1001,gid=1001"
+
+// Supplementary groups handed to the crew container via HostConfig.GroupAdd.
+//
+// Why this is the only lever that works: the crew container runs as
+// `User: "1001:1001"`, and moby's GetExecUser only populates Sgids when the
+// group half of that string is absent — so the colon form we use (and cannot
+// change here without a much wider blast radius) delivers ZERO supplementary
+// groups. Verified live on dev1, 2026-08-01:
+//
+//	$ id
+//	uid=1001(agent) gid=1001(agent) groups=1001(agent)
+//
+// HostConfig.GroupAdd sidesteps that entirely: moby's execSetPlatformOpt →
+// getUser() appends GetAdditionalGroupsPath(HostConfig.GroupAdd, …) to
+// AdditionalGids, so groups set at container create apply to every subsequent
+// `docker exec` — which is how every agent actually runs. Bare numeric GIDs
+// are accepted and need no /etc/group entry in the image.
+const (
+	// crewGroupGID is the group that owns the crew's bind mounts
+	// (buildChownInitCmd does `chown -R 1001:1001`). It is also the exec
+	// user's primary gid today, so listing it here is belt-and-braces —
+	// it keeps crew-group access if the primary gid ever moves (e.g. the
+	// per-agent uid work). There is no per-crew gid allocation in the
+	// product yet; when there is, this is the constant it replaces.
+	crewGroupGID = "1001"
+	// sidecarGroupGID is the sidecar's group. The .memory subtrees are
+	// chgrp'd to it and made setgid 2775 (buildChownInitCmd), so the agent
+	// needs it as a supplementary group to participate in crew-shared
+	// memory at all.
+	sidecarGroupGID = "1002"
+)
+
+// crewStopTimeoutSeconds is the grace period baked into the container so a
+// plain `docker stop`, a daemon shutdown, or a restart-policy stop all give
+// PID 1 the same window StopCrewRuntime passes explicitly. Docker's default is
+// 10 s, which is short for a container that may be flushing an agent run.
+const crewStopTimeoutSeconds = 30
+
+// crewShmSizeBytes sizes /dev/shm. Docker's default is 64 MB (verified live on
+// dev1), which is below what Chromium needs for its renderer shared memory —
+// headless Chrome/Playwright aborts with "Target closed"/bus errors on it, and
+// this repo ships Playwright. 1 GiB is the widely used remediation and is
+// charged against the crew's memory cgroup only as pages are actually touched.
+const crewShmSizeBytes int64 = 1024 * 1024 * 1024
+
+// crewInitAlways is the addressable `true` behind HostConfig.Init. Taking its
+// address is safe because nothing writes it.
+var crewInitAlways = true
+
+// crewUlimits returns the per-process rlimits for everything in the crew
+// container. Without them the container inherits containerd's service limits:
+// LimitNOFILE=1048576, LimitNPROC=infinity and — the dangerous one —
+// LimitCORE=infinity.
+//
+//	core   0/0     The exec CWD is /output/<slug>, a HOST-PERSISTENT bind. An
+//	               unlimited core dump from a crashing agent lands there and
+//	               contains every credential in the exec environment, which
+//	               defeats the whole point of /secrets being a tmpfs
+//	               (secretsTmpfsSpec above). Hard 0 so nothing inside the
+//	               container can raise it back. This is the one that matters.
+//	nofile 8192/65536
+//	               Generous for a Node/Python toolchain plus watchers (a busy
+//	               dev server sits in the low thousands) while still bounding
+//	               a descriptor leak. Also avoids the well-known pathology
+//	               where a 1M soft limit makes anything that loops to
+//	               RLIMIT_NOFILE on fork (older shells, some Python libs)
+//	               burn seconds per exec.
+//	nproc  4096/4096
+//	               A backstop, not the real cap: RLIMIT_NPROC is enforced per
+//	               real uid and is NOT namespaced, so every crew container
+//	               running as uid 1001 shares one budget on the host. The
+//	               binding per-container limit is PidsLimit (200). Kept high
+//	               enough that N co-resident crews cannot starve each other,
+//	               low enough to stop a fork bomb from reaching the host's
+//	               global thread-max.
+//	fsize  4 GiB   A single file bigger than this on /output or /crew is a
+//	               runaway log or a stuck writer filling the host disk, not
+//	               legitimate agent output. Exceeding it raises SIGXFSZ in the
+//	               writer rather than taking the host's filesystem down.
+//
+// Returned as a fresh slice per call: the elements are pointers that end up on
+// a HostConfig, and a shared backing array would let any future mutation of one
+// container's limits reach every other crew's.
+func crewUlimits() []*container.Ulimit {
+	return []*container.Ulimit{
+		{Name: "core", Soft: 0, Hard: 0},
+		{Name: "nofile", Soft: 8192, Hard: 65536},
+		{Name: "nproc", Soft: 4096, Hard: 4096},
+		{Name: "fsize", Soft: 4 << 30, Hard: 4 << 30},
+	}
+}
+
+// crewDefaultEnv are environment defaults applied to the crew container only
+// when the image / devcontainer containerEnv has not already set the key.
+//
+// LANG: without a UTF-8 locale the container runs under POSIX/C, where
+// non-ASCII filenames and agent output get mangled on the way through tools
+// that respect the locale. C.UTF-8 is present on every glibc base we support
+// and needs no locale generation.
+//
+// TZ: unset leaves the container on whatever the base image shipped, so agent
+// timestamps disagree with the server's. UTC matches how crewshipd stores
+// time; a crew that wants local time sets TZ in its devcontainer containerEnv
+// and that wins (see applyDefaultEnv).
+var crewDefaultEnv = [][2]string{
+	{"LANG", "C.UTF-8"},
+	{"TZ", "UTC"},
+}
+
+// applyDefaultEnv appends KEY=VALUE for each default whose KEY is set neither
+// on env (the crew's own vars plus devcontainer containerEnv) nor in imageEnv
+// (the image's baked-in ENV). Checking imageEnv matters: a base image that
+// declares its own LANG has made a deliberate choice, and a container-level
+// entry would silently override it — imageEnv may be nil when the image
+// inspect failed, in which case the defaults simply apply.
+//
+// Append-if-absent rather than prepend-and-let-Docker-dedupe: the daemon's
+// last-wins behaviour for duplicate keys is an implementation detail, and a
+// container carrying two conflicting LANG entries is confusing in
+// `docker inspect` even when it resolves correctly.
+func applyDefaultEnv(env []string, imageEnv map[string]string, defaults [][2]string) []string {
+	present := make(map[string]bool, len(env)+len(imageEnv))
+	for k := range imageEnv {
+		present[k] = true
+	}
+	for _, e := range env {
+		if eq := strings.IndexByte(e, '='); eq > 0 {
+			present[e[:eq]] = true
+		}
+	}
+	for _, d := range defaults {
+		if !present[d[0]] {
+			env = append(env, d[0]+"="+d[1])
+		}
+	}
+	return env
+}
 
 // agentWritableNoexecTargets are the container paths whose mounts must be
 // noexec (see noexecBindMount / #1400). Used both to build the mounts and to

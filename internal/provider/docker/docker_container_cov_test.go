@@ -973,8 +973,12 @@ func TestEnsureCrewRuntime_DefaultHardening(t *testing.T) {
 	if len(hc.CapAdd) != 0 {
 		t.Errorf("CapAdd = %v, want empty (NET_RAW exfil primitive removed)", hc.CapAdd)
 	}
-	if hc.Init != nil {
-		t.Errorf("Init = %v, want nil (docker default)", hc.Init)
+	// Init is no longer opt-in. It used to be boolPtrIf(team.Init) — nil
+	// unless a devcontainer feature asked for it — and that left PID 1 as a
+	// `sleep infinity` that never reaps the orphans every sidecar exec
+	// creates. See TestCrewContainer_InitIsAlwaysOn (#1626).
+	if hc.Init == nil || !*hc.Init {
+		t.Errorf("Init = %v, want true regardless of team.Init", hc.Init)
 	}
 	if len(hc.ExtraHosts) != 1 || hc.ExtraHosts[0] != "host.docker.internal:host-gateway" {
 		t.Errorf("ExtraHosts = %v", hc.ExtraHosts)
