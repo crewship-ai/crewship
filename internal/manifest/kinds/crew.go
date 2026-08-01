@@ -107,6 +107,25 @@ const (
 // the "looks like hex but isn't valid hex" rejection.
 var crewHexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
+// Bounds for spec.devcontainer.memory_mb / .cpus, mirroring the API tier's
+// min/maxCrewContainer* in internal/api/crews_create.go (#1627). Kept as
+// local constants because internal/manifest/kinds must not depend on the
+// server package; the two sets are small, documented, and change together.
+//
+// Floors are Docker's own — the daemon refuses a create below 0.01 CPU
+// ("Range of CPUs is from 0.01") or 6 MiB, and the resulting error names
+// neither the crew nor the field, so a crew configured below either one
+// wedges every agent run. Ceilings are typo guards, deliberately far above
+// any host we expect to run on. 0 (or an omitted key) means "use the server
+// default" and is not range-checked — the emit path already gates on `> 0`.
+const (
+	crewMinContainerMemoryMB = 6
+	crewMaxContainerMemoryMB = 262144 // 256 GiB
+
+	crewMinContainerCPUs float64 = 0.01
+	crewMaxContainerCPUs float64 = 512
+)
+
 // crewServiceNameRe mirrors api.serviceNameRe (RFC 1035 DNS label).
 // Duplicated here rather than imported to keep the kinds package
 // free of a dependency on package api (cycle risk via license /
@@ -388,11 +407,21 @@ func (d *CrewDocument) Validate(_ internalapi.WorkspaceContext) error {
 	}
 
 	if d.Spec.Devcontainer != nil {
-		if d.Spec.Devcontainer.MemoryMB < 0 {
-			return fmt.Errorf("crew %q: spec.devcontainer.memory_mb must be non-negative", d.Metadata.Slug)
+		// Range, not just sign (#1627). A negative was the only thing
+		// rejected here, so `cpus: 0.005` passed apply and only failed at
+		// wake time — the Docker daemon refuses the create with "Range of
+		// CPUs is from 0.01", which names neither the crew nor the field,
+		// and every agent run for that crew wedges on it. Fail here with
+		// the range the API would have returned instead of deferring.
+		if mb := d.Spec.Devcontainer.MemoryMB; mb != 0 &&
+			(mb < crewMinContainerMemoryMB || mb > crewMaxContainerMemoryMB) {
+			return fmt.Errorf("crew %q: spec.devcontainer.memory_mb must be between %d and %d (omit or 0 = use the server default)",
+				d.Metadata.Slug, crewMinContainerMemoryMB, crewMaxContainerMemoryMB)
 		}
-		if d.Spec.Devcontainer.CPUs < 0 {
-			return fmt.Errorf("crew %q: spec.devcontainer.cpus must be non-negative", d.Metadata.Slug)
+		if c := d.Spec.Devcontainer.CPUs; c != 0 &&
+			(c < crewMinContainerCPUs || c > crewMaxContainerCPUs) {
+			return fmt.Errorf("crew %q: spec.devcontainer.cpus must be between %g and %g (omit or 0 = use the server default)",
+				d.Metadata.Slug, crewMinContainerCPUs, crewMaxContainerCPUs)
 		}
 	}
 

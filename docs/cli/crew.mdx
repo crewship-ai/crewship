@@ -92,13 +92,21 @@ crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
 | `--description` | `string` | | Description. |
 | `--color` | `string` | | Hex color (e.g. `#3B82F6`). |
 | `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
-| `--memory-mb` | `int` | `0` | Container memory limit in MB. |
-| `--cpus` | `float64` | `0` | Container CPU limit. |
+| `--memory-mb` | `int` | `0` | Container memory limit in MB. 6–262144; `0` uses the server default. |
+| `--cpus` | `float64` | `0` | Container CPU limit. 0.01–512; `0` uses the server default. |
 | `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. Supports `*.example.com` subdomain wildcards. |
 | `--allow-package-registries` | `bool` | `false` | Also allow the common package registries (npm, pip, cargo, go, apt, Docker Hub). Appended to `--allowed-domains`. |
 | `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
+
+`--memory-mb` and `--cpus` are range-checked by the server and a value
+outside the range comes back as a `400` naming it. The lower bounds are
+Docker's own, so a crew sized below them is refused here rather than
+accepted and then rejected by the daemon at wake time — which wedges
+every run of that crew until the value is corrected. Note the `--cpus`
+ceiling cannot be fully validated server-side, because the daemon's real
+upper bound is the host's core count.
 
 ---
 
@@ -116,8 +124,8 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--description` | `string` | | Description. |
 | `--color` | `string` | | Hex color. |
 | `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
-| `--memory-mb` | `int` | | Container memory limit in MB. |
-| `--cpus` | `float64` | | Container CPU limit. |
+| `--memory-mb` | `int` | | Container memory limit in MB. 6–262144; `0` resets to the server default. |
+| `--cpus` | `float64` | | Container CPU limit. 0.01–512; `0` resets to the server default. |
 | `--ttl` | `int` | `-1` | Auto-stop after idle hours (0 = disable TTL). |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |

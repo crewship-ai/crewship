@@ -38,6 +38,55 @@ func (h *CrewHandler) workspaceAllowsPrivileged(ctx context.Context, workspaceID
 	return v == 1, nil
 }
 
+// Bounds for the two runtime values a crew can configure,
+// container_memory_mb and container_cpus (#1627).
+//
+// The floors are Docker's own. Below 0.01 NanoCPUs the daemon refuses the
+// container create with "Range of CPUs is from 0.01"; below 6 MiB with
+// "Minimum memory limit allowed is 6MB". Neither error names the crew or the
+// field, and nothing between the manifest and the daemon used to check —
+// so `container_cpus: 0.005` was accepted everywhere and then wedged EVERY
+// agent run for that crew on a message the operator could not act on.
+//
+// The ceilings are plain constants rather than a per-workspace quota. A quota
+// an operator can raise needs a workspaces column, an admin route and a CLI
+// command to go with it (docs/prd/crew-runtime-capacity.md §1.1 sketches
+// that), and none of it helps the case this guard exists for: a MANAGER
+// typing container_memory_mb: 999999. The numbers below sit well above any
+// host we expect to run on, so a legitimate large-host configuration is never
+// blocked, while a typo is.
+//
+// The CPU ceiling cannot be exact at this tier. The daemon's real upper limit
+// is the host's core count ("Range of CPUs is from 0.01 to 8.00"), which the
+// API does not know — a host-aware preflight belongs in the docker provider.
+// This catches the typo class only.
+const (
+	minCrewContainerMemoryMB = 6
+	maxCrewContainerMemoryMB = 262144 // 256 GiB
+
+	minCrewContainerCPUs float64 = 0.01
+	maxCrewContainerCPUs float64 = 512
+)
+
+// validateCrewContainerResources range-checks the container sizing fields on
+// create and update. nil means "field absent"; an explicit 0 is the long
+// standing "use the server default" sentinel (the CLI's `--memory-mb 0`, an
+// omitted `hostRequirements` block, and the provider's own `<= 0` fallback all
+// depend on it) and stays accepted.
+func validateCrewContainerResources(memoryMB *int, cpus *float64) error {
+	if memoryMB != nil && *memoryMB != 0 &&
+		(*memoryMB < minCrewContainerMemoryMB || *memoryMB > maxCrewContainerMemoryMB) {
+		return fmt.Errorf("container_memory_mb must be between %d and %d (0 = use the server default)",
+			minCrewContainerMemoryMB, maxCrewContainerMemoryMB)
+	}
+	if cpus != nil && *cpus != 0 &&
+		(*cpus < minCrewContainerCPUs || *cpus > maxCrewContainerCPUs) {
+		return fmt.Errorf("container_cpus must be between %g and %g (0 = use the server default)",
+			minCrewContainerCPUs, maxCrewContainerCPUs)
+	}
+	return nil
+}
+
 // replyDevcontainerSecurityError maps a Config.ValidateSecurity failure to the
 // right HTTP status: privileged-without-flag is an authorization failure (403);
 // a disallowed capability or mount is a bad request (400).
@@ -269,6 +318,10 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	crewID := generateCUID()
 
+	if err := validateCrewContainerResources(req.ContainerMemoryMB, req.ContainerCPUs); err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	memoryMB := 4096
 	if req.ContainerMemoryMB != nil && *req.ContainerMemoryMB > 0 {
 		memoryMB = *req.ContainerMemoryMB
