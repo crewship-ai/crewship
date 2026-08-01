@@ -38,8 +38,8 @@ func candidate(p llm.Provider) Candidate {
 
 func TestReplayCandidate_AssemblesRowsAndFlips(t *testing.T) {
 	corpus := []CorpusRow{
-		{ID: "guard", Prompt: "P-guard", Recorded: Deny, RecordedRisk: 8},
-		{ID: "ok", Prompt: "P-ok", Recorded: Allow, RecordedRisk: 2},
+		{ID: "guard", Prompt: "P-guard", Label: Deny, LabelSource: LabelHuman, IncumbentRisk: 8},
+		{ID: "ok", Prompt: "P-ok", Label: Allow, LabelSource: LabelHuman, IncumbentRisk: 2},
 	}
 	// The guard prompt is answered ALLOW (a dangerous downgrade); the allow
 	// prompt is answered ALLOW (agreement).
@@ -64,15 +64,16 @@ func TestReplayCandidate_AssemblesRowsAndFlips(t *testing.T) {
 			t.Fatalf("row %d: got %d passes, want 2", i, len(r.Replays))
 		}
 	}
-	// The recorded fields carry through untouched.
-	if rows[0].Recorded != Deny || rows[0].RecordedRisk != 8 {
-		t.Errorf("row0 recorded = %v/%d, want DENY/8", rows[0].Recorded, rows[0].RecordedRisk)
+	// The label, its provenance, and the recorded risk carry through untouched —
+	// the driver must never re-decide what a row is worth.
+	if rows[0].Label != Deny || rows[0].IncumbentRisk != 8 || rows[0].Source != LabelHuman {
+		t.Errorf("row0 = %v/%d/%q, want DENY/8/human", rows[0].Label, rows[0].IncumbentRisk, rows[0].Source)
 	}
 
 	// The scorer must see exactly one dangerous flip (the guard row).
 	v := Score(rows)
-	if v.DangerousFlipRows != 1 {
-		t.Errorf("DangerousFlipRows = %d, want 1", v.DangerousFlipRows)
+	if v.Human.DangerousFlipRows != 1 {
+		t.Errorf("Human.DangerousFlipRows = %d, want 1", v.Human.DangerousFlipRows)
 	}
 }
 
@@ -80,7 +81,7 @@ func TestReplayOnce_UsesProductionSettings(t *testing.T) {
 	prov := &stubProvider{respond: func(string) (string, error) {
 		return `{"decision":"allow","risk":1}`, nil
 	}}
-	_, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Recorded: Allow, RecordedRisk: 1}}, 1)
+	_, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Label: Allow, LabelSource: LabelHuman, IncumbentRisk: 1}}, 1)
 	if err != nil {
 		t.Fatalf("ReplayCandidate: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestReplayOnce_ProviderErrorIsFailClosedDeny(t *testing.T) {
 	prov := &stubProvider{respond: func(string) (string, error) {
 		return "", errors.New("model down")
 	}}
-	rows, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Recorded: Allow, RecordedRisk: 1}}, 1)
+	rows, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Label: Allow, LabelSource: LabelHuman, IncumbentRisk: 1}}, 1)
 	if err != nil {
 		t.Fatalf("ReplayCandidate: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestReplayOnce_UnparseableIsFailClosedDeny(t *testing.T) {
 	prov := &stubProvider{respond: func(string) (string, error) {
 		return "the model rambled without JSON", nil
 	}}
-	rows, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Recorded: Allow, RecordedRisk: 1}}, 1)
+	rows, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Label: Allow, LabelSource: LabelHuman, IncumbentRisk: 1}}, 1)
 	if err != nil {
 		t.Fatalf("ReplayCandidate: %v", err)
 	}
@@ -132,7 +133,7 @@ func TestReplayCandidate_PassesFloor(t *testing.T) {
 	prov := &stubProvider{respond: func(string) (string, error) {
 		return `{"decision":"allow","risk":1}`, nil
 	}}
-	rows, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Recorded: Allow, RecordedRisk: 1}}, 0)
+	rows, err := ReplayCandidate(context.Background(), candidate(prov), []CorpusRow{{Prompt: "x", Label: Allow, LabelSource: LabelHuman, IncumbentRisk: 1}}, 0)
 	if err != nil {
 		t.Fatalf("ReplayCandidate: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestReplayCandidate_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	prov := &stubProvider{respond: func(string) (string, error) { return "", nil }}
-	_, err := ReplayCandidate(ctx, candidate(prov), []CorpusRow{{Prompt: "x", Recorded: Allow}}, 1)
+	_, err := ReplayCandidate(ctx, candidate(prov), []CorpusRow{{Prompt: "x", Label: Allow, LabelSource: LabelHuman}}, 1)
 	if err == nil {
 		t.Fatal("want error on cancelled context")
 	}

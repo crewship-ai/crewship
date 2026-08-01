@@ -17,6 +17,10 @@
 //
 // It prints the ranked table (post it to #1001 for the model pick) and, if
 // KEEPER_EVAL_JSON is set, writes the machine-readable JSON alongside.
+//
+// `crewship keeper eval` does the same run as a supported command against the
+// local database. Prefer it; this file stays for driving a replay against an
+// arbitrary database file that is not this host's.
 package eval
 
 import (
@@ -63,7 +67,9 @@ func TestReplay(t *testing.T) {
 	if len(corpus) == 0 {
 		t.Skip("no scoreable keeper_requests rows in the corpus")
 	}
-	t.Logf("corpus: %d rows, %d passes each", len(corpus), passes)
+	humanRows, incumbentRows := CountBySource(corpus)
+	t.Logf("corpus: %d rows (%d human-labelled, %d incumbent-labelled), %d passes each — %s",
+		len(corpus), humanRows, incumbentRows, passes, Strength(humanRows))
 
 	// The incumbent is scored on the exact same corpus + code path — it is the
 	// reference ceiling, not a trivial 100%.
@@ -100,8 +106,13 @@ func scoreModel(ctx context.Context, t *testing.T, ollamaURL, model string, corp
 		t.Fatalf("replay %s: %v", model, err)
 	}
 	v := Score(rows)
-	t.Logf("%s: agree=%.3f danger_flip=%.3f (%d) risk_mae=%.2f",
-		model, v.AgreementRate, v.DangerousFlipRate, v.DangerousFlipRows, v.RiskMAE)
+	// Both agreement numbers, both named: the human one is the score, the other
+	// is only how closely the candidate tracks the model it would replace.
+	t.Logf("%s: human agree=%.3f [%.2f–%.2f] over %d rows, danger_flip=%.3f (%d), risk_mae=%.2f; "+
+		"vs-incumbent-labels=%.3f over %d rows",
+		model, v.Human.AgreementRate, v.Human.AgreementLow, v.Human.AgreementHigh, v.Human.Rows,
+		v.Human.DangerousFlipRate, v.Human.DangerousFlipRows, v.Human.RiskMAE,
+		v.ModelLabelled.AgreementRate, v.ModelLabelled.Rows)
 	return v
 }
 
