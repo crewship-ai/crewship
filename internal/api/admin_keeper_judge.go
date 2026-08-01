@@ -24,6 +24,38 @@ import (
 // comments at each call site.
 var judgeNoThink = false
 
+// judgeVerdictSchema is the shape a verdict must have, sent as llm.Request.Format
+// so Ollama constrains decoding to it instead of trusting the prose instruction
+// above it. It mirrors the schema the gatekeeper sends on the credential path —
+// a probe that asks an easier or harder question than production measures the
+// wrong thing.
+//
+// Why it matters here specifically: stage 3 fails a model that answers correctly
+// but conversationally ("Sure — {…}"), because Keeper brace-scans the reply and
+// an unparseable one is a fail-closed DENY. With the schema that class of model
+// passes, and passes for the right reason: it will produce the same parseable
+// object in production.
+//
+// The prose instruction stays. This binds Ollama only — a hosted judge ignores
+// the field, and NormalizeRawResponse is still the thing that makes a garbled
+// answer safe rather than trusted.
+var judgeVerdictSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"decision": map[string]any{
+			"type": "string",
+			"enum": []string{"ALLOW", "DENY", "ESCALATE"},
+		},
+		"reason": map[string]any{"type": "string"},
+		"risk": map[string]any{
+			"type":    "integer",
+			"minimum": 1,
+			"maximum": 10,
+		},
+	},
+	"required": []string{"decision", "reason", "risk"},
+}
+
 // AdminKeeperJudgeHandler is the two things that turn "paste a URL and hope"
 // into a setup you can finish in a minute:
 //
@@ -282,6 +314,11 @@ func (h *AdminKeeperJudgeHandler) run(ctx context.Context, root, model string) j
 		// verdict, so this check failed a model that answers correctly in 3.4s
 		// when asked the way production asks.
 		Think: &judgeNoThink,
+		// Constrained decoding, because the gatekeeper constrains it too. Without
+		// this the probe asks the model to volunteer well-formed JSON from a prose
+		// instruction — a harder question than production poses, which failed
+		// models that judge fine.
+		Format: judgeVerdictSchema,
 	})
 	stage3 := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {
@@ -576,6 +613,11 @@ func (h *AdminKeeperJudgeHandler) TestHosted(w http.ResponseWriter, r *http.Requ
 		// verdict, so this check failed a model that answers correctly in 3.4s
 		// when asked the way production asks.
 		Think: &judgeNoThink,
+		// Constrained decoding, because the gatekeeper constrains it too. Without
+		// this the probe asks the model to volunteer well-formed JSON from a prose
+		// instruction — a harder question than production poses, which failed
+		// models that judge fine.
+		Format: judgeVerdictSchema,
 	})
 	stage2 := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {
@@ -783,6 +825,11 @@ func (h *AdminKeeperJudgeHandler) ProbeModel(w http.ResponseWriter, r *http.Requ
 		// verdict, so this check failed a model that answers correctly in 3.4s
 		// when asked the way production asks.
 		Think: &judgeNoThink,
+		// Constrained decoding, because the gatekeeper constrains it too. Without
+		// this the probe asks the model to volunteer well-formed JSON from a prose
+		// instruction — a harder question than production poses, which failed
+		// models that judge fine.
+		Format: judgeVerdictSchema,
 	})
 	st := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {

@@ -8,8 +8,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// newCorpusDB stands up a minimal keeper_requests table with just the columns
-// LoadCorpus reads. It deliberately does NOT run the full migration set — the
+// newCorpusDB stands up the three tables LoadCorpus joins, with just the
+// columns it reads. It deliberately does NOT run the full migration set — the
 // loader's contract is the query shape, and a focused schema keeps the test
 // fast and independent of unrelated migrations.
 func newCorpusDB(t *testing.T) *sql.DB {
@@ -22,14 +22,33 @@ func newCorpusDB(t *testing.T) *sql.DB {
 	_, err = db.Exec(`
 		CREATE TABLE keeper_requests (
 			id TEXT PRIMARY KEY,
+			requesting_agent_id TEXT NOT NULL DEFAULT '',
+			credential_id TEXT NOT NULL DEFAULT '',
 			request_type TEXT NOT NULL DEFAULT 'access',
 			ollama_prompt TEXT,
 			decision TEXT,
 			risk_score INTEGER,
 			created_at TEXT NOT NULL
+		);
+		CREATE TABLE escalations (
+			id TEXT PRIMARY KEY,
+			from_agent_id TEXT NOT NULL,
+			credential_id TEXT,
+			status TEXT NOT NULL DEFAULT 'PENDING',
+			action TEXT DEFAULT 'approve',
+			resolved_by TEXT,
+			resolved_at TEXT
+		);
+		CREATE TABLE inbox_items (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			source_id TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'unread',
+			resolved_action TEXT,
+			resolved_by_user_id TEXT
 		)`)
 	if err != nil {
-		t.Fatalf("create table: %v", err)
+		t.Fatalf("create tables: %v", err)
 	}
 	return db
 }
@@ -83,13 +102,21 @@ func TestLoadCorpus_FiltersAndNormalizes(t *testing.T) {
 	}
 
 	// Decision normalized to uppercase.
-	if got[0].Recorded != Allow || got[1].Recorded != Deny {
-		t.Errorf("decisions = %v,%v", got[0].Recorded, got[1].Recorded)
+	if got[0].Label != Allow || got[1].Label != Deny {
+		t.Errorf("decisions = %v,%v", got[0].Label, got[1].Label)
 	}
 
 	// risk passes through for a1; NULL risk on e1 clamps to 1.
-	if got[0].RecordedRisk != 2 || got[1].RecordedRisk != 1 {
-		t.Errorf("risks = %d,%d; want 2,1", got[0].RecordedRisk, got[1].RecordedRisk)
+	if got[0].IncumbentRisk != 2 || got[1].IncumbentRisk != 1 {
+		t.Errorf("risks = %d,%d; want 2,1", got[0].IncumbentRisk, got[1].IncumbentRisk)
+	}
+
+	// Nobody ruled on either row, so both fall back to the incumbent's own
+	// decision — and must say so rather than passing as ground truth.
+	for _, r := range got {
+		if r.LabelSource != LabelIncumbent || r.LabelOrigin != OriginIncumbentDecision {
+			t.Errorf("row %s: source/origin = %q/%q, want incumbent fallback", r.ID, r.LabelSource, r.LabelOrigin)
+		}
 	}
 }
 
@@ -104,7 +131,7 @@ func TestLoadCorpus_ClampsOutOfRangeRisk(t *testing.T) {
 	}
 	byID := map[string]int{}
 	for _, r := range got {
-		byID[r.ID] = r.RecordedRisk
+		byID[r.ID] = r.IncumbentRisk
 	}
 	if byID["hi"] != 10 {
 		t.Errorf("hi risk = %d, want 10", byID["hi"])

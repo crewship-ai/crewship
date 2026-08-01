@@ -57,6 +57,10 @@ type keeperConfigResponse struct {
 	// judge slower than the budget denies every request while reporting as healthy
 	// — the operator is the only one who knows what their model returns in.
 	TimeoutMS keeperConfigField[int64] `json:"judge_timeout_ms"`
+	// Profile is which capabilities the judge may use. Served from the same
+	// endpoint as the wiring above because they are one decision: a bigger model
+	// affords a thorough profile, and a 3B one is made worse by it.
+	Profile keeperProfileResponse `json:"judge_profile"`
 
 	// Overridden is whether anything is set at instance level at all — what a
 	// "Reset to inherited" control needs to know before offering itself.
@@ -69,6 +73,56 @@ type keeperConfigResponse struct {
 	JudgeConfigured bool `json:"judge_configured"`
 }
 
+// keeperProfileResponse is the judge profile with the same per-field
+// {value, source, editable} shape as the wiring above it. Every toggle is
+// editable — that is the point of the profile — but the shape is kept identical
+// so a console can render both blocks with one component.
+//
+// Choices carries the preset names and Facts the evidence-fact vocabulary, so a
+// picker cannot hardcode a list that drifts from what the server accepts.
+type keeperProfileResponse struct {
+	Name               keeperConfigField[string]   `json:"name"`
+	Evidence           keeperConfigField[bool]     `json:"evidence"`
+	EvidenceFacts      keeperConfigField[[]string] `json:"evidence_facts"`
+	HardGate           keeperConfigField[bool]     `json:"hard_gate"`
+	EscalateFrom       keeperConfigField[int64]    `json:"escalate_from"`
+	Precedent          keeperConfigField[bool]     `json:"precedent"`
+	PrecedentN         keeperConfigField[int64]    `json:"precedent_n"`
+	ConsistencySamples keeperConfigField[int64]    `json:"consistency_samples"`
+	PromptBudgetTokens keeperConfigField[int64]    `json:"prompt_budget_tokens"`
+
+	Overridden bool     `json:"overridden"`
+	Choices    []string `json:"choices"`
+	Facts      []string `json:"available_facts"`
+	// Stamp is the audit form recorded on each decision — surfaced here so an
+	// operator comparing two keeper_requests rows can see which one names the
+	// configuration currently in force.
+	Stamp string `json:"stamp"`
+}
+
+func keeperProfilePayload(p keepercfg.EffectiveProfile) keeperProfileResponse {
+	choices := make([]string, 0, len(keepercfg.Profiles))
+	for _, name := range keepercfg.Profiles {
+		choices = append(choices, string(name))
+	}
+	return keeperProfileResponse{
+		Name:               keeperConfigField[string]{Value: p.Name.Value, Source: string(p.Name.Source), Editable: true},
+		Evidence:           keeperConfigField[bool]{Value: p.Evidence.Value, Source: string(p.Evidence.Source), Editable: true},
+		EvidenceFacts:      keeperConfigField[[]string]{Value: p.EvidenceFacts.Value, Source: string(p.EvidenceFacts.Source), Editable: true},
+		HardGate:           keeperConfigField[bool]{Value: p.HardGate.Value, Source: string(p.HardGate.Source), Editable: true},
+		EscalateFrom:       keeperConfigField[int64]{Value: p.EscalateFrom.Value, Source: string(p.EscalateFrom.Source), Editable: true},
+		Precedent:          keeperConfigField[bool]{Value: p.Precedent.Value, Source: string(p.Precedent.Source), Editable: true},
+		PrecedentN:         keeperConfigField[int64]{Value: p.PrecedentN.Value, Source: string(p.PrecedentN.Source), Editable: true},
+		ConsistencySamples: keeperConfigField[int64]{Value: p.ConsistencySamples.Value, Source: string(p.ConsistencySamples.Source), Editable: true},
+		PromptBudgetTokens: keeperConfigField[int64]{Value: p.PromptBudgetTokens.Value, Source: string(p.PromptBudgetTokens.Source), Editable: true},
+
+		Overridden: p.Overridden,
+		Choices:    choices,
+		Facts:      append([]string(nil), keepercfg.EvidenceFacts...),
+		Stamp:      p.Stamp(),
+	}
+}
+
 func keeperConfigPayload(eff keepercfg.Effective) keeperConfigResponse {
 	return keeperConfigResponse{
 		Enabled:     keeperConfigField[bool]{Value: eff.Enabled.Value, Source: string(eff.Enabled.Source), Editable: true},
@@ -77,6 +131,7 @@ func keeperConfigPayload(eff keepercfg.Effective) keeperConfigResponse {
 		Wire:        keeperConfigField[string]{Value: eff.Wire.Value, Source: string(eff.Wire.Source)},
 		Model:       keeperConfigField[string]{Value: eff.Model.Value, Source: string(eff.Model.Source), Editable: true},
 		TimeoutMS:   keeperConfigField[int64]{Value: eff.TimeoutMS.Value, Source: string(eff.TimeoutMS.Source), Editable: true},
+		Profile:     keeperProfilePayload(eff.Profile),
 
 		Overridden:      eff.Overridden,
 		UpdatedAt:       eff.UpdatedAt,
@@ -129,6 +184,20 @@ type keeperConfigRequest struct {
 	Model       *string         `json:"judge_model"`
 	// TimeoutMS: 0 clears the override and returns to the built-in default.
 	TimeoutMS *int64 `json:"judge_timeout_ms"`
+
+	// The judge profile. Profile names a preset ("" clears it back to the
+	// built-in); the three toggles are RawMessage for the same three-state reason
+	// as `enabled` above — absent leaves them, null returns them to following the
+	// profile, true/false override it. The numbers clear at 0.
+	Profile            *string         `json:"judge_profile"`
+	Evidence           json.RawMessage `json:"judge_evidence"`
+	EvidenceFacts      *string         `json:"judge_evidence_facts"`
+	HardGate           json.RawMessage `json:"judge_hard_gate"`
+	Precedent          json.RawMessage `json:"judge_precedent"`
+	PrecedentN         *int64          `json:"judge_precedent_n"`
+	ConsistencySamples *int64          `json:"judge_consistency_samples"`
+	EscalateFrom       *int64          `json:"judge_escalate_from"`
+	PromptBudgetTokens *int64          `json:"judge_prompt_budget_tokens"`
 }
 
 // Put applies a partial update. PUT /api/v1/admin/keeper/config
@@ -148,11 +217,17 @@ func (h *AdminKeeperConfigHandler) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := keepercfg.Patch{
-		Provider:    body.Provider,
-		EndpointURL: body.EndpointURL,
-		Wire:        body.Wire,
-		Model:       body.Model,
-		TimeoutMS:   body.TimeoutMS,
+		Provider:           body.Provider,
+		EndpointURL:        body.EndpointURL,
+		Wire:               body.Wire,
+		Model:              body.Model,
+		TimeoutMS:          body.TimeoutMS,
+		Profile:            body.Profile,
+		EvidenceFacts:      body.EvidenceFacts,
+		PrecedentN:         body.PrecedentN,
+		ConsistencySamples: body.ConsistencySamples,
+		EscalateFrom:       body.EscalateFrom,
+		PromptBudgetTokens: body.PromptBudgetTokens,
 	}
 	if len(body.Enabled) > 0 {
 		tri, ok := triFromJSON(body.Enabled)
@@ -161,6 +236,26 @@ func (h *AdminKeeperConfigHandler) Put(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		patch.Enabled = &tri
+	}
+	for _, toggle := range []struct {
+		name string
+		raw  json.RawMessage
+		dst  **keepercfg.TriBool
+	}{
+		{"judge_evidence", body.Evidence, &patch.Evidence},
+		{"judge_hard_gate", body.HardGate, &patch.HardGate},
+		{"judge_precedent", body.Precedent, &patch.Precedent},
+	} {
+		if len(toggle.raw) == 0 {
+			continue
+		}
+		tri, ok := triFromJSON(toggle.raw)
+		if !ok {
+			replyError(w, http.StatusBadRequest, `"`+toggle.name+
+				`" must be true, false, or null (null = follow the judge profile, which is not the same as false)`)
+			return
+		}
+		*toggle.dst = &tri
 	}
 
 	actor := ""
@@ -232,7 +327,7 @@ func (h *AdminKeeperConfigHandler) audit(r *http.Request, actor, summary string,
 	h.logger.Warn("keeper instance judge configuration changed via admin API",
 		"actor", actor, "enabled", eff.Enabled.Value,
 		"endpoint", redactEndpointUserinfo(eff.EndpointURL.Value),
-		"model", eff.Model.Value, "overridden", eff.Overridden)
+		"model", eff.Model.Value, "profile", eff.Profile.Stamp(), "overridden", eff.Overridden)
 	if h.journal == nil {
 		return
 	}
@@ -253,8 +348,15 @@ func (h *AdminKeeperConfigHandler) audit(r *http.Request, actor, summary string,
 			"endpoint_source": string(eff.EndpointURL.Source),
 			"model":           eff.Model.Value,
 			"model_source":    string(eff.Model.Source),
-			"overridden":      eff.Overridden,
-			"rule":            "keeper_runtime_config",
+			// The full stamp, not the profile name: "which capabilities was the
+			// judge running with at 03:00" is unanswerable from a name once a
+			// single toggle has been overridden, and this entry is the record the
+			// decisions in keeper_requests are read against.
+			"judge_profile":        eff.Profile.Stamp(),
+			"judge_profile_name":   eff.Profile.Name.Value,
+			"judge_profile_source": string(eff.Profile.Name.Source),
+			"overridden":           eff.Overridden,
+			"rule":                 "keeper_runtime_config",
 		},
 	}); err != nil {
 		h.logger.Warn("keeper config: journal emit failed", "error", err)

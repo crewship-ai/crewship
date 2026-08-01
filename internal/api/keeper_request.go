@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/keeper/health"
 )
 
 type keeperRequestBody struct {
@@ -239,16 +240,24 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
 	// Run gatekeeper evaluation
+	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
-		Request:        req,
-		CredentialName: credName,
-		SecurityLevel:  keeper.SecurityLevel(secLevel),
-		AgentName:      agentName,
-		CrewName:       crewName,
-		ConvHistory:    convHistory,
+		Request:            req,
+		CredentialName:     credName,
+		SecurityLevel:      keeper.SecurityLevel(secLevel),
+		AgentName:          agentName,
+		CrewName:           crewName,
+		ConvHistory:        convHistory,
+		Evidence:           facts,
+		HardGate:           hardGate,
+		EvidenceFacts:      factKeys,
+		EvidenceInPrompt:   inPrompt,
+		PromptBudgetTokens: h.promptBudget(),
+		EscalateFrom:       h.escalateFrom(),
 	}
 
 	var gkResp keeper.GatekeeperResponse
+	judgeStart := time.Now()
 	if h.gatekeeper != nil {
 		var evalErr error
 		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
@@ -260,6 +269,18 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 				RiskScore: 10,
 			}
 		}
+		// PR-P6: nothing watched Keeper's own verdicts, so #1624 denied every
+		// credential request for several milestones unnoticed. Recorded only
+		// when a judge actually ran — an instance with no gatekeeper wired
+		// denies by configuration, not by malfunction, and counting that would
+		// alarm on every unconfigured install. Fire-and-forget by contract;
+		// see health.Record.
+		health.Record(r.Context(), h.db, h.logger, health.Verdict{
+			WorkspaceID: body.WorkspaceID,
+			Decision:    gkResp.Decision,
+			JudgeFailed: gkResp.InfraFailure || evalErr != nil,
+			Latency:     time.Since(judgeStart),
+		})
 	} else {
 		gkResp = keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
@@ -285,9 +306,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// semantics from "decided" to "retry", which is the wrong recovery for an
 	// outcome that has already happened.
 	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 		[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
 		keeperTransition{
 			RequestID:    reqID,
 			WorkspaceID:  body.WorkspaceID,

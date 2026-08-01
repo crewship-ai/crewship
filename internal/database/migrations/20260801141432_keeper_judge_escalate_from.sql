@@ -1,0 +1,24 @@
+-- Keeper judge profile: the escalation floor (PRD P8).
+--
+-- INTENTIONALLY EMPTY. The column this migration used to add is now created by
+-- 20260801150210, which owns it outright.
+--
+-- The history is worth keeping, because the lesson is the file itself. This
+-- migration added judge_escalate_from with CHECK (1-4). Hours later the dial
+-- gained a fifth value — "never", i.e. full autonomy — and the CHECK was widened
+-- BY EDITING THIS FILE, which a dev instance had already applied. SQLite cannot
+-- alter a CHECK in place, so that instance was left rejecting the new value with
+-- a constraint failure, and the fix needed a table rebuild anyway.
+--
+-- Adding the rebuild alongside the original ALTER then produced the second
+-- problem: two migrations owning one column, failing in one order with "no such
+-- column" and in the other with "duplicate column name", depending on whether
+-- the ledger had been renumbered. Emptying this one leaves a single owner and
+-- makes the pair order-independent.
+--
+-- Kept rather than deleted because instances have it in their ledger. An empty
+-- migration is cheap; a missing one that a database claims to have applied is a
+-- repair job.
+--
+-- The rule this cost us: once a migration has been applied ANYWHERE, it is
+-- frozen. Widen it in a new file, even when the edit looks free.

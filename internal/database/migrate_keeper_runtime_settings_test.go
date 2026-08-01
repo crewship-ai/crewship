@@ -39,11 +39,12 @@ func TestMigrateKeeperRuntimeSettings_TableShape(t *testing.T) {
 	if !strings.Contains(ddl, "strftime('%Y-%m-%dT%H:%M:%fZ','now')") {
 		t.Errorf("timestamps must default to the T-form literal:\n%s", ddl)
 	}
-	// Every judge column inherits from cfg.Keeper when empty, so an instance
-	// that has never been configured must be indistinguishable from one that
-	// pre-dates the table.
-	if strings.Count(ddl, "DEFAULT ''") != 4 {
-		t.Errorf("all four judge columns must default to empty (inherit):\n%s", ddl)
+	// Every judge column inherits when empty, so an instance that has never been
+	// configured must be indistinguishable from one that pre-dates the table.
+	// Six: the four wiring columns plus judge_profile and judge_evidence_facts,
+	// where '' means "follow the built-in profile" and "carry every fact".
+	if strings.Count(ddl, "DEFAULT ''") != 6 {
+		t.Errorf("all six inheriting text columns must default to empty:\n%s", ddl)
 	}
 }
 

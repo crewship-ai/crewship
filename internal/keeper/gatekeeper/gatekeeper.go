@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/keeper/evidence"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/lookout"
 )
@@ -122,6 +123,49 @@ type EvalRequest struct {
 	AgentName      string
 	CrewName       string
 	Command        string // non-empty for /execute requests: the command to run with the credential
+	// Evidence is the computed, database-sourced facts about this request
+	// (internal/keeper/evidence). Supplied by the CALLER, exactly as ConvHistory
+	// is, so this package stays free of database access and the collection can be
+	// tested on its own.
+	//
+	// nil means "not gathered" — the operator turned the capability off, or every
+	// query failed. It is never treated as a set of negative facts: an absence
+	// that denied requests would turn a database blip into the #1624 outage with
+	// a new cause.
+	Evidence *evidence.Facts
+	// HardGate enables the deterministic refusal of an unbound credential at the
+	// tiers that reach real infrastructure. Caller-controlled, because it is an
+	// operator toggle (keepercfg judge profile, hard_gate) and this package must
+	// not read configuration.
+	//
+	// false is the safe default for a caller that has not decided: the request
+	// still reaches the judge with the facts in front of it, which is strictly
+	// more information than before and never less.
+	HardGate bool
+	// EvidenceFacts narrows the rendered evidence block to these fact keys. Empty
+	// means every fact. Caller-supplied for the same reason HardGate is: it is an
+	// operator toggle and this package does not read configuration.
+	EvidenceFacts []string
+	// EscalateFrom raises the HumanApproval floor to this tier: a judge ALLOW at
+	// or above it becomes an ESCALATE. Zero means the tier table decides, which
+	// is the pre-existing behaviour. Caller-supplied, like the other operator
+	// toggles — see keeper.SecurityLevel.TierWithEscalateFrom for why this is a
+	// dial rather than relabelling the credential.
+	EscalateFrom keeper.SecurityLevel
+	// EvidenceInPrompt renders the facts block. Separate from Evidence itself
+	// because the hard gate needs the FACTS while the operator may have turned
+	// the BLOCK off to save context — two questions, two switches.
+	EvidenceInPrompt bool
+	// PromptBudgetTokens caps the assembled prompt. 0 means no cap, which is the
+	// pre-existing behaviour exactly.
+	//
+	// It exists because ConvHistory is bounded in MESSAGE COUNT and not in tokens,
+	// while the reference deployment runs num_ctx 4096. A model server truncates
+	// from the front, and this prompt is assembled policy → tier → evidence →
+	// history → request, so the first thing a long conversation pushes out is the
+	// operator's watch policy. That is not lost context, it is a security
+	// downgrade the response cannot be distinguished from a considered verdict.
+	PromptBudgetTokens int
 
 	// RequestType selects which prompt template buildPrompt renders.
 	// Empty defaults to RequestTypeAccess so existing callers (the
@@ -413,7 +457,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// what extra questions the judge is asked, and what may be done with the
 	// answer. An unknown level resolves to L4, so a corrupt row is the strictest
 	// case rather than the cheapest bypass.
-	tier := req.SecurityLevel.Tier()
+	tier := req.SecurityLevel.TierWithEscalateFrom(req.EscalateFrom)
 
 	if isAccessFlow &&
 		req.Command == "" &&
@@ -452,6 +496,42 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 			Reason: fmt.Sprintf(
 				"%s credential (%s): the stated intent is %d characters, and this tier needs at least %d. Say what the credential is for, on what system, and why this one — a longer restatement of the credential's name will be denied again.",
 				tier.Label, tier.Blast, len(intent), tier.MinIntentChars),
+			RiskScore: tier.RefusalRisk(),
+		}, nil
+	}
+
+	// The binding gate, for the same reason the intent minimum sits above it:
+	// some questions do not need a model.
+	//
+	// agent_credentials is the operator's standing answer to "may this agent hold
+	// this credential at all". Asking a 9B judge to weigh it against a persuasive
+	// intent is asking the wrong question.
+	//
+	// DEFENCE IN DEPTH, not the primary control. Both API paths into this
+	// package already enforce the binding in SQL — internal/api/keeper_request.go
+	// and keeper_execute.go both JOIN agent_credentials and answer 404 for an
+	// unbound credential — so this branch cannot fire through them today. It
+	// exists for a caller that does not, and it is deliberately cheap. Do not
+	// mistake it for the reason unbound credentials are refused.
+	//
+	// Only at the tiers that reach real infrastructure. L1/L2 are self-service
+	// (their value is handed to the agent for the whole run anyway), and inventing
+	// a refusal there would be this file deciding policy that tier.go owns — a
+	// tier may only tighten a verdict.
+	//
+	// Bound==false is a VERIFIED absence; a nil Binding is a failed query, and
+	// gating on it would turn a database blip into a blanket denial of every
+	// L3/L4 request. Omission over guessing, on the enforcement side too.
+	if (isAccessFlow || rt == keeper.RequestTypeExecute) &&
+		req.HardGate && !tier.SelfServiceDelivery && req.Evidence != nil &&
+		req.Evidence.Binding != nil && !req.Evidence.Binding.Bound {
+		g.logger.Info("keeper: agent holds no binding for this credential — denied without a model call",
+			"agent", req.AgentName, "credential", req.CredentialName, "tier", tier.Label)
+		return keeper.GatekeeperResponse{
+			Decision: string(keeper.DecisionDeny),
+			Reason: fmt.Sprintf(
+				"%s credential (%s): %q is not bound to this credential, so there is nothing for the judge to weigh — an operator grants the binding, an intent cannot. Bind it in the agent's credentials, or ask for one this agent already holds.",
+				tier.Label, tier.Blast, req.AgentName),
 			RiskScore: tier.RefusalRisk(),
 		}, nil
 	}
@@ -511,6 +591,20 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		// verdict, which this fail-closed path turns into a DENY on every
 		// request. The judge wants one JSON object, not deliberation.
 		Think: ptr(false),
+		// Constrained decoding, so "one JSON object" stops being a request the
+		// model may decline. The prompt asks for it in prose and parseResponse
+		// brace-scans the answer; a small model that opens with "Sure, here's my
+		// assessment:" — or fences the object — parses as nothing, and nothing is
+		// DENY risk 10 on every credential request. A schema removes that class at
+		// the decoder.
+		//
+		// The enum is per REQUEST TYPE, not one list for the whole method — see
+		// verdictSchema. This literal serves all five prompt templates, and they
+		// do not ask the same question.
+		//
+		// Ollama honours this; hosted providers ignore it. NormalizeRawResponse
+		// therefore stays exactly as load-bearing as it was.
+		Format: verdictSchema(rt),
 	})
 
 	if err != nil {
@@ -560,7 +654,9 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	// the safer path only.
 	if isAccessFlow || rt == keeper.RequestTypeExecute {
 		var note string
-		decision, risk, note = keeper.ApplyTierFloor(req.SecurityLevel, decision, risk)
+		// The resolved policy, not the bare level: the operator's EscalateFrom
+		// dial lives on `tier` and re-deriving it here would drop it.
+		decision, risk, note = keeper.ApplyTierPolicyFloor(tier, decision, risk)
 		if note != "" {
 			reason += note
 			g.logger.Info("keeper: tier floor applied to the judge's verdict",
@@ -662,6 +758,57 @@ func (g *Gatekeeper) buildPrompt(req EvalRequest, watch string) string {
 // of the model's attention. The block is length-capped upstream (CompileWatchSpec).
 // A malicious admin authoring a policy that neuters the evaluator is out of the
 // M1 threat model — an OWNER/ADMIN can already disable the watchdog entirely.
+// charsPerToken is the estimator behind the prompt budget. Deliberately crude
+// and deliberately PESSIMISTIC — real tokenizers average nearer 4 characters per
+// token on English prose, so budgeting at 3.5 lands under the true limit rather
+// than over it. Being exactly right would need the model's own tokenizer, which
+// the judge does not have and which would change per model anyway; being
+// reliably under is what the budget is for.
+const charsPerToken = 3.5
+
+// criteriaBlockLen is the size of the fixed tail every access prompt carries —
+// the decision criteria plus the JSON contract. Reserved up front so the budget
+// cannot be spent on history and then overrun by the part that tells the model
+// what to answer.
+const criteriaBlockLen = 900
+
+// historyTruncationNotice marks a cut conversation. It is not decoration: the
+// decision criteria ask the judge whether the conversation supports the request,
+// so an undisclosed truncation turns "I was not shown it" into "it did not
+// happen" — a refusal manufactured by a context limit.
+const historyTruncationNotice = "[…earlier conversation truncated to fit the judge's context budget; " +
+	"absence of earlier corroboration here is not evidence it did not happen…]\n"
+
+// truncateHistory trims a conversation to fit budgetChars, keeping the END.
+//
+// The end, because recency is what corroborates a request: the message that says
+// "rotate the staging certs" is the last thing said, not the first. Cutting the
+// tail would leave the judge with the opening pleasantries.
+//
+// The cut is DISCLOSED. A judge shown three messages out of ninety with nothing
+// to mark the gap reads missing corroboration as absent corroboration — and the
+// decision criteria explicitly ask it whether the conversation supports the
+// request. Silence there manufactures a refusal.
+func truncateHistory(history string, budgetChars int) (string, bool) {
+	if len(history) <= budgetChars {
+		return history, false
+	}
+	// Nothing left to spend: the incompressible sections already overran the
+	// allowance. Drop the history entirely rather than treating a negative
+	// remainder as "unbudgeted" — the old reading meant a TIGHTER budget
+	// protected less than a loose one, silently, in precisely the case the
+	// setting exists for. The notice still goes in, so the judge is told the
+	// conversation is missing rather than left to read it as absent.
+	if budgetChars <= 0 {
+		return historyTruncationNotice, true
+	}
+	keep := budgetChars - len(historyTruncationNotice)
+	if keep < 0 {
+		keep = 0
+	}
+	return historyTruncationNotice + history[len(history)-keep:], true
+}
+
 func watchPolicyBlock(spec string) string {
 	if spec == "" {
 		return ""
@@ -686,14 +833,38 @@ func (g *Gatekeeper) buildAccessPrompt(req EvalRequest, watch string) string {
 	// Then the credential's tier, for the same reason: it is our policy, derived
 	// from an operator-set level, and it has to outrank anything the history says.
 	sb.WriteString(tierPolicyBlock(req.SecurityLevel))
+	// Computed facts, ABOVE the conversation fence and alongside the policy for
+	// the same reason those are there: the block's claim to outrank the history
+	// is only credible if agent-authored text cannot precede, restate or
+	// contradict it. Render returns "" when nothing was established, so an
+	// instance with the capability off produces exactly the prompt it did before.
+	if req.Evidence != nil && req.EvidenceInPrompt {
+		sb.WriteString(req.Evidence.RenderOnly(req.EvidenceFacts))
+	}
 
 	if req.ConvHistory != "" {
 		delim, ok := randomDelimiter()
 		if ok {
+			// The budget is spent on the history because the history is the only
+			// compressible section. Everything above it is policy and everything
+			// below is the question — trimming either would change what is being
+			// asked, which is the failure this budget exists to prevent.
+			history := req.ConvHistory
+			if req.PromptBudgetTokens > 0 {
+				spent := sb.Len() + len(req.Request.Intent) + len(req.Command) + criteriaBlockLen
+				remaining := int(float64(req.PromptBudgetTokens)*charsPerToken) - spent
+				var cut bool
+				history, cut = truncateHistory(history, remaining)
+				if cut {
+					g.logger.Info("keeper: conversation history truncated to fit the prompt budget",
+						"agent", req.AgentName, "budget_tokens", req.PromptBudgetTokens,
+						"original_chars", len(req.ConvHistory), "kept_chars", len(history))
+				}
+			}
 			sb.WriteString("[BACKGROUND — CONVERSATION HISTORY]\n")
 			sb.WriteString("This is the agent's recent conversation for context only. Use it to verify whether the agent's work genuinely requires the credential.\n")
 			fmt.Fprintf(&sb, "--- %s begin ---\n", delim)
-			sb.WriteString(req.ConvHistory)
+			sb.WriteString(history)
 			fmt.Fprintf(&sb, "--- %s end ---\n\n", delim)
 		} else {
 			g.logger.Warn("keeper: random delimiter unavailable; skipping conversation history")
@@ -950,6 +1121,46 @@ func NormalizeRawResponse(raw string) (decision string, risk int, reason string,
 	}
 
 	return decision, risk, resp.Reason, nil
+}
+
+// verdictSchema returns the constrained-decoding schema for one request type.
+//
+// It is a function rather than a package var because the decision SPACE is not
+// uniform: Evaluate serves five prompt templates through a single llm.Request,
+// and the behavior watchdog asks a four-verb question while the credential path
+// asks a three-verb one.
+//
+// Getting this wrong is silent and expensive in both directions:
+//
+//   - Omitting WARN on the behavior path makes it undecodable, not merely
+//     unnormalised. classifyBehaviorDecision re-parses the raw body precisely to
+//     recover WARN, and with a three-verb schema there is nothing left to
+//     recover — every would-be WARN lands on ALLOW/DENY/ESCALATE, and a DENY in
+//     "block" mode interrupts the tool call that the design wanted merely
+//     flagged.
+//   - Offering WARN on the credential path would manufacture refusals:
+//     NormalizeRawResponse folds anything outside the closed set to DENY, so the
+//     model would be handed a verb whose only effect is to deny.
+func verdictSchema(rt keeper.RequestType) map[string]any {
+	decisions := []string{
+		string(keeper.DecisionAllow),
+		string(keeper.DecisionDeny),
+		string(keeper.DecisionEscalate),
+	}
+	if rt == keeper.RequestTypeBehavior {
+		// Matches buildBehaviorPrompt's stated decision space, which is the
+		// contract the model is actually being held to.
+		decisions = append(decisions, "WARN")
+	}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"decision": map[string]any{"type": "string", "enum": decisions},
+			"reason":   map[string]any{"type": "string"},
+			"risk":     map[string]any{"type": "integer", "minimum": 1, "maximum": 10},
+		},
+		"required": []string{"decision", "reason", "risk"},
+	}
 }
 
 func randomDelimiter() (string, bool) {

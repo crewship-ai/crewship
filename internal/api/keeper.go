@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/keeper/evidence"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -82,6 +85,86 @@ type KeeperHandler struct {
 	// execDedup is the single chokepoint (#1329) that gives POST
 	// /keeper/execute an idempotency key — see keeperExecuteDedup.
 	execDedup *keeperExecuteDedup
+	// judgeCfg supplies the judge profile — which capabilities the credential
+	// judge may use. nil until SetJudgeConfig wires it, and nil means every
+	// capability is off: an instance that has not been told otherwise behaves
+	// exactly as it did before the profile existed.
+	judgeCfg *keepercfg.Store
+}
+
+// promptBudget is the operator's prompt ceiling, or 0 when none is configured.
+// Separate from gatherEvidence because it applies whether or not evidence is on:
+// an unbounded conversation truncates the watch policy either way.
+func (h *KeeperHandler) promptBudget() int {
+	if h.judgeCfg == nil {
+		return 0
+	}
+	return int(h.judgeCfg.Effective().Profile.PromptBudgetTokens.Value)
+}
+
+// escalateFrom is the operator's human-approval floor, or 0 for the tier table's
+// own. Like promptBudget it applies regardless of the evidence toggle: it is a
+// policy dial, not part of the evidence block.
+func (h *KeeperHandler) escalateFrom() keeper.SecurityLevel {
+	if h.judgeCfg == nil {
+		return 0
+	}
+	return keeper.SecurityLevel(h.judgeCfg.Effective().Profile.EscalateFrom.Value)
+}
+
+// judgeProfileStamp is the compact description of the capability set a decision
+// was taken under, or "" when no profile is wired.
+//
+// It is recorded ON the decision because the eval harness replays recorded
+// prompts: a corpus mixing verdicts taken with the evidence block against
+// verdicts taken without it measures the difference between two regimes and
+// reports it as a difference between two models. Without the stamp there is no
+// way to tell the two kinds of row apart after the fact.
+func (h *KeeperHandler) judgeProfileStamp() string {
+	if h.judgeCfg == nil {
+		return ""
+	}
+	return h.judgeCfg.Effective().Profile.Stamp()
+}
+
+// SetJudgeConfig wires the instance judge configuration so the credential path
+// can honour the operator's profile (evidence, hard gate). Skip the call to keep
+// the pre-profile behaviour.
+func (h *KeeperHandler) SetJudgeConfig(s *keepercfg.Store) { h.judgeCfg = s }
+
+// gatherEvidence computes the verified facts for one request, or returns nil
+// when the operator has the capability off, the wiring is absent, or the ids are
+// not both known.
+//
+// nil is deliberately indistinguishable from "gathered nothing" at the call
+// site: the gatekeeper treats a nil Facts as "not established" and never as a
+// set of negative facts, so a config change and a database outage both degrade
+// to the prose-only judgement rather than to a refusal.
+func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool, []string, bool) {
+	if h.judgeCfg == nil || h.db == nil || agentID == "" || credentialID == "" {
+		return nil, false, nil, false
+	}
+	prof := h.judgeCfg.Effective().Profile
+	// Gathered when EITHER capability wants it, because the two answer different
+	// questions. `evidence` is "how much context does my judge get" — an operator
+	// shrinks it because their model has a small window. `hard_gate` is "refuse a
+	// credential this agent is not bound to" — a deterministic refusal the model
+	// never sees. Tying the gate to the block meant trimming the prompt silently
+	// stopped the refusals while `profile get` still reported the gate as on.
+	//
+	// It costs one indexed query on agent_credentials, so the cheap answer is
+	// also the safe one.
+	if !prof.Evidence.Value && !prof.HardGate.Value {
+		return nil, false, nil, false
+	}
+	f := evidence.Gather(ctx, h.db, evidence.Query{AgentID: agentID, CredentialID: credentialID})
+	for _, om := range f.Omitted {
+		h.logger.Warn("keeper: evidence fact omitted",
+			"fact", om.Fact, "error", om.Err, "agent_id", agentID, "credential_id", credentialID)
+	}
+	// The block reaches the PROMPT only when the operator asked for it. Gathering
+	// for the gate is not permission to spend their context window.
+	return &f, prof.HardGate.Value, prof.EvidenceFacts.Value, prof.Evidence.Value
 }
 
 // NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.

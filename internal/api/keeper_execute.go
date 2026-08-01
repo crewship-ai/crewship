@@ -27,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
+	"github.com/crewship-ai/crewship/internal/keeper/health"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -430,18 +431,33 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// Load agent's recent conversation history for Keeper context
 	execConvHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
-	// Gatekeeper evaluation (include the command so the LLM can reason about it)
+	// Gatekeeper evaluation (include the command so the LLM can reason about it).
+	//
+	// Same evidence, gate and budget as /keeper/request. The two paths share
+	// buildAccessPrompt and differ only in that this one also RUNS something with
+	// the credential — so it is the stricter of the two, and protecting only the
+	// other one would leave the higher-consequence flow unguarded. The hard-gate
+	// branch in the gatekeeper already tests for RequestTypeExecute; without this
+	// it was a condition that could never be true.
+	execFacts, execHardGate, execFactKeys, execInPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
-		Request:        req,
-		CredentialName: credName,
-		SecurityLevel:  keeper.SecurityLevel(secLevel),
-		AgentName:      agentName,
-		CrewName:       crewName,
-		Command:        body.Command,
-		ConvHistory:    execConvHistory,
+		Request:            req,
+		CredentialName:     credName,
+		SecurityLevel:      keeper.SecurityLevel(secLevel),
+		AgentName:          agentName,
+		CrewName:           crewName,
+		Command:            body.Command,
+		ConvHistory:        execConvHistory,
+		Evidence:           execFacts,
+		HardGate:           execHardGate,
+		EvidenceFacts:      execFactKeys,
+		EvidenceInPrompt:   execInPrompt,
+		PromptBudgetTokens: h.promptBudget(),
+		EscalateFrom:       h.escalateFrom(),
 	}
 
 	var gkResp keeper.GatekeeperResponse
+	judgeStart := time.Now()
 	if h.gatekeeper != nil {
 		var evalErr error
 		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
@@ -453,6 +469,16 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 				RiskScore: 10,
 			}
 		}
+		// PR-P6: /execute shares the /request window deliberately. Both flows
+		// are the same judge answering the same way, so splitting them would
+		// halve each sample count and delay the alarm on an instance that
+		// spreads its credential traffic across the two. See health.Record.
+		health.Record(r.Context(), h.db, h.logger, health.Verdict{
+			WorkspaceID: body.WorkspaceID,
+			Decision:    gkResp.Decision,
+			JudgeFailed: gkResp.InfraFailure || evalErr != nil,
+			Latency:     time.Since(judgeStart),
+		})
 	} else {
 		gkResp = keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
@@ -476,9 +502,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		// #1369: the PENDING→decided step is appended to the ledger in the same
 		// transaction as the in-place UPDATE.
 		if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
-			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 			[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
-				nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+				nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
 			keeperTransition{
 				RequestID:    reqID,
 				WorkspaceID:  body.WorkspaceID,
@@ -709,9 +735,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	defer cancelAudit()
 
 	if err := updateKeeperDecisionWithTransition(auditCtx, h.db, `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 		[]any{string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now,
-			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID},
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), nullIfEmpty(h.judgeProfileStamp()), reqID},
 		keeperTransition{
 			RequestID:    reqID,
 			WorkspaceID:  body.WorkspaceID,
