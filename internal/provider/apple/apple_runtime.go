@@ -129,29 +129,22 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if cpuInt < 1 {
 		cpuInt = 1
 	}
-	args := []string{
-		"create",
-		"--name", containerName,
-		"--cpus", fmt.Sprintf("%d", cpuInt),
-		"--memory", fmt.Sprintf("%dM", memoryMB),
-		"--read-only",
-		"--env", "CREWSHIP_CREW_ID=" + team.ID,
-		"-v", workspacePath + ":/workspace",
-		"-v", outputPath + ":/output",
-		"-v", crewPath + ":/crew",
-		"--tmpfs", "/tmp",
-		"--tmpfs", "/home/agent",
+	args, err := buildCreateArgs(createArgsInput{
+		containerName:  containerName,
+		image:          p.cfg.RuntimeImage,
+		network:        p.cfg.Network,
+		cpus:           cpuInt,
+		memoryMB:       memoryMB,
+		crewID:         team.ID,
+		workspacePath:  workspacePath,
+		outputPath:     outputPath,
+		crewPath:       crewPath,
+		sidecarPath:    p.cfg.SidecarBinaryPath,
+		entrypointPath: p.cfg.EntrypointPath,
+	})
+	if err != nil {
+		return "", err
 	}
-
-	if p.cfg.Network != "" {
-		args = append(args, "--network", p.cfg.Network)
-	}
-
-	// Apple Containers use --user for the init process user
-	args = append(args, "--user", agentContainerUser)
-
-	// Image + entrypoint: keep container alive
-	args = append(args, p.cfg.RuntimeImage, "sleep", "infinity")
 
 	out, err := runCLI(ctx, args...)
 	if err != nil {

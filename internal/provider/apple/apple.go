@@ -38,6 +38,20 @@ type Config struct {
 	Network         string
 	OutputBasePath  string
 	ContainerPrefix string
+
+	// SidecarBinaryPath is the host path to crewship-sidecar, bind-mounted
+	// read-only into crew containers at /usr/local/bin/crewship-sidecar. It is
+	// how the in-container egress proxy that enforces `restricted` network
+	// mode gets there at all; without it the mode is reported and not
+	// enforced (#1648). Required — buildCreateArgs refuses to build a create
+	// invocation without it.
+	SidecarBinaryPath string
+
+	// EntrypointPath is the host path to entrypoint.sh, bind-mounted
+	// read-only at /usr/local/bin/entrypoint.sh and forced as the container's
+	// entrypoint so a user-provided base image runs it instead of its own
+	// CMD. Required, as above.
+	EntrypointPath string
 }
 
 // Provider implements provider.ContainerProvider using the Apple Container CLI.

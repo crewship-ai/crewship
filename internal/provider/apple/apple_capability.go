@@ -8,9 +8,17 @@ package apple
 // UnsupportedCrewConfig is the answer to "what did you actually do with this",
 // asked per crew so that a field the crew never set is never mentioned.
 //
-// Closing the gaps themselves — the /secrets tmpfs, the sidecar and entrypoint
-// binds, an init, the noexec mounts — is #1649. This file makes the gap
-// visible; it does not pretend to narrow it.
+// #1649 then closed two of them for real — the delivery mounts landed, so
+// NetworkMode is enforced and Init is honoured — and both entries came out of
+// this report. That direction matters more than it looks: an entry that
+// outlives the gap it describes is not a harmless over-report. It feeds the
+// crew read paths and the agent's own system prompt, so a stale "not enforced"
+// instructs every agent on this provider to behave as though its egress were
+// open when it is not. Under-claiming is the safe direction to be wrong in,
+// not a direction it is safe to stay wrong in.
+//
+// Still open here: CapDrop/SecurityOpt/noexec mounts and the rest of the
+// table below.
 
 import (
 	"fmt"
@@ -41,22 +49,33 @@ func (p *Provider) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewC
 
 	// Egress restriction is implemented by the in-container crewship-sidecar
 	// proxy (internal/orchestrator/exec_sidecar.go), and that binary reaches
-	// the container only through the read-only bind the docker provider adds
-	// at docker.go. This provider creates no such mount, so "restricted" here
-	// restricts nothing. "restricted" is also the database's create-time
-	// default (database.DefaultCrewNetworkMode), so this is the common case on
-	// this provider rather than an exotic one.
+	// the container through a read-only bind mount. This provider creates that
+	// mount now (#1649), so the fence is real here and this entry is NOT
+	// emitted in the normal case — reporting otherwise would tell every agent
+	// on this provider to act as if unfenced when it is not, which is a lie in
+	// the safe direction but a lie that changes behaviour.
 	//
-	// The crews row keeps saying "restricted" and SHOULD: it is the operator's
-	// intent, and it becomes true again the moment the crew moves to docker.
-	// What must not happen is a surface presenting that intent as the
-	// effective state, which is why this entry is the one the crew read paths
-	// look up by name.
-	if strings.EqualFold(strings.TrimSpace(cfg.NetworkMode), "restricted") {
-		detail := "egress is enforced by the in-container crewship-sidecar proxy, whose binary reaches " +
-			"the container only through a bind mount this provider does not create, so this crew's " +
-			"network is unrestricted despite being configured restricted. The setting is kept as your " +
-			"intent and takes effect if the crew moves to the docker provider."
+	// Nothing else in the chain is provider-specific: the orchestrator starts
+	// the proxy through the plain Exec interface and every exec carries
+	// HTTP_PROXY/HTTPS_PROXY (exec_env.go SidecarProxyEnv), the same mechanism
+	// that fences a docker crew. There is no kernel-level fence on either
+	// provider for this entry to be understating.
+	//
+	// The one case where it still holds is a deployment with no sidecar binary
+	// configured at all. buildCreateArgs refuses to create a container then, so
+	// a crew cannot start unfenced-but-reported-fenced through the create path
+	// — but the reuse path returns an already-running container without
+	// consulting it, and this report runs ahead of that lookup by design. A
+	// container that predates the mount cannot silently serve an unfenced crew
+	// either: startSidecar's health check exits non-zero when the binary is not
+	// there and orchestrator_run.go fails the run rather than proceeding. So
+	// the honest statement is about what this provider can deliver, not about
+	// what some older container happens to have.
+	if strings.EqualFold(strings.TrimSpace(cfg.NetworkMode), "restricted") && p.cfg.SidecarBinaryPath == "" {
+		detail := "egress is enforced by the in-container crewship-sidecar proxy, and this deployment has " +
+			"no sidecar binary configured for the provider to mount, so this crew's network is " +
+			"unrestricted despite being configured restricted. Set CREWSHIP_SIDECAR_PATH (or reinstall " +
+			"crewship, whose release archive bundles the binary) to make the fence real."
 		if len(cfg.AllowedDomains) > 0 {
 			detail += fmt.Sprintf(" The %d-entry AllowedDomains allowlist is part of the same control and "+
 				"is equally unenforced.", len(cfg.AllowedDomains))
@@ -109,13 +128,12 @@ func (p *Provider) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewC
 			Detail: "the container is not created privileged; features that need it (docker-in-docker) will not work",
 		})
 	}
-	if cfg.Init {
-		s.Degraded = append(s.Degraded, provider.DroppedField{
-			Field: "Init",
-			Detail: "no init process is used — PID 1 is `sleep infinity`, which never reaps, so orphaned " +
-				"processes accumulate as zombies for the life of the container",
-		})
-	}
+	// Init is deliberately absent from this report. The container is created
+	// with --init unconditionally (#1649), exactly as the docker provider sets
+	// HostConfig.Init unconditionally, so there is no configuration of this
+	// field the provider fails to honour — asking for an init gets one, and not
+	// asking for one gets one anyway because the sidecar is always reparented
+	// onto PID 1 and would otherwise leak zombies.
 	if len(cfg.CapAdd) > 0 {
 		s.Degraded = append(s.Degraded, provider.DroppedField{
 			Field: "CapAdd", Value: strings.Join(cfg.CapAdd, ","),

@@ -171,80 +171,84 @@ type containerJSON struct {
 | `ExecResize` | Resizes running exec TTY | No-op (CLI does not support resize) |
 | CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
 | Stop timeout | 30 seconds | 10 seconds |
-| Crew isolation controls | `CapDrop: ALL`, `no-new-privileges`, `/secrets` tmpfs, `noexec` mounts, `Init`, core-dump ulimit, `MemorySwap`/`ShmSize` limits, restart policy | None of them are applied |
-| `network_mode: "restricted"` egress fence | Enforced | Not enforced — crews reach the network unfiltered |
+| Crew isolation controls | `CapDrop: ALL`, `no-new-privileges`, `noexec` mounts, `MemorySwap`/`ShmSize` limits, restart policy | Not applied |
+| `/secrets` credential tmpfs | Applied, owned by the agent UID at mode `0700` | Applied, mode `1777` — Apple's CLI has no `uid`/`gid` mount directive |
+| Process rlimits | `core=0`, `nofile`, `nproc`, `fsize` | Same four, via `--ulimit`; inherited by every `container exec`, so they bind the agent and not just the init process |
+| Process count cap | `PidsLimit` (200 per container) | No equivalent — `nproc` is the only fork backstop, though each crew is its own VM so a fork bomb cannot reach a sibling or the host |
+| `network_mode: "restricted"` egress fence | Enforced | Enforced |
 
 <Warning>
-  The isolation rows above are not a feature gap to work around, they are the
-  reason `auto` prefers Docker. A crew on the Apple provider runs without the
-  container hardening and without the egress fence, whichever way that provider
-  was selected. `crewship start` logs a warning naming exactly what is not
-  enforced whenever it wires the Apple provider — treat that line as a
-  deployment decision, not noise.
+  `auto` still prefers Docker. A crew on the Apple provider gets the credential
+  tmpfs, the egress fence, an init process and the rlimits, but not
+  `CapDrop: ALL`, `no-new-privileges`, `noexec` mounts or the memory-swap and
+  restart-policy controls — several of which the Apple CLI has no flag for at
+  all. `crewship start` logs a warning naming exactly what is and is not
+  applied whenever it wires the Apple provider; treat that line as a deployment
+  decision, not noise.
 </Warning>
+
+#### Crew delivery mounts
+
+Crew containers get the same three delivery mounts on both providers: an
+in-memory `/secrets` for file-delivered credentials, the `crewship-sidecar`
+binary that enforces `restricted` network mode, and `entrypoint.sh` forced as
+the container entrypoint with an init process to reap orphans. Both host
+artefacts are mandatory — the Apple provider refuses to create a crew container
+without them rather than starting one whose egress mode nothing enforces.
+
+The one difference worth knowing is `/secrets` ownership. Docker mounts it
+owned by the agent UID with mode `0700`; Apple's `container create --mount`
+accepts only `type`, `size`, `mode`, `source`, `destination` and `readonly`, so
+the mount root is root-owned and has to be world-writable for the agent to use
+it at all. The credentials themselves keep the same protection on both — the
+per-agent directory is created `0700` and each file `0400`/`0600`, owned by the
+agent — but on Apple another UID inside the container can list `/secrets` and
+see agent slugs.
 
 #### Crew settings the Apple provider does not apply
 
 Starting a crew hands the provider the crew's full runtime configuration. The
-Apple Containers provider acts on the crew id, slug, memory and CPU count; the
-remaining settings below are not applied. None of them blocks the crew — it
-starts either way — but none of them is dropped in silence any more.
+Apple Containers provider acts on the crew id, slug, memory, CPU count, network
+mode and init; the remaining settings below are not applied. None of them
+blocks the crew — it starts either way — but none of them is dropped in silence
+any more.
 
 | Crew setting | Behaviour on Apple Containers |
 |---|---|
-| `network_mode: restricted` | Not enforced — the crew runs with unrestricted egress. See below. |
 | `container_ttl_hours` | No idle auto-stop; the container runs until stopped. |
 | `runtime_image` / provisioned image | Ignored — the container is created from `container.image`, so tools baked into the crew's provisioned image are missing at exec time. |
 | devcontainer `containerEnv` | Not set on the container; only `CREWSHIP_CREW_ID` is. |
 | Captured login `PATH` | Not set, so feature/pipx tool directories are off `PATH` for a non-login exec. |
 | Feature `privileged`, `capAdd`, `securityOpt` | Not applied; features that need them (e.g. docker-in-docker) will not work. |
-| Feature mounts | Not attached; only `/workspace`, `/output` and `/crew` are bound. |
+| Feature mounts | Not attached; only `/workspace`, `/output`, `/crew` and the delivery mounts above are bound. |
 | `postStartCommand` hooks | Not executed on create or restart. |
 | `/crew/init.sh` init hook | Not executed on container start. |
 | Sidecar `services:` | Not started; the agent cannot reach them by name. |
 
 Each of these is logged at `WARN` by the daemon when the crew starts, naming
 the setting and what was lost, and is streamed into the chat as a status line.
+A crew that sets none of them sees nothing.
 
-<Warning>
-**`network_mode: restricted` is not enforced here, and every surface says so.**
-Egress restriction is enforced by the in-container `crewship-sidecar` proxy,
-whose binary reaches the container only through a bind mount the Apple provider
-does not create. A crew configured `restricted` on this provider **runs with
-unrestricted egress**.
+<Note>
+**`network_mode: restricted` is enforced here.** It reaches the container the
+same way it does under Docker: the `crewship-sidecar` proxy binary is
+bind-mounted read-only into the crew container, the orchestrator starts it, and
+every exec carries `HTTP_PROXY`/`HTTPS_PROXY` pointing at it.
 
-The crew still starts — Crewship runs on every platform it can, and refusing
-would not make the crew any more contained. What it does not do is let the
-configured value pass for the effective one:
+Because the binary is a hard requirement of container creation, there is no
+state in which a crew starts on this provider with `restricted` configured and
+nothing enforcing it: either the mount is there, or the container is not
+created. If a container created before the mount existed is still running, the
+sidecar cannot launch inside it and the run fails with `sidecar health check
+failed` rather than proceeding unfenced — recreate the crew's container to
+clear it.
 
-- `GET /api/v1/crews` and `GET /api/v1/crews/{id}` return
-  `network_mode_enforced: false` alongside `network_mode: "restricted"`, plus a
-  `network_mode_unenforced_reason` explaining what is missing.
-- `crewship crew list` shows `restricted (NOT ENFORCED)` in the NETWORK column;
-  `crewship crew get` adds a **Why Not Enforced** line.
-- The dashboard's Network Policy card reads **Restricted — not enforced** and
-  carries the reason.
-- Creating or updating a crew to `restricted` on such an instance returns the
-  same explanation in the response's `warnings` array.
-- **The agent is told too.** Its system prompt gains a
-  `[NETWORK POLICY — NOT ENFORCED]` section instructing it to work as if on an
-  open network: assume outbound requests leave the machine, redact secrets
-  before sending anything, and never describe the crew to you as sandboxed or
-  network-isolated. An agent that believes it is fenced makes different
-  *choices*, not just different statements, so this is the surface that changes
-  behaviour rather than only reporting.
-
-A crew whose egress **is** enforced sees none of the above — its prompt is
-byte-for-byte what it was, and its API payload gains only
-`network_mode_enforced: true`.
-
-The stored `network_mode` is **not** rewritten. It is your intent, and it takes
-effect the moment the crew runs on the Docker provider — so moving a crew there
-restores the fence without you having to remember what it used to be set to.
-</Warning>
-
-To get enforced egress on macOS, run the crew on the Docker provider
-(`container.provider: "docker"`).
+The reporting built for the unenforced case remains and still fires for the
+settings in the table above: `GET /api/v1/crews` carries `network_mode_enforced`
+next to `network_mode`, `crewship crew list` marks an unenforced fence
+`restricted (NOT ENFORCED)`, and an agent whose fence is not real is told so in
+its system prompt. On this provider those now report enforced.
+</Note>
 
 ### Auto Provider
 
@@ -252,12 +256,15 @@ To get enforced egress on macOS, run the crew on the Docker provider
 
 Auto-detection tries Docker first, then falls back to Apple Containers. Useful for development environments where the runtime may vary.
 
-The order is deliberate and not merely a preference: every crew isolation
-control and the `restricted` egress fence exist on the Docker path only (see
-the limitations table above). On a host with both runtimes installed, `auto`
-therefore selects the hardened one; Apple Containers are the fallback for hosts
-that have nothing else. Set `container.provider: "apple"` explicitly if you
-want that path regardless of what else is installed.
+The order is deliberate and not merely a preference: several crew isolation
+controls exist on the Docker path only — `CapDrop: ALL`, `no-new-privileges`,
+`noexec` mounts, the memory-swap and restart-policy limits — and the Apple CLI
+has no flag for some of them at all (see the limitations table above). The
+`restricted` egress fence, the credential tmpfs, the init process and the
+rlimits are on both. On a host with both runtimes installed, `auto` therefore
+still selects the more hardened one; Apple Containers are the fallback for
+hosts that have nothing else. Set `container.provider: "apple"` explicitly if
+you want that path regardless of what else is installed.
 
 Apple Containers additionally require macOS 26 (Tahoe) or newer. On an older
 host the `container` CLI can be installed and its system service can answer

@@ -34,33 +34,65 @@ func (s *syncBuffer) String() string {
 func newLoggingTestProvider(cfg Config) (*Provider, *syncBuffer) {
 	buf := &syncBuffer{}
 	return &Provider{
-		cfg:    cfg,
+		cfg:    withTestSidecarArtefacts(cfg),
 		logger: slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		execs:  make(map[string]*execEntry),
 		done:   make(chan struct{}),
 	}, buf
 }
 
-// TestEnsureCrewRuntime_RestrictedEgressStartsTheCrewAndSaysItIsUnenforced:
-// the crew is not blocked over a setting this provider cannot apply — the
-// product runs everywhere it can — but the daemon log names the drop, so the
-// operator debugging "why did this reach the internet" finds it at the moment
-// the container came up.
-func TestEnsureCrewRuntime_RestrictedEgressStartsTheCrewAndSaysItIsUnenforced(t *testing.T) {
+// TestEnsureCrewRuntime_RestrictedEgressIsEnforcedAndSaysNothing: the mount
+// that carries the proxy binary lands now (#1649), so a restricted crew is
+// actually fenced and there is nothing to report. The warning this test used
+// to assert would today be a false one, and a false one with teeth — the same
+// report drives the agent's system prompt.
+func TestEnsureCrewRuntime_RestrictedEgressIsEnforcedAndSaysNothing(t *testing.T) {
 	installFakeContainer(t, crewBody)
 	p, logs := newLoggingTestProvider(Config{OutputBasePath: t.TempDir(), RuntimeImage: "img:1"})
 
 	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
 		ID: "crew1", Slug: "eng", NetworkMode: "restricted",
+		AllowedDomains: []string{"api.example.com"},
 	})
 	if err != nil {
-		t.Fatalf("an unenforceable egress mode must not block the crew: %v", err)
+		t.Fatalf("a restricted crew must start: %v", err)
+	}
+	if id == "" {
+		t.Fatal("want a container id")
+	}
+	if out := logs.String(); strings.Contains(out, "NetworkMode") {
+		t.Errorf("egress is enforced here; naming it as a drop would be a false warning. log:\n%s", out)
+	}
+}
+
+// TestEnsureCrewRuntime_UnfenceableEgressIsStillReported keeps #1648's
+// assertion alive for the state that still produces it — a deployment with no
+// sidecar binary — and keeps it on the path where it is reachable. Cold create
+// now refuses outright rather than building a container with no proxy in it
+// (the same refusal the docker provider has always made for the same
+// misconfiguration), so the surviving case is warm reuse: the report runs
+// ahead of the container lookup by design, the log names the drop, and the
+// running container is still handed back rather than the crew being blocked.
+func TestEnsureCrewRuntime_UnfenceableEgressIsStillReported(t *testing.T) {
+	installFakeContainer(t, `
+case "$1" in
+  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+esac
+exit 0`)
+	p, logs := newLoggingTestProvider(Config{OutputBasePath: t.TempDir(), RuntimeImage: "img:1"})
+	p.cfg.SidecarBinaryPath = ""
+
+	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
+		ID: "crew1", Slug: "eng", NetworkMode: "restricted",
+	})
+	if err != nil {
+		t.Fatalf("an unenforceable egress mode must not block a crew whose container is already up: %v", err)
 	}
 	if errors.Is(err, provider.ErrCrewConfigRefused) {
 		t.Fatal("nothing is refused today")
 	}
-	if id == "" {
-		t.Fatal("want a container id")
+	if id != "crewship-team-eng-crew1" {
+		t.Fatalf("id = %q, want the running container handed back", id)
 	}
 	out := logs.String()
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "NetworkMode") {

@@ -200,10 +200,28 @@ func assertAppleIsolationWarning(t *testing.T, out string) {
 	if !strings.Contains(out, "level=WARN") {
 		t.Fatalf("apple selection must warn, got: %s", out)
 	}
-	for _, want := range []string{"cap_drop", "no-new-privileges", "tmpfs", "restricted"} {
-		if !strings.Contains(strings.ToLower(out), want) {
-			t.Errorf("warning must name %q as not enforced, got: %s", want, out)
+	lower := strings.ToLower(out)
+
+	// Still not applied on this provider, and the Apple CLI has no flag for
+	// some of them at all. These are why `auto` still prefers Docker, so the
+	// disclosure has to keep naming them.
+	for _, want := range []string{"cap_drop", "no-new-privileges", "noexec"} {
+		if !strings.Contains(lower, want) {
+			t.Errorf("warning must name %q as not applied, got: %s", want, out)
 		}
+	}
+
+	// Applied since #1649. A disclosure that lists these as missing sends the
+	// operator to Docker for controls they already have, and — worse in the
+	// egress case — describes a crew as unfenced when it is fenced. The
+	// warning must account for them on the applied side.
+	for _, want := range []string{"tmpfs", "egress fence", "init process"} {
+		if !strings.Contains(lower, want) {
+			t.Errorf("warning must name %q among the controls that ARE applied, got: %s", want, out)
+		}
+	}
+	if strings.Contains(lower, "not enforced") || strings.Contains(lower, "unfiltered") {
+		t.Errorf("the egress fence is enforced on this provider now; the warning must not say otherwise, got: %s", out)
 	}
 }
 

@@ -1197,10 +1197,12 @@ func autoContainerCandidates(ctx context.Context, cfg *config.Config, logger *sl
 		}},
 		{name: providerApple, new: func() (provider.ContainerProvider, error) {
 			a, err := apple.New(ctx, apple.Config{
-				RuntimeImage:    cfg.Container.RuntimeImage,
-				Network:         cfg.Container.Network,
-				OutputBasePath:  cfg.Storage.BasePath,
-				ContainerPrefix: cfg.Container.ContainerPrefix,
+				RuntimeImage:      cfg.Container.RuntimeImage,
+				Network:           cfg.Container.Network,
+				OutputBasePath:    cfg.Storage.BasePath,
+				ContainerPrefix:   cfg.Container.ContainerPrefix,
+				SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+				EntrypointPath:    cfg.Container.EntrypointPath,
 			}, logger)
 			if err != nil {
 				return nil, err
@@ -1237,10 +1239,10 @@ func selectAutoContainerProvider(candidates []containerProviderCandidate, logger
 // equivalent choice; it is not, and the operator has to be told which controls
 // are simply not applied on that path (#1647, #1648).
 func warnAppleProviderIsolationGap(logger *slog.Logger) {
-	logger.Warn("apple container provider selected: crew containers run without the isolation the docker provider applies",
-		"not_enforced", "cap_drop ALL, no-new-privileges, /secrets tmpfs, noexec mounts, core-dump ulimit, memory-swap and shm limits, restart policy",
-		"egress", "a crew's restricted network mode is not enforced — crews reach the network unfiltered",
-		"remedy", "install Docker and set container.provider to docker for a hardened crew runtime")
+	logger.Warn("apple container provider selected: crew containers run with less isolation than the docker provider applies",
+		"not_applied", "cap_drop ALL, no-new-privileges, noexec mounts, memory-swap and shm limits, restart policy",
+		"applied", "/secrets tmpfs, crewship-sidecar egress fence, init process, core-dump and file-size rlimits",
+		"remedy", "install Docker and set container.provider to docker for the remaining hardening")
 }
 
 func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
@@ -1273,10 +1275,12 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			break
 		}
 		a, err := apple.New(ctx, apple.Config{
-			RuntimeImage:    cfg.Container.RuntimeImage,
-			Network:         cfg.Container.Network,
-			OutputBasePath:  cfg.Storage.BasePath,
-			ContainerPrefix: cfg.Container.ContainerPrefix,
+			RuntimeImage:      cfg.Container.RuntimeImage,
+			Network:           cfg.Container.Network,
+			OutputBasePath:    cfg.Storage.BasePath,
+			ContainerPrefix:   cfg.Container.ContainerPrefix,
+			SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+			EntrypointPath:    cfg.Container.EntrypointPath,
 		}, logger)
 		if err != nil {
 			logger.Warn("apple container provider unavailable, running without containers", "error", err)

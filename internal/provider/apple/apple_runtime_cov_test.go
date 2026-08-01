@@ -211,7 +211,12 @@ func TestEnsureCrewRuntimeCreatesNewWithDefaults(t *testing.T) {
 		"--tmpfs /home/agent",
 		"--network mynet",
 		"--user 1001:1001",
-		"img:1 sleep infinity",
+		// The image is now the final argument with no trailing argv: the
+		// forced entrypoint (scripts/entrypoint.sh) ends in `exec sleep
+		// infinity` itself, and Apple parses anything after the image as the
+		// container process's arguments.
+		"--entrypoint " + entrypointTargetPath,
+		"img:1",
 	} {
 		if !strings.Contains(createCall, want) {
 			t.Errorf("create call missing %q: %s", want, createCall)
