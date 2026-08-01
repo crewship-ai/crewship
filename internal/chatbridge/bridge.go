@@ -674,6 +674,28 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}
 		}
 
+		// Ask the provider what it will drop for this crew and say so, before
+		// the crew starts believing otherwise (#1648). This generalises the
+		// SidecarProvider check below, which did the same thing for exactly
+		// one field. The REFUSED half needs no handling here: the provider
+		// enforces it itself and it arrives as the error from
+		// EnsureCrewRuntime, so a caller that forgets this block still cannot
+		// start a crew whose containment control is unenforceable.
+		support := provider.InspectCrewConfigSupport(b.container, cc)
+		var reportedServices bool
+		for _, msg := range support.DegradedMessages() {
+			streamFn(ws.ChatEvent{Type: "status", Content: "Not honoured by this container provider — " + msg})
+		}
+		if len(support.Degraded) > 0 {
+			b.logger.Warn("container provider drops crew config fields",
+				"crew_slug", info.CrewSlug, "fields", support.Fields())
+			for _, f := range support.Degraded {
+				if f.Field == "Services" {
+					reportedServices = true
+				}
+			}
+		}
+
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
 			// Classify the cause into a closed set so the user gets an
@@ -701,8 +723,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			} else {
 				b.logger.Warn("container provider does not support sidecars; services skipped",
 					"crew_slug", info.CrewSlug, "service_count", len(cc.Services))
-				streamFn(ws.ChatEvent{Type: "status",
-					Content: "Sidecar services declared but provider doesn't support them yet"})
+				// Only when the provider's own report didn't already name
+				// Services — telling the user the same thing twice reads as
+				// two separate faults.
+				if !reportedServices {
+					streamFn(ws.ChatEvent{Type: "status",
+						Content: "Sidecar services declared but provider doesn't support them yet"})
+				}
 			}
 		}
 		containerID = cID
@@ -1050,12 +1077,24 @@ func (b *Bridge) persistInBandFailureTurn(
 // substring classifier (the provider wraps most causes as %w strings, not typed
 // sentinels), and it never leaks the raw daemon text — that goes to logs / the
 // run record via the caller's wrapped return. Codes are a closed set the UI /
-// agent can branch on: legacy_volume_conflict, image_missing, resource_limit,
-// provision_failed, internal.
+// agent can branch on: provider_capability, legacy_volume_conflict,
+// image_missing, resource_limit, provision_failed, internal.
 func classifyCrewRuntimeError(err error) (code, message string) {
 	raw := ""
 	if err != nil {
 		raw = err.Error()
+	}
+	// A capability refusal is our own text, not the daemon's, and the field it
+	// names is the only thing the operator can act on — so it is passed
+	// through rather than reduced to "the container could not be started".
+	// Checked first, and structurally, so no substring rule below can claim it.
+	var refused *provider.CrewConfigRefusedError
+	if errors.As(err, &refused) {
+		return "provider_capability", fmt.Sprintf(
+			"This crew asks for %s, which the %s container provider cannot apply, so it was not started "+
+				"rather than run with that setting reported but unenforced. Change the setting, or move the "+
+				"crew to a provider that supports it.",
+			refused.FieldList(), refused.Provider)
 	}
 	lower := strings.ToLower(raw)
 	const hint = " Details are in the run journal / server logs."

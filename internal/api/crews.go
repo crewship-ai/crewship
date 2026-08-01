@@ -255,19 +255,34 @@ type crewCountResponse struct {
 }
 
 type crewResponse struct {
-	ID                string   `json:"id"`
-	WorkspaceID       string   `json:"workspace_id"`
-	Name              string   `json:"name"`
-	Slug              string   `json:"slug"`
-	Description       *string  `json:"description"`
-	Color             *string  `json:"color"`
-	Icon              *string  `json:"icon"`
-	AvatarStyle       *string  `json:"avatar_style"`
-	ContainerMemoryMB int      `json:"container_memory_mb"`
-	ContainerCPUs     float64  `json:"container_cpus"`
-	ContainerTTLHours *int     `json:"container_ttl_hours"`
-	NetworkMode       string   `json:"network_mode"`
-	AllowedDomains    []string `json:"allowed_domains"`
+	ID                string  `json:"id"`
+	WorkspaceID       string  `json:"workspace_id"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	Description       *string `json:"description"`
+	Color             *string `json:"color"`
+	Icon              *string `json:"icon"`
+	AvatarStyle       *string `json:"avatar_style"`
+	ContainerMemoryMB int     `json:"container_memory_mb"`
+	ContainerCPUs     float64 `json:"container_cpus"`
+	ContainerTTLHours *int    `json:"container_ttl_hours"`
+	// NetworkMode is the CONFIGURED egress policy — the operator's intent, as
+	// stored. The two fields below are the EFFECTIVE state: whether the
+	// container provider this instance runs actually applies it, and why not.
+	// They are derived from the provider's capability report at read time
+	// (crew_egress_enforcement.go), never written to the crews row, so a crew
+	// moved between providers reports the truth for wherever it is now.
+	//
+	// Enforced defaults true and is set false only on a positive report, so a
+	// read path that forgets to annotate cannot invent an alarm — but the two
+	// read paths that matter (List, Get) are both covered, and
+	// TestCrewGet/List pin it.
+	NetworkMode         string `json:"network_mode"`
+	NetworkModeEnforced bool   `json:"network_mode_enforced"`
+	// NetworkModeUnenforcedReason is the provider's own words for what is
+	// missing. Empty (and omitted) whenever the mode is enforced.
+	NetworkModeUnenforcedReason string   `json:"network_mode_unenforced_reason,omitempty"`
+	AllowedDomains              []string `json:"allowed_domains"`
 	// AllowPrivateEndpoints (#961) opts this crew into reaching a
 	// private/LAN model endpoint (RFC1918/loopback); link-local/metadata
 	// stay blocked regardless. Default false = strict SSRF fence.

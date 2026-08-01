@@ -36,16 +36,21 @@ var crewListCmd = &cobra.Command{
 		}
 
 		var crews []struct {
-			ID           string  `json:"id"`
-			Name         string  `json:"name"`
-			Slug         string  `json:"slug"`
-			Description  *string `json:"description"`
-			MemoryMB     int     `json:"container_memory_mb"`
-			CPUs         float64 `json:"container_cpus"`
-			NetworkMode  string  `json:"network_mode"`
-			RuntimeImage *string `json:"runtime_image"`
-			CachedImage  *string `json:"cached_image"`
-			Count        struct {
+			ID          string  `json:"id"`
+			Name        string  `json:"name"`
+			Slug        string  `json:"slug"`
+			Description *string `json:"description"`
+			MemoryMB    int     `json:"container_memory_mb"`
+			CPUs        float64 `json:"container_cpus"`
+			NetworkMode string  `json:"network_mode"`
+			// #1648: the configured mode is not necessarily the effective
+			// one. Missing on an older server, where the zero value would
+			// read as "not enforced" and mark every crew — so it is a
+			// pointer, and absent means "this server does not report it".
+			NetworkModeEnforced *bool   `json:"network_mode_enforced"`
+			RuntimeImage        *string `json:"runtime_image"`
+			CachedImage         *string `json:"cached_image"`
+			Count               struct {
 				Agents  int `json:"agents"`
 				Members int `json:"members"`
 			} `json:"_count"`
@@ -63,10 +68,7 @@ var crewListCmd = &cobra.Command{
 		}
 		var rows [][]string
 		for _, c := range crews {
-			nm := c.NetworkMode
-			if nm == "" {
-				nm = "free"
-			}
+			nm := networkModeDisplay(c.NetworkMode, c.NetworkModeEnforced)
 			row := []string{
 				c.Slug, c.Name,
 				fmt.Sprintf("%d", c.Count.Agents),
@@ -91,6 +93,24 @@ var crewListCmd = &cobra.Command{
 		}
 		return f.Auto(crews, headers, rows)
 	},
+}
+
+// networkModeDisplay renders a crew's egress policy for a terminal, marking it
+// when the server reports that its container provider does not apply it
+// (#1648). The bare configured value used to be the only thing printed, which
+// is how `crewship crew get` came to agree with the dashboard and the crews
+// row about a fence none of them was checking.
+//
+// enforced == nil means the server did not report it (older daemon) — the
+// value prints unadorned rather than being guessed at in either direction.
+func networkModeDisplay(mode string, enforced *bool) string {
+	if mode == "" {
+		mode = "free"
+	}
+	if enforced != nil && !*enforced {
+		return mode + " (NOT ENFORCED)"
+	}
+	return mode
 }
 
 // truncateImageRef shortens a container image reference for display by stripping
@@ -137,17 +157,20 @@ var crewGetCmd = &cobra.Command{
 		}
 
 		var crew struct {
-			ID             string   `json:"id"`
-			Name           string   `json:"name"`
-			Slug           string   `json:"slug"`
-			Description    *string  `json:"description"`
-			Color          *string  `json:"color"`
-			Icon           *string  `json:"icon"`
-			MemoryMB       int      `json:"container_memory_mb"`
-			CPUs           float64  `json:"container_cpus"`
-			TTLHours       *int     `json:"container_ttl_hours"`
-			NetworkMode    string   `json:"network_mode"`
-			AllowedDomains []string `json:"allowed_domains"`
+			ID          string  `json:"id"`
+			Name        string  `json:"name"`
+			Slug        string  `json:"slug"`
+			Description *string `json:"description"`
+			Color       *string `json:"color"`
+			Icon        *string `json:"icon"`
+			MemoryMB    int     `json:"container_memory_mb"`
+			CPUs        float64 `json:"container_cpus"`
+			TTLHours    *int    `json:"container_ttl_hours"`
+			NetworkMode string  `json:"network_mode"`
+			// #1648: configured vs effective. See networkModeDisplay.
+			NetworkModeEnforced         *bool    `json:"network_mode_enforced"`
+			NetworkModeUnenforcedReason string   `json:"network_mode_unenforced_reason"`
+			AllowedDomains              []string `json:"allowed_domains"`
 			// #1377: the API has always returned this; the CLI projection
 			// dropped it, so `crew get` couldn't answer "is private egress on?"
 			// — the one question the flag exists to answer.
@@ -167,10 +190,7 @@ var crewGetCmd = &cobra.Command{
 		if len(crew.AllowedDomains) > 0 {
 			domainsStr = strings.Join(crew.AllowedDomains, ", ")
 		}
-		networkMode := crew.NetworkMode
-		if networkMode == "" {
-			networkMode = "free"
-		}
+		networkMode := networkModeDisplay(crew.NetworkMode, crew.NetworkModeEnforced)
 		ttlStr := "Never stop"
 		if crew.TTLHours != nil && *crew.TTLHours > 0 {
 			ttlStr = fmt.Sprintf("%d hours", *crew.TTLHours)
@@ -191,10 +211,19 @@ var crewGetCmd = &cobra.Command{
 			{"CPUs", fmt.Sprintf("%.1f", crew.CPUs)},
 			{"TTL", ttlStr},
 			{"Network Mode", networkMode},
-			{"Allowed Domains", domainsStr},
-			{"Private Endpoints", privateEndpointsStr},
-			{"Created", crew.CreatedAt},
 		}
+		// The reason goes on its own line rather than into the mode string:
+		// it is a sentence, and an operator who sees NOT ENFORCED needs to
+		// know what is missing before they can decide whether to move the
+		// crew or accept it.
+		if crew.NetworkModeEnforced != nil && !*crew.NetworkModeEnforced && crew.NetworkModeUnenforcedReason != "" {
+			pairs = append(pairs, []string{"Why Not Enforced", crew.NetworkModeUnenforcedReason})
+		}
+		pairs = append(pairs,
+			[]string{"Allowed Domains", domainsStr},
+			[]string{"Private Endpoints", privateEndpointsStr},
+			[]string{"Created", crew.CreatedAt},
+		)
 		return f.AutoDetail(crew, pairs)
 	},
 }

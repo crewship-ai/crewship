@@ -24,7 +24,15 @@ export interface CrewRecord {
   icon: string | null
   avatar_style: string | null
   issue_prefix: string | null
+  /** The CONFIGURED egress policy — the operator's intent, as stored. */
   network_mode: string
+  /** #1648 — whether the server's container provider actually applies
+   *  network_mode. Optional so a client talking to an older backend renders
+   *  the mode plainly rather than claiming it is unenforced. */
+  network_mode_enforced?: boolean
+  /** The provider's own words for what is missing. Present only when
+   *  network_mode_enforced is false. */
+  network_mode_unenforced_reason?: string
   allowed_domains: string[] | string | null
   /** #1377 — crews.allow_private_endpoints (v135). Optional so a client
    *  talking to an older backend hides the toggle instead of showing it off. */

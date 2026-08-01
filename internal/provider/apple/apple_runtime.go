@@ -26,6 +26,23 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return "", fmt.Errorf("crew slug not safe for path: %w", err)
 	}
 
+	// Say what this provider will not do with the config it was handed, before
+	// it does anything at all (#1648). Ahead of the container lookup as well as
+	// the create, because a crew flipped to restricted egress while its
+	// container was already up would otherwise keep being handed back unfenced
+	// on the reuse path, which never reaches the create branch again.
+	if support := p.UnsupportedCrewConfig(team); !support.Empty() {
+		if err := support.RefusedError(providerName); err != nil {
+			p.logger.Error("refusing crew config this provider cannot apply",
+				"crew_id", team.ID, "crew_slug", team.Slug, "fields", support.Fields(), "error", err)
+			return "", err
+		}
+		p.logger.Warn("crew config fields not honoured by this provider",
+			"crew_id", team.ID, "crew_slug", team.Slug,
+			"fields", support.Fields(),
+			"detail", strings.Join(support.DegradedMessages(), " | "))
+	}
+
 	if p.cfg.Network != "" {
 		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
 			return "", fmt.Errorf("ensure network: %w", err)

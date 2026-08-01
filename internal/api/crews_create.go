@@ -332,29 +332,40 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("crew sized below the usable floor", "crew_id", crewID, "slug", req.Slug, "advisory", a)
 	}
 
+	created := crewResponse{
+		ID:                    crewID,
+		WorkspaceID:           workspaceID,
+		Name:                  req.Name,
+		Slug:                  req.Slug,
+		Description:           req.Description,
+		Color:                 req.Color,
+		Icon:                  req.Icon,
+		ContainerMemoryMB:     memoryMB,
+		ContainerCPUs:         cpus,
+		ContainerTTLHours:     ttlHours,
+		NetworkMode:           networkMode,
+		AllowedDomains:        allowedDomainsOut,
+		AllowPrivateEndpoints: req.AllowPrivateEndpoints,
+		RuntimeImage:          req.RuntimeImage,
+		DevcontainerConfig:    req.DevcontainerConfig,
+		MiseConfig:            req.MiseConfig,
+		ServicesJSON:          req.ServicesJSON,
+		CreatedAt:             now,
+		UpdatedAt:             now,
+	}
+	// Setting `--network-mode restricted` on an instance that cannot apply it
+	// is answered here, on the request that set it, rather than only on a
+	// later GET the operator may never make.
+	h.annotateEgressEnforcement(&created)
+	if adv := h.egressEnforcementAdvisory(&created); adv != "" {
+		h.logger.Warn("crew egress mode is not enforced by this instance's provider",
+			"crew_id", crewID, "slug", req.Slug, "network_mode", networkMode)
+		advisories = append(advisories, adv)
+	}
+
 	writeJSON(w, http.StatusCreated, crewResponseWithAdvisories{
-		crewResponse: crewResponse{
-			ID:                    crewID,
-			WorkspaceID:           workspaceID,
-			Name:                  req.Name,
-			Slug:                  req.Slug,
-			Description:           req.Description,
-			Color:                 req.Color,
-			Icon:                  req.Icon,
-			ContainerMemoryMB:     memoryMB,
-			ContainerCPUs:         cpus,
-			ContainerTTLHours:     ttlHours,
-			NetworkMode:           networkMode,
-			AllowedDomains:        allowedDomainsOut,
-			AllowPrivateEndpoints: req.AllowPrivateEndpoints,
-			RuntimeImage:          req.RuntimeImage,
-			DevcontainerConfig:    req.DevcontainerConfig,
-			MiseConfig:            req.MiseConfig,
-			ServicesJSON:          req.ServicesJSON,
-			CreatedAt:             now,
-			UpdatedAt:             now,
-		},
-		Warnings: advisories,
+		crewResponse: created,
+		Warnings:     advisories,
 	})
 
 	h.broadcastCrewEvent("crew.created", workspaceID, map[string]string{

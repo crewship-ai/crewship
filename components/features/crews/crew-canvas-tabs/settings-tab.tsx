@@ -181,10 +181,12 @@ export function SettingsTab({
 
         <Collapsible
           title="Network policy"
-          summary={`${crew.network_mode}${Array.isArray(crew.allowed_domains) && crew.allowed_domains.length > 0 ? ` · ${crew.allowed_domains.length} allowed` : ""}`}
+          summary={`${crew.network_mode}${crew.network_mode_enforced === false ? " · not enforced" : ""}${Array.isArray(crew.allowed_domains) && crew.allowed_domains.length > 0 ? ` · ${crew.allowed_domains.length} allowed` : ""}`}
         >
           <CrewNetworkPolicy
             networkMode={crew.network_mode === "restricted" ? "restricted" : "free"}
+            enforced={crew.network_mode_enforced}
+            unenforcedReason={crew.network_mode_unenforced_reason}
             allowedDomains={Array.isArray(crew.allowed_domains)
               ? crew.allowed_domains
               : (crew.allowed_domains ? String(crew.allowed_domains).split(",").map((s) => s.trim()).filter(Boolean) : [])}
