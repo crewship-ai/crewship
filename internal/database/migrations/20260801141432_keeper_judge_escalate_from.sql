@@ -1,42 +1,24 @@
 -- Keeper judge profile: the escalation floor (PRD P8).
 --
--- The step from L3 to L4 is the largest single trust jump in the product and
--- there was no dial between them. L3 is "administrative access to real
--- infrastructure (SSH, database admin, cloud account)" and the model grants it
--- alone; L4 is the first tier a person always confirms. An operator running a
--- 9B judge who wanted a human on SSH-to-production had exactly one move:
--- relabel the credential L4 — which also imposes the four-eyes rule and L4's
--- 35-character intent minimum, whether they wanted those or not.
+-- INTENTIONALLY EMPTY. The column this migration used to add is now created by
+-- 20260801150210, which owns it outright.
 --
--- judge_escalate_from SETS the human-approval floor, in either direction, to a
--- tier the operator names. NULL (the default) leaves the tier table alone, so
--- an instance that does not set it behaves exactly as it did — every L4 read
--- still reaches a person.
+-- The history is worth keeping, because the lesson is the file itself. This
+-- migration added judge_escalate_from with CHECK (1-4). Hours later the dial
+-- gained a fifth value — "never", i.e. full autonomy — and the CHECK was widened
+-- BY EDITING THIS FILE, which a dev instance had already applied. SQLite cannot
+-- alter a CHECK in place, so that instance was left rejecting the new value with
+-- a constraint failure, and the fix needed a table rebuild anyway.
 --
--- 5 means "never": no tier is escalated on the model's behalf, including L4.
--- That is full autonomy, and it is the operator's call to make. The rule that a
--- tier may only TIGHTEN a verdict still governs the tier table itself — no
--- judge, prompt or intent talks its way past it. This column is a different
--- thing: the operator's own configuration, on their own self-hosted instance,
--- about their own credentials. Refusing them would not make the instance safer,
--- it would make the product wrong about whose decision this is.
+-- Adding the rebuild alongside the original ALTER then produced the second
+-- problem: two migrations owning one column, failing in one order with "no such
+-- column" and in the other with "duplicate column name", depending on whether
+-- the ledger had been renumbered. Emptying this one leaves a single owner and
+-- makes the pair order-independent.
 --
--- The CHECK is 1-5 rather than an open integer because it is a credential tier
--- (plus the "never" sentinel), and a hand-edited 9 would otherwise resolve to
--- "escalate nothing" by accident — an out-of-range floor silently disabling the
--- control is the one reading that must not be possible.
+-- Kept rather than deleted because instances have it in their ledger. An empty
+-- migration is cheap; a missing one that a database claims to have applied is a
+-- repair job.
 --
--- Separate migration rather than an edit to 20260801113326: that one had already
--- been applied on a dev instance, and rewriting an applied migration desyncs the
--- ledger hash for the sake of saving one ALTER.
---
--- This file was itself widened from 1-4 to 1-5 after a dev instance had applied
--- it, which is the same mistake one line up. It was survivable only because the
--- migration has never merged, so that instance was the only one carrying the old
--- CHECK and could simply be reseeded. SQLite cannot alter a CHECK in place — the
--- table has to be rebuilt — so had this shipped, the fix would have been a
--- table rebuild of the settings row rather than an edit. Once it merges, this
--- file is frozen.
-
-ALTER TABLE keeper_runtime_settings ADD COLUMN judge_escalate_from INTEGER
-    CHECK (judge_escalate_from IS NULL OR (judge_escalate_from >= 1 AND judge_escalate_from <= 5));
+-- The rule this cost us: once a migration has been applied ANYWHERE, it is
+-- frozen. Widen it in a new file, even when the edit looks free.
