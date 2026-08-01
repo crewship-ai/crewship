@@ -10,6 +10,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -1135,6 +1136,14 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 // retain); keeperEnabled gates SECRET file delivery (see buildCredFileScript);
 // runID is the run-state row failRun marks on fatal errors. Returns the
 // augmented env and the exec working directory. Pure extraction from RunAgent.
+//
+// #1646: every write below is QUEUED on a preflightBatch and delivered as one
+// exec (see preflight_batch.go) instead of one exec per step. Only two things
+// still cost a round-trip of their own here — the root-only manifest
+// pre-create, and the read probes deeper in the MCP/skills paths whose output
+// decides what gets written. The steps stay individually named, and the three
+// fail-loud paths (agent dirs, credential files, MCP config) are checked
+// against the flush result rather than against a per-step exec error.
 func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunRequest, env []string, fileCreds bool, keeperEnabled bool, runID string) ([]string, string, error) {
 	scratchDir := path.Join("/workspace", req.AgentSlug)
 	outputDir := path.Join("/output", req.AgentSlug)
@@ -1146,27 +1155,14 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	secretsAgentDir := path.Join("/secrets", req.AgentSlug)
 	secretsSharedDir := "/secrets/shared"
 
+	// The merged preflight script. Every write from here on is queued on it;
+	// it is flushed once at the bottom (and implicitly by any read probe that
+	// needs earlier writes to have landed first).
+	batch := newPreflightBatch(o.container, req.ContainerID, "1001:1001", o.logger)
+
 	// Create scratch, output, per-agent crew, and secrets directories
-	mkdirCfg := provider.ExecConfig{
-		ContainerID: req.ContainerID,
-		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir},
-		User:        "1001:1001",
-	}
-	if mkErr := o.execPreflight(ctx, mkdirCfg); mkErr != nil {
-		// With file-mounted credentials in play this is fatal: the write
-		// below would fail too (or silently no-op), and the agent would run
-		// with ZERO file credentials — the classic cause is a Docker daemon
-		// older than Docker Engine 26, which drops the /secrets tmpfs uid/gid
-		// options and leaves the mount root-owned so UID 1001 can't mkdir.
-		if fileCreds {
-			o.logger.Error("failed to create agent dirs; run carries file-mounted credentials", "error", mkErr, "agent_id", req.AgentID)
-			o.failRun(ctx, req, runID, "error")
-			return nil, "", fmt.Errorf("create agent dirs (incl. /secrets/%s) for file-mounted credentials: %w — "+
-				"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
-				"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, mkErr)
-		}
-		o.logger.Warn("failed to create agent dirs", "error", mkErr)
-	}
+	batch.add(preflightStepAgentDirs, "", shellJoin("mkdir", "-p",
+		scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir))
 
 	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
 	manifestCfg := provider.ExecConfig{
@@ -1177,54 +1173,41 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		// needs root to chmod 0666; #1158 opt-in (see ExecConfig).
 		AllowPrivileged: true,
 	}
+	// Deliberately NOT merged into the batch (#1646): the merged script runs
+	// as the agent, and widening it to root so this one step could join would
+	// trade a ~4x latency win for a permanently root-privileged preflight.
+	// One extra exec is the cheaper side of that trade.
 	if mfErr := o.execPreflight(ctx, manifestCfg); mfErr != nil {
 		o.logger.Debug("manifest pre-create skipped", "error", mfErr)
 	}
 
-	// Create .memory/ directories for persistent agent memory (in crew HOME)
+	// Create .memory/ directories for persistent agent memory (in crew HOME).
+	// The MemoryEnabled / CrewID conditions are resolved HERE, in Go, so the
+	// merged script carries only the steps this request needs — a script full
+	// of shell `if`s would be both harder to test and harder to read in a log.
 	if req.MemoryEnabled {
 		memoryDir := path.Join(crewAgentDir, ".memory")
 		memoryDailyDir := path.Join(memoryDir, "daily")
 		memorySnapshotsDir := path.Join(memoryDir, ".snapshots")
-		mkMemCfg := provider.ExecConfig{
-			ContainerID: req.ContainerID,
-			Cmd:         []string{"mkdir", "-p", memoryDir, memoryDailyDir, memorySnapshotsDir},
-			User:        "1001:1001",
-		}
-		if memErr := o.execPreflight(ctx, mkMemCfg); memErr != nil {
-			o.logger.Warn("failed to create memory dirs", "error", memErr)
-		}
+		batch.add(preflightStepMemoryDirs, "",
+			shellJoin("mkdir", "-p", memoryDir, memoryDailyDir, memorySnapshotsDir))
 
 		// Create crew shared memory dirs for lead agents (if in a crew)
 		if req.CrewID != "" {
 			crewMemDir := "/crew/shared/.memory"
 			crewMemDailyDir := path.Join(crewMemDir, "daily")
 			crewMemTopicsDir := path.Join(crewMemDir, "topics")
-			mkCrewMemCfg := provider.ExecConfig{
-				ContainerID: req.ContainerID,
-				Cmd:         []string{"mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir},
-				User:        "1001:1001",
-			}
-			if crewMemErr := o.execPreflight(ctx, mkCrewMemCfg); crewMemErr != nil {
-				o.logger.Warn("failed to create crew memory dirs", "error", crewMemErr)
-			}
+			batch.add(preflightStepCrewMemoryDirs, "",
+				shellJoin("mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir))
 		}
 
 		// One-time migration: copy memory from old location (/output/{slug}/.memory/)
 		// to new location (/crew/agents/{slug}/.memory/) if not already migrated
 		oldMemoryDir := path.Join(outputDir, ".memory")
-		migScript := fmt.Sprintf(
+		batch.add(preflightStepMemoryMigrate, "", fmt.Sprintf(
 			`if [ -d %[1]s ] && [ -z "$(ls -A %[2]s 2>/dev/null)" ]; then cp -a %[1]s/. %[2]s/ 2>/dev/null; fi; true`,
 			oldMemoryDir, memoryDir,
-		)
-		migCfg := provider.ExecConfig{
-			ContainerID: req.ContainerID,
-			Cmd:         []string{"sh", "-c", migScript},
-			User:        "1001:1001",
-		}
-		if migErr := o.execPreflight(ctx, migCfg); migErr != nil {
-			o.logger.Debug("memory migration skipped", "error", migErr)
-		}
+		))
 	}
 
 	// Write credential files into the per-agent secrets directory (written as
@@ -1232,14 +1215,21 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// per-key secrets lock so a lagging cleanup rm from a previous run can
 	// never delete these files right after they land (TOCTOU window #2, see
 	// secrets_cleanup.go).
-	credWriteErr := func() error {
-		if fileCreds {
-			lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
-			lk.Lock()
-			defer lk.Unlock()
-		}
-		return writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, keeperEnabled, o.logger)
-	}()
+	//
+	// #1646 widened that lock: the credential write is now a step in the
+	// merged script, so the moment the files actually land is the FLUSH, not
+	// this call. The lock therefore has to span both, or the window it exists
+	// to close reopens. It is released immediately after the flush below, and
+	// the deferred release covers the fail-loud returns in between.
+	unlockSecrets := func() {}
+	if fileCreds {
+		lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
+		lk.Lock()
+		var once sync.Once
+		unlockSecrets = func() { once.Do(lk.Unlock) }
+		defer unlockSecrets()
+	}
+	credWriteErr := writeCredentialFiles(ctx, batch, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, keeperEnabled, o.logger)
 	if credWriteErr != nil {
 		// Same fail-loud posture as the mkdir preflight above: a run that
 		// carries file-mounted credentials must not start without them.
@@ -1258,7 +1248,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 
 	// Write non-secret Claude config (skip onboarding). Credentials are
 	// also available as files in /secrets/{agent-slug}/ for CLI tools.
-	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, req.AgentSlug, o.logger); err != nil {
+	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, o.logger); err != nil {
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
@@ -1268,10 +1258,10 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// under "mcp" key, Cursor .cursor/mcp.json, Droid .factory/mcp.json).
 	// Adapters that don't support MCP (currently none after the multi-CLI
 	// wave; unknownAdapter only) make this a no-op.
+	hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
 	mcpAdapter := getAdapter(req.CLIAdapter)
 	if mcpAdapter.SupportsMCP() {
-		if err := mcpAdapter.WriteMCPConfig(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
-			hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
+		if err := mcpAdapter.WriteMCPConfig(ctx, batch, req.ContainerID, req, workDir, o.logger); err != nil {
 			if hasMCP {
 				o.failRun(ctx, req, runID, "error")
 				return nil, "", fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
@@ -1283,16 +1273,54 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// Inject OAuth token files for MCP servers that need them.
 	// When Crewship holds access+refresh tokens from OAuth flow, write them
 	// to the location MCP servers expect (e.g. ~/.config/<server>/tokens.json).
-	if err := injectMCPOAuthTokens(ctx, o.container, req.ContainerID, req.AgentSlug, req.MCPServers, req.Credentials, o.logger); err != nil {
+	if err := injectMCPOAuthTokens(ctx, batch, req.ContainerID, req.AgentSlug, req.MCPServers, req.Credentials, o.logger); err != nil {
 		o.logger.Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
-	if err := setupSystemPromptFiles(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
+	if err := setupSystemPromptFiles(ctx, batch, req.ContainerID, req, workDir, o.logger); err != nil {
 		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 	}
 
+	// One exec for everything queued above. Steps that were their own exec
+	// before #1646 reported failure through their own return value; they now
+	// report it here, by name, so the three fail-loud paths below read the
+	// same signal they always did.
+	flushErr := batch.Flush(ctx)
+	unlockSecrets()
+	if flushErr != nil {
+		o.logger.Warn("preflight steps failed", "error", flushErr, "agent_id", req.AgentID)
+	}
+
+	if fileCreds && (batch.stepFailed(preflightStepAgentDirs) || batch.stepFailed(preflightStepCredentials)) {
+		// A run carrying file-mounted credentials must not start without
+		// them. The classic cause is a Docker daemon older than Engine 26,
+		// which drops the /secrets tmpfs uid/gid options and leaves the mount
+		// root-owned so UID 1001 can't mkdir.
+		o.logger.Error("agent dirs or credential files failed; run carries file-mounted credentials",
+			"error", flushErr, "agent_id", req.AgentID)
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("prepare /secrets/%s for file-mounted credentials: %w — "+
+			"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
+			"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, flushErr)
+	}
+	if hasMCP && batch.stepFailed(preflightStepMCPConfig) {
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, flushErr)
+	}
+
 	return env, workDir, nil
+}
+
+// shellJoin renders argv as a single-quoted shell command line. Used to turn
+// the preflight's former exec-argv steps into script fragments the merged
+// script can carry without the quoting hazard of naive concatenation.
+func shellJoin(args ...string) string {
+	quoted := make([]string, 0, len(args))
+	for _, a := range args {
+		quoted = append(quoted, "'"+shellEscape(a)+"'")
+	}
+	return strings.Join(quoted, " ")
 }
 
 // buildExecCommand wraps the agent CLI command for execution — stdbuf

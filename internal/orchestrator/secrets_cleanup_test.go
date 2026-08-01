@@ -10,7 +10,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -338,40 +337,39 @@ func TestRunAgent_SecretsRetainBeforeWriteThenCleanup(t *testing.T) {
 }
 
 // Fail loudly (Docker < 26 posture): when the run carries file-mounted
-// credentials and the /secrets setup fails — the mkdir preflight or the
-// credential-write script — the run must ABORT with an actionable error, not
+// credentials and the /secrets setup fails — the directory step or the
+// credential-write step — the run must ABORT with an actionable error, not
 // warn-and-continue into a session with zero credentials.
+//
+// Both steps ride the merged preflight script since #1646, so the failure
+// arrives as the script's trailing "which step failed" line rather than as an
+// error from that step's own exec. That the fail-loud posture still keys off a
+// NAMED step is exactly the reporting property the merge had to preserve.
 func TestRunAgent_SecretsSetupFailureAbortsWithFileCreds(t *testing.T) {
 	fileCred := []Credential{{Type: "SECRET", EnvVarName: "GH_TOKEN", PlainValue: "tok"}}
 	cases := []struct {
 		name     string
-		failWhen func(joined string, cmd []string) bool
+		failStep string
 		creds    []Credential
 		wantErr  bool
 	}{
 		{
-			name: "mkdir failure with file creds aborts",
-			failWhen: func(joined string, cmd []string) bool {
-				return len(cmd) > 0 && cmd[0] == "mkdir" && strings.Contains(joined, "/secrets/test-agent")
-			},
-			creds:   fileCred,
-			wantErr: true,
+			name:     "agent-dirs step failure with file creds aborts",
+			failStep: preflightStepAgentDirs,
+			creds:    fileCred,
+			wantErr:  true,
 		},
 		{
-			name: "cred-write failure with file creds aborts",
-			failWhen: func(joined string, cmd []string) bool {
-				return strings.Contains(joined, "base64 -d")
-			},
-			creds:   fileCred,
-			wantErr: true,
+			name:     "cred-write step failure with file creds aborts",
+			failStep: preflightStepCredentials,
+			creds:    fileCred,
+			wantErr:  true,
 		},
 		{
-			name: "mkdir failure without file creds stays best-effort",
-			failWhen: func(joined string, cmd []string) bool {
-				return len(cmd) > 0 && cmd[0] == "mkdir" && strings.Contains(joined, "/secrets/test-agent")
-			},
-			creds:   []Credential{{Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "k"}},
-			wantErr: false,
+			name:     "agent-dirs step failure without file creds stays best-effort",
+			failStep: preflightStepAgentDirs,
+			creds:    []Credential{{Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "k"}},
+			wantErr:  false,
 		},
 	}
 	for _, c := range cases {
@@ -379,8 +377,11 @@ func TestRunAgent_SecretsSetupFailureAbortsWithFileCreds(t *testing.T) {
 			mc := &mockContainer{
 				execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 					joined := strings.Join(cfg.Cmd, " ")
-					if c.failWhen(joined, cfg.Cmd) {
-						return nil, errors.New("exec failed (simulated)")
+					if stdin := covStdin(cfg); strings.Contains(stdin, preflightStepMarker+c.failStep) {
+						return &provider.ExecResult{
+							ExecID: "preflight-fail",
+							Reader: io.NopCloser(strings.NewReader(preflightFailMarker + c.failStep + "\n")),
+						}, nil
 					}
 					if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
 						return &provider.ExecResult{ExecID: "exec-1", Reader: io.NopCloser(strings.NewReader("hello\n"))}, nil

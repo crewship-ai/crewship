@@ -25,8 +25,12 @@ import (
 // returning (nil, nil) falls through to a default empty-success result.
 // inspect (optional) keys exit codes by ExecID.
 type covContainer struct {
-	mu      sync.Mutex
-	calls   []provider.ExecConfig
+	mu    sync.Mutex
+	calls []provider.ExecConfig
+	// stdins holds each call's drained stdin, parallel to calls. The merged
+	// preflight script (#1646) rides stdin rather than argv, so a fake that
+	// only recorded Cmd would see an exec that says nothing about its work.
+	stdins  []string
 	route   func(cfg provider.ExecConfig) (*provider.ExecResult, error)
 	inspect func(execID string) (bool, int, error)
 	// expectedHash, when non-empty, makes covContainer implement the
@@ -56,11 +60,28 @@ func (c *covContainer) ContainerStatus(_ context.Context, _ string) (*provider.C
 	return &provider.ContainerStatus{State: "running"}, nil
 }
 func (c *covContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	// Drain stdin once, then hand the recorded call and the router each their
+	// own reader over the same bytes, so an assertion on the merged preflight
+	// script does not race the router that already consumed it.
+	var stdin string
+	if cfg.Stdin != nil {
+		b, _ := io.ReadAll(cfg.Stdin)
+		stdin = string(b)
+	}
+	recorded := cfg
+	if stdin != "" {
+		recorded.Stdin = strings.NewReader(stdin)
+	}
 	c.mu.Lock()
-	c.calls = append(c.calls, cfg)
+	c.calls = append(c.calls, recorded)
+	c.stdins = append(c.stdins, stdin)
 	c.mu.Unlock()
 	if c.route != nil {
-		res, err := c.route(cfg)
+		routed := cfg
+		if stdin != "" {
+			routed.Stdin = strings.NewReader(stdin)
+		}
+		res, err := c.route(routed)
 		if res != nil || err != nil {
 			return res, err
 		}
@@ -86,6 +107,35 @@ func (c *covContainer) CopyToContainer(_ context.Context, _ string, _ string, _ 
 var _ provider.ContainerProvider = (*covContainer)(nil)
 
 func covScript(cfg provider.ExecConfig) string { return strings.Join(cfg.Cmd, " ") }
+
+// covStdin drains cfg.Stdin. SINGLE USE — the reader is consumed. Call it once
+// per route invocation and reuse the string.
+func covStdin(cfg provider.ExecConfig) string {
+	if cfg.Stdin == nil {
+		return ""
+	}
+	b, _ := io.ReadAll(cfg.Stdin)
+	return string(b)
+}
+
+// snapshotScripts returns, per recorded call, its argv and its stdin joined —
+// the whole of what that exec asked the container to do, wherever it rode.
+func (c *covContainer) snapshotScripts() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.calls))
+	for i := range c.calls {
+		out[i] = strings.Join(c.calls[i].Cmd, " ") + "\n" + c.stdins[i]
+	}
+	return out
+}
+
+// covPreflightFailure is the reply a merged preflight script gives when one of
+// its steps exits non-zero: the trailing line that names the step. The
+// matching ExecInspect exit code is keyed on the "preflight-fail" exec ID.
+func covPreflightFailure(step string) *provider.ExecResult {
+	return covResult("preflight-fail", preflightFailMarker+step+"\n")
+}
 
 func covQuietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))

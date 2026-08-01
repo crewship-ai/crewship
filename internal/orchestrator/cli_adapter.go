@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io"
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -304,12 +303,13 @@ func writeFileViaContainer(
 		WorkingDir:  workDir,
 		User:        "1001:1001",
 	}
-	result, err := container.Exec(ctx, cfg)
-	if err != nil {
+	// #1646: this is the single hottest exec in the preflight — five canonical
+	// memory files per run, plus five paths per assigned skill, plus most
+	// adapters' MCP config. Queued onto the merged script when one is active;
+	// unchanged otherwise.
+	if err := runOrBatch(ctx, container, "file:"+relPath, cfg); err != nil {
 		return fmt.Errorf("write %s: %w", relPath, err)
 	}
-	io.Copy(io.Discard, result.Reader)
-	result.Reader.Close()
 
 	if logger != nil {
 		logger.Debug("file written into container", "path", relPath)

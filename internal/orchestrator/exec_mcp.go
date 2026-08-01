@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"path"
 	"strings"
@@ -33,12 +32,9 @@ chmod 600 %s/.claude.json`, homeDir, homeDir, homeDir)
 		User:        "1001:1001",
 	}
 
-	result, err := container.Exec(ctx, cfg)
-	if err != nil {
+	if err := runOrBatch(ctx, container, preflightStepClaudeConfig, cfg); err != nil {
 		return fmt.Errorf("write claude config: %w", err)
 	}
-	io.Copy(io.Discard, result.Reader)
-	result.Reader.Close()
 
 	logger.Debug("claude config injected (no credentials on disk)", "container_id", shortID(containerID))
 	return nil
@@ -150,12 +146,9 @@ func setupMCPConfig(
 		Cmd:         []string{"sh", "-c", script},
 		User:        "1001:1001",
 	}
-	result, err := container.Exec(ctx, cfg)
-	if err != nil {
+	if err := runOrBatch(ctx, container, preflightStepMCPConfig, cfg); err != nil {
 		return fmt.Errorf("write MCP config: %w", err)
 	}
-	io.Copy(io.Discard, result.Reader)
-	result.Reader.Close()
 
 	logger.Debug("MCP config injected", "container_id", shortID(containerID))
 	return nil
@@ -266,13 +259,11 @@ func injectMCPOAuthTokens(
 				Cmd:         []string{"sh", "-c", script},
 				User:        "1001:1001",
 			}
-			result, err := container.Exec(ctx, cfg)
-			if err != nil {
+			// #1646: this loop was one to two execs PER OAuth MCP server.
+			if err := runOrBatch(ctx, container, "mcp-oauth:"+tp, cfg); err != nil {
 				logger.Warn("write MCP OAuth tokens", "server", srv.Name, "path", tp, "error", err)
 				continue
 			}
-			io.Copy(io.Discard, result.Reader)
-			result.Reader.Close()
 			logger.Debug("MCP OAuth tokens injected", "server", srv.Name, "path", tp)
 		}
 	}
