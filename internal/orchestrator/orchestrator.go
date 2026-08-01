@@ -228,11 +228,50 @@ type AgentEvent struct {
 type EventHandler func(event AgentEvent)
 
 // crewState tracks per-crew runtime state (activity, TTL, container).
+//
+// holds refcounts the in-container occupants that must keep the container up
+// regardless of how long ago the last activity was: a running `type: script`
+// step, an attached terminal, an in-flight agent run. It is the same
+// refcount shape as secretsHolds (secrets_cleanup.go) and it fails the same
+// way on purpose — a leaked hold leaves the container running, which is
+// exactly the pre-#1662 behaviour, whereas a missed hold kills live work.
 type crewState struct {
 	lastActivity time.Time
 	ttl          time.Duration
 	containerID  string
+	holds        int
 }
+
+// CrewRuntimeActivity is the reaper's view of one crew, exposed so the wake
+// paths that register a container can assert they did (and so a future status
+// endpoint can report why a container is still up).
+type CrewRuntimeActivity struct {
+	ContainerID  string
+	TTLHours     int
+	LastActivity time.Time
+	Holds        int
+}
+
+// CrewTTLResolver returns the effective container TTL in hours for every crew
+// the instance knows about, keyed by crew id. 0 means "never stop"; a crew
+// absent from the map is unknown and is never reaped.
+//
+// This exists because the TTL must not live in process memory. It used to:
+// refreshActivity took ttlHours off whatever run happened to arrive, and
+// routes_agent.go reads that value straight off the HTTP body with a default
+// of 0 — so any run that didn't mention a TTL erased the one that had been
+// registered. Reading the crews table once per sweep (a single SELECT every
+// five minutes) makes the row authoritative, removes the clobber entirely,
+// and lets a TTL edit take effect on the next tick rather than the next
+// daemon restart.
+type CrewTTLResolver func(ctx context.Context) map[string]int
+
+// ContainerBusyProbe reports whether something outside this package still
+// needs the crew container — today, a live port exposure whose reverse-proxy
+// entry points at it. Injected rather than polled: the port-exposure registry
+// is an in-memory map that rehydrates from the DB at boot, so asking it is a
+// lookup, and unlike a hold it survives the restart that drops every hold.
+type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bool
 
 // Orchestrator manages agent execution lifecycle: building CLI commands,
 // running them inside containers, streaming output, handling credential
@@ -265,9 +304,14 @@ type Orchestrator struct {
 	// it doesn't spam the log on every run.
 	localModelEnvFallbackWarned sync.Once
 	statsRegister               StatsRegisterFunc
-	mu                          sync.RWMutex
-	accepting                   bool
-	crews                       map[string]*crewState
+	// crewTTL and containerBusy are the reaper's two injected inputs; see the
+	// type docs. Both nil-safe: with neither wired the reaper falls back to
+	// the TTL each run registered, which is the pre-#1662 behaviour.
+	crewTTL       CrewTTLResolver
+	containerBusy ContainerBusyProbe
+	mu            sync.RWMutex
+	accepting     bool
+	crews         map[string]*crewState
 
 	// runSem bounds concurrent agent-run exec fan-outs. RunAgent acquires a
 	// token before its container.Exec fan-out (sidecar start, the mkdir/setup

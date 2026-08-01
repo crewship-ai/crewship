@@ -83,6 +83,78 @@ const (
 	defaultCrewContainerCPUs     float64 = 2.0
 )
 
+// defaultCrewContainerTTLHours is how long a crew container may sit with no
+// activity before the reaper stops it (#1662).
+//
+// There was no default. container_ttl_hours is nullable with no DEFAULT —
+// the very next line of the same migration gives container_memory_mb a NOT
+// NULL DEFAULT 4096 — Create stored the field only when > 0, agent_config
+// yielded 0 for a NULL, and the reaper skips 0. Out of the box no crew
+// container was ever stopped: dev1 had three that had been running for days
+// with zero agent runs between them.
+//
+// Four hours, not one and not a day:
+//
+//   - A day is indistinguishable from no default for the fleet this is sized
+//     for — 20-50 crews on one host, a handful active — because a crew woken
+//     by a daily routine never reaches it.
+//   - An hour reclaims more, but it also drops any background process an
+//     agent left behind (a dev server, a watcher) across an ordinary meeting.
+//   - Half a working day is long enough that a crew still in use survives a
+//     lunch break and short enough that a crew nobody touched this morning is
+//     genuinely idle.
+//
+// The cost of being wrong in the reclaim direction is one container start on
+// the next wake — a few hundred milliseconds against an LLM round trip
+// measured in seconds — and it makes every other start on the host cheaper,
+// since network-namespace creation takes a global lock whose cost grows with
+// the number of namespaces already present.
+const defaultCrewContainerTTLHours = 4
+
+// resolveCrewContainerTTLHours turns the stored column into the effective TTL.
+//
+// The sentinel is deliberately NOT the one memory_mb and cpus use, and the
+// difference is load-bearing. For a size, 0 is physically meaningless, so 0
+// can safely mean "reset to the server default". For a TTL, 0 is a value the
+// product already publishes: `crewship crew get` prints "TTL: Never stop" for
+// it and checkTTLs has always skipped it. Repurposing 0 would silently
+// convert every crew an operator deliberately pinned to never-stop into a
+// four-hour auto-stop.
+//
+// So NULL — which no API request can produce, and which means "never
+// configured" — is the carrier for the default, and an explicit 0 keeps
+// meaning never stop. Callers therefore pass the nullable column through,
+// not an int.
+// nullIntPtr adapts a nullable SQL column to the *int resolveCrewContainer‑
+// TTLHours takes, keeping the NULL/0 distinction all the way from the row.
+func nullIntPtr(v sql.NullInt64) *int {
+	if !v.Valid {
+		return nil
+	}
+	n := int(v.Int64)
+	return &n
+}
+
+// ResolveCrewContainerTTLHours is the exported form for callers outside this
+// package — the server's reaper resolver reads the same column and must not
+// re-derive the default, which is the mistake #1638 was written to stop
+// (memory_mb's default was written down twice and the two copies disagreed).
+func ResolveCrewContainerTTLHours(stored *int) int {
+	return resolveCrewContainerTTLHours(stored)
+}
+
+func resolveCrewContainerTTLHours(stored *int) int {
+	if stored == nil {
+		return defaultCrewContainerTTLHours
+	}
+	if *stored < 0 {
+		// Validation rejects negatives at both handlers; a row that predates
+		// that reads as never-stop rather than as an instant expiry.
+		return 0
+	}
+	return *stored
+}
+
 // The instance settings behind the advisory floor: the resources ONE agent
 // needs to run. Settable per instance because the right number depends on
 // which CLI the operator runs and how heavy their toolchain is — an operator

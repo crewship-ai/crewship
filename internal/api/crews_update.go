@@ -208,11 +208,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusBadRequest, "container_ttl_hours cannot be negative")
 			return
 		}
-		if *req.ContainerTTLHours == 0 {
-			ub.SetNull("container_ttl_hours")
-		} else {
-			ub.Set("container_ttl_hours", *req.ContainerTTLHours)
-		}
+		// #1662: an explicit 0 used to be written as NULL. Both read as
+		// "never stop" back then, so it made no difference. Now NULL is
+		// "never configured — use the server default", and clearing the
+		// column would flip a deliberate never-stop into a four-hour
+		// auto-stop on the next sweep. Store the 0.
+		ub.Set("container_ttl_hours", *req.ContainerTTLHours)
 	}
 	if req.MaxEphemeralAgents != nil {
 		// Server-side CHECK already enforces >= 0; the 100 ceiling is a

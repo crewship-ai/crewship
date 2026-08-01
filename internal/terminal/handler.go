@@ -45,6 +45,18 @@ type Handler struct {
 	upgrader           websocket.Upgrader
 	sessions           sync.Map // sessionID -> *Session
 	sessionID          atomic.Int64
+	// containerHolder pins the crew container against the idle-TTL reaper
+	// for the life of an attached terminal (#1662). A shell sitting at a
+	// prompt produces no agent runs, so nothing else refreshes the crew's
+	// activity clock and a long debugging session would be stopped out from
+	// under the user. Optional: nil in dev / no-orchestrator paths.
+	containerHolder func(crewID string) func()
+}
+
+// SetContainerHolder wires the idle-reaper hold. Called once at bootstrap
+// with the orchestrator's RetainCrewContainer.
+func (h *Handler) SetContainerHolder(fn func(crewID string) func()) {
+	h.containerHolder = fn
 }
 
 // Session represents an active terminal connection.
@@ -253,6 +265,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		actualSlug = init.CrewSlug // dev mode only
+	}
+
+	// #1662: pin the container for the whole session, taken BEFORE the ensure
+	// below so the window between "we started it" and "the shell is attached"
+	// is covered too. No container id is passed: the terminal works in
+	// container NAMES, and overwriting the reaper's recorded id with a name
+	// would break the port-exposure occupancy check, which compares against
+	// the id in port_exposures.
+	if h.containerHolder != nil && init.CrewID != "" {
+		defer h.containerHolder(init.CrewID)()
 	}
 
 	// Ensure container is running (start if needed).

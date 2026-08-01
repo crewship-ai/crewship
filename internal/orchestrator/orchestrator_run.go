@@ -251,6 +251,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if req.ContainerID != "" {
 		o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
 		defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+		// #1662: the two refreshes bracket the run but say nothing about the
+		// middle of it. A run that outlives the crew's TTL — a long agent
+		// task, a queued mission step — was reapable while its own CLI was
+		// still exec'ing in the container. The hold covers the gap.
+		defer o.RetainCrewContainer(req.CrewID, req.ContainerID)()
 	}
 
 	runState := RunState{

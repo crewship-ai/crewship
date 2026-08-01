@@ -146,8 +146,20 @@ func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceI
 				"crew_id", crewID, "error", err)
 		}
 	}
-	_, err := r.container.EnsureCrewRuntime(ctx, cfg)
-	return err
+	containerID, err := r.container.EnsureCrewRuntime(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	// #1662: prewarm used to discard the container id and register nothing.
+	// A container it started was tracked by no subsystem at all — no TTL, so
+	// the reaper never saw it; no stats, so the dashboard tile stayed empty —
+	// and it ran until crewshipd restarted. No hold: prewarm only warms the
+	// runtime, it does not occupy it, so the idle clock starts now.
+	if r.orch != nil {
+		r.orch.NoteCrewActivity(crewID, containerID, cfg.TTLHours)
+		r.orch.RegisterStatsContainer(containerID, crewID, workspaceID)
+	}
+	return nil
 }
 
 // RunStep is the AgentRunner contract entry point. Each call is one

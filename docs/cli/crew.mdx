@@ -94,7 +94,7 @@ crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
 | `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
 | `--memory-mb` | `int` | `0` | Container memory limit in MB. 6–262144; `0` uses the server default (`4096`). Below `2048` the crew is created with a warning — see [Sizing a crew](#sizing-a-crew). |
 | `--cpus` | `float64` | `0` | Container CPU limit. 0.01–512; `0` uses the server default (`2.0`). Below `0.5` the crew is created with a warning. |
-| `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
+| `--ttl` | `int` | _(server default)_ | Auto-stop the crew container after this many idle hours. Omit it to take the server default (4 hours). `0` means never stop. |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. Supports `*.example.com` subdomain wildcards. |
 | `--allow-package-registries` | `bool` | `false` | Also allow the common package registries (npm, pip, cargo, go, apt, Docker Hub). Appended to `--allowed-domains`. |
@@ -155,6 +155,38 @@ crew's concurrency budget; lowering it does the reverse. A value that
 does not parse, or that falls outside the hard bounds, is ignored in
 favour of the default.
 
+### Idle crews are stopped
+
+A crew container that has done nothing for **4 hours** is stopped. That is
+the server default, applied to any crew whose `--ttl` was never set; set
+`--ttl <hours>` to change it for one crew, or `--ttl 0` to opt that crew out
+entirely. `crewship crew get` shows which of the three states a crew is in:
+
+| `TTL:` shows | Meaning |
+|---|---|
+| `Server default` | Never configured — the server's 4-hour idle stop applies |
+| `Never stop` | `--ttl 0` — the container is never stopped for idleness |
+| `12 hours` | An explicit per-crew value |
+
+Nothing is lost when a container stops. `/workspace`, `/output` and `/crew`
+are host-persistent mounts and survive; the writable layer and volumes
+survive; only running processes and the scratch tmpfs (`/tmp`, `/secrets`)
+do not. The next wake starts the container again, which costs a few hundred
+milliseconds — less than the model round trip of the run that triggered it.
+
+**A busy container is never stopped**, even long past its TTL. Four things
+count as busy:
+
+- a running `type: script` routine step
+- a detached agent session (a run whose CLI is still alive in `tmux`)
+- an attached terminal (the dashboard's container terminal)
+- a live exposed port
+
+**Service sidecars are not touched.** A crew's declared `services:` (redis,
+postgres, …) run as their own containers alongside the crew container, not
+inside it, so stopping an idle crew leaves them running. Crewship stops the
+agent runtime it owns and manages nothing else.
+
 ---
 
 ## `crewship crew update`
@@ -173,7 +205,7 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`, `terminal`). |
 | `--memory-mb` | `int` | | Container memory limit in MB. 6–262144; `0` resets to the server default (`4096`). Shrinking below `2048` warns — see [Sizing a crew](#sizing-a-crew). |
 | `--cpus` | `float64` | | Container CPU limit. 0.01–512; `0` resets to the server default (`2.0`). Shrinking below `0.5` warns. |
-| `--ttl` | `int` | `-1` | Auto-stop after idle hours (0 = disable TTL). |
+| `--ttl` | `int` | | Auto-stop the crew container after this many idle hours. `0` means never stop. Omitting the flag leaves the crew's current setting alone. |
 | `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
 | `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |
 | `--allow-package-registries` | `bool` | `false` | Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains. When passed alone it unions onto the crew's existing domains rather than replacing them. |

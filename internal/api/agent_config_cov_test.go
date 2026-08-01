@@ -483,9 +483,12 @@ func TestCovCfgResolveNetworkPolicy(t *testing.T) {
 func TestCovCfgResolveContainerResources(t *testing.T) {
 	h := covCfgHandler(nil)
 
-	// Defaults.
+	// Defaults. #1662: the TTL default used to be 0 here, which the reaper
+	// reads as "never stop" — a NULL column is "never configured", not "the
+	// operator asked for no TTL", and this line is where that got lost on
+	// every run.
 	mem, cpus, ttl := h.resolveContainerResources(&agentConfigData{})
-	if mem != 4096 || cpus != 2.0 || ttl != 0 {
+	if mem != 4096 || cpus != 2.0 || ttl != defaultCrewContainerTTLHours {
 		t.Errorf("defaults: %d %v %d", mem, cpus, ttl)
 	}
 

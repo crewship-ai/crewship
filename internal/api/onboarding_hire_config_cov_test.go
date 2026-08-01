@@ -965,10 +965,11 @@ func TestCovOHCResolveNetworkPolicy(t *testing.T) {
 func TestCovOHCResolveContainerResources(t *testing.T) {
 	h := &InternalHandler{logger: newTestLogger()}
 
-	// Defaults when all NULL.
+	// Defaults when all NULL. #1662: the TTL was 0, which the reaper reads
+	// as "never stop"; a NULL column means "never configured".
 	mem, cpus, ttl := h.resolveContainerResources(&agentConfigData{})
-	if mem != 4096 || cpus != 2.0 || ttl != 0 {
-		t.Errorf("defaults = (%d, %v, %d), want (4096, 2.0, 0)", mem, cpus, ttl)
+	if mem != 4096 || cpus != 2.0 || ttl != defaultCrewContainerTTLHours {
+		t.Errorf("defaults = (%d, %v, %d), want (4096, 2.0, %d)", mem, cpus, ttl, defaultCrewContainerTTLHours)
 	}
 
 	// Overrides.

@@ -897,10 +897,15 @@ func (h *InternalHandler) resolveContainerResources(data *agentConfigData) (int,
 	if data.crewCPUs.Valid {
 		cpus = data.crewCPUs.Float64
 	}
-	ttlHours := 0
+	// #1662: this yielded 0 for a NULL column, and the reaper reads 0 as
+	// "never stop" — the line that made the missing column default visible on
+	// every single run.
+	var storedTTL *int
 	if data.crewTTLHours.Valid {
-		ttlHours = int(data.crewTTLHours.Int64)
+		v := int(data.crewTTLHours.Int64)
+		storedTTL = &v
 	}
+	ttlHours := resolveCrewContainerTTLHours(storedTTL)
 	return memoryMB, cpus, ttlHours
 }
 

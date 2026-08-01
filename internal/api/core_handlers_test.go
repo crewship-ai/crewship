@@ -2316,8 +2316,10 @@ func TestResolveContainerResources_Defaults(t *testing.T) {
 	h := &InternalHandler{logger: newTestLogger()}
 	data := &agentConfigData{} // all NullX zero-valued
 	mb, cpus, ttl := h.resolveContainerResources(data)
-	if mb != 4096 || cpus != 2.0 || ttl != 0 {
-		t.Errorf("defaults: %d/%v/%d, want 4096/2.0/0", mb, cpus, ttl)
+	// #1662: the TTL default was 0 here, and the reaper reads 0 as "never
+	// stop" — so out of the box no crew container was ever stopped.
+	if mb != 4096 || cpus != 2.0 || ttl != defaultCrewContainerTTLHours {
+		t.Errorf("defaults: %d/%v/%d, want 4096/2.0/%d", mb, cpus, ttl, defaultCrewContainerTTLHours)
 	}
 
 	data2 := &agentConfigData{

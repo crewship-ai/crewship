@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net"
@@ -847,11 +848,102 @@ func (s *Server) rehydrateContainers(ctx context.Context) {
 		}
 		s.statsCollector.Register(containerID, c.id, c.workspaceID)
 		s.ensureFileWatcher(c.id)
+		// #1662: rehydration used to register the stats collector and stop
+		// there, so a container that survived a crewshipd restart was known
+		// to the metrics tile and invisible to the reaper — if it was never
+		// woken again it was never stopped, ever. dev1 had one that had been
+		// running five days with zero agent runs.
+		//
+		// The clock is dated from the container's own StartedAt rather than
+		// from now. Seeding it with now would hand every restart a fresh full
+		// TTL window, and on a host that redeploys more often than the TTL
+		// (dev1 tracks main) nothing would ever be reaped — the bug would
+		// survive its own fix.
+		s.seedCrewReaperClock(ctx, c.id, c.workspaceID, containerID)
 		registered++
 	}
 	if registered > 0 {
 		s.logger.Info("rehydrated existing crew containers", "count", registered)
 	}
+}
+
+// seedCrewReaperClock hands a boot-discovered container to the idle reaper
+// with its idle clock dated from the container's own start (#1662).
+//
+// ContainerStatus.Uptime already carries inspect.State.StartedAt verbatim, so
+// no provider change is needed for this. A timestamp we cannot parse falls
+// back to now — that is the pre-#1662 behaviour for one TTL window, not a
+// missed stop forever.
+func (s *Server) seedCrewReaperClock(ctx context.Context, crewID, workspaceID, containerID string) {
+	if s.orchestrator == nil || crewID == "" || containerID == "" {
+		return
+	}
+	var storedTTL *int
+	var col sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT container_ttl_hours FROM crews WHERE id = ? AND workspace_id = ?`,
+		crewID, workspaceID).Scan(&col)
+	if err != nil {
+		s.logger.Debug("rehydrate: read crew ttl failed", "crew_id", crewID, "err", err)
+		return
+	}
+	if col.Valid {
+		v := int(col.Int64)
+		storedTTL = &v
+	}
+
+	startedAt := time.Now()
+	if st, err := s.container.ContainerStatus(ctx, containerID); err == nil && st != nil && st.Uptime != "" {
+		// The nearby QueryContext belongs to loadCrewTTLHours, which selects an
+		// integer hour count and touches no timestamp — this parse feeds the
+		// reaper's in-memory idle clock and never reaches SQL.
+		if parsed, perr := time.Parse(time.RFC3339Nano, st.Uptime); perr == nil { // tsformat:allow: read-only parse into a time.Time, never compared or ordered in SQL
+			startedAt = parsed
+		} else {
+			s.logger.Debug("rehydrate: unparseable container start time",
+				"container_id", containerID, "value", st.Uptime, "err", perr)
+		}
+	}
+
+	s.orchestrator.SeedCrewActivity(crewID, containerID,
+		goapi.ResolveCrewContainerTTLHours(storedTTL), startedAt)
+}
+
+// loadCrewTTLHours reads every live crew's effective container TTL, in hours,
+// keyed by crew id. This is the reaper's authority (#1662); a crew missing
+// from the returned map is never reaped, so a read failure fails safe by
+// returning nil rather than an empty-but-authoritative map.
+func loadCrewTTLHours(ctx context.Context, db *sql.DB, logger *slog.Logger) map[string]int {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, container_ttl_hours FROM crews WHERE deleted_at IS NULL`)
+	if err != nil {
+		logger.Debug("crew ttl resolver: query failed", "err", err)
+		return nil
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var id string
+		var col sql.NullInt64
+		if err := rows.Scan(&id, &col); err != nil {
+			logger.Debug("crew ttl resolver: scan failed", "err", err)
+			continue
+		}
+		var stored *int
+		if col.Valid {
+			v := int(col.Int64)
+			stored = &v
+		}
+		out[id] = goapi.ResolveCrewContainerTTLHours(stored)
+	}
+	if err := rows.Err(); err != nil {
+		// A truncated list would silently exempt the tail from reaping. Say
+		// nothing rather than say something wrong.
+		logger.Debug("crew ttl resolver: iterate failed", "err", err)
+		return nil
+	}
+	return out
 }
 
 // ephemeralHubAdapter satisfies internal/ephemeral.Broadcaster. The

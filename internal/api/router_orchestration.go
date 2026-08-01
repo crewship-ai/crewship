@@ -632,6 +632,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		r.logger.Warn("port expose registry: initial load failed", "error", err)
 	}
 	r.portExposeRegistry.StartPurger(30 * time.Second)
+	// #1662: a live exposure is one of the four things that must keep a crew
+	// container up. Wired here rather than in server.go because this is where
+	// the registry is built; the orchestrator only learns of it through this
+	// probe.
+	if r.orch != nil {
+		reg := r.portExposeRegistry
+		r.orch.SetContainerBusyProbe(func(_ context.Context, _, containerID string) bool {
+			return reg.HasContainer(containerID)
+		})
+	}
 
 	peCfg := DefaultPortExposeConfig()
 	if r.portExposePublicURL != "" {

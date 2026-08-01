@@ -149,8 +149,11 @@ func TestCrewGetRunE_DefaultsForNullables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "Never stop") {
-		t.Errorf("nil TTL should render 'Never stop': %q", out)
+	// #1662: a nil TTL used to render "Never stop", and that was true —
+	// nothing ever stopped a crew container. It now means the column was
+	// never configured and the server applies its own default.
+	if !strings.Contains(out, "Server default") {
+		t.Errorf("nil TTL should render 'Server default': %q", out)
 	}
 	if !strings.Contains(out, "free") {
 		t.Errorf("empty network mode should render 'free': %q", out)

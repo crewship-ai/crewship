@@ -190,9 +190,23 @@ var crewGetCmd = &cobra.Command{
 		if len(crew.AllowedDomains) > 0 {
 			domainsStr = strings.Join(crew.AllowedDomains, ", ")
 		}
+		// #1648 owns the mode string (configured vs effective); the empty-mode
+		// "free" fallback moved into networkModeDisplay.
 		networkMode := networkModeDisplay(crew.NetworkMode, crew.NetworkModeEnforced)
-		ttlStr := "Never stop"
-		if crew.TTLHours != nil && *crew.TTLHours > 0 {
+		// #1662: a null column and an explicit 0 both rendered "Never stop",
+		// and for a null column that is now false — the server applies its
+		// own default. Reporting "Never stop" four hours before the reaper
+		// stops the container is exactly how the missing default was found.
+		//
+		// The number is deliberately not printed for the null case: it lives
+		// on the server, the CLI can be a different version, and a guessed
+		// figure would be worse than no figure.
+		ttlStr := "Server default"
+		switch {
+		case crew.TTLHours == nil:
+		case *crew.TTLHours <= 0:
+			ttlStr = "Never stop"
+		default:
 			ttlStr = fmt.Sprintf("%d hours", *crew.TTLHours)
 		}
 		// Name the instance ceiling on the "on" line: the crew flag alone does

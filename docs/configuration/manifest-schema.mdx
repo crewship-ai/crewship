@@ -105,7 +105,7 @@ Subset of devcontainer.json. Hand-written JSON can be passed through under `raw:
 | `runtime_image` | string | Alternative to `image:`; falls back to `image` when empty. |
 | `memory_mb` | int | Container memory cap. 6–262144 (Docker's own minimum); `0` or omitted = server default (`4096`). Below `2048` — one agent CLI's working set — applies with a server warning rather than an error; that floor is the `runtime.agent_min_memory_mb` instance setting. |
 | `cpus` | float | CPU cores. 0.01–512 (Docker's own minimum); `0` or omitted = server default (`2.0`). Below `0.5` applies with a server warning; that floor is the `runtime.agent_min_cpus` instance setting. |
-| `ttl_hours` | int | Auto-stop after idle period. `0` = no TTL. |
+| `ttl_hours` | int | Idle hours before the crew container is stopped. Omit it for the server default (4 hours); `0` = never stop. |
 | `network_mode` | `"free"` \| `"restricted"` | When `restricted`, only `allowed_domains` are reachable. |
 | `allowed_domains` | `[]string` | Domain allowlist for `restricted` mode. |
 | `raw` | `map<string,any>` | Free-form devcontainer.json keys passed through. |
