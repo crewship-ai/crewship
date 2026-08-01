@@ -12,7 +12,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// tableDDL mirrors internal/database/migrations/20260730063951_keeper_runtime_settings.sql.
+// tableDDL mirrors internal/database/migrations/20260730063951_keeper_runtime_settings.sql
+// plus the judge-profile columns from 20260801113326_keeper_judge_profile.sql.
 // Duplicated here so the store unit tests don't drag in the full migration
 // stack; the backup totality guard and the migration test keep the real schema
 // honest. The users stub exists only so the updated_by foreign key resolves if
@@ -27,6 +28,14 @@ CREATE TABLE keeper_runtime_settings (
     judge_wire         TEXT NOT NULL DEFAULT '',
     judge_model        TEXT NOT NULL DEFAULT '',
     judge_timeout_ms   INTEGER CHECK (judge_timeout_ms IS NULL OR (judge_timeout_ms >= 1000 AND judge_timeout_ms <= 120000)),
+    judge_profile              TEXT NOT NULL DEFAULT '',
+    judge_evidence             INTEGER CHECK (judge_evidence IN (0, 1)),
+    judge_evidence_facts       TEXT NOT NULL DEFAULT '',
+    judge_hard_gate            INTEGER CHECK (judge_hard_gate IN (0, 1)),
+    judge_precedent            INTEGER CHECK (judge_precedent IN (0, 1)),
+    judge_precedent_n          INTEGER CHECK (judge_precedent_n IS NULL OR (judge_precedent_n >= 1 AND judge_precedent_n <= 10)),
+    judge_consistency_samples  INTEGER CHECK (judge_consistency_samples IS NULL OR (judge_consistency_samples >= 1 AND judge_consistency_samples <= 9)),
+    judge_prompt_budget_tokens INTEGER CHECK (judge_prompt_budget_tokens IS NULL OR (judge_prompt_budget_tokens >= 512 AND judge_prompt_budget_tokens <= 131072)),
     updated_by         TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))

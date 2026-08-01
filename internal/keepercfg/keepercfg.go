@@ -180,6 +180,10 @@ type Effective struct {
 	// Settable because only the operator knows what their model returns in on
 	// their hardware — see DefaultJudgeTimeout.
 	TimeoutMS Field[int64] `json:"judge_timeout_ms"`
+	// Profile is which capabilities the judge may use — the evidence block, the
+	// hard gate, precedent, self-consistency, the prompt budget. See profile.go
+	// for why every one of them is a toggle rather than a constant.
+	Profile EffectiveProfile `json:"judge_profile"`
 
 	// Overridden is true when any field is set at instance level — the one bit
 	// a "Reset all" control needs to know whether it would do anything.
@@ -195,6 +199,13 @@ type Effective struct {
 //
 // Length-prefixed rather than delimiter-joined: a model tag may contain almost
 // anything, and "a|b" and "a" + "|b" must not fingerprint alike.
+//
+// The judge profile is folded in for the same reason the timeout is: the lazy
+// gatekeeper is built FROM an Effective and then cached, so a capability the
+// builder reads at construction time would otherwise stay in force until
+// something unrelated changed the wiring — a profile edit that visibly saved and
+// silently did nothing until the next restart, which is the failure this whole
+// store exists to end. Rebuilding costs one provider struct.
 func (e Effective) JudgeFingerprint() string {
 	var b strings.Builder
 	for _, part := range []string{
@@ -204,6 +215,7 @@ func (e Effective) JudgeFingerprint() string {
 		e.Wire.Value,
 		e.Model.Value,
 		strconv.FormatInt(e.TimeoutMS.Value, 10),
+		e.Profile.Stamp(),
 	} {
 		b.WriteString(strconv.Itoa(len(part)))
 		b.WriteByte(':')
@@ -228,13 +240,14 @@ type settings struct {
 	wire        string
 	model       string
 	timeoutMS   *int64
+	profile     profileSettings
 	updatedAt   string
 	updatedBy   string
 }
 
 func (s settings) empty() bool {
 	return s.enabled == nil && s.provider == "" && s.endpointURL == "" && s.wire == "" &&
-		s.model == "" && s.timeoutMS == nil
+		s.model == "" && s.timeoutMS == nil && s.profile.empty()
 }
 
 // Patch is a partial update. A nil field is left alone; a non-nil field is
@@ -250,12 +263,27 @@ type Patch struct {
 	// TimeoutMS: a pointer to 0 CLEARS the override so the field inherits again,
 	// the same convention the aux patch uses.
 	TimeoutMS *int64
+
+	// The judge profile (profile.go). Profile selects a preset; a pointer to ""
+	// clears it back to the built-in. The rest are per-toggle overrides on top:
+	// TriInherit hands a toggle back to the profile, and for the three numbers a
+	// pointer to 0 does the same.
+	Profile            *string
+	Evidence           *TriBool
+	EvidenceFacts      *string
+	HardGate           *TriBool
+	Precedent          *TriBool
+	PrecedentN         *int64
+	ConsistencySamples *int64
+	PromptBudgetTokens *int64
 }
 
 // empty reports whether the patch would change nothing.
 func (p Patch) empty() bool {
 	return p.Enabled == nil && p.Provider == nil && p.EndpointURL == nil && p.Wire == nil &&
-		p.Model == nil && p.TimeoutMS == nil
+		p.Model == nil && p.TimeoutMS == nil && p.Profile == nil && p.Evidence == nil &&
+		p.EvidenceFacts == nil && p.HardGate == nil && p.Precedent == nil &&
+		p.PrecedentN == nil && p.ConsistencySamples == nil && p.PromptBudgetTokens == nil
 }
 
 // Store is the DB-backed instance override, cached in memory. Reads happen on
@@ -301,7 +329,10 @@ func (s *Store) Load(ctx context.Context) error {
 // read-modify-write, so the two can never drift into reading different columns.
 const settingsSelect = `
 	SELECT enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
-	       judge_timeout_ms, updated_at, updated_by
+	       judge_timeout_ms, judge_profile, judge_evidence, judge_evidence_facts,
+	       judge_hard_gate, judge_precedent, judge_precedent_n,
+	       judge_consistency_samples, judge_prompt_budget_tokens,
+	       updated_at, updated_by
 	  FROM keeper_runtime_settings WHERE id = ?`
 
 // scanSettings reads one singleton row. A missing row is the zero settings —
@@ -311,10 +342,15 @@ func scanSettings(row *sql.Row) (settings, error) {
 		enabled                          sql.NullInt64
 		timeoutMS                        sql.NullInt64
 		provider, endpointURL, wire, mdl string
+		profile, evidenceFacts           string
+		evidence, hardGate, precedent    sql.NullInt64
+		precedentN, samples, budget      sql.NullInt64
 		updatedAt                        string
 		updatedBy                        sql.NullString
 	)
-	err := row.Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &timeoutMS, &updatedAt, &updatedBy)
+	err := row.Scan(&enabled, &provider, &endpointURL, &wire, &mdl, &timeoutMS,
+		&profile, &evidence, &evidenceFacts, &hardGate, &precedent, &precedentN, &samples, &budget,
+		&updatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return settings{}, nil
 	}
@@ -327,6 +363,7 @@ func scanSettings(row *sql.Row) (settings, error) {
 		endpointURL: endpointURL,
 		wire:        wire,
 		model:       mdl,
+		profile:     profileSettings{profile: profile, evidenceFacts: evidenceFacts},
 		updatedAt:   updatedAt,
 		updatedBy:   updatedBy.String,
 	}
@@ -338,7 +375,33 @@ func scanSettings(row *sql.Row) (settings, error) {
 		v := timeoutMS.Int64
 		next.timeoutMS = &v
 	}
+	next.profile.evidence = nullBool(evidence)
+	next.profile.hardGate = nullBool(hardGate)
+	next.profile.precedent = nullBool(precedent)
+	next.profile.precedentN = nullInt(precedentN)
+	next.profile.consistencySamples = nullInt(samples)
+	next.profile.promptBudgetTokens = nullInt(budget)
 	return next, nil
+}
+
+// nullBool / nullInt turn a nullable column into the pointer the settings row
+// uses for "inherit". Separate helpers rather than one generic: the boolean
+// columns store 0/1 and the numeric ones store the value itself, and collapsing
+// them would make a stored 0 read as false in both.
+func nullBool(v sql.NullInt64) *bool {
+	if !v.Valid {
+		return nil
+	}
+	b := v.Int64 != 0
+	return &b
+}
+
+func nullInt(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	n := v.Int64
+	return &n
 }
 
 // Defaults returns the inherited (env/YAML) layer.
@@ -363,6 +426,10 @@ func (s *Store) Effective() Effective {
 			EndpointURL: Field[string]{Source: SourceDefault},
 			Wire:        Field[string]{Value: WireOllama, Source: SourceDefault},
 			Model:       Field[string]{Source: SourceDefault},
+			// Resolved rather than left zero: a zero EffectiveProfile reads as
+			// every capability off, INCLUDING the hard gate, which would make a
+			// storeless process look like a deliberately weakened judge.
+			Profile: resolveProfile(profileSettings{}),
 		}
 	}
 	s.mu.RLock()
@@ -408,6 +475,7 @@ func resolve(cur settings, dflt Defaults) Effective {
 	} else {
 		eff.TimeoutMS = Field[int64]{Value: DefaultJudgeTimeout.Milliseconds(), Source: SourceDefault}
 	}
+	eff.Profile = resolveProfile(cur.profile)
 	return eff
 }
 
@@ -499,6 +567,7 @@ func (s *Store) applyLocked(ctx context.Context, p Patch, actor string) (Effecti
 			next.timeoutMS = &v
 		}
 	}
+	applyProfilePatch(&next.profile, p)
 
 	if err := validate(next, s.dflt); err != nil {
 		return Effective{}, err
@@ -567,26 +636,61 @@ func persistTx(ctx context.Context, tx *sql.Tx, next settings, actor string) err
 	if next.timeoutMS != nil {
 		timeout = *next.timeoutMS
 	}
+	p := next.profile
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO keeper_runtime_settings
 			(id, enabled, judge_provider, judge_endpoint_url, judge_wire, judge_model,
-			 judge_timeout_ms, updated_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			 judge_timeout_ms, judge_profile, judge_evidence, judge_evidence_facts,
+			 judge_hard_gate, judge_precedent, judge_precedent_n,
+			 judge_consistency_samples, judge_prompt_budget_tokens,
+			 updated_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 		ON CONFLICT(id) DO UPDATE SET
-			enabled            = excluded.enabled,
-			judge_provider     = excluded.judge_provider,
-			judge_endpoint_url = excluded.judge_endpoint_url,
-			judge_wire         = excluded.judge_wire,
-			judge_model        = excluded.judge_model,
-			judge_timeout_ms   = excluded.judge_timeout_ms,
-			updated_by         = excluded.updated_by,
-			updated_at         = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+			enabled                    = excluded.enabled,
+			judge_provider             = excluded.judge_provider,
+			judge_endpoint_url         = excluded.judge_endpoint_url,
+			judge_wire                 = excluded.judge_wire,
+			judge_model                = excluded.judge_model,
+			judge_timeout_ms           = excluded.judge_timeout_ms,
+			judge_profile              = excluded.judge_profile,
+			judge_evidence             = excluded.judge_evidence,
+			judge_evidence_facts       = excluded.judge_evidence_facts,
+			judge_hard_gate            = excluded.judge_hard_gate,
+			judge_precedent            = excluded.judge_precedent,
+			judge_precedent_n          = excluded.judge_precedent_n,
+			judge_consistency_samples  = excluded.judge_consistency_samples,
+			judge_prompt_budget_tokens = excluded.judge_prompt_budget_tokens,
+			updated_by                 = excluded.updated_by,
+			updated_at                 = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
 		singletonID, enabled, next.provider, next.endpointURL, next.wire, next.model,
-		timeout, nullIfEmpty(actor))
+		timeout, p.profile, boolColumn(p.evidence), p.evidenceFacts,
+		boolColumn(p.hardGate), boolColumn(p.precedent), intColumn(p.precedentN),
+		intColumn(p.consistencySamples), intColumn(p.promptBudgetTokens),
+		nullIfEmpty(actor))
 	if err != nil {
 		return fmt.Errorf("keepercfg: persist settings: %w", err)
 	}
 	return nil
+}
+
+// boolColumn / intColumn turn "inherit" back into SQL NULL. Untyped nil rather
+// than a zero: a stored 0 is a real value on every one of these columns (a
+// toggle explicitly off), so the absence has to be the absence.
+func boolColumn(v *bool) any {
+	if v == nil {
+		return nil
+	}
+	if *v {
+		return 1
+	}
+	return 0
+}
+
+func intColumn(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // OnChange registers a callback fired synchronously after a committed Apply or
@@ -690,6 +794,9 @@ func validate(next settings, dflt Defaults) error {
 				"the judge timeout must be between %s and %s (clear it to use the %s default)",
 				MinJudgeTimeout, MaxJudgeTimeout, DefaultJudgeTimeout))
 		}
+	}
+	if err := validateProfile(next.profile); err != nil {
+		return err
 	}
 
 	// Fail-closed guard: with Keeper on and no judge, every credential request
