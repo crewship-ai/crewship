@@ -76,15 +76,27 @@ func TestStartTimeoutSweeper_FiresSweepOnTick(t *testing.T) {
 
 	StartTimeoutSweeper(ctx, db, rec, 20*time.Millisecond)
 
-	// Poll for the status flip — bounded so a regression surfaces as
-	// a test failure rather than a hang.
+	// Poll for BOTH effects — bounded so a regression surfaces as a test
+	// failure rather than a hang.
+	//
+	// Waiting only on the status flip and then reading rec is a
+	// read-after-write against another goroutine: the sweeper writes the
+	// row and emits the journal entry as two steps, so breaking out the
+	// instant status == "timeout" can observe the row before the emit has
+	// landed. That is not a regression in the sweeper, and it failed CI
+	// exactly that way on 2026-08-01 — status assertion silent, emit
+	// assertion red (#1597). The recorder is mutex-protected, so this is
+	// an ordering gap, not a data race, which is why -race reports
+	// nothing.
 	deadline := time.Now().Add(2 * time.Second)
 	var status string
+	emitted := false
 	for time.Now().Before(deadline) {
 		if err := db.QueryRow(`SELECT status FROM approvals_queue WHERE id = ?`, id).Scan(&status); err != nil {
 			t.Fatalf("readback: %v", err)
 		}
-		if status == "timeout" {
+		emitted = rec.hasType(journal.EntryApprovalTimeout)
+		if status == "timeout" && emitted {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -92,7 +104,7 @@ func TestStartTimeoutSweeper_FiresSweepOnTick(t *testing.T) {
 	if status != "timeout" {
 		t.Errorf("status = %q after sweeper ticks, want \"timeout\" — sweeper did not flip the row", status)
 	}
-	if !rec.hasType(journal.EntryApprovalTimeout) {
+	if !emitted {
 		t.Errorf("no EntryApprovalTimeout emitted; emit path inside the tick branch never fired")
 	}
 }
