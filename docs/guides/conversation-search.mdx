@@ -115,12 +115,20 @@ Status codes:
 
 ## Agent tool
 
-Agents can call the `conversation.search` tool to recall their own past
-sessions. The tool is agent-scoped — the agent identity is supplied by the
-runtime, not by the model, so an agent cannot search another agent's
-history. Where the searchable mirror is not reachable from the agent's
-sandbox, the tool returns a recoverable "not available" result rather than
-failing the run.
+<Warning>
+  `conversation.search` is **not advertised to agents today**. The memory MCP
+  server's `tools/list` publishes `memory.read`, `memory.write`,
+  `memory.search` and `memory.append_daily` only, so a model never sees the
+  tool — and its backend is the host database, which the in-container
+  dispatcher cannot reach. Search conversations from the HTTP API or the CLI
+  above.
+</Warning>
+
+The tool's schema and handler ship, ready for a transport that can reach the
+mirror from a sandbox. It is agent-scoped by construction — the agent identity
+comes from the runtime, never from the model, so an agent could only ever
+search its own history — and where the mirror is not reachable it returns a
+recoverable "not available" result rather than failing the run.
 
 ## How it works
 

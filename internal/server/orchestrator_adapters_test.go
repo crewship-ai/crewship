@@ -180,12 +180,20 @@ func TestServer_ApprovalGateAdapter_ModeMapping_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestServer_EpisodicRecallAdapter_NilEmbedder_ReturnsEmpty locks the
-// documented graceful-degrade contract: a nil embedder means Ollama is
-// unreachable, and Recall must silently return ("", nil) so the
-// orchestrator drops the [EPISODIC RECALL] block without failing the
-// run.
-func TestServer_EpisodicRecallAdapter_NilEmbedder_ReturnsEmpty(t *testing.T) {
+// TestServer_EpisodicRecallAdapter_NoStore_ReturnsEmpty locks the
+// graceful-degrade contract: an adapter with nothing behind it must
+// silently return ("", nil) so the orchestrator drops the
+// [EPISODIC RECALL] block without failing the run.
+//
+// This used to be TestServer_..._NilEmbedder_ReturnsEmpty, and it passed
+// because the adapter opened with `if a.embedder == nil { return "" }`.
+// #1651 removed that: a missing embedder costs the dense lane, not the
+// BM25 one, and short-circuiting emptied the whole episodic tier on
+// every install without Ollama. What is left here is the honest version
+// of the same contract — no database means no recall — with
+// TestEpisodicRecallAdapter_WithoutEmbedder_ServesSparseLane covering
+// the case this test used to mask.
+func TestServer_EpisodicRecallAdapter_NoStore_ReturnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	adapter := newEpisodicRecallAdapter(nil, nil)
@@ -198,10 +206,10 @@ func TestServer_EpisodicRecallAdapter_NilEmbedder_ReturnsEmpty(t *testing.T) {
 		MaxChars:    1000,
 	})
 	if err != nil {
-		t.Errorf("nil embedder must produce nil error, got %v", err)
+		t.Errorf("an adapter with no store must produce nil error, got %v", err)
 	}
 	if got != "" {
-		t.Errorf("nil embedder must produce empty recall, got %q", got)
+		t.Errorf("an adapter with no store must produce empty recall, got %q", got)
 	}
 }
 
