@@ -273,8 +273,29 @@ func TestRouteWithRateLimiting_CredentialTestPath_ExemptionDoesNotApply(t *testi
 		t.Fatalf("NewRouter: %v", err)
 	}
 
+	// Empty this IP's bucket directly instead of trying to out-run it.
+	//
+	// The old version fired rlCredTestProbes (limit + 10) requests and
+	// hoped one would be refused. That is a race against the refill, not
+	// a test of the exemption: the bucket holds `limit` tokens and refills
+	// at limit/60 per second, so the ten spare probes buy exactly ONE
+	// SECOND. Every one of those probes is a full router round-trip with a
+	// DB-backed CLI-token lookup, and under `-race` on a loaded CI runner
+	// 610 of them do not finish inside a second — so the limiter refills
+	// faster than the loop drains it and no 429 ever appears. It failed
+	// twice in a row that way on 2026-08-01 (#1597), in a PR touching no
+	// Go file in this package.
+	//
+	// The router is built per test, so credTestRL is this test's own
+	// limiter and draining it races nobody.
+	r.credTestRL.getLimiter("127.0.0.4").AllowN(time.Now(), r.credTestRL.burst)
+
+	// With the bucket empty, a valid CLI token must still be refused. The
+	// margin is now 20 tokens against a refill of limit/60 per second —
+	// two full seconds of scheduler delay before this could go wrong,
+	// rather than the time it takes to make 610 HTTP requests.
 	saw429 := false
-	for i := 0; i < rlCredTestProbes; i++ {
+	for i := 0; i < 20; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/test", nil)
 		req.Header.Set("Authorization", "Bearer "+plaintext)
 		req.RemoteAddr = "127.0.0.4:1"
