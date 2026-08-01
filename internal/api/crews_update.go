@@ -183,6 +183,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.AvatarStyle != nil {
 		ub.Set("avatar_style", *req.AvatarStyle)
 	}
+	// #1627: this used to write both values straight through — not even the
+	// negative guard container_ttl_hours gets three lines below. A patch of
+	// container_cpus: 0.005 landed in the row, and the daemon then refused
+	// every subsequent container create for the crew.
+	if err := validateCrewContainerResources(req.ContainerMemoryMB, req.ContainerCPUs); err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.ContainerMemoryMB != nil {
 		ub.Set("container_memory_mb", *req.ContainerMemoryMB)
 	}

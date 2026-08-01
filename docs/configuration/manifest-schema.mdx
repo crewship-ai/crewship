@@ -103,8 +103,8 @@ Subset of devcontainer.json. Hand-written JSON can be passed through under `raw:
 | `env` | `map<string,string>` | Becomes `containerEnv` in the generated config. |
 | `mise` | string | `[tools]` config block fed to mise at provision time. |
 | `runtime_image` | string | Alternative to `image:`; falls back to `image` when empty. |
-| `memory_mb` | int | Container memory cap. |
-| `cpus` | float | CPU cores. |
+| `memory_mb` | int | Container memory cap. 6–262144; `0` or omitted = server default. |
+| `cpus` | float | CPU cores. 0.01–512; `0` or omitted = server default. |
 | `ttl_hours` | int | Auto-stop after idle period. `0` = no TTL. |
 | `network_mode` | `"free"` \| `"restricted"` | When `restricted`, only `allowed_domains` are reachable. |
 | `allowed_domains` | `[]string` | Domain allowlist for `restricted` mode. |

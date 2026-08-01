@@ -140,8 +140,8 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `description` | string | No | `null` | Crew description |
 | `color` | string | No | `null` | Palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`) |
 | `icon` | string | No | `null` | Lucide icon name (`code`, `rocket`, `clipboard`, etc.) |
-| `container_memory_mb` | integer | No | `4096` | Container memory limit in MB |
-| `container_cpus` | number | No | `2.0` | Container CPU limit |
+| `container_memory_mb` | integer | No | `4096` | Container memory limit in MB; must be between `6` and `262144` (`0` uses the server default) |
+| `container_cpus` | number | No | `2.0` | Container CPU limit; must be between `0.01` and `512` (`0` uses the server default) |
 | `container_ttl_hours` | integer | No | `null` | Container time-to-live in hours |
 | `network_mode` | string | No | `"restricted"` | `"free"` or `"restricted"` (new crews default to `restricted` with an empty allowlist — LLM/CLI providers stay reachable; arbitrary egress is denied) |
 | `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` (ignored otherwise) |
@@ -218,8 +218,8 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `color` | string | Palette ID |
 | `icon` | string | Lucide icon name |
 | `avatar_style` | string | Avatar style for agents |
-| `container_memory_mb` | integer | Container memory limit in MB |
-| `container_cpus` | number | Container CPU limit |
+| `container_memory_mb` | integer | Container memory limit in MB; must be between `6` and `262144` (`0` resets to the server default) |
+| `container_cpus` | number | Container CPU limit; must be between `0.01` and `512` (`0` resets to the server default) |
 | `container_ttl_hours` | integer | Container TTL in hours (`0` clears it to `null`; negative is rejected) |
 | `max_ephemeral_agents` | integer | Per-crew hire-flow quota; must be between `0` and `100` |
 | `network_mode` | string | `"free"` or `"restricted"` |

@@ -91,8 +91,8 @@ unmodeled keys pass through via `raw:` (typed fields win on collision).
 |---|---|---|
 | `features` | map | feature-id → feature-config (OCI ref → JSON). |
 | `env` | map[string]string | static container env (emitted as `containerEnv`). |
-| `memory_mb` | int | container memory; emitted as `hostRequirements.memory` and forwarded to the `container_memory_mb` column. Non-negative. |
-| `cpus` | float | container CPUs; emitted as `hostRequirements.cpus` and forwarded to `container_cpus`. Non-negative. |
+| `memory_mb` | int | container memory; emitted as `hostRequirements.memory` and forwarded to the `container_memory_mb` column. Between 6 and 262144, or omit / set 0 to use the server default. |
+| `cpus` | float | container CPUs; emitted as `hostRequirements.cpus` and forwarded to `container_cpus`. Between 0.01 and 512, or omit / set 0 to use the server default. |
 | `post_create_command` | string | shell snippet run once after first build. |
 | `raw` | map | passthrough for any unmodeled key (e.g. `remoteUser`, `customizations`). |
 
@@ -265,7 +265,13 @@ Endpoints used:
 - **`spec.runtime_image` is required** (no sane default; the server
   tolerates NULL but falls back to a wrong-for-you built-in image).
 - `spec.devcontainer.image`, when set, must equal `spec.runtime_image`.
-- `devcontainer.memory_mb` / `cpus` are non-negative.
+- `devcontainer.memory_mb` is 6–262144 and `cpus` is 0.01–512 (0 or an
+  omitted key means "use the server default"). The lower bounds are
+  Docker's own: a crew configured below them is rejected here, at apply
+  time, rather than passing every layer and then failing inside the
+  daemon on every wake — which wedges every run of that crew. The upper
+  bound on `cpus` cannot be fully checked server-side, because the
+  daemon's real limit is the host's core count.
 - Each service: DNS-label name, unique within the crew, image present,
   numeric ports only, parseable healthcheck durations, named (not
   bind) volumes with unique mounts.

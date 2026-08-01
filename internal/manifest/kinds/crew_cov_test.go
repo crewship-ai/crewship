@@ -682,7 +682,9 @@ func TestCrewCov_Validate_EdgeBranches(t *testing.T) {
 		d := base()
 		d.Spec.Devcontainer = &Devcontainer{CPUs: -1}
 		err := d.Validate(internalapi.WorkspaceContext{})
-		if err == nil || !strings.Contains(err.Error(), "cpus must be non-negative") {
+		// #1627 widened this from a sign check to a range check; the
+		// message now names the bounds the daemon actually enforces.
+		if err == nil || !strings.Contains(err.Error(), "cpus must be between") {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -691,7 +693,7 @@ func TestCrewCov_Validate_EdgeBranches(t *testing.T) {
 		d := base()
 		d.Spec.Devcontainer = &Devcontainer{MemoryMB: -1}
 		err := d.Validate(internalapi.WorkspaceContext{})
-		if err == nil || !strings.Contains(err.Error(), "memory_mb must be non-negative") {
+		if err == nil || !strings.Contains(err.Error(), "memory_mb must be between") {
 			t.Fatalf("got %v", err)
 		}
 	})
