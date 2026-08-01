@@ -554,11 +554,11 @@ func (h *QueryHandler) finishQuery(
 // Three arrivals, three near-misses, one shared definition now. Do not spell the
 // query out here again.
 func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
-	delivered, err := loadDeliveredCredentials(ctx, h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentials(ctx, h.db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
-	logDeliveredFieldConflicts(h.logger, agentID, delivered)
+	logDeliveredCredentialNotices(h.logger, agentID, delivered, slotNotices)
 
 	var creds []orchestrator.Credential
 	for _, d := range delivered {

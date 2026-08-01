@@ -46,7 +46,7 @@ func TestBuildCredFileScript_SyntheticOAuthTokenDoesNotPoisonTheBatch(t *testing
 		{ID: "c2", EnvVarName: "DEPLOY_KEY", PlainValue: sshKey, Type: "SSH_KEY"},
 	}
 
-	script, count, err := buildCredFileScript(creds, "/secrets/agent-a", false)
+	script, count, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
 	if err != nil {
 		t.Fatalf("buildCredFileScript: %v — an OAuth MCP binding is not a file "+
 			"credential; it must be skipped, not fail the batch", err)

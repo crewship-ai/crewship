@@ -220,7 +220,7 @@ func TestBuildCredFileScript_PartsBecomeTheirOwnFiles(t *testing.T) {
 			{EnvVar: "DEPLOY_PASSPHRASE", Value: "hunter2", IsSecret: true},
 		},
 	}}
-	script, count, err := buildCredFileScript(creds, "/secrets/agent-a", false)
+	script, count, _, err := buildCredFileScript(creds, "/secrets/agent-a", false)
 	if err != nil {
 		t.Fatalf("buildCredFileScript: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestBuildCredFileScript_PartsOfAWithheldCredentialAreWithheldToo(t *testing
 		EnvVarName: "DB", PlainValue: "pw", Type: "SECRET",
 		Fields: []CredentialField{{EnvVar: "DB_HOST", Value: "db.internal"}},
 	}}
-	script, count, err := buildCredFileScript(creds, "/secrets/agent-a", true)
+	script, count, _, err := buildCredFileScript(creds, "/secrets/agent-a", true)
 	if err != nil {
 		t.Fatalf("buildCredFileScript: %v", err)
 	}
@@ -266,16 +266,26 @@ func TestBuildCredFileScript_PartsOfAWithheldCredentialAreWithheldToo(t *testing
 }
 
 // TestBuildCredFileScript_MalformedPartNameIsRejected keeps the sanitiser
-// applying to parts. It matters more here than for the primary: the error
-// aborts the whole script, so an unsanitised part name that reached this
-// function would leave the agent with no secrets at all rather than with one
-// bad file.
+// applying to parts. The refusal used to be an error that aborted the whole
+// script; since #1657 it is a skip, because aborting left the agent with NO
+// secrets rather than with one missing part — a strictly worse outcome for the
+// same input. What must not change is that the name never reaches the shell.
 func TestBuildCredFileScript_MalformedPartNameIsRejected(t *testing.T) {
 	creds := []Credential{{
-		EnvVarName: "GH_TOKEN", PlainValue: "ghp", Type: "CLI_TOKEN",
+		ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp", Type: "CLI_TOKEN",
 		Fields: []CredentialField{{EnvVar: "GH_TOKEN;rm -rf /", Value: "x"}},
 	}}
-	if _, _, err := buildCredFileScript(creds, "/secrets/agent-a", false); err == nil {
-		t.Fatal("expected an error for a part whose env var name fails the sanitiser")
+	script, _, skipped, err := buildCredFileScript(creds, "/secrets/agent-a", false)
+	if err != nil {
+		t.Fatalf("buildCredFileScript: %v", err)
+	}
+	if strings.Contains(script, "rm -rf /") {
+		t.Fatalf("a part's unsanitised name reached the script:\n%s", script)
+	}
+	if !strings.Contains(script, "/secrets/agent-a/GH_TOKEN") {
+		t.Errorf("the credential itself was dropped along with its bad part:\n%s", script)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("skipped = %+v, want the one refused part reported", skipped)
 	}
 }

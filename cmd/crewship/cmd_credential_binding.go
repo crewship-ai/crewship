@@ -369,6 +369,13 @@ Values are never shown. This answers "which account", not "what is the secret".`
 		var env struct {
 			AgentID string                `json:"agent_id"`
 			Slots   []credResolvedSlotOut `json:"slots"`
+			// Warnings are credentials whose name the server had to normalise
+			// onto a legal environment variable, or could not and did not
+			// deliver (#1657). They are not slots — a credential with no
+			// variable has no row in the map — so without printing them here
+			// the operator's `github-token` would simply be absent from the
+			// table with nothing saying why.
+			Warnings []string `json:"warnings,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &env); err != nil {
 			return err
@@ -376,15 +383,20 @@ Values are never shown. This answers "which account", not "what is the secret".`
 
 		f := newFormatter()
 		return f.AutoHuman(env, func() {
-			if len(env.Slots) == 0 {
+			if len(env.Slots) == 0 && len(env.Warnings) == 0 {
 				fmt.Printf("Agent %s receives no credentials.\n", args[0])
 				return
 			}
-			rows := make([][]string, 0, len(env.Slots))
-			for _, s := range env.Slots {
-				rows = append(rows, []string{s.Slot, s.CredentialName, s.Source})
+			if len(env.Slots) > 0 {
+				rows := make([][]string, 0, len(env.Slots))
+				for _, s := range env.Slots {
+					rows = append(rows, []string{s.Slot, s.CredentialName, s.Source})
+				}
+				f.Table([]string{"SLOT", "CREDENTIAL", "SOURCE"}, rows)
 			}
-			f.Table([]string{"SLOT", "CREDENTIAL", "SOURCE"}, rows)
+			for _, w := range env.Warnings {
+				fmt.Printf("! %s\n", w)
+			}
 		})
 	},
 }

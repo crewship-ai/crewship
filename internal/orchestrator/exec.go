@@ -1,10 +1,10 @@
 package orchestrator
 
-import (
-	"regexp"
-)
-
-var envVarNameRE = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+// The env-var charset rule used to live here as a regexp, and four other files
+// each carried their own opinion of it — two of which allowed lowercase, which
+// this one does not (#1657). It now lives in internal/credname, stated once.
+// credname.Valid is the reader's half: the shape a name must already have to be
+// written under /secrets or exported into a container.
 
 // crewshipSystemPreamble is the orchestrator's operational scaffold --
 // it tells the model where files live, how to share state with the

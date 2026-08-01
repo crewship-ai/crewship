@@ -3,7 +3,10 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/credname"
 )
 
 type agentCredentialResponse struct {
@@ -251,6 +254,24 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "credential_id and env_var_name are required")
 		return
 	}
+	// env_var_name used to be checked for non-emptiness and nothing else — no
+	// charset at all, while the orchestrator that READS it accepted only
+	// uppercase (#1657). So this endpoint would happily record `gh-token`, and
+	// the credential then either failed to arrive or, before the delivery-side
+	// fix, took the agent's whole run down with it.
+	//
+	// This field is an environment variable by definition, so it is held to the
+	// rule and STORED in the form the container will see. Canonicalising rather
+	// than rejecting `gh-token` keeps the endpoint accepting what it always
+	// accepted; the difference is that the row now says what actually happens.
+	// Rows written before this keep their spelling and are normalised on read.
+	envVarName, envVarOK := credname.Canonical(strings.TrimSpace(req.EnvVarName))
+	if !envVarOK {
+		replyError(w, http.StatusBadRequest,
+			"env_var_name must be an environment variable name (letters, digits, underscore or dash; not starting with a digit)")
+		return
+	}
+	req.EnvVarName = envVarName
 	if req.TTLSeconds < 0 {
 		replyError(w, http.StatusBadRequest, "ttl_seconds must not be negative")
 		return

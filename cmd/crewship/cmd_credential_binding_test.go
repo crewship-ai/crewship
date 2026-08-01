@@ -243,6 +243,36 @@ func TestCredResolveCmd_ShowsSourceAndNeverValues(t *testing.T) {
 	}
 }
 
+// TestCredResolveCmd_PrintsDeliveryWarnings is the surfacing half of #1657. A
+// credential whose name could not be an environment variable has no slot, so it
+// is absent from the table by construction; if the CLI drops the server's
+// warnings the operator sees a credential they configured simply not appear,
+// with nothing anywhere connecting that to the name they typed.
+func TestCredResolveCmd_PrintsDeliveryWarnings(t *testing.T) {
+	stub := covStub(t)
+	stub.OnGet("/api/v1/agents/"+covAgentIDCli3+"/credential-bindings", clitest.JSONResponse(200, map[string]any{
+		"agent_id": covAgentIDCli3,
+		"slots": []map[string]string{
+			{"slot": "GITHUB_TOKEN", "credential_id": covCredIDBinding, "credential_name": "github-token", "source": "crew_link"},
+		},
+		"warnings": []string{
+			"Credential github-token is delivered as GITHUB_TOKEN — the name is not a legal environment variable, so it was delivered as GITHUB_TOKEN.",
+			"Credential my token! is NOT delivered to this agent — the name cannot be an environment variable, and no variable can be derived from it.",
+		},
+	}))
+
+	out := covCaptureStdoutCli3(t, func() {
+		if err := credResolveCmd.RunE(credResolveCmd, []string{covAgentIDCli3}); err != nil {
+			t.Errorf("RunE: %v", err)
+		}
+	})
+	for _, want := range []string{"delivered as GITHUB_TOKEN", "my token!", "NOT delivered"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q — the server's warning was dropped:\n%s", want, out)
+		}
+	}
+}
+
 func TestCredResolveCmd_EmptyIsExplicit(t *testing.T) {
 	stub := covStub(t)
 	stub.OnGet("/api/v1/agents/"+covAgentIDCli3+"/credential-bindings", clitest.JSONResponse(200, map[string]any{

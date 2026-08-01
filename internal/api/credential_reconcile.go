@@ -27,16 +27,23 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-// Defensive validators — env var names and agent slugs both come from our own
-// DB (validated at creation), but the values land in a shell `rm` command, so
-// re-check the charset and single-quote the paths regardless.
-var (
-	credEnvVarRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	credSlugRE   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-)
+// Defensive validator — an agent slug comes from our own DB (validated at
+// creation), but the value lands in a shell `rm` command, so re-check the
+// charset and single-quote the paths regardless.
+//
+// The env-var half of this pair used to be `^[A-Za-z_][A-Za-z0-9_]*$` — mixed
+// case legal, unlike the writer it is supposed to mirror (#1657). It is now
+// credname, and the difference is not cosmetic: this file removes files that
+// buildCredFileScript WROTE, so it has to spell the name the way delivery did.
+// A revoke that looks for /secrets/<agent>/gh_token while delivery wrote
+// /secrets/<agent>/GH_TOKEN removes nothing on a case-sensitive filesystem and,
+// being a best-effort `rm -f`, reports success — the operator believes a live
+// container no longer holds a secret it is still reading.
+var credSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // credSecretPaths returns the absolute in-container paths a file-mounted
 // credential occupies, mirroring buildCredFileScript's per-type layout
@@ -73,7 +80,7 @@ func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []s
 	}
 	for _, key := range fieldKeys {
 		name := deliveredFieldEnvVar(envVar, key)
-		if !credEnvVarRE.MatchString(name) {
+		if !credname.Valid(name) {
 			continue
 		}
 		paths = append(paths, dir+"/"+name)
@@ -198,11 +205,19 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	}
 
 	for _, t := range targets {
-		if !credSlugRE.MatchString(t.agentSlug) || !credEnvVarRE.MatchString(t.envVar) {
+		// The stored env_var_name is normalised the SAME way the delivery path
+		// normalises it (credential_slot_delivery.go), because the file on disk
+		// carries the delivered name, not the stored one. Rows written before
+		// #1657 hold whatever the assign endpoint accepted when it checked
+		// nothing but non-emptiness; those are exactly the rows whose files
+		// would otherwise survive a revoke.
+		envVar, ok := credname.Canonical(t.envVar)
+		if !credSlugRE.MatchString(t.agentSlug) || !ok {
 			logger.Warn("revoke reconcile: skipping unsafe identifiers",
 				"agent_slug", t.agentSlug, "env_var", t.envVar)
 			continue
 		}
+		t.envVar = envVar
 		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, fieldKeys)
 		if script == "" {
 			continue // type has no on-disk form

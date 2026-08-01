@@ -30,9 +30,10 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/credname"
 )
 
 // Binding scopes, most specific first.
@@ -53,11 +54,30 @@ const (
 	bindingSourceCrewLink   = "crew_link"
 )
 
-// slotNameRE is the shape of a POSIX-ish environment variable name. Enforced
-// because a slot is exported into a container: a name with a space or an `=` is
-// silently dropped by the runtime, which presents to the user as "the binding
-// is configured and the tool still can't see it".
-var slotNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// The slot's charset used to be a regexp here — `^[A-Za-z_][A-Za-z0-9_]*$`,
+// mixed case legal. It is enforced because a slot is exported into a container:
+// a name with a space or an `=` is silently dropped by the runtime, which
+// presents to the user as "the binding is configured and the tool still can't
+// see it".
+//
+// The rule now comes from credname (#1657), and this endpoint's contract with
+// it is deliberate. A slot, unlike a credential's display name, IS an
+// environment variable and nothing else — so:
+//
+//   - accept anything credname can render (credname.Deliverable), which is
+//     LOOSER than the old regexp: `gh-token` is now a legal slot, and
+//     `GH_TOKEN` is what the agent gets.
+//   - store the rendered form (credname.Canonical), which is STRICTER than the
+//     old regexp: `gh_token` was accepted and then never delivered, because the
+//     reader is uppercase-only. Now the row holds the variable that will
+//     actually exist, so the 201 body, `credential binding list` and
+//     `credential resolve` all show the same string the container sees, and the
+//     UNIQUE index on (scope, slot) prevents two spellings of one variable from
+//     both being bound in one scope.
+//
+// Rows written before this keep their spelling and are normalised on read
+// (credential_slot_delivery.go), so nothing existing breaks; only the collision
+// they can create with a new row survives, reported as a delivery warning.
 
 // CredentialBindingHandler serves the binding CRUD and the per-agent
 // resolution view.
@@ -206,9 +226,10 @@ func (h *CredentialBindingHandler) Create(w http.ResponseWriter, r *http.Request
 	agentID := strings.TrimSpace(req.AgentID)
 	credentialID := strings.TrimSpace(req.CredentialID)
 
-	if !slotNameRE.MatchString(slot) {
+	slot, slotOK := credname.Canonical(slot)
+	if !slotOK {
 		replyError(w, http.StatusBadRequest,
-			"slot must be an environment variable name (letters, digits, underscore; not starting with a digit)")
+			"slot must be an environment variable name (letters, digits, underscore or dash; not starting with a digit)")
 		return
 	}
 
@@ -367,7 +388,7 @@ func (h *CredentialBindingHandler) ResolveForAgent(w http.ResponseWriter, r *htt
 		return
 	}
 
-	delivered, err := loadDeliveredCredentials(r.Context(), h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentials(r.Context(), h.db, agentID)
 	if err != nil {
 		h.logger.Error("resolve bindings: load delivered", "error", err, "agent_id", agentID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
@@ -398,7 +419,25 @@ func (h *CredentialBindingHandler) ResolveForAgent(w http.ResponseWriter, r *htt
 			Source:         bindingSourceLabel(d.Source),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"agent_id": agentID, "slots": slots})
+
+	// Warnings ride the response as an additive array, the shape #1641
+	// established for the crew endpoints. This is the surface for them because
+	// it is the endpoint that answers "which credential fills which variable,
+	// and why" — a credential renamed on its way in, or dropped because the
+	// variable it folds onto is taken, is precisely an answer to that question,
+	// and a server log alone is not reachable by the operator who typed the
+	// name. The key is absent, not empty, for the overwhelming majority of
+	// agents, whose credentials are all named legally.
+	//
+	// A credential that was refused a slot appears HERE and not in `slots`: it
+	// has no variable, so a row with an empty SLOT column would read as
+	// "delivered under no name", which is the ambiguity this view exists to
+	// remove.
+	resp := map[string]any{"agent_id": agentID, "slots": slots}
+	if warnings := deliveredSlotWarnings(slotNotices, names); len(warnings) > 0 {
+		resp["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // bindingSourceLabel turns a delivery rank into the rule that produced it.
