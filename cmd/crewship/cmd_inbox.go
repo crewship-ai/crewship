@@ -319,6 +319,23 @@ Examples:
 			SecondApproverByWorkspace bool   `json:"second_approver_by_workspace,omitempty" yaml:"second_approver_by_workspace,omitempty"`
 			SecondApproverByTier      bool   `json:"second_approver_by_tier,omitempty" yaml:"second_approver_by_tier,omitempty"`
 			SecurityLevelLabel        string `json:"security_level_label,omitempty" yaml:"security_level_label,omitempty"`
+			// Evidence is the facts block: the consequences of granting this
+			// credential, as query results rather than advice. Pointers all the way
+			// down because absent ("the query failed, nobody knows") and
+			// exists:false ("we looked, there is none") are different answers, and
+			// flattening them turns a database outage into an argument.
+			Evidence *struct {
+				LastBackup *struct {
+					Exists   bool   `json:"exists" yaml:"exists"`
+					AgeHours int    `json:"age_hours" yaml:"age_hours"`
+					Scope    string `json:"scope" yaml:"scope"`
+				} `json:"last_backup,omitempty" yaml:"last_backup,omitempty"`
+				NarrowerCredential *struct {
+					Exists        bool   `json:"exists" yaml:"exists"`
+					Name          string `json:"name,omitempty" yaml:"name,omitempty"`
+					SecurityLevel int    `json:"security_level,omitempty" yaml:"security_level,omitempty"`
+				} `json:"narrower_credential,omitempty" yaml:"narrower_credential,omitempty"`
+			} `json:"evidence,omitempty" yaml:"evidence,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &item); err != nil {
 			return err
@@ -365,6 +382,29 @@ Examples:
 				fmt.Printf("%s2nd approver required · %s%s\n", cli.Yellow, why, cli.Reset)
 				fmt.Printf("%swhoever owns %s cannot resolve it — someone else has to%s\n",
 					cli.Dim, who, cli.Reset)
+			}
+			// Before the body for the same reason the four-eyes notice is: these
+			// decide whether to press the button, and the body is the model's case
+			// for the verdict it already reached.
+			if ev := item.Evidence; ev != nil {
+				fmt.Printf("\n%sChecked against the database — not the agent's account%s\n", cli.Dim, cli.Reset)
+				if b := ev.LastBackup; b != nil {
+					if b.Exists {
+						// The scope qualifier travels with the number: backup_catalog is
+						// scoped to a workspace, never a table, and "6h ago" read as
+						// "this table can be restored" is the invention to avoid.
+						fmt.Printf("  last backup          %dh ago (%s-wide, not this table)\n", b.AgeHours, b.Scope)
+					} else {
+						fmt.Printf("  last backup          %snone recorded%s\n", cli.Yellow, cli.Reset)
+					}
+				}
+				if n := ev.NarrowerCredential; n != nil {
+					if n.Exists {
+						fmt.Printf("  narrower credential  %s (L%d)\n", n.Name, n.SecurityLevel)
+					} else {
+						fmt.Printf("  narrower credential  none for this provider\n")
+					}
+				}
 			}
 			if item.BodyMD != "" {
 				fmt.Printf("\n%s\n", item.BodyMD)
