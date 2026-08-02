@@ -368,6 +368,7 @@ func covRegisterEmptyNukeStubs(s *clitest.StubServer) {
 	// per-crew DELETE fires, so no stub is needed here.)
 	s.OnDelete("/api/v1/inbox", clitest.JSONResponse(200, map[string]int{"deleted": 0}))
 	s.OnPost("/api/v1/admin/prune-crew-runtimes", clitest.JSONResponse(200, map[string]any{"removed": []string{}, "count": 0}))
+	s.OnDelete("/api/v1/admin/keeper/requests", clitest.JSONResponse(200, map[string]int{"deleted_requests": 0, "deleted_events": 0}))
 }
 
 func TestSeedNuke_EmptyWorkspaceSucceeds(t *testing.T) {
@@ -378,11 +379,18 @@ func TestSeedNuke_EmptyWorkspaceSucceeds(t *testing.T) {
 	if err := seedNuke(context.Background(), covStubClient(s)); err != nil {
 		t.Fatalf("seedNuke on empty workspace: %v", err)
 	}
-	// All ten list endpoints must have been consulted, plus the three
+	// All ten list endpoints must have been consulted, plus the four
 	// full-teardown calls: inbox purge (DELETE /inbox), the escalation pass
-	// (a second GET /crews), and the crew-runtime teardown (POST prune) — 13.
-	if got := len(s.Calls()); got != 13 {
-		t.Errorf("expected 13 calls (10 lists + inbox purge + escalation crew list + runtime prune), got %d", got)
+	// (a second GET /crews), the crew-runtime teardown (POST prune), and the
+	// keeper decision history (DELETE /admin/keeper/requests) — 14.
+	//
+	// The keeper call joined the set because keeper_requests has no workspace_id
+	// and no ON DELETE CASCADE from agents, so a nuke could not reach it and 115
+	// rows survived one on dev2. Counting the calls is what keeps a piece of the
+	// teardown from being dropped silently, so the number moves with the set
+	// rather than the set being trimmed to the number.
+	if got := len(s.Calls()); got != 14 {
+		t.Errorf("expected 14 calls (10 lists + inbox purge + escalation crew list + runtime prune + keeper history), got %d", got)
 	}
 }
 

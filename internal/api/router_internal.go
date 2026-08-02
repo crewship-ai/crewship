@@ -216,6 +216,11 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// mistake this package already made twice with the think and format flags.
 	r.authedMut("POST", "/api/v1/admin/keeper/ask", roleManage, keeperH.HandleAsk)
 	r.authedMut("POST", "/api/v1/admin/keeper/requests/{requestId}/resolve", roleManage, keeperH.HandleResolve)
+	// The keeper's share of a workspace-contents wipe. keeper_requests has no
+	// workspace_id and no cascade from agents, so `seed --nuke` could not reach it
+	// and 115 rows survived one on dev2 — each carrying an intent and the
+	// conversation the judge was shown.
+	r.authedMut("DELETE", "/api/v1/admin/keeper/requests", roleManage, keeperH.HandlePurge)
 	if r.hub != nil {
 		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
 	}

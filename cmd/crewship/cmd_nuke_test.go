@@ -165,3 +165,50 @@ func TestNukeAll_HitsAllTeardownsBeforeCrewDelete(t *testing.T) {
 		t.Errorf("runtime prune (idx %d) must precede crew delete (idx %d)", runtime, crewDel)
 	}
 }
+
+// The keeper decision history is part of "all workspace contents", and it was
+// not being deleted: 115 rows survived a nuke on dev2, each holding an
+// agent-authored intent and the conversation history the judge was shown.
+//
+// keeper_requests has no workspace_id and its agent FK has no ON DELETE CASCADE,
+// so it is reachable only while the agents still exist — which is why the call
+// belongs before nukeData, alongside escalations and crew runtimes.
+func TestNukeKeeperRequests_HitsTheDeleteRoute(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnDelete("/api/v1/admin/keeper/requests",
+		clitest.JSONResponse(200, map[string]int{"deleted_requests": 3, "deleted_events": 5}))
+
+	if err := nukeKeeperRequests(context.Background(), covStubClient(s)); err != nil {
+		t.Fatalf("nukeKeeperRequests: %v", err)
+	}
+	if n := len(s.CallsFor("DELETE", "/api/v1/admin/keeper/requests")); n != 1 {
+		t.Fatalf("DELETE /api/v1/admin/keeper/requests calls = %d; want 1", n)
+	}
+}
+
+// A server older than the endpoint answers 404. Failing the whole nuke on that
+// would make the CLI unusable against any instance it has not been upgraded
+// alongside — the same tolerance nukeRuntimes gives a docker-less 503.
+func TestNukeKeeperRequests_ToleratesAnOlderServer(t *testing.T) {
+	for _, code := range []int{404, 405} {
+		s := clitest.NewStubServer()
+		s.OnDelete("/api/v1/admin/keeper/requests", clitest.JSONResponse(code, map[string]string{"error": "no such route"}))
+		if err := nukeKeeperRequests(context.Background(), covStubClient(s)); err != nil {
+			t.Errorf("HTTP %d should be tolerated, got: %v", code, err)
+		}
+		s.Close()
+	}
+}
+
+// Anything else is a real failure and must be reported, not swallowed — a nuke
+// that silently leaves the decision history behind is the bug this fixes.
+func TestNukeKeeperRequests_ReportsARealFailure(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnDelete("/api/v1/admin/keeper/requests", clitest.JSONResponse(403, map[string]string{"error": "Forbidden"}))
+
+	if err := nukeKeeperRequests(context.Background(), covStubClient(s)); err == nil {
+		t.Error("a 403 was swallowed; the operator would believe the history was cleared")
+	}
+}

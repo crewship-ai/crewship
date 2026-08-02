@@ -965,6 +965,24 @@
       }
     },
     "/api/v1/admin/keeper/requests": {
+      "delete": {
+        "operationId": "delete_api_v1_admin_keeper_requests",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      },
       "get": {
         "operationId": "get_api_v1_admin_keeper_requests",
         "responses": {
