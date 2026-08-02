@@ -29,6 +29,18 @@ import (
 
 var keeperAudienceCounter atomic.Int64
 
+// keeperInboxAudienceVersion finds the migration by name in the merged registry.
+// Hard-coding the timestamp would silently stop testing the thing it names the
+// moment the file is renamed.
+func keeperInboxAudienceVersion() int {
+	for _, m := range migrations {
+		if m.name == "keeper_inbox_audience" {
+			return m.version
+		}
+	}
+	return 0
+}
+
 // migratedAtKeeperAudience lands the schema as it stood just before this
 // migration, so legacy rows can be seeded and then upgraded — the only way to
 // test a backfill is to have something to fill.
@@ -44,7 +56,11 @@ func migratedAtKeeperAudience(t *testing.T) (*sql.DB, context.Context, *slog.Log
 
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := applyMigrationsUpTo(ctx, db, keeperInboxAudienceVersion-1, logger); err != nil {
+	// One tick before the backfill: this is a data migration, so the only way to
+	// test it is to land the schema without it, seed the legacy rows, and then
+	// upgrade. The stamp is read from the registry rather than repeated here, so
+	// renaming the file cannot leave this pointing at the wrong version.
+	if err := applyMigrationsUpTo(ctx, db, keeperInboxAudienceVersion()-1, logger); err != nil {
 		t.Fatalf("migrate to the version before the backfill: %v", err)
 	}
 	return db, ctx, logger
@@ -158,5 +174,44 @@ func TestKeeperInboxAudience_DoesNotWidenANarrowerAudience(t *testing.T) {
 
 	if got := targetRoleOf(t, db, "ibx-kr-owner"); got != "OWNER" {
 		t.Errorf("an OWNER-only row was widened to %q", got)
+	}
+}
+
+// keeper_requests is not only credential requests. request_type also admits
+// skill_review, behavior, memory_health and negative_learning, and five sites in
+// keeper_phase2.go write inbox escalations for them at MANAGER — legitimately,
+// because none of them names a credential. Re-targeting those to ADMIN would
+// take a review away from the people it is for, and would do it in the name of a
+// credential-exposure fix that does not apply to them.
+//
+// The earlier "touches only keeper-sourced rows" case could not catch this: it
+// used a source_id that was not a keeper request at all, so it proved the join
+// worked and nothing about WHICH keeper requests.
+func TestKeeperInboxAudience_LeavesNonCredentialKeeperRequestsAlone(t *testing.T) {
+	db, ctx, logger := migratedAtKeeperAudience(t)
+	seedLegacyKeeperInbox(t, db, ctx, "kr-cred", "unread")
+
+	for _, rt := range []string{"skill_review", "behavior", "memory_health", "negative_learning"} {
+		mustExecCtx(t, db, ctx, `INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, intent, decision)
+			VALUES (?, ?, 'a1', 'c1', 'x', 'ESCALATE')`, "kr-"+rt, rt)
+		mustExecCtx(t, db, ctx, `INSERT INTO inbox_items
+			(id, workspace_id, kind, source_id, target_role, title, state, priority, blocking, payload_json)
+			VALUES (?, 'ws1', 'escalation', ?, 'MANAGER', 'Keeper review', 'unread', 'medium', 0, '{}')`,
+			"ibx-"+rt, "kr-"+rt)
+	}
+
+	if err := Migrate(ctx, db, logger); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	for _, rt := range []string{"skill_review", "behavior", "memory_health", "negative_learning"} {
+		if got := targetRoleOf(t, db, "ibx-"+rt); got != "MANAGER" {
+			t.Errorf("a %s review was re-addressed to %q; it names no credential and "+
+				"belongs with the managers it was written for", rt, got)
+		}
+	}
+	if got := targetRoleOf(t, db, "ibx-kr-cred"); got != "ADMIN" {
+		t.Errorf("the credential request was missed: %q", got)
 	}
 }

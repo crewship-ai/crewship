@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -516,4 +517,60 @@ func TestInboxList_KeeperFourEyesDoesNotCrossTenants(t *testing.T) {
 		return
 	}
 	t.Fatal("the row is not in the inbox at all")
+}
+
+// keeper_requests is not only credential requests. request_type also admits
+// skill_review, behavior, memory_health and negative_learning — five sites in
+// keeper_phase2.go write inbox escalations for those with SourceID = the keeper
+// request id and TargetRole=MANAGER, legitimately, because none of them names a
+// credential.
+//
+// So a keeper branch that matches every keeper request tells a skill review it
+// needs a second approver. It never will: four-eyes is a rule about credential
+// escalations, and there is no credential here to be refused over. A warning
+// that will not come true is worse than none — it teaches the operator to skip
+// the one that will.
+func TestInboxList_NonCredentialKeeperRequestClaimsNothing(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	crewID := seedCrewRow(t, db, "nc-crew", wsID, "Crew", "nc-crew")
+	seedOwnedAgent(t, db, "nc-agent", wsID, crewID, ownerID)
+
+	// The workspace toggle is ON — the case where a match would claim the most.
+	if err := governance.Upsert(context.Background(), db, wsID,
+		governance.Settings{RequireSecondApprover: true}, ownerID); err != nil {
+		t.Fatalf("enable require_second_approver: %v", err)
+	}
+
+	for _, rt := range []string{"skill_review", "behavior", "memory_health", "negative_learning"} {
+		execOrFatal(t, db, `INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, intent, decision)
+			VALUES (?, ?, 'nc-agent', ?, 'x', 'ESCALATE')`, "kr-"+rt, rt, crewID)
+		execOrFatal(t, db, `INSERT INTO inbox_items
+			(id, workspace_id, kind, source_id, target_role, title, body_md,
+			 sender_type, sender_id, sender_name, state, priority, blocking,
+			 payload_json, created_at, updated_at)
+			VALUES (?, ?, 'escalation', ?, 'MANAGER', 'Keeper review', '',
+			 'agent', 'nc-agent', 'nc-agent', 'unread', 'medium', 0, '{}',
+			 datetime('now'), datetime('now'))`, "ibx-"+rt, wsID, "kr-"+rt)
+	}
+
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	rows := listInbox(t, h, ownerID, wsID)
+	seen := 0
+	for _, row := range rows {
+		if !strings.HasPrefix(row.SourceID, "kr-") {
+			continue
+		}
+		seen++
+		if row.SecondApproverRequired || row.SecondApproverByWorkspace {
+			t.Errorf("%s claims a second approver is needed; four-eyes is a rule about "+
+				"credential escalations and this one names no credential", row.SourceID)
+		}
+	}
+	if seen != 4 {
+		t.Fatalf("saw %d non-credential keeper rows, want 4", seen)
+	}
 }
