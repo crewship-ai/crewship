@@ -59,7 +59,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
@@ -369,11 +368,18 @@ func execInContainer(ctx context.Context, p *Provider, id, script string) (strin
 		return "", err
 	}
 	defer res.Reader.Close()
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, res.Reader); err != nil {
-		return "", fmt.Errorf("demux exec stream: %w (stderr so far: %s)", err, stderr.String())
+	// Read it plain. Provider.Exec already runs stdcopy.StdCopy over the
+	// hijacked connection and hands back the demultiplexed pipe (docker.go
+	// ~1162), so demuxing here a second time parses ordinary text as frame
+	// headers and yields nothing — with no error, which is how the first CI run
+	// reported "exec succeeded but returned \"\"" against a perfectly healthy
+	// container. stdout and stderr arrive interleaved on that pipe by design;
+	// the probe emits KEY=VALUE lines so stray stderr is simply not parsed.
+	out, err := io.ReadAll(res.Reader)
+	if err != nil {
+		return "", fmt.Errorf("read exec stream: %w", err)
 	}
-	return stdout.String(), nil
+	return string(out), nil
 }
 
 // evaluate turns the observed facts into the probe matrix, comparing each

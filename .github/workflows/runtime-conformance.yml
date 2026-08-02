@@ -71,6 +71,61 @@ jobs:
       - name: Conformance
         run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
 
+  # Ubuntu 24.04 ships podman 4.9.3, which is two majors behind what a user who
+  # installs podman today gets (6.x on Homebrew, 5.x on current distros). That
+  # matters for the verdict, not just the coverage: "Crewship does not work on
+  # Podman" and "Crewship does not work on Podman older than 5" are different
+  # answers with different fixes, and the apt leg alone cannot tell them apart.
+  #
+  # quay.io/podman/stable is podman's own image. Run rootful inside it, with the
+  # runner's /tmp and workspace bind-mounted at their real paths so the crew
+  # container's own bind mounts — which are host paths chosen by the test —
+  # resolve to the same files from inside that podman's view.
+  podman-current:
+    name: podman (current, in image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Start a current podman
+        run: |
+          set -euo pipefail
+          docker run -d --name podman-current --privileged \
+            -v /tmp:/tmp \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
+            quay.io/podman/stable \
+            podman system service --time=0 unix:///tmp/podman-current.sock
+          for _ in $(seq 1 60); do
+            [ -S /tmp/podman-current.sock ] && break
+            sleep 1
+          done
+          if [ ! -S /tmp/podman-current.sock ]; then
+            echo "podman compat socket never appeared" >&2
+            docker logs podman-current || true
+            exit 1
+          fi
+          sudo chmod 666 /tmp/podman-current.sock
+          echo "DOCKER_HOST=unix:///tmp/podman-current.sock" >> "$GITHUB_ENV"
+
+      - name: Runtime facts
+        run: |
+          docker exec podman-current podman version || true
+          curl -s --unix-socket /tmp/podman-current.sock http://d/version || true
+
+      - name: Conformance
+        run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
+
+      - name: Podman service logs
+        if: always()
+        run: docker logs podman-current 2>&1 | tail -50 || true
+
   # Podman is the runtime we advertise and have never run. Both modes are here
   # because they fail differently: rootful diverges only where podman's compat
   # layer maps a field differently, while rootless additionally runs the agent
