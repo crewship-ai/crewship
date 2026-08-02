@@ -309,6 +309,52 @@ func TestParseCandidates_MalformedReplyIsAnError(t *testing.T) {
 	}
 }
 
+// The SETTINGS-backed reader — the one production actually wires — had
+// no test at all, and it is the switch: if its query missed the row the
+// CLI writes, `instance settings set memory.user_model_profile off`
+// would resolve to the default, which is ON. A switch that silently
+// fails open is worse than no switch, and #1698's live check is what
+// surfaced that nothing covered it.
+//
+// The row is written the way internal/api's instance-settings handler
+// writes it, so this fails if either side moves.
+func TestProfileFromSettings_ReadsTheRowTheCLIWrites(t *testing.T) {
+	db := testutil.MigratedDB(t).DB
+	read := ProfileFromSettings(db, quietLogger())
+	ctx := context.Background()
+
+	if got := read(ctx); got.Name != DefaultProfileName {
+		t.Errorf("no row should mean the default profile; got %q", got.Name)
+	}
+
+	set := func(v string) {
+		t.Helper()
+		if _, err := db.Exec(`INSERT INTO app_settings (key, value, updated_at)
+			VALUES (?, ?, datetime('now'))
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, SettingProfile, v); err != nil {
+			t.Fatalf("set %q: %v", v, err)
+		}
+	}
+
+	set("off")
+	if got := read(ctx); got.Writes() {
+		t.Errorf("the off profile still writes (%q)", got.Name)
+	}
+
+	// Live on the NEXT read, with no rebuild — the whole point of a
+	// ProfileReader rather than a captured Profile (#1556, #1606).
+	set("stated-technical")
+	if got := read(ctx); got.Name != ProfileStatedTechnical.Name {
+		t.Errorf("switching back did not take effect; got %q", got.Name)
+	}
+
+	// A name nobody implements must never resolve to one that writes.
+	set("inferred-everything")
+	if got := read(ctx); got.Writes() {
+		t.Errorf("an unknown profile resolved to something that writes: %q", got.Name)
+	}
+}
+
 func TestResolveProfile(t *testing.T) {
 	if p, err := ResolveProfile(""); err != nil || p.Name != DefaultProfileName {
 		t.Errorf("empty name should give the default; got %v / %v", p.Name, err)
