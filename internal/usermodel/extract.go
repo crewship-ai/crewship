@@ -15,16 +15,24 @@ import (
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
-// Resolver hands back the provider and model for the NEXT extraction.
+// Resolver hands back the provider, model and per-call budget for the
+// NEXT extraction.
 //
-// Call sites hold one of these rather than a resolved pair, for the same
-// reason internal/runverdict does (#1556): the aux slot behind this is
-// runtime-settable, and a pair captured at construction is a pair no
+// Call sites hold one of these rather than a resolved triple, for the
+// same reason internal/runverdict does (#1556): the aux slot behind this
+// is runtime-settable, and a value captured at construction is a value no
 // override can reach without a server restart.
+//
+// The BUDGET is part of that, and is the reason this returns three values
+// where runverdict's Resolver returns two. #1601 was the slot's Timeout
+// field reaching no evaluator, so every one of them ran on a bound nobody
+// had chosen; an operator lowering `crewship keeper aux set curator
+// --timeout` has to reach this call. A zero means "the slot did not say",
+// not "no deadline".
 //
 // A nil provider means "extraction is off" — an unconfigured or
 // unbuildable slot, e.g. no ANTHROPIC_API_KEY — not an error.
-type Resolver func() (llm.Provider, string)
+type Resolver func() (llm.Provider, string, time.Duration)
 
 // ProfileReader resolves the configured extraction profile. Read per
 // sweep so `crewship instance settings set memory.user_model_profile`
@@ -38,14 +46,21 @@ type ProfileReader func(ctx context.Context) Profile
 // on the Extractor and logged, because a refusal rate is the only thing
 // that distinguishes a working stated-only extractor from a broken one.
 type Extractor struct {
-	db       *sql.DB
-	resolve  Resolver
-	profile  ProfileReader
-	logger   *slog.Logger
-	lookback time.Duration
-	maxTurns int
-	now      func() time.Time
+	db              *sql.DB
+	resolve         Resolver
+	profile         ProfileReader
+	logger          *slog.Logger
+	lookback        time.Duration
+	maxTurns        int
+	fallbackTimeout time.Duration
+	now             func() time.Time
 }
+
+// defaultFallbackTimeout bounds a call whose slot reported no budget.
+// 30s matches ResolveAux's own "nobody stated one" fallback, so a slot
+// that somehow arrives here with a zero is treated the same way the
+// resolver would have treated it.
+const defaultFallbackTimeout = 30 * time.Second
 
 // Option configures an Extractor.
 type Option func(*Extractor)
@@ -69,6 +84,16 @@ func WithMaxTurns(n int) Option {
 	}
 }
 
+// WithFallbackCallTimeout sets the bound used when the resolver reports
+// no per-call budget. It never overrides a budget the slot did state.
+func WithFallbackCallTimeout(d time.Duration) Option {
+	return func(e *Extractor) {
+		if d > 0 {
+			e.fallbackTimeout = d
+		}
+	}
+}
+
 // WithClock injects a clock for tests.
 func WithClock(now func() time.Time) Option {
 	return func(e *Extractor) {
@@ -83,13 +108,14 @@ func WithClock(now func() time.Time) Option {
 // nothing is admissible).
 func New(db *sql.DB, resolve Resolver, profile ProfileReader, logger *slog.Logger, opts ...Option) *Extractor {
 	e := &Extractor{
-		db:       db,
-		resolve:  resolve,
-		profile:  profile,
-		logger:   logger,
-		lookback: 14 * 24 * time.Hour,
-		maxTurns: DefaultMaxTurns,
-		now:      time.Now,
+		db:              db,
+		resolve:         resolve,
+		profile:         profile,
+		logger:          logger,
+		lookback:        14 * 24 * time.Hour,
+		maxTurns:        DefaultMaxTurns,
+		fallbackTimeout: defaultFallbackTimeout,
+		now:             time.Now,
 	}
 	for _, o := range opts {
 		o(e)
@@ -131,14 +157,24 @@ func (e *Extractor) Extract(ctx context.Context, cand consolidate.UserModelCandi
 		return "", nil
 	}
 
-	provider, model := e.resolve()
+	provider, model, budget := e.resolve()
 	if provider == nil {
 		// The slot is unconfigured or unbuildable. "Feature off", not an
 		// error — a later fix to the wiring is picked up on the next sweep.
 		return "", nil
 	}
 
-	resp, err := provider.Complete(ctx, llm.Request{
+	// Bound the call. The sweep is one goroutine walking every operator in
+	// every workspace on a context that lives until server shutdown, so an
+	// unbounded call here does not fail one extraction — it stops the
+	// sweep, for everybody behind it, until the process restarts.
+	if budget <= 0 {
+		budget = e.fallbackTimeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	resp, err := provider.Complete(callCtx, llm.Request{
 		Model:     model,
 		System:    BuildSystemPrompt(p),
 		MaxTokens: maxCompletionTokens,

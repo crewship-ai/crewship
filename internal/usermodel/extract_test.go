@@ -95,7 +95,7 @@ func TestExtract_StoresOnlyWhatWasStated(t *testing.T) {
   {"key":"timezone","value":"probably Central European","quote":"","source":"inferred"}
 ]}`}
 
-	ex := New(db, func() (llm.Provider, string) { return prov, "m" },
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
 		func(context.Context) Profile { return ProfileStatedTechnical }, quietLogger())
 
 	body, err := ex.Extract(context.Background(),
@@ -145,7 +145,7 @@ func TestExtract_PassesTheWholePriorModel(t *testing.T) {
 	})
 	prior := "- timezone: UTC+1\n- language: Czech\n- tooling: Postgres and Go"
 	prov := &fakeProvider{reply: `{"facts":[]}`}
-	ex := New(db, func() (llm.Provider, string) { return prov, "m" },
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
 		func(context.Context) Profile { return ProfileStatedTechnical }, quietLogger())
 
 	if _, err := ex.Extract(context.Background(),
@@ -170,7 +170,7 @@ func TestExtract_NoSubjectTurnsSkipsTheModelCall(t *testing.T) {
 		{"user", "Pavel is out this week.", "u2"},
 	})
 	prov := &fakeProvider{reply: `{"facts":[]}`}
-	ex := New(db, func() (llm.Provider, string) { return prov, "m" },
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
 		func(context.Context) Profile { return ProfileStatedTechnical }, quietLogger())
 
 	body, err := ex.Extract(context.Background(),
@@ -190,7 +190,7 @@ func TestExtract_NilProviderIsFeatureOffNotAnError(t *testing.T) {
 	seedTranscript(t, db, []struct{ role, content, author string }{
 		{"user", "I run the platform team here.", "u1"},
 	})
-	ex := New(db, func() (llm.Provider, string) { return nil, "" },
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return nil, "", time.Second },
 		func(context.Context) Profile { return ProfileStatedTechnical }, quietLogger())
 	body, err := ex.Extract(context.Background(),
 		consolidate.UserModelCandidate{WorkspaceID: "ws1", UserID: "u1"}, "")
@@ -209,7 +209,7 @@ func TestExtract_ProfileIsReadPerCallNotCaptured(t *testing.T) {
 	})
 	prov := &fakeProvider{reply: `{"facts":[{"key":"role","value":"runs the platform team","quote":"I run the platform team here","source":"stated"}]}`}
 	current := ProfileStatedTechnical
-	ex := New(db, func() (llm.Provider, string) { return prov, "m" },
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
 		func(context.Context) Profile { return current }, quietLogger())
 	cand := consolidate.UserModelCandidate{WorkspaceID: "ws1", UserID: "u1"}
 

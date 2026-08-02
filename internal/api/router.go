@@ -340,8 +340,13 @@ func (r *Router) DrainVerdicts(timeout time.Duration) {
 // ANTHROPIC_API_KEY). Callers must read that as "verdict generation is off",
 // not as an error; a later fix to the wiring is picked up on the next call.
 func (r *Router) RunVerdict() (llm.Provider, string) {
-	return r.auxProvider(llm.SlotRunSummary, &r.runVerdictCache,
+	p, m, _ := r.auxProvider(llm.SlotRunSummary, &r.runVerdictCache,
 		"run verdict: run_summary", "outcome verdicts disabled")
+	// The budget is dropped here on purpose: the post-run verdict is
+	// bounded by the caller's context (see internal/runverdict), which is
+	// the run's own teardown deadline, and narrowing it to the slot's
+	// number would be a behaviour change this PR has no business making.
+	return p, m
 }
 
 // UserModelAux resolves the curator aux slot for the operator-model
@@ -357,8 +362,13 @@ func (r *Router) RunVerdict() (llm.Provider, string) {
 // consults the aux slots at all, so an operator repointing curator has
 // until now changed only skill review.
 //
+// The third return is the slot's per-call budget, which the extractor
+// applies. #1601 was that field reaching no evaluator; here an unbounded
+// call would not fail one extraction but stall the whole daily sweep,
+// whose context lives until server shutdown.
+//
 // A nil provider means "extraction is off", not an error.
-func (r *Router) UserModelAux() (llm.Provider, string) {
+func (r *Router) UserModelAux() (llm.Provider, string, time.Duration) {
 	return r.auxProvider(llm.SlotCurator, &r.userModelCache,
 		"user model: curator", "operator-model extraction disabled")
 }
@@ -386,11 +396,13 @@ type auxProviderCache struct {
 // auxProvider is the shared body of RunVerdict / UserModelAux. what names
 // the caller and slot for the log line ("run verdict: run_summary");
 // consequence says what stops working ("outcome verdicts disabled").
-func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, consequence string) (llm.Provider, string) {
+// The third return is the slot's per-call budget; callers that bound the
+// call themselves may ignore it.
+func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, consequence string) (llm.Provider, string, time.Duration) {
 	aux, err := llm.ResolveAux(r.AuxModels(), slot)
 	if err != nil {
 		r.dropAuxProvider(cache, what+" aux slot resolve failed; "+consequence, err)
-		return nil, ""
+		return nil, "", 0
 	}
 	// An "ollama" slot must dial the endpoint the instance is configured with —
 	// the judge endpoint is itself runtime-settable — rather than whatever
@@ -409,7 +421,11 @@ func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, conse
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 	if cache.provider != nil && cache.fpr == fpr {
-		return cache.provider, cache.model
+		// The budget comes from the freshly resolved slot, not the cache:
+		// it is not part of the provider's identity (changing a timeout
+		// must not force an HTTP client rebuild) and it must still be live
+		// on the next call after an operator lowers it.
+		return cache.provider, cache.model, aux.Timeout
 	}
 
 	// Bounded: this resolves the key on the first call rather than at boot,
@@ -420,11 +436,11 @@ func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, conse
 	provider, err := buildAuxWithCredential(ctx, aux, ollamaBase, credID, NewAuxCredentialLookup(r.db), r.logger)
 	if err != nil {
 		r.dropAuxProviderLocked(cache, what+" provider build failed; "+consequence, err)
-		return nil, ""
+		return nil, "", 0
 	}
 	cache.provider, cache.model, cache.fpr = provider, aux.Model, fpr
 	cache.warned = ""
-	return provider, aux.Model
+	return provider, aux.Model, aux.Timeout
 }
 
 // dropAuxProvider forgets any cached provider and logs why. Forgetting
