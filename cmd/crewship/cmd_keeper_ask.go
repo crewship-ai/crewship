@@ -74,13 +74,26 @@ Examples:
 			return err
 		}
 
+		// Slug or id, both accepted. An operator types "riley", not a cuid, and
+		// the credential lookup joins agent_credentials on the ID — so passing the
+		// slug straight through produced "credential not found", which points at
+		// the wrong thing entirely.
+		agentID, err := resolveAgentID(client, strings.TrimSpace(flagKeeperAskAgent))
+		if err != nil {
+			return err
+		}
+		crewID, err := resolveCrewID(client, strings.TrimSpace(flagKeeperAskCrew))
+		if err != nil {
+			return err
+		}
+
 		// The workspace is taken from the session server-side; sending it here
 		// would be ignored, and pretending otherwise would invite somebody to
 		// think they could target another one.
 		var out keeperAskResult
 		if err := postJSON(client, "/api/v1/admin/keeper/ask", map[string]any{
-			"requesting_agent_id": strings.TrimSpace(flagKeeperAskAgent),
-			"requesting_crew_id":  strings.TrimSpace(flagKeeperAskCrew),
+			"requesting_agent_id": agentID,
+			"requesting_crew_id":  crewID,
 			"credential_name":     strings.TrimSpace(flagKeeperAskCredential),
 			"intent":              strings.TrimSpace(flagKeeperAskIntent),
 		}, &out); err != nil {
@@ -112,8 +125,8 @@ Examples:
 
 func init() {
 	f := keeperAskCmd.Flags()
-	f.StringVar(&flagKeeperAskAgent, "agent", "", "agent id the request is made on behalf of")
-	f.StringVar(&flagKeeperAskCrew, "crew", "", "crew id that agent belongs to")
+	f.StringVar(&flagKeeperAskAgent, "agent", "", "agent slug or id the request is made on behalf of")
+	f.StringVar(&flagKeeperAskCrew, "crew", "", "crew slug or id that agent belongs to")
 	f.StringVar(&flagKeeperAskCredential, "credential", "", "credential name, as `credential list` shows it")
 	f.StringVar(&flagKeeperAskIntent, "intent", "", "what the credential is for — the tier's minimum length applies")
 }

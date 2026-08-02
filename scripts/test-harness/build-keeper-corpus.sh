@@ -124,12 +124,19 @@ preflight
 # Nonced, because this is meant to be run more than once and a corpus built from
 # two runs of the same names would be one situation counted twice.
 N="$(date +%s | tail -c 5)"
-declare -A FIXTURES=(
-  [npm-read]=1 [docs-api-key]=1
-  [github-staging]=2 [staging-db-write]=2
-  [ssh-staging-web]=3 [cloud-admin]=3
-  [prod-db-admin]=4 [prod-payments-key]=4
+# A flat list, not an associative array: macOS ships bash 3.2 and `declare -A`
+# is a bash 4 feature, so a map here would work on the Linux dev box and fail on
+# every developer laptop. The same reason the rest of this harness avoids them.
+FIXTURES=(
+  "npm-read|1" "docs-api-key|1"
+  "github-staging|2" "staging-db-write|2"
+  "ssh-staging-web|3" "cloud-admin|3"
+  "prod-db-admin|4" "prod-payments-key|4"
 )
+
+# The stored name is derived, not looked up, so no map is needed to get from a
+# case's credential to the one this run created.
+corpus_name() { printf 'CORPUS_%s_%s' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')" "$N"; }
 
 if ! cs keeper ask --help >/dev/null 2>&1; then
   skip "keeper ask present" "installed crewship has no 'keeper ask' — rebuild from the branch that adds it"
@@ -152,11 +159,11 @@ fi
 info "asking on behalf of agent=$CORPUS_AGENT crew=$CORPUS_CREW"
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
-echo "Creating ${#FIXTURES[@]} credentials and binding them to $CORPUS_AGENT…"
-declare -A REAL
-for base in "${!FIXTURES[@]}"; do
-  tier="${FIXTURES[$base]}"
-  name="CORPUS_$(tr 'a-z-' 'A-Z_' <<<"$base")_${N}"
+echo "Creating ${#FIXTURES[@]} credentials and binding them to ${CORPUS_AGENT}..."
+MADE=""
+for spec in "${FIXTURES[@]}"; do
+  base="${spec%%|*}"; tier="${spec##*|}"
+  name="$(corpus_name "$base")"
   if ! cs credential create --name "$name" --type SECRET --value "corpus-$tier-$N" \
         --security-level "$tier" >/dev/null 2>&1; then
     echo "  ! could not create $name (L$tier) — cases using it will be skipped"
@@ -166,7 +173,7 @@ for base in "${!FIXTURES[@]}"; do
     echo "  ! could not bind $name to $CORPUS_AGENT — cases using it will be skipped"
     continue
   fi
-  REAL[$base]="$name"
+  MADE="$MADE $base"
 done
 echo
 
@@ -177,7 +184,8 @@ submitted=0; allowed=0; denied=0; escalated=0; failed=0
 for c in "${CASES[@]}"; do
   base="$(cut -d'|' -f2 <<<"$c")"
   intent="$(cut -d'|' -f3- <<<"$c")"
-  cred="${REAL[$base]:-}"
+  cred=""
+  case " $MADE " in *" $base "*) cred="$(corpus_name "$base")";; esac
   if [[ -z "$cred" ]]; then
     failed=$((failed+1))
     printf '  %-9s L%s %s\n' "NOCRED" "${c%%|*}" "${intent:0:62}"
