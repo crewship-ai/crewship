@@ -33,13 +33,26 @@ The provider probes multiple socket paths in priority order:
 | 7 | `/run/user/{uid}/podman/podman.sock` | Podman (rootless) |
 | 8 | `~/.local/share/containers/podman/machine/podman.sock` | Podman machine (macOS) |
 | 9 | `/run/podman/podman.sock` | Podman (root) |
-| 10 | `/run/containerd/containerd.sock` | nerdctl |
 
 Each socket gets a **1.5-second ping timeout** (`socketPingTimeout`) to prevent hung daemons from blocking detection.
 
 <Note>
   Podman masquerades as Docker. The provider checks server components for "Podman Engine" to correctly identify it, even through Docker-compatible sockets.
 </Note>
+
+<Note>
+  **A runtime that takes over `/var/run/docker.sock` is still named correctly.** OrbStack (from its privileged helper), Rancher Desktop (with administrative access on) and Docker Desktop all offer to point `/var/run/docker.sock` at their own socket. That path is priority 2 and matches on the path alone, so the runtime behind it would otherwise be reported as a plain `docker` — the same product landing under two different labels depending only on whether its helper is installed. Detection resolves the symlink and prefers the label of the specific socket it points at. A link to an unrecognised target, or no link at all, keeps `docker`.
+
+  This is not cosmetic: `knownRuntimeGaps` switches on the detected runtime, so a misnamed runtime is one whose known gaps would never be applied.
+</Note>
+
+<Warning>
+  **containerd and nerdctl are not supported runtimes.** `/run/containerd/containerd.sock` was probed as priority 10 until it was measured: containerd serves its own gRPC API over HTTP/2, while Crewship's client speaks the Docker REST API over HTTP/1.1. A ping to it comes back as an HTTP/2 SETTINGS frame, so the probe could never have succeeded on any version. nerdctl is a client for that same gRPC API, not a Docker-API server, so installing it changes nothing.
+
+  The candidate is gone. In its place, when no runtime answers **and** a containerd socket exists, the detection error names the socket and explains why it is not usable, instead of reporting that nothing was found on a machine that visibly has a container runtime.
+
+  **Rancher Desktop** is supported in **dockerd (moby)** mode only. In containerd mode it still creates `~/.rd/docker.sock`, but that socket accepts a connection and immediately closes it — detection correctly moves on, and Crewship cannot use the instance. Switch the container engine to dockerd in Rancher Desktop's preferences.
+</Warning>
 
 #### Runtime Selection
 

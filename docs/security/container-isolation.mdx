@@ -515,7 +515,17 @@ The Docker provider (`internal/provider/docker/docker.go`) auto-detects the cont
 | `/run/user/{uid}/podman/podman.sock` | Podman (rootless) |
 | `~/.local/share/containers/podman/machine/podman.sock` | Podman machine (macOS) |
 | `/run/podman/podman.sock` | Podman (root) |
-| `/run/containerd/containerd.sock` | nerdctl |
 </Accordion>
 
 Each socket gets a 1.5-second ping timeout to avoid blocking on unresponsive daemons.
+
+<Warning>
+  **containerd and nerdctl are not supported.** `/run/containerd/containerd.sock`
+  used to appear in this list. It was removed because containerd serves its own
+  gRPC API over HTTP/2, not the Docker REST API — the client Crewship uses can
+  never talk to it, on any version. If a containerd socket is present when
+  detection fails, the error now names it and says so. Rancher Desktop counts
+  here too: it works in **dockerd (moby)** mode and not in containerd mode,
+  where it leaves a `~/.rd/docker.sock` behind that accepts a connection and
+  then closes it.
+</Warning>
