@@ -230,25 +230,57 @@ func repoFile(t *testing.T, parts ...string) string {
 // finding, so the failure names the runtime and dumps the logs.
 func waitForPID1(ctx context.Context, t *testing.T, p *Provider, id string) {
 	t.Helper()
+	// Both the state and the exec error are kept, because they distinguish the
+	// two ways this fails and they need opposite fixes: a container that exited
+	// is the entrypoint or the HostConfig, while a running container that will
+	// not exec is the exec path itself (user resolution, the #1158 guard, or the
+	// runtime's exec semantics). Reporting only "never became exec-able" sends
+	// the reader to the wrong half.
+	var lastState, lastExecErr string
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		inspect, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
-		if err == nil && inspect.Container.State != nil && inspect.Container.State.Running {
-			// Running is not the same as ready: the entrypoint still has to get
-			// past its home-directory skeleton before an exec is meaningful.
-			if out, err := execInContainer(ctx, p, id, "test -d /proc/1 && echo ready"); err == nil && strings.Contains(out, "ready") {
-				return
+		switch {
+		case err != nil:
+			lastState = "inspect failed: " + err.Error()
+		case inspect.Container.State == nil:
+			lastState = "no state reported"
+		default:
+			s := inspect.Container.State
+			lastState = fmt.Sprintf("status=%s running=%t restarting=%t exit=%d oom=%t err=%q",
+				s.Status, s.Running, s.Restarting, s.ExitCode, s.OOMKilled, s.Error)
+			if s.Running {
+				// Running is not the same as ready: the entrypoint still has to
+				// get past its home-directory skeleton before an exec means
+				// anything.
+				out, execErr := execInContainer(ctx, p, id, "test -d /proc/1 && echo ready")
+				if execErr == nil && strings.Contains(out, "ready") {
+					return
+				}
+				if execErr != nil {
+					lastExecErr = execErr.Error()
+				} else {
+					lastExecErr = fmt.Sprintf("exec succeeded but returned %q", out)
+				}
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	logs, _ := p.client.ContainerLogs(ctx, id, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true})
-	if logs != nil {
+	logs, logErr := p.client.ContainerLogs(ctx, id, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true})
+	switch {
+	case logErr != nil:
+		t.Logf("container logs unavailable: %v", logErr)
+	default:
 		body, _ := io.ReadAll(logs)
 		logs.Close()
-		t.Logf("container logs:\n%s", body)
+		if len(bytes.TrimSpace(body)) == 0 {
+			t.Log("container produced no log output")
+		} else {
+			t.Logf("container logs:\n%s", body)
+		}
 	}
-	t.Fatalf("crew container never became exec-able on %s", p.detected.Runtime)
+	t.Fatalf("crew container never became exec-able on %s\n  last state: %s\n  last exec error: %s",
+		p.detected.Runtime, lastState, emptyAs(lastExecErr, "(never attempted — container was not running)"))
 }
 
 // probeScript reads back everything the HostConfig asked for, from inside the

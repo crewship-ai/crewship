@@ -142,7 +142,7 @@ jobs:
 
       - name: Runtime facts
         run: |
-          podman info --format '{{.Host.CgroupVersion}} {{.Host.CgroupManager}} {{.Host.Security.Rootless}}' || true
+          podman info --format '{{.Host.CgroupsVersion}} {{.Host.CgroupManager}} {{.Host.Security.Rootless}}' || true
           # What the compat endpoint claims to be is itself part of the finding:
           # Detect() decides "podman" from the ServerVersion components.
           curl -s --unix-socket /tmp/podman-conf.sock http://d/version || true
