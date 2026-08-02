@@ -67,6 +67,11 @@ interface ConfigResponse {
  *  sentinel for "no tier is escalated on the model's behalf". */
 const NEVER = 5
 
+/** keepercfg.MinPromptBudgetTokens / MaxPromptBudgetTokens. 0 is the separate
+ *  "no cap" sentinel and is always allowed. */
+const MIN_BUDGET = 512
+const MAX_BUDGET = 131072
+
 function ProvenanceChip({ source }: { source: ConfigSource }) {
   const label =
     source === "instance" ? "instance override"
@@ -190,6 +195,17 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
       </SettingsCard>
     )
   }
+
+  // The server's rule, held here so the operator learns it from the field rather
+  // than from a round trip. Stripping the minus sign was not enough: "-1" became
+  // "1", which is refused for the same reason — every non-zero value below the
+  // floor is rejected. Mirrors keepercfg.validateProfile.
+  const budgetNum = Number(form.draft.budget)
+  const budgetInvalid =
+    form.draft.budget.trim() !== "" &&
+    (!Number.isFinite(budgetNum) ||
+      !Number.isInteger(budgetNum) ||
+      (budgetNum !== 0 && (budgetNum < MIN_BUDGET || budgetNum > MAX_BUDGET)))
 
   const autonomy = Number(form.draft.escalateFrom) === NEVER
   const facts = p.evidence_facts?.value ?? []
@@ -341,6 +357,17 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
         />
       </SettingsRow>
 
+      {budgetInvalid && (
+        <div
+          data-testid="budget-invalid"
+          role="status"
+          className="px-4 py-2 text-xs text-destructive border-b border-border/40"
+        >
+          The prompt budget must be a whole number between {MIN_BUDGET} and{" "}
+          {MAX_BUDGET} tokens, or 0 for no cap.
+        </div>
+      )}
+
       {p.stamp && (
         <div className="px-4 py-2.5 border-t border-border/60 text-[11px] text-muted-foreground">
           Recorded on each decision as{" "}
@@ -357,7 +384,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           dirty={form.isDirty}
           status={form.status}
           error={form.error}
-          canSave
+          canSave={!budgetInvalid}
           onSave={handleSave}
           onCancel={form.reset}
         />

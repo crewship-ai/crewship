@@ -119,4 +119,28 @@ describe("KeeperProfileCard", () => {
     await waitFor(() => expect(mockFetch).toHaveBeenCalled())
     expect(screen.queryByTestId("autonomy-warning")).not.toBeInTheDocument()
   })
+
+
+  // Stripping the minus was cosmetic, not corrective: "-1" became "1", which the
+  // server refuses for the same reason — every non-zero value below 512 is
+  // rejected — so the operator still paid the round trip the guard was meant to
+  // save. The field has to hold the whole rule, not just the sign.
+  it.each(["-1", "1", "511", "200000"])("blocks saving an out-of-range budget: %s", async (bad) => {
+    render(<KeeperProfileCard workspaceId="ws1" />)
+    await screen.findByText(/computed facts/i)
+
+    fireEvent.change(screen.getByTestId("keeper-profile-budget"), { target: { value: bad } })
+    expect(await screen.findByTestId("budget-invalid")).toBeInTheDocument()
+    expect((screen.getByRole("button", { name: /save/i }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  // 0 is the documented "no cap", and in-range values must stay savable — a
+  // guard that blocks everything is not a guard.
+  it.each(["0", "512", "3500", "131072"])("accepts a valid budget: %s", async (good) => {
+    render(<KeeperProfileCard workspaceId="ws1" />)
+    await screen.findByText(/computed facts/i)
+
+    fireEvent.change(screen.getByTestId("keeper-profile-budget"), { target: { value: good } })
+    expect(screen.queryByTestId("budget-invalid")).not.toBeInTheDocument()
+  })
 })
