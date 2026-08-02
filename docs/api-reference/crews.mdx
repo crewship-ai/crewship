@@ -103,7 +103,7 @@ Returns all crews in the workspace, ordered by creation date descending.
 | `avatar_style` | string? | Avatar style for agents (e.g., `"bottts"`) |
 | `container_memory_mb` | integer | Container memory limit in MB |
 | `container_cpus` | number | Container CPU limit |
-| `container_ttl_hours` | integer? | Container TTL in hours |
+| `container_ttl_hours` | integer? | Container idle TTL in hours. `null` = never configured, so the server default (4 hours) applies; `0` = never stop |
 | `network_mode` | string | `"free"` or `"restricted"` |
 | `allowed_domains` | string[] | Allowed domains (restricted mode only) |
 | `mcp_config_json` | string? | Raw MCP server config JSON |
@@ -142,7 +142,7 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `icon` | string | No | `null` | Lucide icon name (`code`, `rocket`, `clipboard`, etc.) |
 | `container_memory_mb` | integer | No | `4096` | Container memory limit in MB; must be between `6` and `262144` (`0` uses the server default, `4096`). Below `2048` succeeds with a `warnings` entry |
 | `container_cpus` | number | No | `2.0` | Container CPU limit; must be between `0.01` and `512` (`0` uses the server default, `2.0`). Below `0.5` succeeds with a `warnings` entry |
-| `container_ttl_hours` | integer | No | `null` | Container time-to-live in hours |
+| `container_ttl_hours` | integer | No | `null` | Idle hours before the crew container is stopped. Omit it (`null`) to take the server default of `4`; send `0` to never stop it. Negative is rejected |
 | `network_mode` | string | No | `"restricted"` | `"free"` or `"restricted"` (new crews default to `restricted` with an empty allowlist — LLM/CLI providers stay reachable; arbitrary egress is denied) |
 | `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` (ignored otherwise) |
 | `runtime_image` | string | No | `null` | Custom runtime image; existence is validated against the registry before insert |
@@ -257,7 +257,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `avatar_style` | string | Avatar style for agents |
 | `container_memory_mb` | integer | Container memory limit in MB; must be between `6` and `262144` (`0` resets to the server default, `4096`). Shrinking below `2048` succeeds with a `warnings` entry |
 | `container_cpus` | number | Container CPU limit; must be between `0.01` and `512` (`0` resets to the server default, `2.0`). Shrinking below `0.5` succeeds with a `warnings` entry |
-| `container_ttl_hours` | integer | Container TTL in hours (`0` clears it to `null`; negative is rejected) |
+| `container_ttl_hours` | integer | Idle hours before the crew container is stopped (`0` = never stop, stored as `0`; negative is rejected) |
 | `max_ephemeral_agents` | integer | Per-crew hire-flow quota; must be between `0` and `100` |
 | `network_mode` | string | `"free"` or `"restricted"` |
 | `allowed_domains` | string[] | Allowed domains (restricted mode) |

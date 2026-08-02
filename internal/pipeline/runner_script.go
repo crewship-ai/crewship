@@ -314,6 +314,19 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		return ScriptRunResult{}, fmt.Errorf("script runner: ensure container: %w", err)
 	}
 
+	// #1662: a script step woke the container and registered nothing — no
+	// TTL, no stats, no port scanner — so it ran until crewshipd restarted.
+	// The hold matters as much as the registration: the script execs INSIDE
+	// this container, so a TTL sweep landing mid-step would stop the runtime
+	// out from under it and the step would surface as an unattributable exec
+	// failure.
+	if r.orch != nil {
+		r.orch.NoteCrewActivity(cfg.ID, containerID, cfg.TTLHours)
+		releaseHold := r.orch.RetainCrewContainer(cfg.ID, containerID)
+		defer releaseHold()
+		r.orch.RegisterStatsContainer(containerID, cfg.ID, req.WorkspaceID)
+	}
+
 	maxBytes := req.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = 1_000_000

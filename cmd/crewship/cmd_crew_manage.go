@@ -193,7 +193,12 @@ var crewCreateCmd = &cobra.Command{
 		if cpus > 0 {
 			body["container_cpus"] = cpus
 		}
-		if ttl > 0 {
+		// #1662: this was `ttl > 0`, so `--ttl 0` sent nothing and the row
+		// went in NULL — which now means "use the server default", the
+		// opposite of what the operator asked for. Send whatever was actually
+		// typed, and only that; an omitted flag must leave the field absent so
+		// the server default still applies. Same rule the update path uses.
+		if flags.Changed("ttl") {
 			body["container_ttl_hours"] = ttl
 		}
 		if networkMode != "" {

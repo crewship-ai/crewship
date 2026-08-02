@@ -261,6 +261,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			termSessions = sessions.NewDBStore(termDB)
 		}
 		termHandler = terminal.New(ctr, jwtValidator, termDB, logger, termSessions)
+		// #1662: an attached terminal is one of the four occupants that must
+		// hold the crew container open against the idle reaper.
+		termHandler.SetContainerHolder(func(crewID string) func() {
+			return orch.RetainCrewContainer(crewID, "")
+		})
 		logger.Info("terminal handler configured")
 	}
 
@@ -316,6 +321,19 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
 			sc.Register(containerID, crewID, workspaceID)
 			s.ensureFileWatcher(crewID)
+		})
+	}
+
+	// #1662: the crews table, not process memory, is the authority on every
+	// crew's TTL. refreshActivity used to take it from whatever run arrived,
+	// and routes_agent.go reads ttl_hours straight off the HTTP body with a
+	// default of 0 — so one run that didn't mention a TTL disabled the TTL for
+	// the crew. One SELECT per five-minute sweep removes the clobber and makes
+	// an operator's edit land on the next tick instead of the next restart.
+	if deps != nil && deps.DB != nil {
+		db := deps.DB
+		orch.SetCrewTTLResolver(func(ctx context.Context) map[string]int {
+			return loadCrewTTLHours(ctx, db, logger)
 		})
 	}
 

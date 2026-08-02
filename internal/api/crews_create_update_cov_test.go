@@ -395,7 +395,7 @@ func TestCovCruUpdate_Happy_EverySettableField(t *testing.T) {
 	}
 }
 
-func TestCovCruUpdate_TTLZeroClearsAndNetworkFreeClearsDomains(t *testing.T) {
+func TestCovCruUpdate_TTLZeroStoresNeverStopAndNetworkFreeClearsDomains(t *testing.T) {
 	h, db, userID, wsID := covCruNewCrew(t)
 	// Seed a restricted crew with domains so we can watch free-mode clear them.
 	_, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode,
@@ -405,7 +405,12 @@ func TestCovCruUpdate_TTLZeroClearsAndNetworkFreeClearsDomains(t *testing.T) {
 		t.Fatalf("seed restricted crew: %v", err)
 	}
 
-	// ttl=0 clears the column; network_mode=free nulls allowed_domains.
+	// ttl=0 stores a 0; network_mode=free nulls allowed_domains.
+	//
+	// #1662: this used to write NULL. Both read as "never stop" then, so it
+	// made no difference. Now NULL means "never configured — use the server
+	// default", so clearing the column would flip a deliberate never-stop
+	// into a four-hour auto-stop on the next sweep.
 	rr := covCruDoUpdate(h, "cru-clear", userID, wsID, "OWNER",
 		`{"container_ttl_hours":0,"network_mode":"free"}`)
 	if rr.Code != http.StatusOK {
@@ -418,8 +423,8 @@ func TestCovCruUpdate_TTLZeroClearsAndNetworkFreeClearsDomains(t *testing.T) {
 		FROM crews WHERE id = ?`, "cru-clear").Scan(&ttl, &mode, &domains); err != nil {
 		t.Fatalf("read crew: %v", err)
 	}
-	if ttl.Valid {
-		t.Errorf("ttl = %q, want NULL after ttl=0", ttl.String)
+	if !ttl.Valid || ttl.String != "0" {
+		t.Errorf("ttl = %q (valid=%v), want a stored 0 after ttl=0", ttl.String, ttl.Valid)
 	}
 	if mode != "free" {
 		t.Errorf("network_mode = %q, want free", mode)

@@ -163,10 +163,16 @@ type scriptCovContainer struct {
 	inspectErr   error
 	lastExecCfg  provider.ExecConfig
 	inspectCalls int
+	// onExec fires inside the exec, i.e. while the script is "running", so a
+	// test can observe state that is only true for the duration of the step.
+	onExec func()
 }
 
 func (m *scriptCovContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	m.lastExecCfg = cfg
+	if m.onExec != nil {
+		m.onExec()
+	}
 	if m.execErr != nil {
 		return nil, m.execErr
 	}

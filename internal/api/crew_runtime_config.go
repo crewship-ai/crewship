@@ -109,7 +109,12 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		MemoryMB:    int(memoryMB.Int64),
 		CPUs:        cpus.Float64,
 		NetworkMode: networkMode.String,
-		TTLHours:    int(ttlHours.Int64),
+		// #1662: this read the raw column, so a NULL arrived as 0 — which the
+		// reaper reads as "never stop". It is the field the two wake paths
+		// that never reach RunAgent (script steps, prewarm) use to register a
+		// TTL, so handing them a 0 registered never-stop for exactly the
+		// crews nobody had ever configured.
+		TTLHours:    resolveCrewContainerTTLHours(nullIntPtr(ttlHours)),
 		Image:       runtimeImage.String,
 		CachedImage: cachedImage.String,
 	}

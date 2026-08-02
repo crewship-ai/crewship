@@ -119,6 +119,30 @@ func (r *PortExposeRegistry) UpdateIP(token, newIP string) {
 	}
 }
 
+// HasContainer reports whether any unexpired entry points at the container.
+// The idle-crew reaper (#1662) calls it before stopping a crew container: a
+// stop kills the process the agent exposed the port from, so the capability
+// URL would 502 for the rest of its TTL with nothing to restart it.
+//
+// This is a map scan rather than a hold taken at expose time on purpose. An
+// exposure outlives the run that created it and, because the registry
+// rehydrates from port_exposures at boot (LoadFromDB), it outlives the
+// process too — a hold would be dropped by the restart the exposure survives.
+func (r *PortExposeRegistry) HasContainer(containerID string) bool {
+	if containerID == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, e := range r.entries {
+		if e.ContainerID == containerID && !e.Expired(now) {
+			return true
+		}
+	}
+	return false
+}
+
 // Len returns the current number of live entries. Only used in tests + status
 // dumps; acquires RLock.
 func (r *PortExposeRegistry) Len() int {

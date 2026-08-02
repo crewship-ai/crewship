@@ -281,10 +281,17 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.ContainerCPUs != nil {
 		cpus = resolveCrewContainerCPUs(*req.ContainerCPUs)
 	}
-	var ttlHours *int
-	if req.ContainerTTLHours != nil && *req.ContainerTTLHours > 0 {
-		ttlHours = req.ContainerTTLHours
+	// #1662: this was `> 0`, so an explicit 0 was dropped and the row went in
+	// NULL. That was harmless while NULL and 0 both meant "never stop"; now
+	// that NULL means "use the server default", dropping the 0 would hand an
+	// operator who asked for never-stop a four-hour auto-stop instead. Store
+	// what was asked for, and reject the negative Update has always rejected
+	// — the same body used to mean different things on POST and PATCH.
+	if req.ContainerTTLHours != nil && *req.ContainerTTLHours < 0 {
+		replyError(w, http.StatusBadRequest, "container_ttl_hours cannot be negative")
+		return
 	}
+	ttlHours := req.ContainerTTLHours
 
 	// Fail-fast: catch typos like "debian:bogus" before the crew is persisted.
 	// Matches the validation performed on PATCH in Update.
