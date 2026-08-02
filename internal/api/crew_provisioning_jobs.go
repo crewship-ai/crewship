@@ -536,6 +536,9 @@ func (h *ProvisioningHandler) emitProvisionEvent(ctx context.Context, crewID, wo
 	if ev.Detail != "" {
 		payload["detail"] = ev.Detail
 	}
+	if ev.Reason != "" {
+		payload["reason"] = ev.Reason
+	}
 	if ev.Error != "" {
 		payload["error"] = ev.Error
 	}

@@ -52,13 +52,19 @@ type PlanCallback func(steps []string)
 // provision got stuck. Nothing in this pipeline fails silently: every failure
 // emits a ProvStepFailed event AND propagates the underlying error.
 type ProvisionEvent struct {
-	Phase      string `json:"phase"` // ProvisionPhase
-	Step       string `json:"step"`  // one of the ProvStep* constants
-	Feature    string `json:"feature,omitempty"`
-	Status     string `json:"status,omitempty"` // one of the ProvStatus* constants
-	Detail     string `json:"detail,omitempty"`
-	Error      string `json:"error,omitempty"`
-	Tag        string `json:"tag,omitempty"`
+	Phase   string `json:"phase"` // ProvisionPhase
+	Step    string `json:"step"`  // one of the ProvStep* constants
+	Feature string `json:"feature,omitempty"`
+	Status  string `json:"status,omitempty"` // one of the ProvStatus* constants
+	Detail  string `json:"detail,omitempty"`
+	Error   string `json:"error,omitempty"`
+	Tag     string `json:"tag,omitempty"`
+	// Reason is a machine-readable cause for steps that have one. Only
+	// ProvStepCapacityHold sets it today, where it carries an
+	// admission.Reason* token (host_memory, concurrency, …). A field rather
+	// than a prefix inside Detail: the consumer that has to turn the cause
+	// into a sentence should not be parsing one back out of prose.
+	Reason     string `json:"reason,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 }
 
@@ -90,15 +96,19 @@ const (
 	// retrievable post hoc (#829), not only in the live stream.
 	ProvStepBuildFailed = "provision.build_failed"
 	// ProvStepCapacityHold marks a container start that admission control is
-	// HOLDING because the host cannot afford it yet (#1668). Detail names the
-	// binding reason and its numbers. It is the difference between a run that
-	// is waiting for capacity and a run that has hung: without it the wait is
-	// silent on every surface the operator has.
+	// HOLDING because the host cannot afford it yet (#1668). Reason carries
+	// the binding admission.Reason* token, Detail its numbers, and DurationMs
+	// how long the start has been waiting SO FAR — this event is emitted while
+	// the wait is still going, so DurationMs is elapsed time, not the duration
+	// of a finished step. It is the difference between a run that is waiting
+	// for capacity and a run that has hung: without it the wait is silent on
+	// every surface the operator has.
 	//
-	// It can be emitted more than once for a single start, when the binding
-	// reason changes (host memory frees, but the concurrency bound is now what
-	// holds it). It is never terminal — a held start still ends at ready or
-	// provision.failed.
+	// It is emitted repeatedly for a single start: when the binding reason
+	// changes (host memory frees, but the concurrency bound is now what holds
+	// it) and otherwise on an escalating schedule, so a long wait keeps saying
+	// so without turning into a per-poll line (#1675). It is never terminal —
+	// a held start still ends at ready or provision.failed.
 	ProvStepCapacityHold = "capacity_hold"
 )
 

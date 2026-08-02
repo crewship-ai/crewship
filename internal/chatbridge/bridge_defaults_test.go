@@ -131,13 +131,22 @@ type capturingContainer struct {
 	mu          sync.Mutex
 	captured    []provider.CrewConfig
 	createCalls atomic.Int32
+	// onEnsure, when set, runs inside EnsureCrewRuntime with the CrewConfig
+	// the bridge built. It is how a test drives the callbacks a real provider
+	// would drive from in there — the ProvisionSink above all, which is the
+	// only way a capacity hold reaches the caller.
+	onEnsure func(cc provider.CrewConfig)
 }
 
 func (c *capturingContainer) EnsureCrewRuntime(_ context.Context, cc provider.CrewConfig) (string, error) {
 	c.mu.Lock()
 	c.captured = append(c.captured, cc)
+	hook := c.onEnsure
 	c.mu.Unlock()
 	c.createCalls.Add(1)
+	if hook != nil {
+		hook(cc)
+	}
 	return "captured-container-id", nil
 }
 func (c *capturingContainer) StopCrewRuntime(_ context.Context, _ string) error   { return nil }

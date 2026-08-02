@@ -253,9 +253,13 @@ type ContainerProvider interface {
 // same class of defect, waiting for the twelfth caller. Here, the only way to
 // create a crew container is to go through the code that asks.
 //
-// onHold is invoked the first time a start is actually held, and again if the
-// binding reason changes. It is how the run's own provisioning stream says
-// "waiting for capacity" rather than going quiet.
+// onHold is invoked the first time a start is actually held, again if the
+// binding reason changes, and then periodically for as long as the wait lasts
+// — rate-limited, and spreading out as it goes on. It is how the run's own
+// provisioning stream says "waiting for capacity" rather than going quiet.
+// One line at the start is not enough: the common hold keeps the same reason
+// for its whole life, and a 30-minute silence after it reads exactly like a
+// hang (#1675).
 type AdmissionGate interface {
 	Admit(ctx context.Context, crewID, crewSlug string, onHold func(reason, detail string)) (release func(), err error)
 }

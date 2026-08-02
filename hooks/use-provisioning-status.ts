@@ -168,6 +168,8 @@ interface ProvisionEventPayload {
   detail?: string
   error?: string
   tag?: string
+  /** Machine-readable cause; only `capacity_hold` sets it (host_memory, concurrency, …). */
+  reason?: string
   duration_ms?: number
 }
 
@@ -182,6 +184,10 @@ const STEP_LABELS: Record<string, string> = {
   resolve_features: "Resolving features",
   image_build_start: "Building image",
   image_build_done: "Image built",
+  // Emitted repeatedly while a start is held by admission control; it upserts
+  // onto one row rather than accumulating, and stays "started" until the host
+  // frees up. Without a label here the step list rendered the raw wire token.
+  capacity_hold: "Waiting for host capacity",
   container_create: "Creating container",
   containerEnv_apply: "Applying environment",
   ready: "Ready",

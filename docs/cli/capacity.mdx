@@ -36,6 +36,50 @@ Held container starts:
 | `concurrency` | The container-start bound is saturated. Short-lived. |
 | `pacing` | Simultaneous wakes are being staggered. Very short-lived. |
 
+## What the person waiting sees
+
+You should not need this command to find out that your own run is queued. A
+held start reports itself on the stream that started it:
+
+```
+[status] Starting container...
+[status] Waiting for host capacity — the host does not have enough free memory to start another agent container (host has 41837 MiB available, 62048 MiB needed for one more agent container); waiting 30s so far
+[status] Waiting for host capacity — the host does not have enough free memory to start another agent container (host has 41837 MiB available, 62048 MiB needed for one more agent container); waiting 4m0s so far
+```
+
+The line repeats on an escalating schedule — roughly at 30s, 1m, 2m, 4m, 9m,
+19m and 29m — so a long wait keeps saying so without becoming a line per poll.
+It also repeats immediately when the binding reason changes (host memory frees,
+but the concurrency bound is now what holds you).
+
+The same events land in the run journal as `provision capacity_hold` rows,
+carrying `reason` and the numbers, and on the Activity Bar as
+**Waiting for host capacity**.
+
+<Note>
+The `apple` container provider emits no other container-preparation events —
+no create, no ready — but it does emit this one. The host-memory leg is
+inactive on macOS, but the concurrency bound and the stagger still bind there,
+so a start can be held on that provider too.
+</Note>
+
+## When a hold runs out
+
+A hold is not infinite: it ends when the run's own deadline does — 30 minutes
+for a chat or agent run, 45 for the scheduler. When that happens the failure
+names the resource that ran out rather than blaming provisioning:
+
+```
+The host does not have enough free memory to start another agent container —
+host has 41837 MiB available, 62048 MiB needed for one more agent container.
+The start waited 30m0s for capacity and then gave up. Free memory on the host,
+lower the crew's container memory, or lower runtime.host_memory_reserve_mb.
+```
+
+The machine-readable code for this failure is `capacity`, distinct from
+`resource_limit` (a limit the container runtime itself refused) and from
+`provision_failed` (the image or the daemon).
+
 ## Thresholds
 
 All four are instance settings, read live — a change takes effect on the next

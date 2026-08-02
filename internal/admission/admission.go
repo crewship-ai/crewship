@@ -57,6 +57,84 @@ const (
 	ReasonPacing       = "pacing"
 )
 
+// ReasonPhrase renders a hold reason as a clause a person can read, without
+// the reason token. Exported because two surfaces need the same words and
+// must not drift: the live "waiting for capacity" line on the run's own
+// stream while it waits, and the failure message when the wait runs out.
+func ReasonPhrase(reason string) string {
+	switch reason {
+	case ReasonHostMemory:
+		return "the host does not have enough free memory to start another agent container"
+	case ReasonHostPressure:
+		return "the host is already stalling on memory"
+	case ReasonConcurrency:
+		return "too many agent containers are starting on this host at once"
+	case ReasonPacing:
+		return "agent container starts are being staggered"
+	default:
+		return "this host cannot afford another agent container yet"
+	}
+}
+
+// ReasonRemedy names what an operator can actually change. Empty when there
+// is nothing useful to say — a pacing hold clears itself in milliseconds and
+// telling somebody to reconfigure it would be noise.
+func ReasonRemedy(reason string) string {
+	switch reason {
+	case ReasonHostMemory:
+		return "Free memory on the host, lower the crew's container memory, " +
+			"or lower runtime.host_memory_reserve_mb."
+	case ReasonHostPressure:
+		return "Reduce load on the host, or raise runtime.host_memory_pressure_pct."
+	case ReasonConcurrency:
+		return "Wait for the starts in flight to finish, or raise runtime.max_concurrent_container_starts."
+	default:
+		return ""
+	}
+}
+
+// ErrHeldForCapacity marks every failure produced by a start that was held
+// until its deadline. Callers classify against it with errors.Is rather than
+// by matching text: the previous arrangement was a substring classifier, and
+// the gate's own wrapper contains the substring "container start", so the
+// generic provisioning case claimed the capacity failure and threw away the
+// only detail an operator could act on (#1675).
+var ErrHeldForCapacity = errors.New("held for host capacity")
+
+// HoldExpiredError is what Admit returns when the caller's context ran out
+// while the start was still held. It carries the binding reason, the numbers
+// behind it and how long the start waited, so the surface reporting it can
+// name the host resource that ran out instead of saying "provisioning error".
+type HoldExpiredError struct {
+	CrewID   string
+	CrewSlug string
+	// Reason is one of the Reason* constants.
+	Reason string
+	// Detail is the human-readable numbers for Reason, e.g. "host has 41837
+	// MiB available, 62048 MiB needed for one more agent container".
+	Detail string
+	// Waited is how long the start was held before it gave up.
+	Waited time.Duration
+	// Err is the context error that ended the wait.
+	Err error
+}
+
+func (e *HoldExpiredError) Error() string {
+	return fmt.Sprintf("held for host capacity for %s (%s: %s): %v",
+		e.Waited.Round(time.Millisecond), e.Reason, e.Detail, e.Err)
+}
+
+// Unwrap reports BOTH the sentinel and the context error that ended the wait,
+// so errors.Is(err, ErrHeldForCapacity) and errors.Is(err,
+// context.DeadlineExceeded) hold on the same value. Dropping the second would
+// break callers that already distinguish a cancelled run from an expired one.
+func (e *HoldExpiredError) Unwrap() []error {
+	if e.Err == nil {
+		return []error{ErrHeldForCapacity}
+	}
+	return []error{ErrHeldForCapacity, e.Err}
+}
+
 // Limits is the resolved admission policy. Every field is "0 disables this
 // leg", so an operator can turn off one check without losing the others.
 type Limits struct {
@@ -130,6 +208,9 @@ type Controller struct {
 	// the property that made the settings live rather than boot-time — and
 	// long enough that the poll loop costs nothing.
 	limitsCacheTTL time.Duration
+	// holdNotify is the gap to the next "still waiting" notice for a hold
+	// whose reason has not changed. See defaultHoldNotify.
+	holdNotify []time.Duration
 
 	mu        sync.Mutex
 	inFlight  int
@@ -155,7 +236,30 @@ const (
 	defaultPollInterval   = 200 * time.Millisecond
 	defaultHostCacheTTL   = 250 * time.Millisecond
 	defaultLimitsCacheTTL = time.Second
+
+	// holdNotifyFloor is the shortest gap between two notices, whatever else
+	// happens. It exists for the reason that FLAPS: memory frees for one poll
+	// and the concurrency bound binds instead, then back. A reason change is
+	// worth reporting, but at 200ms per poll an unconditional "report every
+	// change" would put five lines a second on the caller's stream.
+	holdNotifyFloor = 5 * time.Second
 )
+
+// defaultHoldNotify is the gap to the next notice for a hold whose reason has
+// not changed, escalating and then repeating on its last entry. Cumulatively:
+// 0s, 30s, 1m, 2m, 4m, 9m, 19m, 29m — eight lines across the 30-minute run
+// budget instead of the sixty a fixed 30s cadence would produce, with the
+// close-together ones early, where somebody is still deciding whether the run
+// has hung. A field on the Controller rather than a package var so tests can
+// compress it without racing each other.
+var defaultHoldNotify = []time.Duration{
+	30 * time.Second,
+	30 * time.Second,
+	time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+	10 * time.Minute,
+}
 
 // New builds a Controller. limits and read may be nil: a nil resolver yields
 // zero Limits (every leg disabled) and a nil reader yields no host signal, so
@@ -171,6 +275,7 @@ func New(limits LimitsResolver, read HostReader, logger *slog.Logger) *Controlle
 		pollInterval:   defaultPollInterval,
 		hostCacheTTL:   defaultHostCacheTTL,
 		limitsCacheTTL: defaultLimitsCacheTTL,
+		holdNotify:     defaultHoldNotify,
 		holds:          make(map[uint64]*Hold),
 		wake:           make(chan struct{}),
 	}
@@ -180,11 +285,20 @@ func New(limits LimitsResolver, read HostReader, logger *slog.Logger) *Controlle
 // returns the release. The release must be called on every exit path; it is
 // idempotent.
 //
-// onHold, when non-nil, is called the first time the start is actually held
-// and again whenever the binding reason changes. It is how a run's own event
-// stream says "waiting for capacity" instead of going quiet — a silent queue
-// is indistinguishable from a hang, which is how this feature would earn a bug
-// report instead of trust. It runs on the caller's goroutine; keep it cheap.
+// onHold, when non-nil, is called the first time the start is actually held,
+// whenever the binding reason changes, and then on an escalating schedule for
+// as long as the wait lasts (see defaultHoldNotify). It is how a run's own
+// event stream says "waiting for capacity" instead of going quiet — a silent
+// queue is indistinguishable from a hang, which is how this feature would earn
+// a bug report instead of trust.
+//
+// Reporting only on a reason CHANGE was not enough: the common hold has one
+// reason for its whole life, so the caller got one line and then thirty
+// minutes of silence. Reporting on every poll is the other failure, so the
+// notices are rate-limited — never closer together than holdNotifyFloor, and
+// spreading out as the wait goes on.
+//
+// It runs on the caller's goroutine; keep it cheap.
 func (c *Controller) Admit(ctx context.Context, crewID, crewSlug string, onHold func(reason, detail string)) (func(), error) {
 	if c == nil {
 		return func() {}, nil
@@ -194,6 +308,8 @@ func (c *Controller) Admit(ctx context.Context, crewID, crewSlug string, onHold 
 		holdID     uint64
 		registered bool
 		lastReason string
+		notifiedAt time.Time
+		notices    int
 	)
 	defer func() {
 		if registered {
@@ -220,8 +336,10 @@ func (c *Controller) Admit(ctx context.Context, crewID, crewSlug string, onHold 
 		} else if reason != lastReason {
 			c.updateHold(holdID, reason, detail)
 		}
-		if reason != lastReason && onHold != nil {
+		if onHold != nil && c.notifyDue(notifiedAt, notices, reason != lastReason) {
 			onHold(reason, detail)
+			notifiedAt = time.Now()
+			notices++
 		}
 		lastReason = reason
 
@@ -230,12 +348,39 @@ func (c *Controller) Admit(ctx context.Context, crewID, crewSlug string, onHold 
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, fmt.Errorf("held for host capacity (%s: %s): %w", reason, detail, ctx.Err())
+			return nil, &HoldExpiredError{
+				CrewID:   crewID,
+				CrewSlug: crewSlug,
+				Reason:   reason,
+				Detail:   detail,
+				Waited:   time.Since(c.holdSince(holdID)),
+				Err:      ctx.Err(),
+			}
 		case <-wake:
 			timer.Stop()
 		case <-timer.C:
 		}
 	}
+}
+
+// notifyDue answers whether the caller should be told about the hold on this
+// poll. notices is how many have already gone out; the gap after the n-th is
+// holdNotify[n-1], with the last entry repeating for the rest of the wait.
+// The first notice is immediate. Any gap is brought forward to holdNotifyFloor
+// when the binding reason has changed — a change is news, but not news worth
+// five lines a second when two legs are trading the hold back and forth.
+func (c *Controller) notifyDue(notifiedAt time.Time, notices int, reasonChanged bool) bool {
+	if notices == 0 || notifiedAt.IsZero() {
+		return true
+	}
+	due := holdNotifyFloor
+	if n := len(c.holdNotify); n > 0 {
+		due = c.holdNotify[min(notices-1, n-1)]
+	}
+	if reasonChanged && due > holdNotifyFloor {
+		due = holdNotifyFloor
+	}
+	return time.Since(notifiedAt) >= due
 }
 
 // resolveLimits returns the policy, cached for limitsCacheTTL so N waiters
