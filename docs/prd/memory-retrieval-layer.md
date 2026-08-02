@@ -958,3 +958,19 @@ The bench imports the production functions rather than copying them, so if
 `sanitizeFTSQuery` or `escapeFTSQuery` changes, the measurement changes with
 it. That is deliberate: a benchmark that silently stops measuring production
 code is worse than no benchmark.
+
+**That property was mutation-tested**, because it is the claim everything else
+rests on. `search.go:111` was mutated from `strings.Join(quoted, " ")` to
+`strings.Join(quoted, " OR ")`; the patch reported **1 hunk applied** (an
+unapplied `sed` is indistinguishable from an uncaught one, so the count was
+printed rather than assumed). §7 moved from **2/10 to 8/10** and the printed
+MATCH expressions changed from `"aux" "slots"` to `"aux" OR "slots"` — so the
+bench is reading the shipping function, not a copy of it. Reverted with
+`git checkout -- internal/memory/search.go` and verified byte-identical to a
+pre-mutation copy (`diff -q`), which is valid here only because `search.go` is
+tracked — it would not have been a revert for the untracked files in
+`scripts/memory-retrieval-bench/`.
+
+No production code was changed by this work. The only files added inside
+`internal/` are the two build-tagged `bench_export.go` shims, which are absent
+from every untagged build.
