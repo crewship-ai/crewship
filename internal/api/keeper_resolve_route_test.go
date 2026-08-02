@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -24,41 +25,78 @@ func routePost(r *Router, token, path, body string) *httptest.ResponseRecorder {
 	return rr
 }
 
-// An OWNER must reach the handler on both keeper mutation routes. 404 is a pass
-// here — it means authorization let us through and the lookup found no such
-// request. 403 is the failure this pins.
-func TestKeeperResolveRoute_OwnerIsNotForbidden(t *testing.T) {
+// An OWNER must reach the handler on the resolve route AND get its own answer.
+//
+// The first version of this accepted anything except 403, which meant an
+// unregistered route — 404 — passed it. That is precisely the wiring failure the
+// test was added to detect, so it could not have detected it. It now seeds a
+// real escalated request and demands the 200 that only the handler can produce.
+func TestKeeperResolveRoute_OwnerCanResolveThroughTheRouter(t *testing.T) {
 	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	_ = seedTestWorkspace(t, db, userID) // already enrols the creator as OWNER
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+
+	// seedKeeperFixture's user is the workspace OWNER; mint them a token.
+	var userID string
+	if err := db.QueryRow(`SELECT user_id FROM workspace_members WHERE workspace_id = ? AND role = 'OWNER'`,
+		wsID).Scan(&userID); err != nil {
+		t.Fatalf("find the owner: %v", err)
+	}
 	token := mintTokenFor(t, db, userID, "keeper-resolve")
+
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-route', 'access', ?, ?, ?, 'rotate the certs', 'ESCALATE')`,
+		agentID, crewID, credID)
 
 	r, err := NewRouter(db, "this-is-a-32-char-test-secret-pad", newTestLogger())
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	for _, tc := range []struct{ name, path, body string }{
-		{
-			"ask",
-			"/api/v1/admin/keeper/ask",
-			`{"requesting_agent_id":"a","requesting_crew_id":"c","credential_name":"n","intent":"i"}`,
-		},
-		{
-			"resolve",
-			"/api/v1/admin/keeper/requests/kr-nope/resolve",
-			`{"decision":"ALLOW"}`,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rr := routePost(r, token, tc.path, tc.body)
-			if rr.Code == http.StatusForbidden {
-				t.Fatalf("OWNER was refused on %s: %d %s", tc.path, rr.Code, rr.Body.String())
-			}
-			if rr.Code == http.StatusNotFound && tc.name == "resolve" {
-				return // reached the handler, no such request — the pass we want
-			}
-		})
+	rr := routePost(r, token,
+		"/api/v1/admin/keeper/requests/kr-route/resolve?workspace_id="+wsID,
+		`{"decision":"DENY","reason":"no change window"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("OWNER could not resolve through the router: %d %s", rr.Code, rr.Body.String())
+	}
+
+	// And it actually decided, rather than answering 200 from somewhere else.
+	var decision string
+	if err := db.QueryRow(`SELECT COALESCE(decision,'') FROM keeper_requests WHERE id = 'kr-route'`).
+		Scan(&decision); err != nil {
+		t.Fatalf("read decision: %v", err)
+	}
+	if decision != "DENY" {
+		t.Errorf("decision is %q, want DENY — a 200 that changed nothing is not the route working", decision)
+	}
+}
+
+// The ask route is registered on the same line with the same role, and it was
+// the control that told me the resolve 403 was NOT a wiring problem. An
+// unregistered route answers 404/405; reaching the handler with a body naming
+// nothing real gets that handler's own rejection instead.
+func TestKeeperAskRoute_OwnerReachesTheHandler(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID) // already enrols the creator as OWNER
+	token := mintTokenFor(t, db, userID, "keeper-ask")
+
+	r, err := NewRouter(db, "this-is-a-32-char-test-secret-pad", newTestLogger())
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	rr := routePost(r, token, "/api/v1/admin/keeper/ask?workspace_id="+wsID,
+		`{"requesting_agent_id":"nope","requesting_crew_id":"nope","credential_name":"ghost-key","intent":"i"}`)
+	if rr.Code == http.StatusForbidden {
+		t.Fatalf("OWNER was refused on the ask route: %s", rr.Body.String())
+	}
+	// The status alone cannot settle this: the handler's own "no such credential"
+	// is a 404, and so is an unregistered route. The BODY can — only the handler
+	// knows which credential was asked for.
+	if !strings.Contains(rr.Body.String(), "ghost-key") {
+		t.Fatalf("the ask route did not reach its handler: %d %s", rr.Code, rr.Body.String())
 	}
 }
 

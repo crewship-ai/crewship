@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/keeper/eval"
@@ -497,5 +498,79 @@ func TestKeeperResolve_ARefusedRulingLeavesNoLedgerEntry(t *testing.T) {
 	if n != 0 {
 		t.Errorf("the refused ruling left %d ledger entries; a history showing a decision "+
 			"that was never applied is worse than one missing an entry", n)
+	}
+}
+
+// Settled-once is checked BEFORE the transaction opens, so the sequential test
+// above cannot see the hole CodeRabbit found: two requests can both read
+// ESCALATE, both pass the check, and both write — the UPDATE filtered only by
+// id. The later one silently overwrites a verdict somebody already gave, and the
+// ledger ends up with two terminal entries for one decision.
+//
+// That is the exact property the endpoint claims: this row is what the eval
+// reads as ground truth, and a verdict that can be rewritten is not one.
+//
+// So the guard has to live in the WRITE, not in a read before it: update only
+// while the row is still ESCALATE, and treat "no row changed" as the 409.
+func TestKeeperResolve_ConcurrentRulingsSettleExactlyOnce(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-race', 'access', ?, ?, ?, 'rotate the certs', 'ESCALATE')`,
+		agentID, crewID, credID)
+
+	const racers = 6
+	start := make(chan struct{})
+	codes := make([]int, racers)
+	var wg sync.WaitGroup
+	for i := 0; i < racers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Half approve, half refuse: whichever lands first, the other verdict
+			// must not overwrite it.
+			d := "ALLOW"
+			if i%2 == 1 {
+				d = "DENY"
+			}
+			rr := httptest.NewRecorder()
+			<-start
+			h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "alice", "kr-race",
+				map[string]any{"decision": d}))
+			codes[i] = rr.Code
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	ok := 0
+	for i, c := range codes {
+		switch c {
+		case http.StatusOK:
+			ok++
+		case http.StatusConflict:
+		default:
+			t.Errorf("racer %d got %d, want 200 or 409", i, c)
+		}
+	}
+	if ok != 1 {
+		t.Errorf("%d of %d rulings were accepted, want exactly 1 — a settled request was re-decided", ok, racers)
+	}
+
+	// One terminal entry in the ledger, matching the one accepted verdict. Two
+	// would mean the audit trail records a decision that was overwritten as though
+	// it still stood.
+	var n int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM keeper_request_events
+		 WHERE request_id = 'kr-race' AND state IN ('ALLOW','DENY')`).Scan(&n); err != nil {
+		t.Fatalf("count ledger rows: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("the ledger holds %d terminal entries for one decision, want 1", n)
 	}
 }

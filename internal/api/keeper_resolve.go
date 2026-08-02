@@ -108,6 +108,11 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	// acted on downstream — the credential was delivered or refused — so letting
 	// it be rewritten would change an audit record about something that already
 	// happened.
+	//
+	// This is the EARLY answer, for the message: it can name the verdict already
+	// stored, which "no row changed" cannot. It is not the guard — the read
+	// happens before the transaction opens, so two callers can both see ESCALATE
+	// here and both proceed. The guard is the conditional UPDATE below.
 	if current.Valid && current.String != string(keeper.DecisionEscalate) {
 		writeProblem(w, r, http.StatusConflict,
 			fmt.Sprintf("this request is already settled as %s", current.String))
@@ -182,11 +187,36 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(r.Context(), `
+	// `AND decision = 'ESCALATE'` is the real settled-once guard, and it has to be
+	// here rather than in the read above: that read happens before the transaction
+	// opens, so two callers can both observe ESCALATE, both pass, and both write —
+	// the later silently overwriting a verdict somebody already gave and leaving
+	// the ledger with two terminal entries for one decision.
+	//
+	// Making the condition part of the write turns the race into a lost update
+	// that reports itself: exactly one statement changes a row, and the rest see
+	// zero and roll back. That matters more here than in most places — this row is
+	// what eval.LoadCorpus reads as ground truth, and a verdict that can be
+	// rewritten is not one.
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE keeper_requests
 		   SET decision = ?, reason = ?, decided_at = ?
-		 WHERE id = ?`, decision, reason, now, reqID); err != nil {
+		 WHERE id = ? AND decision = ?`,
+		decision, reason, now, reqID, string(keeper.DecisionEscalate))
+	if err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: record decision", err)
+		return
+	}
+	switch n, err := res.RowsAffected(); {
+	case err != nil:
+		replyInternalError(w, h.logger, "keeper resolve: confirm decision", err)
+		return
+	case n == 0:
+		// Somebody settled it between the read and this write. The rollback is the
+		// deferred one; nothing has been committed, so the inbox row and the ledger
+		// stay as they were.
+		writeProblem(w, r, http.StatusConflict,
+			"this request was settled by somebody else while you were deciding it")
 		return
 	}
 
