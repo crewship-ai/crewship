@@ -355,6 +355,13 @@ func nukeAll(ctx context.Context, client *cli.Client) error {
 		failures = append(failures, fmt.Sprintf("inbox: %v", err))
 	}
 
+	// Keeper decision history — same ordering constraint as escalations above,
+	// and for a sharper reason: keeper_requests has no workspace_id at all, so
+	// once the agents are gone nothing can find the rows to delete.
+	if err := nukeKeeperRequests(ctx, client); err != nil {
+		failures = append(failures, fmt.Sprintf("keeper requests: %v", err))
+	}
+
 	// DB entities last — this is the step that deletes the crew rows.
 	dataFailures, err := nukeData(ctx, client)
 	if err != nil {
@@ -514,6 +521,35 @@ func nukeInbox(ctx context.Context, client *cli.Client, kind string) error {
 		return err
 	}
 	defer r.Body.Close()
+	if r.StatusCode >= 300 {
+		return fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
+	}
+	return nil
+}
+
+// nukeKeeperRequests clears the keeper decision history and its append-only
+// ledger. Like escalations and crew runtimes, it MUST run while the agents still
+// exist: keeper_requests has no workspace_id, so the requesting agent is the only
+// route from a workspace to its rows — and requesting_agent_id carries no ON
+// DELETE CASCADE, so deleting the agents first orphans them instead of removing
+// them. 115 rows survived a nuke on dev2 that way, each holding an agent-authored
+// intent and the conversation history the judge was shown.
+func nukeKeeperRequests(ctx context.Context, client *cli.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	const path = "/api/v1/admin/keeper/requests"
+	r, err := client.Delete(path)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+	// A server older than this endpoint answers 404/405. Tolerated the way
+	// nukeRuntimes tolerates a docker-less 503: the CLI must keep working against
+	// a server that predates it, and the alternative is failing every nuke.
+	if r.StatusCode == http.StatusNotFound || r.StatusCode == http.StatusMethodNotAllowed {
+		return nil
+	}
 	if r.StatusCode >= 300 {
 		return fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
 	}
