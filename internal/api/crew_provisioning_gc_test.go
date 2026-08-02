@@ -173,10 +173,15 @@ func TestSweepOrphanTempContainers_RemovesStaleKeepsFresh(t *testing.T) {
 // The provisioner labels its scratch container crewship.temp=provision and
 // then `docker commit`s it into crewship-cache:<hash>. Docker copies the
 // source container's config — labels included — into the committed image,
-// and every container started from that image inherits them. Crew runtime
-// containers set no labels of their own (buildCrewContainerConfig passes
-// none), so crewship.temp=provision is the only label they carry, and the
-// sweeper's label filter matched them exactly.
+// and every container started from that image inherits them for any key the
+// create request leaves unset. Crew runtime containers set no key of that
+// name, so crewship.temp=provision rode in and the sweeper's label filter
+// matched them exactly.
+//
+// #1644 stopped the inheritance at the source — buildCrewContainerConfig now
+// sets crewship.temp to the empty string — but this fixture is deliberately
+// the OLD shape, because every crew container created before that fix is
+// still running with the inherited value and must still survive a sweep.
 //
 // Observed on crewship-dev on 2026-07-20: a healthy crew container that had
 // been serving for an hour was force-removed the first time a sweep ran
@@ -227,6 +232,52 @@ func TestSweepOrphanTempContainers_SparesLiveCrewContainers(t *testing.T) {
 
 	if got := strings.Join(fake.removedContainers, ","); got != "leaked-temp" {
 		t.Errorf("removed containers = %q; want only leaked-temp — a crew container was killed by the orphan sweeper", got)
+	}
+}
+
+// The other half of #1644: a crew container created since the fix carries
+// crewship.temp="" and therefore never reaches the sweeper's loop at all —
+// the daemon's own exact-value filter excludes it, so the name guard above
+// becomes belt-and-braces instead of the only thing between a live crew and
+// a GC pass.
+//
+// The empty value is asserted here rather than merely "not provision"
+// because that is the value buildCrewContainerConfig sends, and because it
+// is what makes the daemon's presence-keyed merge decline to substitute the
+// image's own value. Measured on docker 29.3.0: a container created with
+// `--label crewship.temp=` from an image labelled crewship.temp=provision
+// reports {"crewship.temp":""} and drops out of
+// `docker ps --filter label=crewship.temp=provision`.
+func TestSweepOrphanTempContainers_NeutralisedCrewLabelIsNotEvenListed(t *testing.T) {
+	now := time.Now().Unix()
+	fake := &fakeGCClient{
+		containers: []container.Summary{
+			{
+				ID:      "crew-modern",
+				Names:   []string{"/crewship-1-team-quality-cmrmd4i0a01b1b5a27a84"},
+				Created: now - int64((3 * time.Hour).Seconds()),
+				State:   "running",
+				Labels: map[string]string{
+					"managed-by":                       "crewship",
+					"crewship.kind":                    "crew",
+					devcontainer.TempContainerLabelKey: "",
+				},
+			},
+			{
+				ID:      "leaked-temp",
+				Names:   []string{"/" + devcontainer.TempContainerNamePrefix + "a1b2c3d4"},
+				Created: now - int64((2 * time.Hour).Seconds()),
+				State:   "running",
+				Labels:  map[string]string{devcontainer.TempContainerLabelKey: devcontainer.TempContainerLabelValue},
+			},
+		},
+	}
+	h := newGCTestHandler(t, fake)
+
+	h.sweepOrphanTempContainers(context.Background())
+
+	if got := strings.Join(fake.removedContainers, ","); got != "leaked-temp" {
+		t.Errorf("removed containers = %q; want only leaked-temp", got)
 	}
 }
 

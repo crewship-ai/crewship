@@ -191,17 +191,26 @@ to remove crash leaks:
   <Warning>
   The label alone is not proof of provenance. Provisioning ends in a
   `docker commit` of the scratch container, and Docker copies that
-  container's labels into the resulting `crewship-cache:*` image — so every
-  crew container started from it inherits `crewship.temp=provision`. Crew
-  containers set no labels of their own, making it the only label they carry.
-  A label-only sweeper therefore force-removes healthy crews an hour into
-  their lives; this happened on a dev host on 2026-07-20. Container names are
-  never copied into images, which is why the name is the marker that holds.
-
-  Consequence for `docker ps`: filtering by `label=crewship.temp=provision`
-  lists your running crews too. Filter by `name=crewship-provision-` to see
-  only genuine scratch containers.
+  container's labels into the resulting `crewship-cache:*` image — so a crew
+  container started from it *inherited* `crewship.temp=provision` without
+  asking. A label-only sweeper therefore force-removes healthy crews an hour
+  into their lives; this happened on a dev host on 2026-07-20. Container
+  names are never copied into images, which is why the name is the marker
+  that holds.
   </Warning>
+
+  Crew containers now set `crewship.temp` to the empty string at create,
+  which stops the inheritance: the daemon merges an image label only for a
+  key the create request leaves unset, so the explicit empty value wins and
+  the container drops out of `--filter label=crewship.temp=provision`.
+
+  Consequence for `docker ps`: an **exact-value** filter
+  (`label=crewship.temp=provision`) now lists only scratch containers plus
+  any crew container created before this release. A **key-only** filter
+  (`label=crewship.temp`) still lists every crew, because the key is present
+  with an empty value. Filter by `name=crewship-provision-` when you want
+  only genuine scratch containers — that is what the sweeper itself decides
+  on.
 
   Scratch containers leaked before this release carry a Docker-assigned
   random name and are no longer swept automatically. Remove them by hand if

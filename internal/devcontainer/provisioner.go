@@ -190,11 +190,18 @@ type Provisioner struct {
 // treated as one. createTempContainer's container is the input to
 // `docker commit`, and Docker copies the source container's config —
 // labels included — into the committed crewship-cache:<hash> image. Every
-// crew container started from that image therefore inherits
-// crewship.temp=provision, and since crew containers set no labels of
-// their own it is the only label they carry. The sweeper matched them and
+// crew container started from that image therefore inherited
+// crewship.temp=provision, unasked; the sweeper matched them and
 // force-removed a healthy crew container an hour into its life
 // (crewship-dev, 2026-07-20).
+//
+// Crew containers created since #1644 set this key to the empty string at
+// create, which wins over the image's value (the daemon's label merge is
+// keyed on key presence) and takes them out of the exact-value filter. That
+// does not retire the rule above: containers created BEFORE that fix are
+// still running with the inherited value, a key-only label filter matches
+// the neutralised ones too, and any future image built from a labelled
+// source repeats the trick.
 //
 // TempContainerNamePrefix is the marker that actually holds: a container
 // name lives on the container and is never copied into an image, so no
