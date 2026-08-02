@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/moby/moby/api/types/container"
 )
@@ -285,6 +286,50 @@ func TestCrewContainer_CarriesDiscoveryLabels(t *testing.T) {
 		if got := req.Config.Labels[k]; got != v {
 			t.Errorf("label %q = %q, want %q", k, got, v)
 		}
+	}
+}
+
+// The discovery labels are additive; they do not displace the one label a crew
+// container carries WITHOUT asking for it (#1644).
+//
+// The provisioner labels its scratch container crewship.temp=provision and then
+// `docker commit`s it into crewship-cache:<hash>. Commit copies the source
+// container's config — labels included — into the image, and the daemon merges
+// image labels into every container started from it for any key the create
+// request does not already set. So a crew container inherits
+// crewship.temp=provision and looks, to a label filter, exactly like a leaked
+// provisioner scratch container. On 2026-07-20 that cost a healthy crew: the
+// orphan sweeper force-removed it an hour into its life
+// (TestSweepOrphanTempContainers_SparesLiveCrewContainers records the incident).
+//
+// Setting the key at create is what stops the inheritance, and the merge is
+// keyed on PRESENCE, not on value — so the empty string is a real answer and
+// not a no-op. Measured on docker 29.3.0 rather than assumed:
+//
+//	image labels                        {"crewship.temp":"provision"}
+//	container, no label of its own      {"crewship.temp":"provision"}   <- inherited
+//	container, --label crewship.temp=   {"crewship.temp":""}            <- neutralised
+//	docker ps --filter label=crewship.temp=provision   matches only the first two
+//
+// The assertion is therefore two-part, and both halves matter: the key must be
+// PRESENT (absence is precisely what lets the image's value through) and its
+// value must not be the one the sweeper filters on.
+func TestCrewContainer_NeutralisesInheritedTempLabel(t *testing.T) {
+	t.Parallel()
+
+	req := crewCreate(t, nil)
+	got, ok := req.Config.Labels[devcontainer.TempContainerLabelKey]
+	if !ok {
+		t.Fatalf("create request sets no %q label; the daemon then merges the cache image's own value in and the crew container answers to `--filter label=%s=%s`",
+			devcontainer.TempContainerLabelKey, devcontainer.TempContainerLabelKey, devcontainer.TempContainerLabelValue)
+	}
+	if got == devcontainer.TempContainerLabelValue {
+		t.Errorf("label %q = %q — that is the value the orphan sweeper deletes on",
+			devcontainer.TempContainerLabelKey, got)
+	}
+	if got != "" {
+		t.Errorf("label %q = %q, want the empty string (nothing about a crew container is temporary)",
+			devcontainer.TempContainerLabelKey, got)
 	}
 }
 
