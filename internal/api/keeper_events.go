@@ -50,6 +50,13 @@ const (
 	keeperActorSystem = "system" // dedup suppression, timeouts, sweeps
 	keeperActorAgent  = "agent"  // the requesting agent raised the request
 	keeperActorUser   = "user"   // an operator resolved an escalation
+	// keeperActorReference: an AI reference model adjudicated the escalation
+	// instead of a person. A legitimate way to give the eval labels at scale, and
+	// deliberately NOT recorded as `user` — internal/keeper/eval reads this to
+	// classify the row as `reference` rather than ground truth, because a corpus
+	// that cannot say where its labels came from produces a number that lies
+	// about itself.
+	keeperActorReference = "reference"
 )
 
 // keeperTransition is one row of the append-only ledger. The denormalised

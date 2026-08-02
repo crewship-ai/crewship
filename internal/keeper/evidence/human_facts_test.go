@@ -204,3 +204,53 @@ func TestNarrowerCredential_IgnoresSoftDeleted(t *testing.T) {
 		t.Errorf("got %+v, want none — a deleted credential is not an alternative", got)
 	}
 }
+
+// 'NONE' is the schema's DEFAULT for credentials.provider — the sentinel for
+// "no provider recorded", not a provider. Treating it as one makes every
+// credential in a workspace a same-provider match for every other, and dev2
+// showed exactly that: a docs API key offered as a narrower substitute for a
+// production database admin credential.
+//
+// The earlier "ignores other providers" case could not catch it. It used real
+// provider values, so it proved the predicate works when providers are known
+// and nothing about the case where none is. Same shape of blind spot as the
+// three before it today: the test set up the world it then checked.
+func TestNarrowerCredential_TreatsTheNoneSentinelAsNoProvider(t *testing.T) {
+	for _, sentinel := range []string{"NONE", "none", ""} {
+		db := newHumanFactsDB(t)
+		mustExec(t, db, `INSERT INTO credentials
+			(id, workspace_id, name, encrypted_value, type, provider, security_level, status, created_by)
+			VALUES ('c-hi', 'ws1', 'PROD_DB_ADMIN', 'v1:x', 'SECRET', '`+sentinel+`', 4, 'ACTIVE', 'u1'),
+			       ('c-lo', 'ws1', 'DOCS_API_KEY',  'v1:x', 'SECRET', '`+sentinel+`', 1, 'ACTIVE', 'u1')`)
+
+		got, err := queryNarrowerCredential(context.Background(), db, "c-hi")
+		if err != nil {
+			t.Fatalf("provider %q: %v", sentinel, err)
+		}
+		if got == nil || got.Exists {
+			t.Errorf("provider %q: got %+v, want none — a docs key is not a narrower "+
+				"production database credential, and %q establishes no relationship between them",
+				sentinel, got, sentinel)
+		}
+	}
+}
+
+// And the sentinel on the OTHER side is just as wrong: a credential with no
+// provider recorded cannot be established as an alternative to one that has a
+// real provider.
+func TestNarrowerCredential_IgnoresACandidateWithNoProvider(t *testing.T) {
+	db := newHumanFactsDB(t)
+	mustExec(t, db, `INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, provider, security_level, status, created_by)
+		VALUES ('c-hi', 'ws1', 'GITHUB_ADMIN', 'v1:x', 'SECRET', 'GITHUB', 4, 'ACTIVE', 'u1'),
+		       ('c-lo', 'ws1', 'MYSTERY_KEY',  'v1:x', 'SECRET', 'NONE',   1, 'ACTIVE', 'u1')`)
+
+	got, err := queryNarrowerCredential(context.Background(), db, "c-hi")
+	if err != nil {
+		t.Fatalf("queryNarrowerCredential: %v", err)
+	}
+	if got == nil || got.Exists {
+		t.Errorf("got %+v, want none — a credential with no provider recorded cannot be "+
+			"established as an alternative to one that has a real provider", got)
+	}
+}

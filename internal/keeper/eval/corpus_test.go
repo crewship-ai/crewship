@@ -46,6 +46,15 @@ func newCorpusDB(t *testing.T) *sql.DB {
 			state TEXT NOT NULL DEFAULT 'unread',
 			resolved_action TEXT,
 			resolved_by_user_id TEXT
+		);
+		CREATE TABLE keeper_request_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			seq INTEGER NOT NULL,
+			state TEXT NOT NULL,
+			actor_type TEXT NOT NULL DEFAULT 'keeper',
+			actor_id TEXT,
+			recorded_at TEXT NOT NULL
 		)`)
 	if err != nil {
 		t.Fatalf("create tables: %v", err)
@@ -164,4 +173,118 @@ func TestLoadCorpus_Empty(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("want 0 rows, got %d", len(got))
 	}
+}
+
+// A corpus has to tell the truth about where its labels came from.
+//
+// The eval was asked to score candidates against verdicts an AI reference model
+// adjudicated, rather than against twenty human rulings. That is a legitimate
+// technique and it answers a genuinely useful question — "can a 9B model on a
+// laptop match a frontier model's judgement?" — which scales and reproduces in a
+// way twenty human clicks do not.
+//
+// What it is NOT is human ground truth. Recording it as such would make the
+// eval report "agrees with the human 0.81" about a number that measured "agrees
+// with the reference model 0.81". That is not imprecision; it is a false claim
+// figure a security decision rests on.
+//
+// So the ledger's actor_type carries the provenance — it is already the record
+// of WHO decided — and a request whose terminal transition was made by a
+// reference adjudicator is labelled `reference`, never `human`.
+
+func seedLedger(t *testing.T, db *sql.DB, requestID, state, actorType, actorID string, seq int) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO keeper_request_events
+		(id, request_id, seq, state, actor_type, actor_id, recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, '2026-08-02T12:00:00.000000000Z')`,
+		requestID+"-ev"+string(rune('0'+seq)), requestID, seq, state, actorType, actorID); err != nil {
+		t.Fatalf("seed ledger: %v", err)
+	}
+}
+
+func TestLoadCorpus_ReferenceAdjudicationIsNotHuman(t *testing.T) {
+	db := newCorpusDB(t)
+	insertRow(t, db, "kr-ref", "access", "PROMPT", "DENY", sql.NullInt64{Int64: 9, Valid: true}, "2026-08-02T10:00:00Z")
+	mustExecCorpus(t, db, `INSERT INTO inbox_items (id, kind, source_id, state, resolved_action, resolved_by_user_id)
+		VALUES ('ibx-ref', 'escalation', 'kr-ref', 'resolved', 'denied', 'u-ref')`)
+	seedLedger(t, db, "kr-ref", "DENY", "reference", "reference-model-v1", 2)
+
+	rows, err := LoadCorpus(context.Background(), db, 0)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	got := findRow(t, rows, "kr-ref")
+	if got.LabelSource == LabelHuman {
+		t.Error("a reference adjudication was recorded as human ground truth; the eval " +
+			"would report agreement with a person about a number that measured agreement with a model")
+	}
+	if got.LabelSource != LabelReference {
+		t.Errorf("LabelSource = %q, want %q", got.LabelSource, LabelReference)
+	}
+	if got.Label != Deny {
+		t.Errorf("Label = %q, want DENY — the verdict itself is still the verdict", got.Label)
+	}
+	if got.LabelSource.IsHuman() {
+		t.Error("IsHuman() is true for a reference label; every caller that gates on it " +
+			"would treat this as ground truth")
+	}
+}
+
+// A person's ruling stays a person's ruling. The ledger names them with
+// actor_type='user', and nothing about adding a third source may downgrade the
+// one the whole exercise is about.
+func TestLoadCorpus_AHumanRulingStaysHuman(t *testing.T) {
+	db := newCorpusDB(t)
+	insertRow(t, db, "kr-hum", "access", "PROMPT", "ALLOW", sql.NullInt64{Int64: 3, Valid: true}, "2026-08-02T10:00:00Z")
+	mustExecCorpus(t, db, `INSERT INTO inbox_items (id, kind, source_id, state, resolved_action, resolved_by_user_id)
+		VALUES ('ibx-hum', 'escalation', 'kr-hum', 'resolved', 'approved', 'u-pavel')`)
+	seedLedger(t, db, "kr-hum", "ALLOW", "user", "u-pavel", 2)
+
+	got := findRow(t, mustLoad(t, db), "kr-hum")
+	if !got.LabelSource.IsHuman() {
+		t.Errorf("LabelSource = %q, want human", got.LabelSource)
+	}
+}
+
+// A resolution with no ledger entry at all predates the ledger, and the honest
+// reading is the one that was true before: a named person resolved the inbox
+// item. Downgrading those to `reference` would erase every human label the
+// product collected before this change.
+func TestLoadCorpus_NoLedgerEntryStillReadsAsHuman(t *testing.T) {
+	db := newCorpusDB(t)
+	insertRow(t, db, "kr-old", "access", "PROMPT", "ALLOW", sql.NullInt64{Int64: 3, Valid: true}, "2026-08-02T10:00:00Z")
+	mustExecCorpus(t, db, `INSERT INTO inbox_items (id, kind, source_id, state, resolved_action, resolved_by_user_id)
+		VALUES ('ibx-old', 'escalation', 'kr-old', 'resolved', 'approved', 'u-pavel')`)
+
+	got := findRow(t, mustLoad(t, db), "kr-old")
+	if !got.LabelSource.IsHuman() {
+		t.Errorf("LabelSource = %q, want human — a pre-ledger resolution is still a person's", got.LabelSource)
+	}
+}
+
+func mustExecCorpus(t *testing.T, db *sql.DB, q string) {
+	t.Helper()
+	if _, err := db.Exec(q); err != nil {
+		t.Fatalf("exec %.50q: %v", q, err)
+	}
+}
+
+func mustLoad(t *testing.T, db *sql.DB) []CorpusRow {
+	t.Helper()
+	rows, err := LoadCorpus(context.Background(), db, 0)
+	if err != nil {
+		t.Fatalf("LoadCorpus: %v", err)
+	}
+	return rows
+}
+
+func findRow(t *testing.T, rows []CorpusRow, id string) CorpusRow {
+	t.Helper()
+	for _, r := range rows {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("row %s not in corpus (%d rows)", id, len(rows))
+	return CorpusRow{}
 }

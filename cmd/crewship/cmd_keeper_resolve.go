@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	flagKeeperResolveDecision string
-	flagKeeperResolveReason   string
+	flagKeeperResolveDecision    string
+	flagKeeperResolveReason      string
+	flagKeeperResolveAdjudicator string
 )
 
 type keeperResolveResult struct {
@@ -39,6 +40,17 @@ and the attempt is recorded.
 
 Find the waiting ones with 'crewship inbox list'.
 
+--adjudicator names an AI model that made the judgement instead of you. Use it
+when you are applying a model's verdicts at scale to give 'keeper eval' labels:
+the ledger then records the decision as a reference adjudication rather than
+as yours, and the eval reports it separately from decisions a PERSON made.
+
+That separation is the point. An AI adjudication is a useful label — it answers
+"can a small model match a frontier one?", which scales where human rulings do
+not — but it is not ground truth, and recorded as one it would make the eval
+report agreement with a person about a number that measured agreement with a
+model. Omit the flag and the decision is yours, which is the default.
+
 Examples:
   crewship keeper resolve cmsb… --decision deny --reason "no change window declared"
   crewship keeper resolve cmsb… --decision allow`,
@@ -55,7 +67,11 @@ Examples:
 		var out keeperResolveResult
 		if err := postJSON(client,
 			"/api/v1/admin/keeper/requests/"+strings.TrimSpace(args[0])+"/resolve",
-			map[string]any{"decision": decision, "reason": strings.TrimSpace(flagKeeperResolveReason)},
+			map[string]any{
+				"decision":    decision,
+				"reason":      strings.TrimSpace(flagKeeperResolveReason),
+				"adjudicator": strings.TrimSpace(flagKeeperResolveAdjudicator),
+			},
 			&out); err != nil {
 			return keeperPermissionHint(err)
 		}
@@ -76,4 +92,6 @@ func init() {
 	f := keeperResolveCmd.Flags()
 	f.StringVar(&flagKeeperResolveDecision, "decision", "", "allow or deny")
 	f.StringVar(&flagKeeperResolveReason, "reason", "", "why — recorded on the decision and in the journal")
+	f.StringVar(&flagKeeperResolveAdjudicator, "adjudicator", "",
+		"name the AI model that made this judgement, when one did instead of you (e.g. reference-model-v1)")
 }

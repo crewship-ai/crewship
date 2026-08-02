@@ -40,6 +40,18 @@ import (
 //     path (escalation_handler.go), including auditing the blocked attempt —
 //     someone approving their own agent's production request is exactly the
 //     event this control exists to catch, so it must leave a trail.
+//
+// ledgerActorID names who to record. For a reference adjudication that is the
+// model, kept alongside the operator who ran it in the reason line — the model
+// made the judgement, the person carried it out, and the corpus cares about the
+// first.
+func ledgerActorID(userID, adjudicator string) string {
+	if adjudicator != "" {
+		return adjudicator
+	}
+	return userID
+}
+
 func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "manage") {
 		return
@@ -58,6 +70,17 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Decision string `json:"decision"`
 		Reason   string `json:"reason"`
+		// Adjudicator names an AI reference model when one ruled instead of a
+		// person. Empty means a person did, which stays the default and the
+		// normal case.
+		//
+		// It exists so the corpus can say where its labels came from. An AI
+		// adjudication is a useful label — it answers "can a small model match a
+		// frontier one?", which scales where human clicks do not — but it is not
+		// ground truth, and recorded as one it would make the eval report
+		// agreement with a person about a number that measured agreement with a
+		// model.
+		Adjudicator string `json:"adjudicator"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "invalid JSON body")
@@ -161,6 +184,14 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	if user := UserFromContext(r.Context()); user != nil {
 		actorID = user.ID
 	}
+	// Who is recorded as deciding. The authenticated user still owns the ACTION —
+	// they ran the command and the four-eyes rule still applies to them — but the
+	// ledger records the reference model as the adjudicator, because that is what
+	// the corpus needs to know.
+	actorType, adjudicator := keeperActorUser, strings.TrimSpace(body.Adjudicator)
+	if adjudicator != "" {
+		actorType = keeperActorReference
+	}
 
 	// The ruling lands in TWO places and both are load-bearing, so they commit
 	// together or not at all (the pattern issue #1247 established for hire
@@ -253,8 +284,8 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		CrewID:       crewID,
 		CredentialID: credentialID,
 		Reason:       reason,
-		ActorType:    keeperActorUser,
-		ActorID:      actorID,
+		ActorType:    actorType,
+		ActorID:      ledgerActorID(actorID, adjudicator),
 	}); err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: append ledger transition", err)
 		return

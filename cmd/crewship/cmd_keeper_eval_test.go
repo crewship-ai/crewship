@@ -82,6 +82,15 @@ func newEvalDB(t *testing.T) *sql.DB {
 			state TEXT NOT NULL DEFAULT 'unread',
 			resolved_action TEXT,
 			resolved_by_user_id TEXT
+		);
+		CREATE TABLE keeper_request_events (
+			id TEXT PRIMARY KEY,
+			request_id TEXT NOT NULL,
+			seq INTEGER NOT NULL,
+			state TEXT NOT NULL,
+			actor_type TEXT NOT NULL DEFAULT 'keeper',
+			actor_id TEXT,
+			recorded_at TEXT NOT NULL
 		)`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}

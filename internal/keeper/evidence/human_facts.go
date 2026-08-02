@@ -127,16 +127,21 @@ const sqlBackupInstant = `strftime('%Y-%m-%dT%H:%M:%SZ', created_at)`
 //
 // Four predicates, each earning its place:
 //
-//   - same provider: an AWS key is not a narrower GitHub key, it is a key for a
-//     different system, and naming it sends the operator somewhere useless.
+//   - same provider, and 'NONE' is not a provider: it is the schema DEFAULT for
+//     credentials.provider, the sentinel for "none recorded". Treating it as a
+//     value makes every credential in a workspace a same-provider match for
+//     every other — dev2 offered a docs API key as a narrower substitute for a
+//     production database admin credential, which is precisely the "sends the
+//     operator somewhere useless" failure this predicate exists to prevent.
+//     An AWS key is not a narrower GitHub key either.
 //   - strictly lower security_level: equal is not narrower.
 //   - status ACTIVE: a revoked or pending credential cannot do the job, and
 //     offering one costs the operator the time it takes to find that out.
 //   - deleted_at IS NULL: the repo-wide soft-delete convention.
 //
-// A credential with no provider recorded matches nothing, because "same
-// provider" cannot be established — omission again, rather than pairing every
-// provider-less credential with every other.
+// A credential with no provider recorded matches nothing, on EITHER side,
+// because "same provider" cannot be established — omission again, rather than
+// pairing every provider-less credential with every other.
 func queryNarrowerCredential(ctx context.Context, db Querier, credentialID string) (*NarrowerCredential, error) {
 	if credentialID == "" {
 		return nil, errors.New("evidence: narrower credential: credential id is required")
@@ -149,7 +154,8 @@ func queryNarrowerCredential(ctx context.Context, db Querier, credentialID strin
 		   AND alt.provider = this.provider
 		   AND alt.id != this.id
 		 WHERE this.id = ?
-		   AND COALESCE(this.provider, '') != ''
+		   AND UPPER(COALESCE(this.provider, '')) NOT IN ('', 'NONE')
+		   AND UPPER(COALESCE(alt.provider, '')) NOT IN ('', 'NONE')
 		   AND alt.security_level < this.security_level
 		   AND UPPER(alt.status) = 'ACTIVE'
 		   AND alt.deleted_at IS NULL
