@@ -280,7 +280,10 @@ The Docker provider checks `DOCKER_HOST` first, then auto-detects from candidate
 
 Crewship runs a background sweeper every 30 minutes that detects three kinds
 of leaks: temporary provisioning containers orphaned by a `crewshipd` crash
-(matched by the `crewship.temp=provision` label), unreferenced
+(matched by the `crewship-provision-*` name **and** the
+`crewship.temp=provision` label — see
+[Devcontainers → Background GC](/configuration/devcontainers#background-gc)
+for why the name is the one that authorises deletion), unreferenced
 `crewship-cache:*` images left behind when the process is killed between
 `docker commit` and the database write that links the image to a crew, and
 intermediate `crewship-feat:*` BuildKit feature images (per-feature layers

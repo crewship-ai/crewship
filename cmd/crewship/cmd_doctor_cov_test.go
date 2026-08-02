@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -176,17 +177,21 @@ func TestCheckDBMigrationVersion(t *testing.T) {
 		}
 	}
 
-	setVersion(85) // expectedLatest in cmd_doctor.go
-	if r := checkDBMigrationVersion(ctx); r.status != "PASS" || !strings.Contains(r.detail, "v85 (latest)") {
+	// The expectation is derived from the migration registry compiled into
+	// this binary (#1645) — it used to be a hand-bumped 85 here and in
+	// cmd_doctor.go, and both had gone ~80 migrations stale.
+	latest := database.MaxKnownMigrationVersion()
+	setVersion(latest)
+	if r := checkDBMigrationVersion(ctx); r.status != "PASS" || !strings.Contains(r.detail, fmt.Sprintf("v%d (latest)", latest)) {
 		t.Errorf("latest: got %+v", r)
 	}
-	setVersion(99)
+	setVersion(latest + 1)
 	if r := checkDBMigrationVersion(ctx); r.status != "WARN" || !strings.Contains(r.detail, "newer than CLI knows about") {
 		t.Errorf("newer: got %+v", r)
 	}
 	setVersion(3)
 	r := checkDBMigrationVersion(ctx)
-	if r.status != "WARN" || !strings.Contains(r.detail, "v3 (CLI expects v85)") {
+	if r.status != "WARN" || !strings.Contains(r.detail, fmt.Sprintf("v3 (CLI expects v%d)", latest)) {
 		t.Errorf("older: got %+v", r)
 	}
 	if !strings.Contains(r.hint, "pending migrations") {

@@ -1,16 +1,24 @@
 ---
 title: "crewship version"
-description: "Print version, commit SHA, build date, Go runtime, and OS/arch of the running binary."
+description: "Print the build identity of the local binary — and, with --remote, of the server it talks to."
 icon: "tag"
 ---
 
 # crewship version
 
-Prints the binary's version metadata. First command to run on any new
+Prints the binary's build identity: version, commit SHA, build time, whether
+the tree was dirty, Go runtime, and OS/arch. First command to run on any new
 install to confirm what you actually installed.
 
 ```bash
 crewship version
+```
+
+With `--remote`, it also asks the configured server which build **it** is
+running — the only way to tell a stale deployment apart from a stale CLI.
+
+```bash
+crewship version --remote
 ```
 
 ## Output
@@ -18,26 +26,76 @@ crewship version
 ```
 $ crewship version
 crewship v0.1.0-beta.1
-  commit:  92ecb9553fe0f9e71cdef38cc0a02edc3e3fa9c7
-  built:   2026-05-14T10:25:17+0200
+  commit:  92ecb9553fe0f9e71cdef38cc0a02edc3e3fa9c7 (clean)
+  built:   2026-05-14T10:25:17Z
   go:      go1.26
   os/arch: darwin/arm64
 ```
 
-Five fields:
-
 | Field | Source |
 |-------|--------|
-| **version** | Goreleaser-injected tag at release-build time (`-X main.version`). For local `go build`, defaults to `dev`. |
-| **commit** | Git SHA of the build commit (`-X main.commit`). For local `go build`, defaults to `none`. |
-| **built** | ISO-8601 timestamp of the build commit (`-X main.date`). For local `go build`, defaults to `unknown`. |
+| **version** | Goreleaser/Make-injected tag (`-X main.version`). `dev` for a plain `go build`. |
+| **commit** | Git SHA. From `-X main.commit` when stamped; otherwise from the VCS metadata the Go toolchain embeds in every `go build`. `unknown` only when neither exists. |
+| **built** | RFC 3339. From `-X main.date` when stamped, else the commit time from the VCS metadata. |
+| **(clean) / (uncommitted changes)** | From the embedded `vcs.modified` stamp. **Printed only when it is known** — a build with ldflags but no VCS metadata cannot tell, and says nothing rather than claiming "clean". |
 | **go** | `runtime.Version()` of the Go toolchain that compiled the binary. |
 | **os/arch** | `runtime.GOOS` and `runtime.GOARCH`. |
 
-The first three are baked at link time via ldflags; see the `builds`
-block in `.goreleaser.yml`. Local `go build` without flags omits them,
-which is how we tell a release artifact from a workstation build at a
-glance.
+<Note>
+  **`version` alone does not identify a build.** Every binary an
+  `-ldflags`-less `go build` has ever produced calls itself `dev` — including
+  every build `dev.sh` makes for a dev slot. That is why the commit is
+  resolved from the embedded VCS metadata when the link-time flags are
+  absent: it is the only source that answers on that path, and it is the one
+  path where "which build is this?" actually gets asked.
+</Note>
+
+## `--remote`: what is the server running?
+
+```
+$ crewship version --remote
+crewship v0.1.0-beta.1
+  commit:  92ecb9553fe0f9e71cdef38cc0a02edc3e3fa9c7 (clean)
+  built:   2026-05-14T10:25:17Z
+  go:      go1.26
+  os/arch: darwin/arm64
+
+server https://dev1.example.internal
+  version: dev
+  commit:  496c8c1a84be761abdb5cbe323a1fd501b8b9ab7 (clean)
+  built:   2026-08-01T09:12:03Z
+  go:      go1.26.5
+  os/arch: linux/amd64
+  schema:  20260801150210
+```
+
+`schema` is the highest migration the **server binary** can apply. Past the
+closed legacy sequential block a migration version is a `YYYYMMDDHHMMSS`
+timestamp, so the number also dates the newest schema change that build
+contains. A running server has already migrated its database up to it.
+
+Requires auth (`crewship login`) and honours the usual target resolution —
+`--server`, `CREWSHIP_SERVER`, `--profile`, then the config default. Note
+`--server` keeps its normal meaning (the target URL); the boolean is
+`--remote`:
+
+```bash
+crewship version --remote --server https://dev2.example.internal
+```
+
+Two things this answers that nothing else did:
+
+- **Did the deployment land?** Compare the server's `commit` against what
+  `origin/main` is at. A slot that silently stopped tracking a branch shows
+  a build older than the merge immediately, instead of after an hour of
+  archaeology through container configs and agent prompts.
+- **Which side is stale?** A missing API field is either a server that has
+  not been redeployed or a CLI that has not been updated. The two blocks side
+  by side settle it without guessing.
+
+Without `--remote` the command touches no network at all — it is the first
+thing you run on a broken install, and a dial here would turn a local
+question into a timeout.
 
 ## Comparison with `--version` flags
 
@@ -48,45 +106,55 @@ flag parsing. Use `crewship version` as the single, unambiguous way.
 
 ## Programmatic version checks
 
-For scripts that need to act on the running binary's version, parse
-the first line. Bash:
+Use `--format json` rather than parsing the human output:
 
 ```bash
-ver=$(crewship version | head -n1 | awk '{print $2}')
-echo "running: $ver"
-```
-
-Or JSON for tools that want structured output — wrap it:
-
-```bash
-crewship version | awk '
-  /^crewship/ { ver=$2 }
-  /^  commit/ { sha=$2 }
-  /^  built/  { date=$2 }
-  END { printf "{\"version\":\"%s\",\"commit\":\"%s\",\"built\":\"%s\"}\n", ver, sha, date }
-'
-```
-
-For long-term scriptable version checks, the server also exposes
-`GET /api/v1/system/version` which returns:
-
-```json
+$ crewship version --remote --format json
 {
-  "current": "v0.1.0-beta.1",
-  "latest":  "v0.1.0",
-  "newer":   true,
-  "url":     "https://github.com/crewship-ai/crewship/releases/tag/v0.1.0"
+  "client": {
+    "version": "v0.1.0-beta.1",
+    "commit": "92ecb9553fe0f9e71cdef38cc0a02edc3e3fa9c7",
+    "build_time": "2026-05-14T10:25:17Z",
+    "dirty": false,
+    "go_version": "go1.26",
+    "os": "darwin",
+    "arch": "arm64"
+  },
+  "server": {
+    "url": "https://dev1.example.internal",
+    "version": "dev",
+    "commit": "496c8c1a84be761abdb5cbe323a1fd501b8b9ab7",
+    "build_time": "2026-08-01T09:12:03Z",
+    "dirty": false,
+    "go_version": "go1.26.5",
+    "os": "linux",
+    "arch": "amd64",
+    "schema_version": 20260801150210
+  }
 }
 ```
 
-(Authenticated endpoint. The `latest` / `newer` / `url` fields drive
-the update-available banner in the web UI.)
+The `server` key is absent entirely without `--remote`. `dirty` is `null`
+when the build carries no VCS metadata — treat `null` as "unknown", not as
+"clean".
+
+A deploy check, in one line:
+
+```bash
+deployed=$(crewship version --remote --format json | jq -r .server.commit)
+[ "$deployed" = "$(git rev-parse origin/main)" ] || echo "server is not on main: $deployed"
+```
+
+The underlying endpoint is `GET /api/v1/system/version`
+([reference](/api-reference/admin#get-api-v1-system-version)); its
+`latest` / `newer` / `url` fields drive the update-available banner in the
+web UI.
 
 ## Update available?
 
-`crewship version` itself does **not** hit the network — it only prints
-the compiled-in metadata above. The update-availability banner is
-printed by [`crewship doctor`](/cli/doctor) and logged at boot by
+`crewship version` does **not** check for new releases, with or without
+`--remote`. The update-availability banner is printed by
+[`crewship doctor`](/cli/doctor) and logged at boot by
 [`crewship start`](/cli/start); both call `internal/update.Check`.
 
 Suppress that check via env:
@@ -100,8 +168,8 @@ skips silently for `version=dev` (local `go build` / `go run`).
 
 ## Related
 
-- [`crewship doctor`](/cli/doctor) — full pre-flight diagnostic;
-  uses the same update-check infrastructure.
+- [`crewship doctor`](/cli/doctor) — full pre-flight diagnostic, including
+  the local database's migration version.
 - [`crewship start`](/cli/start) — boot flow that logs the same
   version string at INFO level.
 - [Install](/guides/install) — what each install path gives you.

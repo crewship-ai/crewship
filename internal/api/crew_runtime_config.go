@@ -104,10 +104,22 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 	}
 
 	cfg := provider.CrewConfig{
-		ID:          crewID,
-		Slug:        slug,
-		MemoryMB:    int(memoryMB.Int64),
-		CPUs:        cpus.Float64,
+		ID:   crewID,
+		Slug: slug,
+		// #1643: this read the raw columns, so a row still holding the
+		// "use the server default" sentinel — 0, as `PATCH /crews/{id}`
+		// wrote it before #1641 resolved it — arrived here as 0 and hit the
+		// docker provider's own `<= 0` fallback of 8192: twice the 4096 the
+		// create path, the schema DEFAULT and the docs all promise.
+		//
+		// The backfill migration clears the rows that exist. This clears the
+		// ones that arrive later: a restore re-inserts the source bundle's
+		// rows verbatim and file migrations carry no restore-backfill hook,
+		// so a bundle from before the fix puts the 0s straight back. Same
+		// argument, same shape, and the same three lines down as the TTL
+		// resolution #1662 added for exactly this reason.
+		MemoryMB:    resolveCrewContainerMemoryMB(int(memoryMB.Int64)),
+		CPUs:        resolveCrewContainerCPUs(cpus.Float64),
 		NetworkMode: networkMode.String,
 		// #1662: this read the raw column, so a NULL arrived as 0 — which the
 		// reaper reads as "never stop". It is the field the two wake paths

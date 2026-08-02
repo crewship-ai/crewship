@@ -447,13 +447,48 @@ func (h *InboxHandler) enrichEscalationFourEyes(ctx context.Context, workspaceID
 	// The agents JOIN is deliberately inner: no agent row means no recorded
 	// owner to compare against, which is the case where the rule cannot be
 	// enforced — such a row drops out of this map and claims nothing.
+	// Two sources, one shape. An escalation-backed row's source_id is an
+	// escalations id; a KEEPER credential escalation's is a keeper_requests id and
+	// has no escalations row at all — keeper_request.go writes the inbox item
+	// directly (the same fact humanInboxSQL in the eval corpus relies on).
+	//
+	// Reading only the first table is what left the keeper card silent: #1574 put
+	// the four-eyes notice in the inbox precisely so an operator would not meet
+	// the 403 cold, and then #1671 gave that card an Approve button while the
+	// notice was still never fed for it. An OWNER pressed Approve on an L4 request
+	// and got a refusal the card had given no hint of.
+	//
+	// keeper_requests is NOT only credential requests: request_type also admits
+	// skill_review, behavior, memory_health and negative_learning, and five sites
+	// in keeper_phase2.go write inbox escalations for those with source_id = the
+	// keeper request id and target_role=MANAGER — legitimately, since none of them
+	// names a credential. Matching every keeper request would tell a skill review
+	// it needs a second approver, which it never will: four-eyes is a rule about
+	// credential escalations and there is no credential here to be refused over. A
+	// warning that cannot come true is worse than none, because it teaches the
+	// operator to skip the one that can.
+	//
+	// So the filter is `access`/`execute` — the two types that name a credential —
+	// and the reported type is a literal because for those two it is always
+	// CREDENTIAL. The agents JOIN stays inner for the same reason as above: no
+	// recorded owner means nothing to compare an approver against, so the row drops
+	// out and claims nothing.
 	args := append([]interface{}{workspaceID}, ids...)
+	args = append(args, workspaceID)
+	args = append(args, ids...)
 	q, err := h.db.QueryContext(ctx, `
 		SELECT e.id, e.type, COALESCE(a.created_by_user_id, ''), c.security_level
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
-		WHERE e.workspace_id = ? AND e.id IN (`+sqlPlaceholders(len(ids))+`)`,
+		WHERE e.workspace_id = ? AND e.id IN (`+sqlPlaceholders(len(ids))+`)
+		UNION ALL
+		SELECT kr.id, 'CREDENTIAL', COALESCE(a.created_by_user_id, ''), c.security_level
+		FROM keeper_requests kr
+		JOIN agents a ON a.id = kr.requesting_agent_id
+		LEFT JOIN credentials c ON c.id = kr.credential_id AND c.workspace_id = a.workspace_id
+		WHERE a.workspace_id = ? AND kr.request_type IN ('access','execute')
+		  AND kr.id IN (`+sqlPlaceholders(len(ids))+`)`,
 		args...)
 	if err != nil {
 		h.logger.Warn("inbox four-eyes enrich", "error", err)

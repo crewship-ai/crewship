@@ -261,6 +261,16 @@ func applyRegistry(ctx context.Context, db *sql.DB, regs []migration, logger *sl
 	return nil
 }
 
+// MaxKnownMigrationVersion is the highest schema version this binary can
+// apply. Exported for the callers that need to name the schema a *binary*
+// expects rather than the one a database happens to be at: GET
+// /api/v1/system/version reports it so a remote CLI can compare, and
+// `crewship doctor` compares it against the local DB. Both used to carry
+// a hand-bumped copy of the number, which is how doctor spent ~80
+// migrations telling every healthy install its schema was "newer than the
+// CLI knows about".
+func MaxKnownMigrationVersion() int { return maxKnownMigrationVersion() }
+
 // maxKnownMigrationVersion is the highest schema version this binary can
 // apply — the ceiling the version-skew guard compares the DB against.
 func maxKnownMigrationVersion() int {

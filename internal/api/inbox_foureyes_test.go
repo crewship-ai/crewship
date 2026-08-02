@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -352,5 +353,224 @@ func TestInboxList_FourEyesLeavesOtherKindsAlone(t *testing.T) {
 		if row.Kind == "message" && (row.SecondApproverRequired || row.SecurityLevelLabel != "") {
 			t.Errorf("a message row picked up a four-eyes claim from a colliding source_id: %+v", row)
 		}
+	}
+}
+
+// A KEEPER credential escalation carries a keeper_requests id in source_id, not
+// an escalations id — it has no backing escalations row at all (see corpus.go on
+// humanInboxSQL, and keeper_request.go which writes the item directly). So the
+// enrichment's `FROM escalations e WHERE e.id IN (…)` matches nothing for it, and
+// every four-eyes field stays false.
+//
+// That did not matter while the card had no buttons. #1671 gave it Approve and
+// Deny, and the notice #1574 added to the inbox *specifically so an operator
+// would not meet the 403 cold* went on rendering nothing — because it was never
+// fed. On dev2 an OWNER pressed Approve on an L4 request and got a refusal the
+// card had given no hint of.
+//
+// The rule itself is right, and so is the RBAC: `manage` is OWNER **or** ADMIN,
+// and an ADMIN who does not own the agent can approve. What was wrong is that
+// the card promised something it could not deliver to the person reading it.
+func seedKeeperInboxFourEyes(t *testing.T, level keeper.SecurityLevel, toggleOn bool) (*InboxHandler, string, string) {
+	t.Helper()
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	crewID := seedCrewRow(t, db, "kife-crew", wsID, "Crew", "kife-crew")
+	agentID := "kife-agent"
+	seedOwnedAgent(t, db, agentID, wsID, crewID, ownerID)
+
+	execOrFatal(t, db, `INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, provider, scope, security_level, status, created_by)
+		VALUES ('kife-cred', ?, 'PROD_DB_ADMIN', 'v1:aW52YWxpZA==', 'SECRET', 'NONE', 'WORKSPACE', ?, 'ACTIVE', ?)`,
+		wsID, int(level), ownerID)
+
+	// The keeper's own row: no escalations row anywhere, which is the point.
+	execOrFatal(t, db, `INSERT INTO keeper_requests
+		(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kife-kr', 'access', ?, ?, 'kife-cred', 'migrate the orders table', 'ESCALATE')`,
+		agentID, crewID)
+
+	execOrFatal(t, db, `INSERT INTO inbox_items
+		(id, workspace_id, kind, source_id, target_role, title, body_md,
+		 sender_type, sender_id, sender_name, state, priority, blocking,
+		 payload_json, created_at, updated_at)
+		VALUES ('kife-inbox', ?, 'escalation', 'kife-kr', 'ADMIN',
+		 'Keeper escalation: Agent requested PROD_DB_ADMIN', '',
+		 'agent', ?, ?, 'unread', 'high', 1,
+		 '{"request_type":"access","request_id":"kife-kr"}', datetime('now'), datetime('now'))`,
+		wsID, agentID, agentID)
+
+	if toggleOn {
+		if err := governance.Upsert(context.Background(), db, wsID,
+			governance.Settings{RequireSecondApprover: true}, ownerID); err != nil {
+			t.Fatalf("enable require_second_approver: %v", err)
+		}
+	}
+	return NewInboxHandler(db, newTestLogger(), nil), ownerID, wsID
+}
+
+// L4 forces the rule whatever the workspace toggle says, so the card must warn
+// even on an instance that has deliberately switched second approvers off.
+func TestInboxList_KeeperEscalationCarriesFourEyes(t *testing.T) {
+	h, ownerID, wsID := seedKeeperInboxFourEyes(t, keeper.SecurityLevelL4, false)
+
+	for _, row := range listInbox(t, h, ownerID, wsID) {
+		if row.SourceID != "kife-kr" {
+			continue
+		}
+		if !row.SecondApproverRequired {
+			t.Error("the keeper escalation claims no second approver is needed; " +
+				"the card offers Approve and the server will refuse the agent's owner")
+		}
+		if !row.SecondApproverByTier {
+			t.Error("by_tier is false for an L4 credential — the tier forces the rule " +
+				"regardless of the workspace toggle, and that is the half the operator cannot switch off")
+		}
+		if row.SecurityLevelLabel == "" {
+			t.Error("no tier label, so the notice cannot say WHICH tier is demanding it")
+		}
+		return
+	}
+	t.Fatal("the keeper escalation is not in the inbox at all")
+}
+
+// A low-tier keeper request must claim nothing: warning where no refusal is
+// coming trains the operator to ignore the warning that matters.
+func TestInboxList_KeeperEscalationBelowTheFloorClaimsNothing(t *testing.T) {
+	h, ownerID, wsID := seedKeeperInboxFourEyes(t, keeper.SecurityLevelL1, false)
+
+	for _, row := range listInbox(t, h, ownerID, wsID) {
+		if row.SourceID != "kife-kr" {
+			continue
+		}
+		if row.SecondApproverRequired {
+			t.Error("an L1 keeper request threatens a second approver that will never be demanded")
+		}
+		return
+	}
+	t.Fatal("the keeper escalation is not in the inbox at all")
+}
+
+// And the workspace toggle reaches keeper requests too, at any tier.
+func TestInboxList_KeeperEscalationHonoursTheWorkspaceToggle(t *testing.T) {
+	h, ownerID, wsID := seedKeeperInboxFourEyes(t, keeper.SecurityLevelL1, true)
+
+	for _, row := range listInbox(t, h, ownerID, wsID) {
+		if row.SourceID != "kife-kr" {
+			continue
+		}
+		if !row.SecondApproverByWorkspace || !row.SecondApproverRequired {
+			t.Error("the workspace toggle is on and the row does not say so")
+		}
+		return
+	}
+	t.Fatal("the keeper escalation is not in the inbox at all")
+}
+
+// The enrichment query just grew a second branch, and a widened query is where
+// tenant scoping gets lost. keeper_requests has no workspace_id column of its
+// own, so the scope comes from the requesting agent's — and a mistake there
+// would let one tenant's inbox row take its tier and its agent-owner from
+// another tenant's request.
+func TestInboxList_KeeperFourEyesDoesNotCrossTenants(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	crewID := seedCrewRow(t, db, "xt-crew", wsID, "Crew", "xt-crew")
+	agentID := "xt-agent"
+	seedOwnedAgent(t, db, agentID, wsID, crewID, ownerID)
+
+	// Another tenant, holding an L4 request whose id the victim's row names.
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES ('xt-owner', 'xt@ex.com', 'XT')`)
+	execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('xt-ws', 'Other', 'other')`)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('xt-crew2', 'xt-ws', 'C', 'c')`)
+	execOrFatal(t, db, `INSERT INTO agents (id, workspace_id, crew_id, name, slug, created_by_user_id)
+		VALUES ('xt-agent2', 'xt-ws', 'xt-crew2', 'A', 'a', 'xt-owner')`)
+	execOrFatal(t, db, `INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, provider, scope, security_level, status, created_by)
+		VALUES ('xt-cred', 'xt-ws', 'PROD', 'v1:aW52YWxpZA==', 'SECRET', 'NONE', 'WORKSPACE', 4, 'ACTIVE', 'xt-owner')`)
+	execOrFatal(t, db, `INSERT INTO keeper_requests
+		(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('xt-kr', 'access', 'xt-agent2', 'xt-crew2', 'xt-cred', 'x', 'ESCALATE')`)
+
+	// The victim's inbox row points at the OTHER tenant's request id.
+	execOrFatal(t, db, `INSERT INTO inbox_items
+		(id, workspace_id, kind, source_id, target_role, title, body_md,
+		 sender_type, sender_id, sender_name, state, priority, blocking,
+		 payload_json, created_at, updated_at)
+		VALUES ('xt-inbox', ?, 'escalation', 'xt-kr', 'ADMIN', 'Keeper escalation', '',
+		 'agent', ?, ?, 'unread', 'high', 1, '{"request_type":"access"}',
+		 datetime('now'), datetime('now'))`, wsID, agentID, agentID)
+
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	for _, row := range listInbox(t, h, ownerID, wsID) {
+		if row.SourceID != "xt-kr" {
+			continue
+		}
+		if row.SecondApproverRequired || row.SecondApproverByTier || row.SecurityLevelLabel != "" {
+			t.Fatalf("another tenant's L4 request leaked into this row: required=%v by_tier=%v label=%q",
+				row.SecondApproverRequired, row.SecondApproverByTier, row.SecurityLevelLabel)
+		}
+		return
+	}
+	t.Fatal("the row is not in the inbox at all")
+}
+
+// keeper_requests is not only credential requests. request_type also admits
+// skill_review, behavior, memory_health and negative_learning — five sites in
+// keeper_phase2.go write inbox escalations for those with SourceID = the keeper
+// request id and TargetRole=MANAGER, legitimately, because none of them names a
+// credential.
+//
+// So a keeper branch that matches every keeper request tells a skill review it
+// needs a second approver. It never will: four-eyes is a rule about credential
+// escalations, and there is no credential here to be refused over. A warning
+// that will not come true is worse than none — it teaches the operator to skip
+// the one that will.
+func TestInboxList_NonCredentialKeeperRequestClaimsNothing(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	crewID := seedCrewRow(t, db, "nc-crew", wsID, "Crew", "nc-crew")
+	seedOwnedAgent(t, db, "nc-agent", wsID, crewID, ownerID)
+
+	// The workspace toggle is ON — the case where a match would claim the most.
+	if err := governance.Upsert(context.Background(), db, wsID,
+		governance.Settings{RequireSecondApprover: true}, ownerID); err != nil {
+		t.Fatalf("enable require_second_approver: %v", err)
+	}
+
+	for _, rt := range []string{"skill_review", "behavior", "memory_health", "negative_learning"} {
+		execOrFatal(t, db, `INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, intent, decision)
+			VALUES (?, ?, 'nc-agent', ?, 'x', 'ESCALATE')`, "kr-"+rt, rt, crewID)
+		execOrFatal(t, db, `INSERT INTO inbox_items
+			(id, workspace_id, kind, source_id, target_role, title, body_md,
+			 sender_type, sender_id, sender_name, state, priority, blocking,
+			 payload_json, created_at, updated_at)
+			VALUES (?, ?, 'escalation', ?, 'MANAGER', 'Keeper review', '',
+			 'agent', 'nc-agent', 'nc-agent', 'unread', 'medium', 0, '{}',
+			 datetime('now'), datetime('now'))`, "ibx-"+rt, wsID, "kr-"+rt)
+	}
+
+	h := NewInboxHandler(db, newTestLogger(), nil)
+	rows := listInbox(t, h, ownerID, wsID)
+	seen := 0
+	for _, row := range rows {
+		if !strings.HasPrefix(row.SourceID, "kr-") {
+			continue
+		}
+		seen++
+		if row.SecondApproverRequired || row.SecondApproverByWorkspace {
+			t.Errorf("%s claims a second approver is needed; four-eyes is a rule about "+
+				"credential escalations and this one names no credential", row.SourceID)
+		}
+	}
+	if seen != 4 {
+		t.Fatalf("saw %d non-credential keeper rows, want 4", seen)
 	}
 }

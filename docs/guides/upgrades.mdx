@@ -191,6 +191,52 @@ restore the pre-migration snapshot with `crewship db restore-snapshot` (see
 stop/swap/start/rollback (the macOS analogue of `--systemd`) is not yet
 available.
 
+## Verify the upgrade actually landed
+
+A binary swap that did not take, a service that was never restarted, or a
+deployment pinned to a branch that no longer exists all look identical from
+the outside: the server answers, and answers with the old code. Ask it what
+build it is running.
+
+```bash
+crewship version --remote
+```
+
+```
+crewship v0.1.0-beta.2
+  commit:  92ecb9553fe0f9e71cdef38cc0a02edc3e3fa9c7 (clean)
+  built:   2026-05-14T10:25:17Z
+  go:      go1.26
+  os/arch: darwin/arm64
+
+server https://dev1.example.internal
+  version: v0.1.0-beta.1
+  commit:  496c8c1a84be761abdb5cbe323a1fd501b8b9ab7 (clean)
+  built:   2026-08-01T09:12:03Z
+  go:      go1.26.5
+  os/arch: linux/amd64
+  schema:  20260801150210
+```
+
+The `commit` line is the one that settles it — compare it against the commit
+you expected to deploy. `version` cannot: every binary built without
+`-ldflags` reports `dev`, so a tracking deployment looks unchanged forever.
+
+This is also how you tell **which side** is stale when an API call fails on
+an unknown field: a server older than the change, or a CLI older than the
+change. The two blocks side by side answer it without guessing. Scriptable:
+
+```bash
+deployed=$(crewship version --remote --format json | jq -r .server.commit)
+[ "$deployed" = "$(git rev-parse origin/main)" ] || echo "server is not on main: $deployed"
+```
+
+`schema` is the highest migration the server binary can apply — a
+`YYYYMMDDHHMMSS` timestamp for anything past the legacy sequential block, so
+it also dates the newest schema change that build carries. Compare it against
+the local database's applied version reported by
+[`crewship doctor`](/cli/doctor).
+
 ## Install channels & their upgrade path
 
 Beyond Homebrew and the installer, Crewship ships native Linux packages and an

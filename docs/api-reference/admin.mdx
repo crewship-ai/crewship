@@ -36,7 +36,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `POST` | [/api/v1/internal/keeper/negative-learning](#post-api-v1-internal-keeper-negative-learning) | F4.4 — failure-event lesson capture |
 | `GET` | [/api/v1/system/setup-status](#get-api-v1-system-setup-status) | First-run bootstrap + signup gate |
 | `GET` | [/api/v1/system/telemetry](#get-api-v1-system-telemetry) | Read-only Sentry consent gate |
-| `GET` | [/api/v1/system/version](#get-api-v1-system-version) | Running binary version + latest release |
+| `GET` | [/api/v1/system/version](#get-api-v1-system-version) | Running binary's build identity + latest release |
 | `GET` | [/api/v1/metrics/timeseries](#get-api-v1-metrics-timeseries) | Bucketed time-series metrics for dashboard charts |
 
 ## Stats & users
@@ -1044,7 +1044,9 @@ Errors fall back to `{enabled: false, install_id: ""}` rather than 5xx -- a tran
 
 ### GET /api/v1/system/version
 
-Reports the running binary's version and (cache-permitting) the latest release from GitHub. The web UI uses this to render an "update available" banner.
+Reports the running binary's **build identity** and (cache-permitting) the latest release from GitHub. The web UI uses `current`/`latest`/`newer`/`url` to render an "update available" banner; the build fields answer the separate question of *which build this server actually is*.
+
+This is the only way to ask a running server what it is. `crewship version --remote` is the CLI for it.
 
 **Auth:** required (any authenticated user, no workspace role needed).
 
@@ -1055,18 +1057,36 @@ Reports the running binary's version and (cache-permitting) the latest release f
   "current": "0.4.1",
   "latest": "0.4.2",
   "newer": true,
-  "url": "https://github.com/crewship-ai/crewship/releases/tag/v0.4.2"
+  "url": "https://github.com/crewship-ai/crewship/releases/tag/v0.4.2",
+
+  "commit": "496c8c1a84be761abdb5cbe323a1fd501b8b9ab7",
+  "build_time": "2026-08-02T15:35:24Z",
+  "dirty": false,
+  "go_version": "go1.26.5",
+  "os": "linux",
+  "arch": "amd64",
+  "schema_version": 20260801150210
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `current` | string | The running binary's version (`SetVersion`-injected from `cmd_start`). |
+| `current` | string | The running binary's version (`SetBuild`-injected from `cmd_start`). `"dev"` for any build made without `-ldflags`. |
 | `latest` | string? | Latest release tag from GitHub. `null` on a cold cache + GitHub timeout. |
 | `newer` | boolean | `true` when `latest > current` by semver. |
 | `url` | string? | Release page URL. `null` paired with `null` `latest`. |
+| `commit` | string | Full git SHA of the build. Falls back to the binary's embedded VCS stamp when no `-ldflags` were passed, which is the only source an unstamped build has. `""` when neither is available (`go run`, `go install` from the module proxy). |
+| `build_time` | string | RFC 3339. The `-ldflags` build date, else the commit time from the VCS stamp. `""` when unknown. |
+| `dirty` | boolean? | Whether the working tree had uncommitted changes at build time. **`null` means unknown** -- a build with `-ldflags` but no VCS stamping (the Dockerfile path) genuinely does not know, and reporting that as `false` would be a confident wrong answer. |
+| `go_version` | string | Go toolchain that compiled the server. |
+| `os` / `arch` | string | `GOOS` / `GOARCH` of the server binary. |
+| `schema_version` | integer | The highest migration this server binary can apply. For anything past the closed legacy sequential block this is a `YYYYMMDDHHMMSS` timestamp, so it also dates the newest schema change the build contains. A booted server has already migrated its database to this number. |
 
-The handler imposes a 4 s upper bound on top of the update package's 5 s internal HTTP timeout -- a cold cache + slow network still returns "no info" rather than blocking the UI render.
+The handler imposes a 4 s upper bound on top of the update package's 5 s internal HTTP timeout -- a cold cache + slow network still returns "no info" rather than blocking the UI render. The build fields are computed in-process and are unaffected by it.
+
+<Note>
+  `current` alone cannot identify a build. Every binary an `-ldflags`-less `go build` has ever produced calls itself `dev` -- which is how a dev slot once sat a full day behind `main` with nothing able to say so. Compare `commit`.
+</Note>
 
 ### GET /api/v1/metrics/timeseries
 

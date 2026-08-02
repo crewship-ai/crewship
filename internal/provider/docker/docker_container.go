@@ -1162,15 +1162,39 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 		// them while keeping its mounts, network and credentials. The sidecar
 		// has carried the same label set since the H7 audit (sidecar.go).
 		//
-		// Note these do NOT displace the crewship.temp=provision label the
-		// container inherits from its committed cache image; see
-		// TestSweepOrphanTempContainers_SparesLiveCrewContainers for why that
-		// inherited label cannot be used as an identity marker.
 		Labels: map[string]string{
 			"managed-by":       "crewship",
 			"crewship.kind":    "crew",
 			"crewship.crew":    team.Slug,
 			"crewship.crew-id": team.ID,
+			// …and one label set for what it is NOT (#1644). The provisioner
+			// labels its scratch container crewship.temp=provision and commits
+			// it into crewship-cache:<hash>; commit copies the source
+			// container's labels into the image, and the daemon merges an image
+			// label into every container started from it for any key the create
+			// request leaves unset. A crew container therefore INHERITED
+			// crewship.temp=provision and looked, to a label filter, exactly
+			// like a leaked scratch container — which on 2026-07-20 cost a
+			// healthy crew on crewship-dev, force-removed by the orphan sweeper
+			// an hour into its life.
+			//
+			// The sweeper grew a name-based guard for that
+			// (hasTempContainerName), and the name is still the authority for
+			// deletion. This closes the hole a layer earlier so the guard is
+			// belt-and-braces rather than the only thing standing between a
+			// live crew and a GC pass: every present and future sweeper, ours
+			// or an operator's `docker ps --filter`, now sees a crew container
+			// that does not claim to be temporary.
+			//
+			// The empty string is a real value, not a no-op: the daemon's merge
+			// is keyed on key PRESENCE, so an explicitly-empty value wins over
+			// the image's. Measured on docker 29.3.0 — a container created with
+			// `--label crewship.temp=` from an image labelled
+			// crewship.temp=provision reports {"crewship.temp":""} and drops
+			// out of `docker ps --filter label=crewship.temp=provision`. Note a
+			// KEY-ONLY filter (`--filter label=crewship.temp`) still matches it,
+			// which is the second reason the sweeper keeps deciding on the name.
+			devcontainer.TempContainerLabelKey: "",
 		},
 		// Explicit stop grace period so a plain `docker stop`, a daemon
 		// shutdown and the restart policy all use the same window
