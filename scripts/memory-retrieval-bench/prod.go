@@ -143,7 +143,7 @@ func sectionProdPath() {
 	fmt.Printf("\n**%d/%d queries found the right file. %d returned ZERO hits.**\n\n",
 		found, len(realQueries), zero)
 
-	fmt.Println("Failure mechanism — the MATCH expression the sanitiser builds:")
+	fmt.Println("The MATCH expression the shipping sanitiser builds:")
 	fmt.Println()
 	fmt.Println("| query | MATCH expression sent to FTS5 |")
 	fmt.Println("|---|---|")
@@ -151,14 +151,19 @@ func sectionProdPath() {
 		fmt.Printf("| `%s` | `%s` |\n", q.q, memory.SanitizeFTSQueryForBench(q.q))
 	}
 	fmt.Println()
-	fmt.Println("FTS5's implicit operator between two bare terms is **AND**, so an")
-	fmt.Println("N-word question requires all N words in ONE ~500-char chunk.")
+	fmt.Println("FTS5's implicit operator between two bare terms is **AND**, so a")
+	fmt.Println("space-joined N-word question requires all N words in ONE ~500-char")
+	fmt.Println("chunk — the #1678 failure. Since #1678 the builder emits")
+	fmt.Println("phrase-OR-terms with stopwords removed instead.")
 	fmt.Println()
 
-	// Show the same queries under an OR rewrite, to size the headroom.
+	// The bare term-OR-term arm, kept as the comparison the fix was
+	// chosen against. The first column is whatever the shipping builder
+	// does today, so this table is the before/after when run either side
+	// of a change to sanitizeFTSQuery.
 	fmt.Println("Same corpus, same engine, queries rewritten term-OR-term:")
 	fmt.Println()
-	fmt.Println("| query | AND (today) | OR (rewrite) |")
+	fmt.Println("| query | production builder | bare OR |")
 	fmt.Println("|---|---|---|")
 	var andF, orF int
 	for _, q := range realQueries {
@@ -175,7 +180,7 @@ func sectionProdPath() {
 		}
 		fmt.Printf("| `%s` | %s (%d hits) | %s (%d hits) |\n", q.q, tick(af), len(a), tick(of), len(o))
 	}
-	fmt.Printf("\n**AND %d/%d → OR %d/%d.**\n\n", andF, len(realQueries), orF, len(realQueries))
+	fmt.Printf("\n**production %d/%d → bare OR %d/%d.**\n\n", andF, len(realQueries), orF, len(realQueries))
 }
 
 func quoteEach(ws []string) []string {
@@ -201,11 +206,14 @@ func containsFile(rs []memory.SearchResult, f string) bool {
 // -------------------------------------- 8. the `file` column and BM25 weights
 
 func sectionColumnWeights() {
-	fmt.Println("## 8. The `file` column is searchable, and unweighted")
+	fmt.Println("## 8. The `file` column, and why bm25 weights could not fix it")
 	fmt.Println()
-	fmt.Println("`memory_chunks` is `fts5(file, content)` with no `UNINDEXED` on")
-	fmt.Println("`file` and no bm25 weights, so a path fragment is a full-strength")
-	fmt.Println("search term competing with the note's actual prose.")
+	fmt.Println("`memory_chunks` used to be `fts5(file, content)` with `file`")
+	fmt.Println("SEARCHABLE, so a path fragment was a full-strength search term")
+	fmt.Println("competing with the note's prose — `md` matched 100% of a markdown")
+	fmt.Println("corpus. Since #1678 the column is `file UNINDEXED`. The list below")
+	fmt.Println("is the shipping engine; the table after it is the same corpus")
+	fmt.Println("measured both ways, which is the comparison that decided it.")
 	fmt.Println()
 	dir, e := newProdEngine()
 	defer os.RemoveAll(dir)

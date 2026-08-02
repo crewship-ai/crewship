@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -59,6 +60,13 @@ type Engine struct {
 	// which reseeds it, so a cold map just means the first per-file write does
 	// the (still O(file), not O(corpus)) re-chunk it would have done anyway.
 	fileHashes map[string]string
+
+	// writesSinceOptimize counts committed ReindexPath calls since the last
+	// FTS5 `optimize`. Guarded by e.mu, like fileHashes, and in memory only:
+	// losing the count on restart just means the next optimize is at most
+	// optimizeEveryNWrites writes late, and the sidecar's boot Reindex
+	// optimizes anyway. See optimizeEveryNWrites.
+	writesSinceOptimize int
 }
 
 // New creates a memory engine for the given base path (e.g. /output/{agent}/.memory/).
@@ -95,20 +103,179 @@ func New(basePath string, cfg Config) (*Engine, error) {
 	}, nil
 }
 
-func initSchema(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE VIRTUAL TABLE IF NOT EXISTS memory_chunks USING fts5(
-			file,
-			content,
-			tokenize='unicode61'
-		);
+// memoryChunksDDL is the ONE definition of the FTS5 index. It is written
+// verbatim on a fresh database and compared verbatim against
+// sqlite_master.sql on an existing one (see chunksSchemaIsCurrent), so
+// changing this constant is what triggers a rebuild of every already-built
+// index — there is no second place to remember to bump.
+//
+// `file UNINDEXED` is load-bearing and not cosmetic (#1678): with `file`
+// searchable, the token "md" matched every chunk of every markdown file and
+// "daily" matched every daily note. Under the old implicit-AND query builder
+// that stayed invisible (an extra required term only makes a query stricter);
+// under the OR builder in search.go it would return the whole tier for any
+// question containing a path word. Path-scoped search is the `tier` argument
+// on memory.search, not a silent term in the free-text match.
+//
+// No "IF NOT EXISTS": initSchema decides whether to create, and SQLite
+// strips the clause from sqlite_master.sql anyway, which would break the
+// verbatim comparison.
+const memoryChunksDDL = `CREATE VIRTUAL TABLE memory_chunks USING fts5(
+	file UNINDEXED,
+	content,
+	tokenize='unicode61'
+)`
 
+// chunksSchemaIsCurrent reports whether a memory_chunks definition read out
+// of sqlite_master matches memoryChunksDDL. The comparison is on normalised
+// whitespace only: SQLite stores the CREATE statement's text verbatim apart
+// from an `IF NOT EXISTS` clause, so this recognises exactly what this code
+// writes and nothing else.
+//
+// Comparing against the DDL rather than against a version counter in
+// memory_meta is deliberate. A counter can disagree with the table it
+// claims to describe — a database restored from a backup, or written by an
+// older binary that never had the row — and the failure is silent: the
+// index keeps the old column definition while claiming to be current.
+func chunksSchemaIsCurrent(storedSQL string) bool {
+	return normaliseDDL(storedSQL) == normaliseDDL(memoryChunksDDL)
+}
+
+func normaliseDDL(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// optimizeEveryNWrites is how many ReindexPath calls pass between FTS5
+// `optimize` runs (#1678 §7.3).
+//
+// FTS5 never rewrites its index in place: every ReindexPath is a DELETE
+// (which appends tombstones) plus N INSERTs (which append segments), so a
+// long-lived agent's index fragments monotonically and queries slow down
+// against data that never changed. Measured on one daily note rewritten
+// 3000 times — the exact shape memory.write produces — the index went from
+// 197µs to 36µs per query for 3ms of total optimize work.
+//
+// The cadence is a cost/benefit pick, not a tuned constant. `optimize` is
+// O(index), so running it per write would dominate an 86µs write; running
+// it never is what we have today. 200 writes is ~1% overhead on the write
+// path at the measured cost, and bounds fragmentation to roughly one
+// merge's worth. It is also well inside a single agent's daily write
+// volume, so an index that is quiet overnight is never left fragmented for
+// long. Nothing depends on the exact value: it changes when maintenance
+// happens, never what the index contains.
+const optimizeEveryNWrites = 200
+
+// initSchema brings an index.sqlite up to memoryChunksDDL, creating it if
+// it does not exist and rebuilding it in place if it was created by an
+// older definition.
+//
+// The rebuild is the part that is easy to get wrong, and both wrong answers
+// are worse than the bug they fix:
+//
+//   - `CREATE VIRTUAL TABLE IF NOT EXISTS` — what this used to do — leaves
+//     an existing table alone. Every index.sqlite written before #1678
+//     would keep `file` as a SEARCHABLE column forever, so the OR query
+//     builder would ship without its prerequisite and hand back a whole
+//     tier for any question containing a path word.
+//   - DROP + CREATE without carrying the rows over would empty the index
+//     until something ran a full Reindex. The sidecar does run one at boot
+//     (sidecar/server.go), but it is not the only caller of New — the CLI's
+//     `crewship memory` path and the workspace tier construct engines too —
+//     so "the caller will reindex" is not a property this function may
+//     assume.
+//
+// So the rows are copied through a plain staging table and re-inserted into
+// the new virtual table, all inside one transaction: a crash mid-migration
+// leaves either the old index or the new one, never an empty one. The
+// content is identical either way — (file, content) is all memory_chunks
+// has ever stored — so nothing is lost and no reindex is required.
+func initSchema(db *sql.DB) error {
+	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS memory_meta (
 			key TEXT PRIMARY KEY,
 			value TEXT
 		);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+
+	stored, err := storedChunksDDL(db)
+	if err != nil {
+		return err
+	}
+	if stored == "" {
+		_, err := db.Exec(memoryChunksDDL)
+		return err
+	}
+	if chunksSchemaIsCurrent(stored) {
+		return nil
+	}
+	return rebuildChunksSchema(db)
+}
+
+// storedChunksDDL returns the CREATE statement SQLite recorded for
+// memory_chunks, or "" if the table does not exist yet.
+func storedChunksDDL(db *sql.DB) (string, error) {
+	var sqlText sql.NullString
+	err := db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_chunks'`,
+	).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read memory_chunks schema: %w", err)
+	}
+	return sqlText.String, nil
+}
+
+// rebuildChunksSchema recreates memory_chunks with the current definition,
+// carrying every row across. See initSchema for why it is shaped this way.
+func rebuildChunksSchema(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin memory_chunks rebuild: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Re-read inside the transaction: two processes opening the same index
+	// concurrently would otherwise both act on a stale reading and the
+	// second would redo the work.
+	var stored sql.NullString
+	err = tx.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_chunks'`,
+	).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, err := tx.Exec(memoryChunksDDL); err != nil {
+			return fmt.Errorf("create memory_chunks: %w", err)
+		}
+		return tx.Commit()
+	}
+	if err != nil {
+		return fmt.Errorf("read memory_chunks schema: %w", err)
+	}
+	if chunksSchemaIsCurrent(stored.String) {
+		return tx.Commit()
+	}
+
+	// A plain table, not a rename: ALTER TABLE ... RENAME rewrites the
+	// recorded CREATE statement (it quotes the new name), which would stop
+	// chunksSchemaIsCurrent from recognising its own output and re-migrate
+	// the index on every open.
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS memory_chunks_rebuild`,
+		`CREATE TABLE memory_chunks_rebuild (file TEXT, content TEXT)`,
+		`INSERT INTO memory_chunks_rebuild (file, content) SELECT file, content FROM memory_chunks`,
+		`DROP TABLE memory_chunks`,
+		memoryChunksDDL,
+		`INSERT INTO memory_chunks (file, content) SELECT file, content FROM memory_chunks_rebuild`,
+		`DROP TABLE memory_chunks_rebuild`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("rebuild memory_chunks: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // Status returns information about the memory index state.

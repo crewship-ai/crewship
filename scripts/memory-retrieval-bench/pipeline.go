@@ -77,9 +77,11 @@ func sectionTermSelectivity() {
 		}
 	}
 	fmt.Println()
-	fmt.Println("Fragments of two or three characters are the problem: they are")
-	fmt.Println("produced only because a Czech diacritic cut the word short, and")
-	fmt.Println("as prefixes they select a large fraction of any corpus.")
+	fmt.Println("Fragments of two or three characters were the problem: they were")
+	fmt.Println("produced only because a Czech diacritic cut the word short, and as")
+	fmt.Println("prefixes they select a large fraction of any corpus. Under the")
+	fmt.Println("#1678 builder the words survive whole and anything under three")
+	fmt.Println("runes is searched exactly, so no row above is a prefix any more.")
 	fmt.Println()
 }
 
@@ -148,7 +150,7 @@ func quoteAll(ws []string) []string {
 }
 
 var builders = []queryBuilder{
-	{"AND (today)", func(q string) string {
+	{"AND (pre-#1678)", func(q string) string {
 		return strings.Join(quoteAll(tokenizeWords(q)), " ")
 	}},
 	{"OR", func(q string) string {
@@ -164,7 +166,7 @@ var builders = []queryBuilder{
 		}
 		return strings.Join(ws, " OR ")
 	}},
-	{"phrase OR (OR+stop)", func(q string) string {
+	{"phrase OR (OR+stop) — SHIPPING", func(q string) string {
 		ws := stripStop(tokenizeWords(q))
 		phrase := `"` + strings.Join(ws, " ") + `"`
 		return phrase + " OR " + strings.Join(quoteAll(ws), " OR ")

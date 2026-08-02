@@ -135,8 +135,11 @@ func sectionRealCorpus() {
 		fmt.Println()
 	}
 
-	// AND vs OR on real questions.
-	fmt.Println("| question | AND (today) | OR | OR + stopwords |")
+	// The first column is whatever the shipping sanitiser does; the other
+	// two are the local comparison arms the #1678 fix was chosen against.
+	// Run this either side of a change to sanitizeFTSQuery and column one
+	// is the before/after.
+	fmt.Println("| question | production builder | bare OR | OR + stopwords |")
 	fmt.Println("|---|---|---|---|")
 	var a3, o3, s3 int
 	for _, q := range docsQueries {
@@ -158,7 +161,7 @@ func sectionRealCorpus() {
 		fmt.Printf("| `%s` | %s (%d hits) | %s (%d) | %s (%d) |\n",
 			q.q, rankStr(ra), len(andHits), rankStr(ro), len(orHits), rankStr(rs), len(stHits))
 	}
-	fmt.Printf("\n**Right file in top-3: AND %d/%d · OR %d/%d · OR+stopwords %d/%d.**\n\n",
+	fmt.Printf("\n**Right file in top-3: production %d/%d · bare OR %d/%d · OR+stopwords %d/%d.**\n\n",
 		a3, len(docsQueries), o3, len(docsQueries), s3, len(docsQueries))
 
 	// Vocabulary and prefix expansion — the honest version of §12b.
@@ -199,10 +202,13 @@ func sectionRealCorpus() {
 			100*float64(terms)/float64(vocab), c, 100*float64(c)/float64(nChunks))
 	}
 	fmt.Println()
-	fmt.Println("These are the fragments `escapeFTSQuery` produces from Czech")
-	fmt.Println("input (§12). A two-character prefix is not a search term; it is")
-	fmt.Println("a request for a double-digit percentage of the corpus, OR-ed")
-	fmt.Println("into a query alongside the terms that actually mattered.")
+	fmt.Println("These are the fragments `escapeFTSQuery` USED to produce from")
+	fmt.Println("Czech input (§12), and the reason #1678 raised its prefix floor")
+	fmt.Println("to three runes: a two-character prefix is not a search term, it")
+	fmt.Println("is a request for a double-digit percentage of the corpus, OR-ed")
+	fmt.Println("into a query alongside the terms that actually mattered. The")
+	fmt.Println("three-rune fragments are kept in the table to show the floor is")
+	fmt.Println("a floor and not a fix — `keep*` still reaches 7.6%.")
 	fmt.Println()
 }
 

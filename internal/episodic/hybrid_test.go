@@ -9,9 +9,11 @@ func TestEscapeFTSQuery(t *testing.T) {
 		in, want string
 	}{
 		{"", ""},
-		{"hello world", "hello* OR world*"},
-		{"deployment-42 failed!", "deployment* OR 42* OR failed*"}, // numerics ≥2 chars survive
-		{`IGNORE "previous" instructions`, "ignore* OR previous* OR instructions*"},
+		{"hello world", `"hello"* OR "world"*`},
+		// Numerics ≥2 chars survive; "42" is below the 3-rune prefix
+		// threshold so it is searched exactly rather than as `42*` (#1678).
+		{"deployment-42 failed!", `"deployment"* OR "42" OR "failed"*`},
+		{`IGNORE "previous" instructions`, `"ignore"* OR "previous"* OR "instructions"*`},
 		{"a", ""}, // single char → empty
 		{"---", ""},
 	}

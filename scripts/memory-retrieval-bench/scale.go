@@ -27,9 +27,11 @@ func init() {
 func sectionEpisodicQueryBuilder() {
 	fmt.Println("## 12. What the episodic lane sends to FTS5")
 	fmt.Println()
-	fmt.Println("`escapeFTSQuery` (episodic/hybrid.go:158) accepts only `a-z0-9`.")
-	fmt.Println("Every other rune — including every Czech diacritic — is a token")
-	fmt.Println("SEPARATOR, and runs shorter than 2 chars are dropped entirely.")
+	fmt.Println("`escapeFTSQuery` used to accept only `a-z0-9`, so every Czech")
+	fmt.Println("diacritic was a token SEPARATOR and cut words into two- and")
+	fmt.Println("three-character heads, each emitted as a PREFIX term. Since #1678")
+	fmt.Println("the scan is Unicode-aware and a prefix needs at least three runes;")
+	fmt.Println("shorter tokens are searched exactly. This is what it builds now.")
 	fmt.Println()
 	fmt.Println("| query | expression built |")
 	fmt.Println("|---|---|")
@@ -45,9 +47,10 @@ func sectionEpisodicQueryBuilder() {
 		fmt.Printf("| `%s` | `%s` |\n", q, episodic.EscapeFTSQueryForBench(q))
 	}
 	fmt.Println()
-	fmt.Println("Note the fragments a Czech query decomposes into: a diacritic in")
-	fmt.Println("the middle of a word truncates the term at that point and emits")
-	fmt.Println("the head as a PREFIX, so short heads become very wide matchers.")
+	fmt.Println("What this used to produce, for comparison: `rozhodnutí o retenci")
+	fmt.Println("žurnálu` became `rozhodnut* OR retenci* OR urn* OR lu*` and `jak")
+	fmt.Println("dlouho se drží žurnál` became `jak* OR dlouho* OR se* OR dr* OR")
+	fmt.Println("urn*`. §12b measures what a fragment that short costs.")
 	fmt.Println()
 
 	// Show how wide, against a realistic corpus.
@@ -103,10 +106,11 @@ func distractor(i int) string {
 func sectionORAtScale() {
 	fmt.Println("## 13. Does the OR rewrite still rank the right chunk first?")
 	fmt.Println()
-	fmt.Println("The 8/10 → OR result in §7 was on a 6-chunk corpus, where OR")
-	fmt.Println("cannot hurt. Here the same two real files sit inside 400")
-	fmt.Println("vocabulary-overlapping distractor notes and we score rank-of-")
-	fmt.Println("correct-file, not just presence.")
+	fmt.Println("§7 runs on a 6-chunk corpus, where OR cannot hurt. Here the")
+	fmt.Println("same two real files sit inside 400 vocabulary-overlapping")
+	fmt.Println("distractor notes and we score rank-of-correct-file, not just")
+	fmt.Println("presence. The first column is the shipping builder; the second")
+	fmt.Println("is the bare term-OR-term arm it was chosen against.")
 	fmt.Println()
 
 	dir, _ := os.MkdirTemp("", "orscale")
@@ -129,7 +133,7 @@ func sectionORAtScale() {
 	st, _ := e.Status(context.Background())
 	fmt.Printf("Corpus: %d files, %d chunks.\n\n", st.TotalFiles, st.TotalChunks)
 
-	fmt.Println("| query | AND rank | OR rank | OR hits |")
+	fmt.Println("| query | production rank | bare-OR rank | bare-OR hits |")
 	fmt.Println("|---|---|---|---|")
 	var andTop3, orTop3 int
 	for _, q := range realQueries {
@@ -146,7 +150,7 @@ func sectionORAtScale() {
 		}
 		fmt.Printf("| `%s` | %s | %s | %d |\n", q.q, rankStr(ra), rankStr(ro), len(o))
 	}
-	fmt.Printf("\n**Correct file in top-3: AND %d/%d, OR %d/%d.**\n\n",
+	fmt.Printf("\n**Correct file in top-3: production %d/%d, bare OR %d/%d.**\n\n",
 		andTop3, len(realQueries), orTop3, len(realQueries))
 
 	fmt.Println("The same, with the `file` column excluded from matching — the")

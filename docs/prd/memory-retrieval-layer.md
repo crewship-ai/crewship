@@ -834,6 +834,64 @@ orders them.
 
 Ranked by measured effect per unit of risk. **1 and 2 must ship together.**
 
+> **Status (#1678, 2026-08-02):** 7.1, 7.2, 7.3 and 7.4 are **shipped**. 7.5
+> onwards are untouched. Two numbers in this document did not survive
+> implementation and are corrected in §7.0 immediately below — read that
+> before quoting the 8/10 figure anywhere.
+
+### 7.0 What implementing 7.1–7.4 corrected in this document
+
+**The "OR + stopwords → 8/10" figure in §3.7 and §7.1 was measured with
+`file` still INDEXED, and does not survive its own prerequisite.** [M]
+Re-running the bench on the shipped code, the same ten questions against the
+same real `docs/` corpus:
+
+| builder | top-3, `file` indexed (as measured in §3.7) | top-3, `file UNINDEXED` (as shipped) |
+|---|---|---|
+| AND (pre-#1678) | 5/10 | — (no longer reachable) |
+| bare OR | 7/10 | 6/10 |
+| OR + stopwords | **8/10** | 6/10 |
+| phrase OR terms + stopwords (shipped) | — | **7/10** |
+
+Two of the eight were filename matches. §3.2 predicted that indexing `file`
+would inflate results and called it a prerequisite; what it did not say is
+that **§3.7's own headline number was one of the results being inflated.**
+The honest before/after for the shipped change is **5/10 → 7/10 top-3 on the
+real corpus**, and **8-of-10-zero-rows → 3-of-10** on the §7 corpus. The
+composite builder beats both single-lever arms once the path column is out,
+which is the finding that survives.
+
+**§7's `jak dlouho se drží žurnál` "HIT" under bare OR was spurious.** [M]
+The 6-chunk corpus has two files; the query matched the Czech note through
+the token `se`, a reflexive pronoun with no bearing on the question. Under
+stopword removal it correctly returns nothing, because none of its content
+words (`dlouho`, `drží`, `žurnál`) appears in the note in that form — the
+note says `žurnálu`. Together with `journal retention` against the same
+Czech note, these are the two of ten that no query rewrite reaches: one
+needs stemming (§7.7), one needs translation. Neither is a query-builder
+defect and neither is claimed as fixed.
+
+**On the 406-chunk synthetic corpus the shipped builder scores 4/10 against
+bare OR's 5/10** (§13). §3.7 already flagged this — "on the synthetic one it
+was neutral-to-negative" — and the single query separating them,
+`how do I deploy to a dev slot`, is one where 400 near-identical distractors
+reward the extra stopword terms. §8's eval is what would settle it. The real
+corpus is the one that was believed, and it goes the other way.
+
+**§3.6's `optimize` cadence landed in a different place than recommended.**
+That recommendation says "every ~200 `ReindexPath` calls **and** once at the
+end of the sidecar's boot `Reindex`". The boot hook is not where it belongs:
+it is inside `ReindexContext`, so *every* full rebuild ends compacted rather
+than only the sidecar's. The journal-side half of that recommendation (item
+2, driven from the daily consolidation job) is **not** shipped and remains
+open.
+
+**§7.4's "minimum 3-char prefix" is implemented as a floor on PREFIXING, not
+on the token.** A one-character run is still dropped; a two-character run is
+now emitted as an EXACT quoted term rather than discarded, so a genuine
+two-letter term still contributes. Discarding them would have been a second
+recall bug in the same function.
+
 ### 7.1 Rewrite the query builder — phrase-OR-terms with stopword removal
 
 `internal/memory/search.go:105-111`. **AND → 8/10 zero-result on realistic

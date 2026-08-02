@@ -269,35 +269,38 @@ func TestReindexSkipsHiddenDirs(t *testing.T) {
 func TestReindexClearsOldIndex(t *testing.T) {
 	dir, engine := setupTestMemory(t)
 
-	// Index a file
-	os.WriteFile(filepath.Join(dir, "old.md"), []byte("# Old\nold content here"), 0o644)
+	// Index a file. The two files below deliberately share no vocabulary:
+	// the query builder ORs a question's terms (#1678), so probing with a
+	// word the surviving file also contains ("content") would prove
+	// nothing about whether the removed file's chunks are gone.
+	os.WriteFile(filepath.Join(dir, "old.md"), []byte("# Old\nsuperseded paragraph about harbours"), 0o644)
 	if err := engine.Reindex(); err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify it's indexed
-	results, _ := engine.Search(context.Background(), "old content", 10)
+	results, _ := engine.Search(context.Background(), "superseded harbours", 10)
 	if len(results) == 0 {
-		t.Fatal("expected results for 'old content'")
+		t.Fatal("expected results for 'superseded harbours'")
 	}
 
 	// Remove the file and add a new one
 	os.Remove(filepath.Join(dir, "old.md"))
-	os.WriteFile(filepath.Join(dir, "new.md"), []byte("# New\nnew content here"), 0o644)
+	os.WriteFile(filepath.Join(dir, "new.md"), []byte("# New\nreplacement paragraph about lighthouses"), 0o644)
 	if err := engine.Reindex(); err != nil {
 		t.Fatal(err)
 	}
 
 	// Old content should be gone
-	results, _ = engine.Search(context.Background(), "old content", 10)
+	results, _ = engine.Search(context.Background(), "superseded harbours", 10)
 	if len(results) != 0 {
-		t.Error("old content should be gone after reindex")
+		t.Errorf("old content should be gone after reindex, got %d hit(s)", len(results))
 	}
 
 	// New content should be present
-	results, _ = engine.Search(context.Background(), "new content", 10)
+	results, _ = engine.Search(context.Background(), "replacement lighthouses", 10)
 	if len(results) == 0 {
-		t.Error("expected results for 'new content'")
+		t.Error("expected results for 'replacement lighthouses'")
 	}
 }
 
@@ -586,7 +589,15 @@ func TestSanitizeFTSQuery(t *testing.T) {
 	}{
 		{"", ""},
 		{"hello", `"hello"`},
-		{"hello world", `"hello" "world"`},
+		// #1678: a plain question becomes phrase-OR-terms, not a
+		// space-join. A space between two FTS5 terms is an implicit AND,
+		// which demanded every word inside one ~500-char chunk.
+		{"hello world", `"hello world" OR "hello" OR "world"`},
+		// Stopwords are dropped from the term list, and from the phrase.
+		{"what is the deploy slot", `"deploy slot" OR "deploy" OR "slot"`},
+		// A question made entirely of stopwords falls back to its own
+		// words rather than becoming an empty (invalid) expression.
+		{"what is the", `"what is the" OR "what" OR "is" OR "the"`},
 		// Queries with operators pass through
 		{`"exact match"`, `"exact match"`},
 		{"foo AND bar", "foo AND bar"},

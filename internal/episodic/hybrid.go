@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // HybridRecall combines two retrieval signals — dense cosine (what
@@ -150,31 +151,63 @@ func bm25Lane(ctx context.Context, db *sql.DB, q Query, limit int) ([]Hit, error
 	return out, rows.Err()
 }
 
+// minPrefixRunes is the shortest token that may be emitted as a PREFIX
+// term. Anything shorter is searched exactly (#1678 §7.4).
+//
+// A prefix is a request for every term in the index that starts with it,
+// and short prefixes are not search terms — they are requests for a
+// double-digit percentage of the corpus, OR-ed in beside the words that
+// actually carried the question. Measured on this repository's docs/ tree
+// (11 177 distinct index terms): `se*` expanded to 160 terms and matched
+// 48.5% of all chunks, `po*` 17.9%, `dr*` 7.6%. Three characters is where
+// that curve flattens in the measurement (`depl*` 2.7%, `keep*` 7.6% —
+// still wide, but selective enough to rank).
+const minPrefixRunes = 3
+
 // escapeFTSQuery turns a free-form query into an FTS5-safe MATCH
-// expression. Each alphanumeric word becomes a prefix token ("deploy" →
-// `deploy*`) joined with OR (FTS5 default is implicit AND which is
-// too strict for human queries). Empty / pathological input returns
-// the empty string so the caller can skip the query entirely.
+// expression. Each word becomes a quoted term joined with OR (FTS5's
+// default is implicit AND, which is too strict for human queries); words of
+// at least minPrefixRunes runes additionally get a `*` so inflected forms
+// still match. Empty / pathological input returns the empty string so the
+// caller can skip the query entirely.
+//
+// The scan is Unicode-aware. It used to accept only `a-z0-9`, which made
+// every Czech diacritic a token SEPARATOR: `drží` became `dr`, `žurnálu`
+// became `urn` + `lu`, and each fragment was then emitted as a prefix. So a
+// Czech question did not merely rank badly — it was decomposed into the
+// widest possible matchers and OR-ed together. `jak dlouho se drží žurnál`
+// built `jak* OR dlouho* OR se* OR dr* OR urn*`.
+//
+// Every term is quoted. Unquoted, a two-character token that happens to
+// spell `or` or a four-character one that spells `near` is parsed as an
+// FTS5 operator and the whole MATCH fails — which the old builder only
+// avoided by appending `*` to everything.
 func escapeFTSQuery(s string) string {
 	if s == "" {
 		return ""
 	}
 	var out []string
-	var cur strings.Builder
-	for _, r := range strings.ToLower(s) {
+	var cur []rune
+	flush := func() {
+		defer func() { cur = cur[:0] }()
 		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			cur.WriteRune(r)
+		case len(cur) < 2:
+			// A single character is noise in every corpus we index.
+			return
+		case len(cur) < minPrefixRunes:
+			out = append(out, `"`+string(cur)+`"`)
 		default:
-			if cur.Len() > 1 {
-				out = append(out, cur.String()+"*")
-			}
-			cur.Reset()
+			out = append(out, `"`+string(cur)+`"*`)
 		}
 	}
-	if cur.Len() > 1 {
-		out = append(out, cur.String()+"*")
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur = append(cur, r)
+			continue
+		}
+		flush()
 	}
+	flush()
 	if len(out) == 0 {
 		return ""
 	}

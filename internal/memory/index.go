@@ -140,7 +140,27 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 		return err
 	}
 	e.fileHashes = hashes
+	// A full rebuild is the one moment the index is guaranteed to be one
+	// fresh segment per insert batch and nothing else is using it, so
+	// merging here is the cheapest optimize we will ever run — and it means
+	// the sidecar's boot Reindex hands the process a compacted index rather
+	// than one carrying whatever debt the last session left behind.
+	e.optimizeIndex(ctx)
 	return nil
+}
+
+// optimizeIndex runs FTS5's `optimize` command, which merges the index's
+// b-tree segments into one. See optimizeEveryNWrites for why this is worth
+// doing and how often.
+//
+// Failure is logged-by-omission and never returned: optimize is pure
+// maintenance, it changes nothing about what the index contains, and a
+// memory write must not fail because a merge could not run. The caller
+// already holds e.mu.
+func (e *Engine) optimizeIndex(ctx context.Context) {
+	//nolint:errcheck // maintenance only; a failed merge must not fail a write
+	_, _ = e.db.ExecContext(ctx, "INSERT INTO memory_chunks(memory_chunks) VALUES('optimize')")
+	e.writesSinceOptimize = 0
 }
 
 // ReindexPath incrementally re-indexes a SINGLE memory file, identified by its
@@ -247,6 +267,17 @@ func (e *Engine) ReindexPath(ctx context.Context, relPath string) (int, error) {
 		return 0, err
 	}
 	e.fileHashes[fileKey] = h
+
+	// FTS5 appends rather than rewriting: the DELETE above left tombstones
+	// and each INSERT opened a segment, so without this the index of a
+	// long-lived agent fragments forever and queries slow down against data
+	// that never changed. Counted after the commit so a rolled-back write
+	// does not move the counter, and outside the write transaction so the
+	// merge never extends it.
+	e.writesSinceOptimize++
+	if e.writesSinceOptimize >= optimizeEveryNWrites {
+		e.optimizeIndex(ctx)
+	}
 	return len(chunks), nil
 }
 
