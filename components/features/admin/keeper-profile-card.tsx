@@ -67,6 +67,11 @@ interface ConfigResponse {
  *  sentinel for "no tier is escalated on the model's behalf". */
 const NEVER = 5
 
+/** keepercfg.MinPromptBudgetTokens / MaxPromptBudgetTokens. 0 is the separate
+ *  "no cap" sentinel and is always allowed. */
+const MIN_BUDGET = 512
+const MAX_BUDGET = 131072
+
 function ProvenanceChip({ source }: { source: ConfigSource }) {
   const label =
     source === "instance" ? "instance override"
@@ -190,6 +195,17 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
       </SettingsCard>
     )
   }
+
+  // The server's rule, held here so the operator learns it from the field rather
+  // than from a round trip. Stripping the minus sign was not enough: "-1" became
+  // "1", which is refused for the same reason — every non-zero value below the
+  // floor is rejected. Mirrors keepercfg.validateProfile.
+  const budgetNum = Number(form.draft.budget)
+  const budgetInvalid =
+    form.draft.budget.trim() !== "" &&
+    (!Number.isFinite(budgetNum) ||
+      !Number.isInteger(budgetNum) ||
+      (budgetNum !== 0 && (budgetNum < MIN_BUDGET || budgetNum > MAX_BUDGET)))
 
   const autonomy = Number(form.draft.escalateFrom) === NEVER
   const facts = p.evidence_facts?.value ?? []
@@ -333,17 +349,24 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           type="number"
           min={0}
           value={form.draft.budget}
-          // min={0} drives the spinner and the native validity flag; it does not
-          // stop a typed "-1". The server refuses it correctly, so nothing
-          // invalid is ever stored — the cost of leaving it is a round-trip and
-          // an error toast to learn what the field could have said at once.
-          onChange={(e) => form.set("budget", e.target.value.replace(/-/g, ""))}
+          onChange={(e) => form.set("budget", e.target.value)}
           disabled={!canEdit}
           className="h-8 w-[110px] text-xs"
           aria-label="Prompt budget"
           data-testid="keeper-profile-budget"
         />
       </SettingsRow>
+
+      {budgetInvalid && (
+        <div
+          data-testid="budget-invalid"
+          role="status"
+          className="px-4 py-2 text-xs text-destructive border-b border-border/40"
+        >
+          The prompt budget must be a whole number between {MIN_BUDGET} and{" "}
+          {MAX_BUDGET} tokens, or 0 for no cap.
+        </div>
+      )}
 
       {p.stamp && (
         <div className="px-4 py-2.5 border-t border-border/60 text-[11px] text-muted-foreground">
@@ -361,7 +384,7 @@ export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null
           dirty={form.isDirty}
           status={form.status}
           error={form.error}
-          canSave
+          canSave={!budgetInvalid}
           onSave={handleSave}
           onCancel={form.reset}
         />
