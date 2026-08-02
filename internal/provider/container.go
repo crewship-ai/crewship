@@ -201,7 +201,32 @@ type ContainerStatus struct {
 	ID     string
 	State  string // "creating", "running", "idle", "stopped", "error"
 	Uptime string
+	// RuntimeContract reports whether this container was created with the
+	// container configuration the running build applies today: "current",
+	// "stale", or "" when the provider has no opinion.
+	//
+	// It exists because a crew container is created once and reused
+	// indefinitely, so a merged change to the HostConfig — Init, the core-dump
+	// ulimit, supplementary groups, swap, /dev/shm — reaches only crews whose
+	// container is recreated afterwards, and nothing used to say which those
+	// were (#1642). A running container is deliberately never torn down for
+	// this; it is reported instead, and applied the next time the container is
+	// recreated (an idle-TTL stop, or `crewship crew restart-agents`).
+	//
+	// Providers that do not track it leave it empty, which every surface
+	// renders as "no opinion" rather than as "current".
+	RuntimeContract string
 }
+
+// The RuntimeContract vocabulary. Declared beside the field rather than in the
+// provider that computes it, because the server, the CLI and any future
+// provider all have to agree on the two strings — and the third state, the
+// empty string, is "this provider has no opinion" and must never be rendered
+// as "current".
+const (
+	RuntimeContractCurrent = "current"
+	RuntimeContractStale   = "stale"
+)
 
 // ContainerMetrics holds point-in-time resource usage metrics for a container
 // including CPU, memory, network I/O, and process count.

@@ -34,6 +34,7 @@ crewship crew <subcommand> [flags]
 | `mcp` | Show or set MCP server configuration for a crew |
 | `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
 | `credential-readiness` | Report credentials whose CLI is missing from the crew's container |
+| `container-status` | Show the crew's runtime container state and whether its configuration is current |
 | `provision` | Trigger devcontainer provisioning |
 | `provision status` | Check provisioning status |
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
@@ -631,6 +632,64 @@ crewship crew rebuild <slug-or-id> --no-watch
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--no-watch` | `bool` | `false` | Do not watch progress; return immediately after triggering. |
+
+---
+
+## `crewship crew container-status`
+
+Show the crew's runtime container state.
+
+```bash
+crewship crew container-status <slug-or-id>
+```
+
+```
+Container: running
+Started:   2026-08-02T09:14:31Z
+Config:    current
+```
+
+`Container:` is one of `running`, `creating`, `stopped`, `error`,
+`not_configured` (no container runtime configured on the server) or `unknown`
+(the runtime could not be reached). Backed by
+[`GET /api/v1/crews/{crewId}/container-status`](/api-reference/crews#container-status).
+
+### `Config:` — is this container running today's configuration?
+
+A crew container is created once and reused for as long as it keeps running.
+Everything that hardens it is applied at **create** time and nowhere else: the
+init process that reaps orphaned processes, the `core: 0` limit that stops a
+crashing agent writing a core dump full of its credentials onto disk,
+supplementary groups, swap being off, the `/dev/shm` size, the restart policy.
+Upgrade the server while a crew is up and that crew keeps the configuration it
+was created with — indefinitely, and until now silently.
+
+```
+Config:    from an older build
+           This container was created before the current container configuration and does not
+           carry the settings added since — including hardening that is applied at create time
+           and nowhere else. It picks them up the next time the container is recreated: an
+           idle-TTL stop, or `crewship crew restart-agents <crew>`.
+```
+
+Three things follow from that line, and none of them is an emergency:
+
+- **Nothing is broken.** The crew runs exactly as it did before the upgrade.
+  What it lacks are improvements, some of which are security hardening.
+- **A stopped container fixes itself.** When a crew whose container is stopped
+  is next woken, a container carrying an older configuration is rebuilt rather
+  than restarted — at that moment the rebuild costs nothing (the crew's root
+  filesystem is read-only, so its writable layer holds nothing, and the wake was
+  going to pay for a container start anyway). With the
+  [idle TTL](#idle-crews-are-stopped) stopping crews after four hours, a fleet
+  converges on its own.
+- **A running container is never torn down for it.** That would kill whatever
+  the crew is executing. Run
+  [`crewship crew restart-agents <slug>`](#crewship-crew-restart-agents) when
+  the crew is idle, or leave it to the TTL.
+
+No `Config:` line at all means the provider does not report it — the Apple
+container provider does not today. Absence is "unknown", not "current".
 
 ---
 

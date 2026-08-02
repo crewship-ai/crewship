@@ -513,13 +513,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return cid, err
 	}
 
-	runtime := p.cfg.DefaultRuntime
-	if runtime == "" {
-		runtime = "runc"
-	}
-	if v := os.Getenv("CREWSHIP_RUNTIME"); v != "" {
-		runtime = v
-	}
+	runtime := p.ociRuntime()
 
 	// Last-resort defaults. The real value should arrive from
 	// crews.container_memory_mb via chatbridge.resolver, but every call
@@ -790,6 +784,54 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
+				// Runtime-contract drift (#1642). Everything above asks
+				// whether this container is BROKEN; this asks whether it is
+				// OLD. A crew container is created once and reused for days,
+				// so every control the create path applies — Init, the
+				// core-dump ulimit, the supplementary gids, swap, /dev/shm,
+				// the restart policy, the healthcheck — reaches only crews
+				// whose container is recreated after the change merges. On
+				// dev1 the server was new and the container was old, and
+				// nothing anywhere said so.
+				//
+				// The response is deliberately different for the two states,
+				// and the asymmetry is the design:
+				//
+				//   stopped — recreate. Nothing is running inside it, the
+				//     caller is already paying for a start, and the crew root
+				//     filesystem is read-only so the writable layer holds
+				//     nothing (/workspace, /output, /crew are host binds;
+				//     /home/agent and /opt/crew-tools are named volumes).
+				//     With the idle TTL now stopping crews (#1662), this is
+				//     how a fleet converges on its own.
+				//
+				//   running — report, never kill. Tearing down a live crew
+				//     container SIGKILLs whatever is executing in it; the
+				//     image-drift path learned that the hard way when a
+				//     bare-config caller clobbered a lead's run mid-flight. A
+				//     configuration improvement does not justify a killed
+				//     run, so it waits for the next recreate and says so
+				//     meanwhile — here, and on `crewship crew
+				//     container-status` via ContainerStatus.
+				if want := p.crewRuntimeContractDigest(); want != "" && runtimeContractOf(inspect.Config) != want {
+					if crewContainerHoldsNoProcesses(c.State) {
+						p.logger.Info("recreating stopped container (runtime configuration predates this build)",
+							"container", containerName,
+							"container_contract", runtimeContractOf(inspect.Config),
+							"build_contract", want,
+						)
+						p.forceTeardown(ctx, c.ID, team.ID)
+						break // fall through to create new container
+					}
+					p.logger.Warn("crew container predates the current runtime configuration and is still serving; "+
+						"the controls added since it was created are NOT in effect on this crew. It will pick them up "+
+						"when the container is next recreated — an idle-TTL stop, or `crewship crew restart-agents <crew>`",
+						"container", containerName,
+						"crew_id", team.ID,
+						"container_contract", runtimeContractOf(inspect.Config),
+						"build_contract", want,
+					)
+				}
 				if c.State == container.StateRunning {
 					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
@@ -862,6 +904,44 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 		}
 	}
 	return "", false, nil
+}
+
+// crewContainerHoldsNoProcesses reports whether a container in this state can
+// be torn down without destroying live process state — the precondition for
+// the runtime-contract rebuild above, where the whole argument is that a
+// rebuild at this moment costs nothing.
+//
+// An ALLOWLIST rather than `state != running`, because `!= running` is wrong
+// for at least one real state and would be wrong again for any state added
+// later. `docker pause` is a single write to cgroup.freeze: every process is
+// still there, still holding its pages, merely unschedulable — so a paused
+// container is a running container that cannot answer, and tearing it down
+// kills exactly what tearing down a running one kills. `removing` is the
+// daemon already deleting it, and racing that buys nothing. Anything this list
+// does not name gets the report-and-leave-alone path, which is the failure
+// direction that costs an operator a warning rather than a workload.
+func crewContainerHoldsNoProcesses(state container.ContainerState) bool {
+	switch state {
+	case container.StateExited, container.StateDead, container.StateCreated:
+		return true
+	default:
+		return false
+	}
+}
+
+// ociRuntime resolves the OCI runtime handed to the daemon for crew
+// containers: the configured default, overridden by CREWSHIP_RUNTIME, falling
+// back to runc. Extracted so the runtime-contract digest asks the same
+// question the create path does rather than restating the chain
+// (runtime_contract.go).
+func (p *Provider) ociRuntime() string {
+	if v := os.Getenv("CREWSHIP_RUNTIME"); v != "" {
+		return v
+	}
+	if p.cfg.DefaultRuntime != "" {
+		return p.cfg.DefaultRuntime
+	}
+	return "runc"
 }
 
 // crewDirs holds the host-side bind-mount paths prepared for a crew
@@ -1011,7 +1091,6 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 // constructs the container.Config / container.HostConfig pair for the crew
 // container create call.
 func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.CrewConfig, containerName, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs) (*container.Config, *container.HostConfig, error) {
-	pidsLimit := int64(200)
 	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
 	env := []string{
 		"CREWSHIP_CREW_ID=" + team.ID,
@@ -1051,6 +1130,36 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 		p.logger.Warn("could not inspect image for env expansion — passing containerEnv literally",
 			"image", runtimeImage, "error", imgEnvErr)
 	}
+	cfg, hostCfg, err := p.assembleCrewSpec(team, runtimeImage, runtime, memoryMB, cpus, dirs, env, imgEnv)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Stamp what this build asked for, so a container created by an older
+	// build can be recognised as such later — the whole of #1642. Written
+	// here rather than inside assembleCrewSpec because the digest is computed
+	// by running assembleCrewSpec over a canonical crew, and a spec that
+	// carried its own digest could not be hashed without hashing the hash.
+	//
+	// Empty digest = this provider could not compute its contract. Stamping
+	// "" would make every container it creates read as drifted to a provider
+	// that CAN compute one; leaving the label off says "unknown", which is
+	// what it is.
+	if digest := p.crewRuntimeContractDigest(); digest != "" {
+		cfg.Labels[crewRuntimeContractLabel] = digest
+	}
+	return cfg, hostCfg, nil
+}
+
+// assembleCrewSpec turns fully-resolved inputs into the crew container's
+// Config/HostConfig pair. Split from buildCrewContainerConfig so the pair can
+// also be built for a CANONICAL crew, with no daemon call and no filesystem
+// access, which is what crewRuntimeContractDigest hashes (runtime_contract.go).
+//
+// Everything here is a pure function of its arguments plus the provider's own
+// configuration. Anything needing the daemon — the image inspect behind
+// imgEnv — happens in the caller and arrives as a parameter.
+func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runtime string, memoryMB int, cpus float64, dirs crewDirs, env []string, imgEnv map[string]string) (*container.Config, *container.HostConfig, error) {
+	pidsLimit := int64(200)
 	// Set the agent exec PATH explicitly. A non-login `docker exec` (how the
 	// agent CLI runs) inherits only the image ENV PATH, which omits the
 	// /etc/profile.d additions devcontainer features make (e.g. pipx's
@@ -1486,6 +1595,10 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 		ID:     containerID,
 		State:  state,
 		Uptime: inspect.State.StartedAt,
+		// Free: the inspect above already carries the label, so reporting
+		// whether this container predates the current container
+		// configuration costs no extra daemon call (#1642).
+		RuntimeContract: p.runtimeContractStatus(inspect.Config),
 	}, nil
 }
 

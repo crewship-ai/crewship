@@ -618,7 +618,12 @@ recreated with the new policy on the next agent run).
 **Response:** `200 OK`
 
 ```json
-{ "crew_id": "ccrew0123456789abcdefghij", "status": "running", "uptime": "2026-07-13T00:00:00Z" }
+{
+  "crew_id": "ccrew0123456789abcdefghij",
+  "status": "running",
+  "uptime": "2026-07-13T00:00:00Z",
+  "runtime_contract": "current"
+}
 ```
 
 **Response Fields:**
@@ -628,6 +633,26 @@ recreated with the new policy on the next agent run).
 | `crew_id` | string | The crew's ID (always the caller's ID, echoed back) |
 | `status` | string | `running`, `creating`, `stopped`, `error`, `not_configured`, or `unknown` |
 | `uptime` | string? | RFC 3339 container start time (present when running) |
+| `runtime_contract` | string? | `current` or `stale` — whether this container was created with the container configuration the running server applies today. **Absent** when the provider does not track it; absent is not `current` |
+
+<Note>
+**Why `runtime_contract` exists.** A crew container is created once and reused
+for as long as it keeps running, and the settings that harden it — the init
+process that reaps orphans, the `core: 0` limit that stops a crashing agent
+writing its credential environment to disk, supplementary groups, swap, the
+`/dev/shm` size — are applied at container-create time and nowhere else. Upgrade
+the server and a crew that was already running keeps the OLD configuration
+indefinitely.
+
+`stale` means exactly that: this container predates the current configuration
+and does not carry what has been added since. Nothing is broken and no run
+fails; the container picks the new settings up the next time it is recreated —
+an [idle-TTL stop](/cli/crew#idle-crews-are-stopped), or
+`crewship crew restart-agents <slug>`. A container found **stopped** with a
+stale contract is rebuilt automatically on the next wake, because at that
+moment the rebuild costs nothing. A **running** one is never torn down for it:
+that would kill whatever the crew is executing.
+</Note>
 
 Status values are deliberately coarse and the endpoint answers `200` even when
 the runtime is unavailable, so a polling UI/CLI can treat them as transient
