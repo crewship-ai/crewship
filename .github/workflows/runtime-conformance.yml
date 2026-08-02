@@ -27,11 +27,6 @@ on:
   workflow_dispatch: {}
   schedule:
     - cron: "40 3 * * *" # nightly, after e2e-devcontainer
-  pull_request:
-    paths:
-      - "internal/provider/**"
-      - "scripts/entrypoint.sh"
-      - ".github/workflows/runtime-conformance.yml"
 
 concurrency:
   group: runtime-conformance-${{ github.ref }}
@@ -48,8 +43,7 @@ env:
 
 jobs:
   # Docker is the runtime every other CI job and every developer already uses,
-  # so this leg is the regression gate: it runs on PRs that touch the provider
-  # and a miss here is a real breakage, not a portability difference.
+  # so a miss here is a real breakage rather than a portability difference.
   docker:
     name: docker (rootful)
     runs-on: ubuntu-latest
@@ -132,12 +126,11 @@ jobs:
   # uid inside a user namespace — which is what can make the /crew, /workspace
   # and /output host binds unwritable for it (agent-isolation-findings §1.6).
   #
-  # Both legs run on pull_request for now, because the first thing this
-  # workflow has to produce is the answer to "what does podman actually do
-  # with our HostConfig" — nobody here knows yet. Once the findings are triaged,
-  # whichever invariants podman cannot honour become either a fix or a declared
-  # capability gap, and only then is it fair to make this a required check.
-  # A permanently-red required check teaches people to ignore checks.
+  # Nothing here runs on pull_request, on purpose. Every leg starts real
+  # containers and pulls real images, and PR feedback has to stay fast — a
+  # multi-minute job on every provider change buys a portability answer that
+  # does not change between one commit and the next. Nightly and on demand is
+  # the right cadence for it, and the results get read.
   podman:
     name: podman (${{ matrix.mode }})
     runs-on: ubuntu-latest
