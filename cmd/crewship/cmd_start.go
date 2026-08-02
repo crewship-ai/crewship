@@ -49,6 +49,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/server"
 	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/update"
+	"github.com/crewship-ai/crewship/internal/usermodel"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
@@ -1088,14 +1089,36 @@ var startCmd = &cobra.Command{
 		// hour after peer cards) and writes / purges the per-(user,
 		// workspace) operator model under cfg.Storage.BasePath. Without this
 		// worker the [OPERATOR MODEL] prompt block never gets a file to read.
-		// Extractor defaults to NoopUserModelExtractor — aux-LLM extraction
-		// lands with the same slot the peer-card extractor will use.
+		//
+		// #1669: the extractor is now a real one. It writes only what the
+		// person stated, in words it can point at in their own turns — see
+		// internal/usermodel for the policy and the gate that enforces it.
+		// The profile is read from app_settings on every sweep, so
+		// `crewship instance settings set memory.user_model_profile off`
+		// takes effect on the next sweep rather than the next restart.
+		//
+		// An unbuildable curator slot (the common case being no
+		// ANTHROPIC_API_KEY) leaves the extractor returning nothing, which
+		// the sweep records as skip_empty_content — the opt-out purge and
+		// the index upkeep still run.
 		if deps.DB != nil {
 			userModelStop := make(chan struct{})
 			var userModelWg sync.WaitGroup
+			var userModelExtractor consolidate.UserModelExtractor
+			if apiRouter := srv.APIRouter(); apiRouter != nil {
+				userModelExtractor = usermodel.New(
+					deps.DB,
+					apiRouter.UserModelAux,
+					usermodel.ProfileFromSettings(deps.DB, logger),
+					logger,
+				)
+			}
 			consolidate.StartUserModelSyncWorker(
 				deps.DB, logger,
-				consolidate.UserModelWorkerConfig{BasePath: cfg.Storage.BasePath},
+				consolidate.UserModelWorkerConfig{
+					BasePath:  cfg.Storage.BasePath,
+					Extractor: userModelExtractor,
+				},
 				userModelStop, &userModelWg,
 			)
 			defer func() {

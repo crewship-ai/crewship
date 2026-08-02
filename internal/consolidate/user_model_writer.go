@@ -267,6 +267,43 @@ func MergeUserModel(prior, extracted string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// TrimUserModelToCap shortens a merged model to at most max bytes by
+// dropping whole lines from the END, and reports whether it had to.
+//
+// It exists because the write path fails closed on an oversize body
+// (memory.WriteUserModel returns an error rather than truncating) and
+// MergeUserModel has no bound at all: it preserves every prior field and
+// appends every new one. While the extractor was a no-op that was
+// unreachable — an empty extraction merges to the prior model unchanged,
+// so nothing ever grew. With a real extractor it is reachable, and the
+// failure is bad in an unusually quiet way: the sweep logs one error a
+// day and the on-disk model silently stops updating, so the agent keeps
+// reading a profile that looks fine and is frozen.
+//
+// Dropping from the END is deliberate. MergeUserModel emits prior fields
+// in their original order first, then fields new to this extraction, then
+// the latest prose — so the tail is the newest and least-established
+// material and the head is the picture built over many sessions. A
+// profile whose oldest fields churned every time it filled up would be a
+// profile the operator could never rely on.
+//
+// Whole lines only: half a "- key: value" bullet is not a fact, and the
+// merge parses this file back on the next sweep.
+func TrimUserModelToCap(content string, max int) (string, bool) {
+	if max <= 0 || len(content) <= max {
+		return content, false
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	for len(lines) > 0 {
+		lines = lines[:len(lines)-1]
+		out := strings.Join(lines, "\n")
+		if len(out) <= max {
+			return out, true
+		}
+	}
+	return "", true
+}
+
 // splitFields parses a model body into "- key: value" bullets (keyed,
 // order-preserving) plus the leftover non-bullet prose lines. Keys are
 // lower-cased + trimmed so "Timezone" and "timezone" merge as one

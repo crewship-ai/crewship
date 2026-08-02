@@ -146,7 +146,7 @@ func TestConsolidatorLearnedRules_LandInsideTheCrewBindSource(t *testing.T) {
 // sentinel that used to live in learned_rules_output_root_test.go. That
 // test asserted the broken state — that the consolidator's output dir
 // escaped every bind source — so it can no longer stand; this is its
-// positive twin, keeping the same contrast against userModelPathsFor,
+// positive twin, keeping the same contrast against UserModelPathsFor,
 // which is the resolver the package already got right.
 func TestRunnerOutputDir_ResolvesInsideTheCrewBindSource(t *testing.T) {
 	basePath := t.TempDir()
@@ -156,9 +156,9 @@ func TestRunnerOutputDir_ResolvesInsideTheCrewBindSource(t *testing.T) {
 	)
 
 	// The bind source, derived by the package's own long-correct helper.
-	bindSource := userModelPathsFor(basePath, crewID).SharedDir
+	bindSource := UserModelPathsFor(basePath, crewID).SharedDir
 	if want := filepath.Join(basePath, "crews", crewID, "shared", ".memory"); bindSource != want {
-		t.Fatalf("control failed: userModelPathsFor no longer resolves the crew bind source (got %q, want %q)", bindSource, want)
+		t.Fatalf("control failed: UserModelPathsFor no longer resolves the crew bind source (got %q, want %q)", bindSource, want)
 	}
 
 	outputDir, err := memory.HostCrewTopicsDir(basePath, crewID, crewSlug)

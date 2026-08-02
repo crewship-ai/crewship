@@ -110,7 +110,7 @@ func RunUserModelSync(
 	sum := UserModelSyncSummary{WorkspaceID: workspaceID, Candidates: len(cands)}
 	now := time.Now()
 	for _, cand := range cands {
-		paths := userModelPathsFor(opts.OutputBasePath, cand.CrewID)
+		paths := UserModelPathsFor(opts.OutputBasePath, cand.CrewID)
 		prior, _ := memory.LoadUserModel(paths, cand.UserID, cand.WorkspaceID)
 		extracted, eerr := opts.Extractor.Extract(ctx, cand, prior)
 		if eerr != nil {
@@ -124,6 +124,17 @@ func RunUserModelSync(
 		// returned unchanged, which then re-writes the same content
 		// (idempotent) unless it too is empty.
 		content := MergeUserModel(prior, extracted)
+		// The merge is unbounded and the write fails closed above the cap,
+		// so a long-lived operator's model would eventually stop updating
+		// with nothing but a daily error line to say so. Trim instead.
+		if trimmed, cut := TrimUserModelToCap(content, memory.UserModelCapBytes); cut {
+			logger.Info("user model trimmed to cap",
+				"user_slug", memory.UserSlug(cand.UserID, cand.WorkspaceID),
+				"workspace_id", cand.WorkspaceID,
+				"was_bytes", len(content), "now_bytes", len(trimmed),
+				"cap_bytes", memory.UserModelCapBytes)
+			content = trimmed
+		}
 		out := SyncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, now)
 		if out.Err != nil {
 			sum.Errors++
@@ -147,11 +158,16 @@ func RunUserModelSync(
 	return sum, nil
 }
 
-// userModelPathsFor resolves the crew-shared memory directory that
-// holds a user model. crewID may be empty (a workspace with no crew on
+// UserModelPathsFor resolves the crew-shared memory directory that holds
+// one operator model. crewID may be empty (a workspace with no crew on
 // the chat path); in that case the model lands in a workspace-level
 // fallback shared dir so the file still has a home.
-func userModelPathsFor(basePath, crewID string) memory.UserModelPaths {
+//
+// Exported because the readers are in another package: the GDPR and
+// self-service surfaces in internal/api have to delete and read exactly
+// the file this sweep writes, and two functions that merely agree today
+// about where a file lives are how a purge silently misses one.
+func UserModelPathsFor(basePath, crewID string) memory.UserModelPaths {
 	if crewID == "" {
 		return memory.UserModelPaths{
 			SharedDir: filepath.Join(basePath, "workspace", "shared", ".memory"),

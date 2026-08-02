@@ -41,7 +41,12 @@ func TestBuildMemoryInstructionsContent(t *testing.T) {
 		"AGENT.md",
 		"daily",
 		"2026-02-19",
-		"remember this",
+		// #1669 changed the phrasing here from "If the user says
+		// 'remember this', write it to AGENT.md immediately" — an
+		// instruction to copy an imperative verbatim into long-term
+		// memory — to a description of what such a request means. The
+		// concept has to survive; the exact old sentence must not.
+		"remember",
 		"evergreen facts",
 	}
 	for _, exp := range expected {

@@ -135,7 +135,7 @@ func (h *UserPeerPrivacyHandler) PutConsent(w http.ResponseWriter, r *http.Reque
 		TargetUserID: userID,
 	})
 
-	purged := 0
+	purged, purgedModels := 0, 0
 	if body.OptedOut {
 		// Walk every card for this user in this workspace and
 		// purge DB rows + audit unconditionally; on-disk delete is
@@ -145,13 +145,32 @@ func (h *UserPeerPrivacyHandler) PutConsent(w http.ResponseWriter, r *http.Reque
 		// Bounded query — peer_cards is indexed on (user_id,
 		// workspace_id) so this is O(N) in the user's card count.
 		purged = h.purgeUserCards(r, userID, wsID)
+
+		// …and the OPERATOR MODEL, which the same consent flag gates
+		// (consolidate.SyncUserModel: opting out of peer cards opts out
+		// of user models too) but which this immediate purge used to
+		// miss entirely (#1669). It survived here until the next daily
+		// sweep at 05:00 UTC and was read into every agent prompt in
+		// between — while the user had been told opt-out was immediate.
+		// Harmless only for as long as the extractor was a no-op and the
+		// file was always empty.
+		n, err := h.purgeUserModel(r, userID, wsID, "opt_out_immediate_purge")
+		if err != nil {
+			// Same shape as the card purge: log and report what was
+			// removed rather than failing the opt-out, which is
+			// recorded already. The daily sweep purges again.
+			h.logger.Warn("opt-out user model purge failed",
+				"user_id", userID, "workspace_id", wsID, "err", err)
+		}
+		purgedModels = n
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user_id":      userID,
-		"workspace_id": wsID,
-		"opted_out":    body.OptedOut,
-		"purged":       purged,
+		"user_id":       userID,
+		"workspace_id":  wsID,
+		"opted_out":     body.OptedOut,
+		"purged":        purged,
+		"purged_models": purgedModels,
 	})
 }
 

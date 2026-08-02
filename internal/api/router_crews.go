@@ -389,6 +389,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("PUT", "/api/v1/users/me/peer-consent", roleSelf, privacy.PutConsent)
 	r.mux.Handle("GET /api/v1/users/me/peer-cards", authed(wsCtx(http.HandlerFunc(privacy.GetMyCards))))
 	r.authedMut("DELETE", "/api/v1/users/me/peer-cards", roleSelf, privacy.DeleteMyCards)
+	// #1669 — the operator model, on the same self-service terms: read
+	// what is stored about you, drop one wrong field, or drop all of it.
+	r.mux.Handle("GET /api/v1/users/me/user-model", authed(wsCtx(http.HandlerFunc(privacy.GetMyUserModel))))
+	r.authedMut("DELETE", "/api/v1/users/me/user-model", roleSelf, privacy.DeleteMyUserModel)
+	r.authedMut("DELETE", "/api/v1/users/me/user-model/facts/{key}", roleSelf, privacy.ForgetUserModelFact)
 
 	// Credentials (require workspace context + manage role for create)
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
