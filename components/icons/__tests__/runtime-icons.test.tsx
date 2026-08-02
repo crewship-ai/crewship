@@ -83,11 +83,17 @@ describe("runtimeBrand", () => {
     expect(contrast("#2496ED", "#2496ED")).toBeCloseTo(1, 5)
   })
 
+  // The floor is 3.5, not the WCAG 3.0 itself. Docker's whale blue measures
+  // 3.02:1 on the light card — technically compliant and one adjustment to
+  // --card away from not being. A bar set exactly at the minimum passes every
+  // colour that is about to fail.
+  const FLOOR = 3.5
+
   it.each(Object.entries(RUNTIME_BRANDS).filter(([, b]) => b.official))(
-    "%s's mark clears 3:1 on both the light and the dark card",
+    "%s's mark clears the contrast floor on both the light and the dark card",
     (_key, brand) => {
-      expect(contrast(brand.light, CARD.light)).toBeGreaterThanOrEqual(3)
-      expect(contrast(brand.dark, CARD.dark)).toBeGreaterThanOrEqual(3)
+      expect(contrast(brand.light, CARD.light)).toBeGreaterThanOrEqual(FLOOR)
+      expect(contrast(brand.dark, CARD.dark)).toBeGreaterThanOrEqual(FLOOR)
     },
   )
 })
