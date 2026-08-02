@@ -19,7 +19,7 @@ ne.
 
 **Podmínka, bez které to nedělám:** korpus musí o svých štítcích říkat pravdu.
 Kdyby se adjudikace zapsala jako lidské rozhodnutí, eval by hlásil *„qwen3.5
-souhlasí s člověkem v 81 %"*, zatímco změřil *„souhlasí s Claudem v 81 %"*. To
+souhlasí s člověkem v 81 %"*, zatímco změřil *„souhlasí s referenčním modelem v 81 %"*. To
 není nepřesnost, to je nesprávné tvrzení v čísle, podle kterého se rozhoduje o
 bezpečnostní vrstvě.
 

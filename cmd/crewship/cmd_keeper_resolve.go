@@ -93,5 +93,5 @@ func init() {
 	f.StringVar(&flagKeeperResolveDecision, "decision", "", "allow or deny")
 	f.StringVar(&flagKeeperResolveReason, "reason", "", "why — recorded on the decision and in the journal")
 	f.StringVar(&flagKeeperResolveAdjudicator, "adjudicator", "",
-		"name the AI model that made this judgement, when one did instead of you (e.g. claude-opus-5)")
+		"name the AI model that made this judgement, when one did instead of you (e.g. reference-model-v1)")
 }

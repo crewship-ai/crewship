@@ -27,7 +27,7 @@ const (
 	//
 	// It is NOT ground truth, and the distinction is not pedantry: recorded as
 	// human, the eval would report "agrees with the person 0.81" about a number
-	// that measured "agrees with Claude 0.81" — a false claim inside the figure a
+	// that measured "agrees with the reference model 0.81" — a false claim inside the figure a
 	// security decision rests on. IsHuman() is false for it, so every caller that
 	// gates on ground truth excludes it by default.
 	//

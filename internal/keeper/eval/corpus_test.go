@@ -185,7 +185,7 @@ func TestLoadCorpus_Empty(t *testing.T) {
 //
 // What it is NOT is human ground truth. Recording it as such would make the
 // eval report "agrees with the human 0.81" about a number that measured "agrees
-// with Claude 0.81". That is not imprecision; it is a false claim inside the
+// with the reference model 0.81". That is not imprecision; it is a false claim
 // figure a security decision rests on.
 //
 // So the ledger's actor_type carries the provenance — it is already the record
@@ -207,7 +207,7 @@ func TestLoadCorpus_ReferenceAdjudicationIsNotHuman(t *testing.T) {
 	insertRow(t, db, "kr-ref", "access", "PROMPT", "DENY", sql.NullInt64{Int64: 9, Valid: true}, "2026-08-02T10:00:00Z")
 	mustExecCorpus(t, db, `INSERT INTO inbox_items (id, kind, source_id, state, resolved_action, resolved_by_user_id)
 		VALUES ('ibx-ref', 'escalation', 'kr-ref', 'resolved', 'denied', 'u-ref')`)
-	seedLedger(t, db, "kr-ref", "DENY", "reference", "claude-opus-5", 2)
+	seedLedger(t, db, "kr-ref", "DENY", "reference", "reference-model-v1", 2)
 
 	rows, err := LoadCorpus(context.Background(), db, 0)
 	if err != nil {

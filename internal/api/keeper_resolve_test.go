@@ -580,7 +580,7 @@ func TestKeeperResolve_ConcurrentRulingsSettleExactlyOnce(t *testing.T) {
 //
 // Recorded as `user`, the corpus would call it ground truth and the eval would
 // report "agrees with the human 0.81" about a number that measured "agrees with
-// Claude 0.81" — a false claim inside the figure a security decision rests on.
+// the reference model 0.81" — a false claim inside the figure a security decision rests on.
 func TestKeeperResolve_RecordsAnAdjudicatorAsReferenceNotUser(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
@@ -593,7 +593,7 @@ func TestKeeperResolve_RecordsAnAdjudicatorAsReferenceNotUser(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "alice", "kr-adj", map[string]any{
-		"decision": "DENY", "reason": "no change window", "adjudicator": "claude-opus-5",
+		"decision": "DENY", "reason": "no change window", "adjudicator": "reference-model-v1",
 	}))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("resolve returned %d: %s", rr.Code, rr.Body.String())
@@ -609,7 +609,7 @@ func TestKeeperResolve_RecordsAnAdjudicatorAsReferenceNotUser(t *testing.T) {
 		t.Errorf("actor_type = %q, want %q — the corpus reads this to decide whether "+
 			"the row is ground truth", actorType, keeperActorReference)
 	}
-	if actorID != "claude-opus-5" {
+	if actorID != "reference-model-v1" {
 		t.Errorf("actor_id = %q, want the model that judged it", actorID)
 	}
 }
