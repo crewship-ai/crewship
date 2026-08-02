@@ -386,11 +386,18 @@ func checkDataDirWritable() checkResult {
 // diagnostic-only. A missing _migrations table means crewshipd has
 // never run; that's a WARN, not a FAIL.
 //
-// The "expected" version is hard-coded here at the latest known
-// migration so an outdated CLI talking to a freshly-migrated DB
-// surfaces visibly. Bump this constant whenever a new migration lands.
+// The "expected" version is the highest migration THIS binary can apply,
+// read from the registry compiled into it — so an outdated CLI talking to a
+// freshly-migrated DB surfaces visibly. It used to be a hand-bumped constant
+// that stopped at v85, roughly eighty migrations before #1645 was filed:
+// every healthy install was told its schema was "newer than the CLI knows
+// about", which is the false alarm that makes a real one unreadable.
+//
+// Note the number is a migration timestamp (YYYYMMDDHHMMSS) for anything
+// past the closed legacy sequential block — see
+// internal/database/migrate_registry.go.
 func checkDBMigrationVersion(ctx context.Context) checkResult {
-	const expectedLatest = 85 // matches internal/database/migrate.go highest version
+	expectedLatest := database.MaxKnownMigrationVersion()
 	dataDir, err := database.DefaultDataDir()
 	if err != nil {
 		return checkResult{name: "db migration version", status: "FAIL", detail: err.Error()}

@@ -59,7 +59,9 @@ func (r *Router) registerSystemRoutes() {
 	r.mux.Handle("GET /api/v1/system/runtime",
 		authed(r.authMw.OptionalWorkspaceRole(http.HandlerFunc(system.Runtime))))
 	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		NewSystemHandler(r.logger, r.version).Version(w, req)
+		// Same re-read-per-request reason for r.build as for r.version:
+		// cmd_start calls SetBuild after construction (#1645).
+		NewSystemHandler(r.logger, r.version).WithBuild(r.build).Version(w, req)
 	})))
 
 	// License info (auth required)

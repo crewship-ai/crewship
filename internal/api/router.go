@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/buildinfo"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -226,6 +227,11 @@ type Router struct {
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
 	// so the web UI can render an "update available" banner.
 	version string
+
+	// build is the resolved build identity — commit, build time, dirty flag
+	// (#1645). Set alongside version by SetBuild; zero until then, which is
+	// why the version handler re-resolves rather than trusting a zero value.
+	build buildinfo.Info
 
 	// policyResolver is the shared per-crew autonomy + behavior_mode
 	// resolver introduced by PR-B F2. Carried on Router so PATCH
@@ -494,8 +500,24 @@ func (r *Router) KeeperAuxSettings() *keepercfg.AuxStore {
 // Called from cmd_start.go after construction because the version lives
 // in package main as an ldflags-injected var and can't be referenced
 // from internal/api.
+//
+// Prefer SetBuild: version alone cannot identify a build, because every
+// binary an ldflags-less `go build` has ever produced reports "dev".
 func (r *Router) SetVersion(v string) {
-	r.version = v
+	r.SetBuild(v, "", "")
+}
+
+// SetBuild records the full ldflags-injected build identity (#1645) —
+// main.version, main.commit and main.date — for GET /api/v1/system/version.
+// Commit and date may be the in-source placeholders; buildinfo.Resolve
+// discards those and falls back to the binary's embedded VCS stamps, which
+// is the only source a dev-slot build has.
+//
+// Called from cmd_start.go before the listener starts, for the same reason
+// SetVersion is: the vars live in package main.
+func (r *Router) SetBuild(version, commit, date string) {
+	r.version = version
+	r.build = buildinfo.Resolve(version, commit, date)
 }
 
 // Provisioning returns the registered ProvisioningHandler so wiring code (e.g.
@@ -592,6 +614,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 		logger:        logger,
 		authMw:        authMw,
 		sessionsStore: sessionsStore,
+		// Seed the build identity from this binary's own VCS stamps so a
+		// router whose wiring never reaches SetBuild still names the commit
+		// it was compiled from (#1645). The ldflags values overwrite it.
+		build: buildinfo.Resolve("", "", ""),
 	}
 
 	// Apply options before registering routes so that internalToken,
