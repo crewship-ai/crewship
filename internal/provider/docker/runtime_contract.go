@@ -42,7 +42,7 @@ package docker
 // at the comparison point, which the status surface below cannot obtain
 // without reconstructing it, and a second reconstruction that can disagree
 // with the first is the failure mode HANDOFF-2026-08-02.md §6 warns about for
-// capability reporting. Filed separately rather than half-solved here.
+// capability reporting. Filed as #1681 rather than half-solved here.
 
 import (
 	"crypto/sha256"
