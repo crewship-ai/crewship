@@ -159,7 +159,7 @@ func ToolSchemas() map[string]ToolSchema {
 				"properties": {
 					"q": {
 						"type": "string",
-						"description": "Search query. Plain text; the engine handles tokenisation."
+						"description": "Search query. Ask a plain question: the engine drops common function words and matches any remaining word, ranking a chunk that contains the whole phrase highest. File paths are not searched — use 'tier' to scope. FTS5 syntax (AND, OR, NOT, \"phrases\", prefix*) is passed through if you write it."
 					},
 					"tier": {
 						"type": "string",

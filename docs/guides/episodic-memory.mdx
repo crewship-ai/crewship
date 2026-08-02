@@ -180,6 +180,28 @@ RRF_score(entry) = Σ over rankings r of:  1 / (k_RRF + rank_r(entry))
 
 with `k_RRF = 60` (the value used in the original RRF paper; further tuning had marginal returns). Each ranking contributes the inverse of the entry's position; entries ranked highly in either leg float to the top, while entries that appear in both pump up most. There is no weighting parameter — both legs are treated equal, and the constant 60 dominates ranking noise at low ranks where it matters most.
 
+### What the sparse leg does with your query text
+
+`QueryText` is free-form; the BM25 leg rewrites it before it reaches FTS5. Every
+word becomes a term and the terms are OR-ed, so any one of them is enough to
+match. A word of **three characters or more** additionally matches by prefix
+(`deploy` finds `deployment`); anything shorter is matched exactly. The scan is
+Unicode-aware, so a Czech or German word survives its diacritics whole — `drží`
+is one term, not `dr` plus a fragment.
+
+<Note>
+  The three-character floor exists because a short prefix is not a search term.
+  Measured against this repository's own docs tree, `se*` expanded to 160 index
+  terms and matched **48.5% of all chunks** — OR-ed in beside the words that
+  actually carried the question. Anything shorter than three characters is
+  therefore searched exactly, never as a prefix.
+</Note>
+
+Note the journal's FTS5 index is tokenized `porter ascii`, which stems English
+but does **not** fold non-ASCII case or accents: a Czech word typed without its
+diacritics (`rozhodnuti`) will not find the entry that spells it `rozhodnutí`.
+That is a property of the index, not of the query builder.
+
 `HybridRecall` is the recommended entry point for new code. The pure-cosine `Recall` is preserved for the orchestrator's prompt-injection path (where rank stability across small query perturbations matters more than recall on lexical hits) and for tests that want a deterministic similarity score.
 
 ## Memory relations (embedding relation graph)

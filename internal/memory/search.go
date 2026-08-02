@@ -77,6 +77,15 @@ func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchR
 // sanitizeFTSQuery makes a user query safe for FTS5.
 // It preserves quoted phrases and trailing wildcards while stripping
 // dangerous FTS5 operators like column filters ({col}:), NEAR, etc.
+//
+// A plain question is turned into `"<phrase>" OR "t1" OR "t2" OR …` — see
+// buildPhraseOrTerms. It used to be turned into `"t1" "t2" …`, and a space
+// between two FTS5 terms is an implicit AND, so an eight-word question
+// demanded all eight words inside one ~500-character chunk. Measured against
+// the production engine, 8 of 10 realistic questions returned ZERO rows
+// (#1678). The [MEMORY GAP] block tells a woken agent to search for the
+// project it is picking up, so that was not a ranking defect — it was an
+// instruction that could not succeed.
 func sanitizeFTSQuery(q string) string {
 	q = strings.TrimSpace(q)
 	if q == "" {
@@ -102,13 +111,7 @@ func sanitizeFTSQuery(q string) string {
 		if hasOperators {
 			return q
 		}
-		// Simple query: wrap each word in quotes for safety
-		words := strings.Fields(q)
-		quoted := make([]string, len(words))
-		for i, w := range words {
-			quoted[i] = "\"" + w + "\""
-		}
-		return strings.Join(quoted, " ")
+		return buildPhraseOrTerms(strings.Fields(q))
 	}
 
 	// Dangerous characters found — strip them and rebuild safely.
@@ -123,6 +126,24 @@ func sanitizeFTSQuery(q string) string {
 	}, q)
 
 	words := strings.Fields(cleaned)
+
+	// A query only becomes dangerous by containing one of the stripped
+	// characters, which most natural questions do not — but "keeper: aux
+	// slots" and "deploy (dev slot)" do, and they deserve the same
+	// treatment as the same question without the punctuation. Only when a
+	// real operator or wildcard survived the strip does the caller clearly
+	// mean FTS5 syntax, and then the operator-preserving rebuild below
+	// applies.
+	if !hasExplicitFTSSyntax(words) {
+		stripped := make([]string, 0, len(words))
+		for _, w := range words {
+			if w = strings.ReplaceAll(w, "\"", ""); w != "" {
+				stripped = append(stripped, w)
+			}
+		}
+		return buildPhraseOrTerms(stripped)
+	}
+
 	parts := make([]string, 0, len(words))
 	for _, w := range words {
 		switch {
@@ -152,4 +173,113 @@ func sanitizeFTSQuery(q string) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// hasExplicitFTSSyntax reports whether the caller wrote FTS5 themselves —
+// a boolean operator or a wildcard — rather than asking a question.
+func hasExplicitFTSSyntax(words []string) bool {
+	for _, w := range words {
+		if strings.EqualFold(w, "AND") || strings.EqualFold(w, "OR") ||
+			strings.EqualFold(w, "NOT") || strings.Contains(w, "*") {
+			return true
+		}
+	}
+	return false
+}
+
+// buildPhraseOrTerms turns the words of a plain question into
+// `"<phrase>" OR "t1" OR "t2" OR …`.
+//
+// The phrase comes first so a chunk containing the whole question in order
+// ranks at the top; the individual terms follow so a chunk containing only
+// some of them still comes back at all. Everything is quoted: quoting is
+// what keeps a word that happens to spell `OR` or `NEAR` from being parsed
+// as an operator, and it is unchanged from the previous builder.
+//
+// Stopwords are dropped from the term list because a bare OR inherits the
+// opposite failure from AND: "what did we decide about journal retention"
+// OR-expands to include `what`, `did`, `we` and `about`, which match nearly
+// every chunk and bury the two terms that carried the meaning.
+//
+// The measurable effect is precision, not rank. Left in, "what is a
+// kubernetes ingress" returns chunks against a corpus containing no word of
+// the actual question — an answer to a question that was not asked, which is
+// worse than an empty result because the caller cannot tell. That is what
+// TestSearch_OrDoesNotBecomeMatchEverything pins. (PRD §3.7 credits the list
+// with 7/10 → 8/10 top-3 on this repository's docs/ tree; that measurement
+// predates `file UNINDEXED` and does not survive it — see PRD §7.0. Once the
+// path column is out, stopword removal and the phrase leg are what separate
+// the shipped builder from a bare OR, and neither does it by rank alone.)
+func buildPhraseOrTerms(words []string) string {
+	terms := make([]string, 0, len(words))
+	for _, w := range words {
+		if w = strings.ReplaceAll(w, "\"", ""); w != "" {
+			terms = append(terms, w)
+		}
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+
+	kept := make([]string, 0, len(terms))
+	for _, w := range terms {
+		if !searchStopwords[strings.ToLower(w)] {
+			kept = append(kept, w)
+		}
+	}
+	// A question made ENTIRELY of stopwords ("what is the") must not become
+	// an empty MATCH expression: FTS5 rejects one, and returning "" would
+	// silently answer a real question with nothing. Fall back to the
+	// unfiltered words — the result is bounded by the chunks that actually
+	// contain them, which is the honest answer to a question with no
+	// content words in it.
+	if len(kept) == 0 {
+		kept = terms
+	}
+
+	// Capacity without the arithmetic: `len(kept)+1` is what a phrase-plus-
+	// terms expression needs, but CodeQL's go/allocation-size-overflow flags
+	// any arithmetic feeding a make(), and one re-grow of a slice this small
+	// is not worth arguing about.
+	parts := make([]string, 0, len(kept))
+	if len(kept) > 1 {
+		parts = append(parts, "\""+strings.Join(kept, " ")+"\"")
+	}
+	for _, w := range kept {
+		parts = append(parts, "\""+w+"\"")
+	}
+	return strings.Join(parts, " OR ")
+}
+
+// searchStopwords are the highest-frequency function words in the two
+// languages this product is used in, held as one flat bilingual set
+// because the two share several spellings ("do", "to", "a").
+//
+// Deliberately short. The failure mode of a too-short list is a little
+// noise in the OR expansion; the failure mode of a too-long one is a
+// deleted content word and a lost answer — "how do I deploy" is a question,
+// "deploy" is the answer, and a list that grew to include "slot" or "run"
+// would start eating the query. It is not stemmed, not per-language, and
+// not configurable: every one of those is a knob whose value cannot be
+// judged without the read-side eval that does not exist yet
+// (docs/prd/memory-retrieval-layer.md §8).
+var searchStopwords = map[string]bool{
+	// English
+	"a": true, "about": true, "after": true, "an": true, "and": true,
+	"any": true, "are": true, "as": true, "at": true, "be": true, "but": true,
+	"by": true, "did": true, "do": true, "does": true, "for": true, "from": true,
+	"how": true, "i": true, "if": true, "in": true, "is": true, "it": true,
+	"of": true, "on": true, "or": true, "should": true, "that": true,
+	"the": true, "then": true, "there": true, "this": true, "to": true,
+	"was": true, "we": true, "were": true, "what": true, "when": true,
+	"where": true, "which": true, "who": true, "why": true, "with": true,
+	// Czech
+	"aby": true, "ale": true, "ani": true, "až": true,
+	"co": true, "další": true, "je": true, "jak": true,
+	"jako": true, "jsem": true, "jsme": true, "jsou": true, "již": true,
+	"k": true, "kde": true, "která": true, "které": true, "který": true,
+	"na": true, "nebo": true, "než": true, "o": true, "po": true, "pro": true,
+	"při": true, "s": true, "se": true, "si": true, "tak": true, "také": true,
+	"u": true, "už": true, "v": true, "ve": true, "z": true,
+	"za": true, "že": true,
 }

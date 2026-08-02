@@ -213,16 +213,17 @@ func TestEscapeFTSQuery_TableDriven(t *testing.T) {
 		want string
 	}{
 		{"", ""},
-		{"!@#$%", ""},         // pure punctuation → empty
-		{"a", ""},             // single chars filtered (cur.Len > 1)
-		{"ab", "ab*"},         // two-char minimum
-		{"deploy", "deploy*"}, // single word becomes prefix
-		{"deploy 42", "deploy* OR 42*"},
-		{"deploy-42", "deploy* OR 42*"},         // dash splits
-		{"DEPLOY-42", "deploy* OR 42*"},         // case lowered
-		{`"quoted"`, "quoted*"},                 // quotes stripped, word kept
-		{"foo AND bar", "foo* OR and* OR bar*"}, // FTS keywords harmless after escape
-		{"héllo wörld", "llo* OR rld*"},         // non-ASCII letters stripped
+		{"!@#$%", ""},           // pure punctuation → empty
+		{"a", ""},               // single chars filtered
+		{"ab", `"ab"`},          // below the 3-rune threshold: exact, never a prefix (#1678)
+		{"deploy", `"deploy"*`}, // single word becomes a prefix
+		{"deploy 42", `"deploy"* OR "42"`},
+		{"deploy-42", `"deploy"* OR "42"`},            // dash splits
+		{"DEPLOY-42", `"deploy"* OR "42"`},            // case lowered
+		{`"quoted"`, `"quoted"*`},                     // quotes stripped, word kept
+		{"foo AND bar", `"foo"* OR "and"* OR "bar"*`}, // FTS keywords harmless after escape
+		{"héllo wörld", `"héllo"* OR "wörld"*`},       // Unicode-aware: a diacritic is a letter (#1678)
+		{"jak dlouho se drží", `"jak"* OR "dlouho"* OR "se" OR "drží"*`}, // Czech survives whole
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {

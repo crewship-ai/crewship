@@ -348,6 +348,31 @@ notes are searchable in the same session they were written.
   failing — results carry no `score`. The sidecar logs the fallback.
 </Note>
 
+#### How a question becomes a query
+
+Ask in plain language. The engine turns the question into an FTS5 expression
+for you, and the rules are worth knowing because they decide what comes back:
+
+- **Any word is enough, the whole phrase ranks best.** `journal retention
+  policy` becomes `"journal retention policy" OR "journal" OR "retention" OR
+  "policy"` — a chunk with the exact phrase ranks first, a chunk with one of
+  the words still comes back. It is **not** an AND: a seven-word question does
+  not have to find all seven words inside one ~500-character chunk.
+- **Common function words are dropped** from the term list, in English and
+  Czech both — `what`, `the`, `how`, `se`, `na`, `který`. They match nearly
+  every chunk and would bury the words that carried the question. A query made
+  *entirely* of function words keeps them rather than searching for nothing.
+- **File paths are not searched.** Searching `daily` or `md` matches notes that
+  say those words, not every file under `daily/` or every `.md`. To scope by
+  location, pass the `tier` argument — that is what it is for.
+- **Write real FTS5 and it is passed through.** If your query contains `AND`,
+  `OR`, `NOT`, a `"quoted phrase"` or a `prefix*`, the engine assumes you meant
+  it and does not rewrite. `gatekeeper AND credential` really is an AND.
+- **Matching ignores accents but not endings.** `rozhodnuti` finds
+  `rozhodnutí`, but `žurnál` does not find `žurnálu` — there is no stemming on
+  this index. If a Czech query comes back empty, try the stem, or a
+  `prefix*`.
+
 The sidecar HTTP API below takes a `scope` parameter and resolves `scope=agent`
 to the **acting** agent's own tier — the caller identified by its
 `Authorization: Bearer $CREWSHIP_AGENT_TOKEN` header, not always the agent the
@@ -640,7 +665,9 @@ Two unrelated things share the word "pin" — don't confuse them:
 </Accordion>
 
 <Accordion title="Optimizing search">
-- **Use consistent terminology.** FTS5 is keyword-based, not semantic
+- **Use consistent terminology.** FTS5 is keyword-based, not semantic — and it does not stem, so `deploys` will not find `deployed`
+- **Ask the whole question.** Extra words no longer narrow the result to nothing; the phrase is what ranks an exact match to the top
+- **Scope with `tier`, not with a path word.** File paths are not part of the match — see [How a question becomes a query](#3-searching-memory)
 - **Trigger reindex after bulk writes.** Agent memory reindexes on startup; crew memory reindexes every 60s
 - **Use `scope=both`** to search across personal and crew knowledge simultaneously
 </Accordion>

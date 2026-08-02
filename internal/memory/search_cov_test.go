@@ -97,9 +97,13 @@ func TestSanitizeFTSQuery_DangerousPathRebuild(t *testing.T) {
 		input string
 		want  string
 	}{
-		// Column filter stripped, words re-quoted.
-		{`title:secret`, `"title" "secret"`},
-		// Operators preserved case-insensitively even on the dirty path.
+		// Column filter stripped, then the remaining words go through the
+		// same phrase-OR-terms builder a clean question would get (#1678):
+		// "keeper: aux slots" is the same question as "keeper aux slots"
+		// and must not keep the implicit-AND that returned zero rows.
+		{`title:secret`, `"title secret" OR "title" OR "secret"`},
+		// Operators preserved case-insensitively even on the dirty path —
+		// an explicit operator means the caller wrote FTS5 on purpose.
 		{`foo AND (bar)`, `"foo" AND "bar"`},
 		{`foo or bar:`, `"foo" OR "bar"`},
 		{`not baz +`, `NOT "baz"`},
@@ -109,12 +113,13 @@ func TestSanitizeFTSQuery_DangerousPathRebuild(t *testing.T) {
 		{`" :`, ``},
 		// Trailing wildcard preserved on the dirty path.
 		{`(pre*)`, `"pre"*`},
-		// Wildcard with empty base is dropped.
+		// Wildcard with empty base is dropped — and with nothing else in
+		// the query there is no expression left to build.
 		{`(***)`, ``},
 		// NEAR-ish constructs lose their operator characters.
-		{`NEAR(a, b)`, `"NEAR" "a," "b"`},
+		{`NEAR(a, b)`, `"NEAR a, b" OR "NEAR" OR "a," OR "b"`},
 		// Caret and tilde stripped.
-		{`^boost~2 word`, `"boost" "2" "word"`},
+		{`^boost~2 word`, `"boost 2 word" OR "boost" OR "2" OR "word"`},
 	}
 	for _, tc := range cases {
 		if got := sanitizeFTSQuery(tc.input); got != tc.want {
