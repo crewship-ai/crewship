@@ -395,3 +395,107 @@ func TestKeeperResolve_ScopesToTheCallersWorkspace(t *testing.T) {
 		t.Errorf("got %d, want 404 for a request outside the caller's workspace", rr.Code)
 	}
 }
+
+// The human ruling has to reach the LEDGER too, and on dev2 it did not:
+// `keeper history` on a request an operator had just denied showed PENDING →
+// ESCALATE and stopped. keeper_requests said DENY, keeper_request_events said
+// the request was still waiting for somebody.
+//
+// #1369 wrote the ledger precisely so the projection and the history could never
+// disagree, and this is the one transition where the disagreement matters most:
+// keeper_requests is UPDATEd in place, so the ledger is the only record of WHO
+// decided and when. Without it the audit trail says a person's verdict was the
+// model's.
+//
+// keeperActorUser exists in keeper_events.go with the comment "an operator
+// resolved an escalation" and nothing used it — the slot was cut for this and
+// left empty.
+func TestKeeperResolve_AppendsTheHumanDecisionToTheLedger(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-ledger', 'access', ?, ?, ?, 'rotate the certs', 'ESCALATE')`,
+		agentID, crewID, credID)
+	execOrFatal(t, db, `
+		INSERT INTO keeper_request_events
+			(id, request_id, workspace_id, seq, state, actor_type, recorded_at)
+		VALUES ('ev1', 'kr-ledger', ?, 1, 'PENDING', 'agent', '2026-01-01T00:00:00.000000000Z'),
+		       ('ev2', 'kr-ledger', ?, 2, 'ESCALATE', 'keeper', '2026-01-01T00:00:01.000000000Z')`,
+		wsID, wsID)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "alice", "kr-ledger",
+		map[string]any{"decision": "DENY", "reason": "no change window declared"}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var seq int
+	var state, actorType, actorID, reason string
+	if err := db.QueryRow(`
+		SELECT seq, state, actor_type, COALESCE(actor_id,''), COALESCE(reason,'')
+		  FROM keeper_request_events
+		 WHERE request_id = 'kr-ledger' ORDER BY seq DESC LIMIT 1`).
+		Scan(&seq, &state, &actorType, &actorID, &reason); err != nil {
+		t.Fatalf("read the last ledger row: %v", err)
+	}
+	if seq != 3 {
+		t.Fatalf("the last ledger entry is seq %d, want 3 — the human decision was never appended, "+
+			"so `keeper history` still says the request is waiting for somebody", seq)
+	}
+	if state != "DENY" {
+		t.Errorf("ledger state is %q, want DENY", state)
+	}
+	if actorType != keeperActorUser {
+		t.Errorf("actor_type is %q, want %q — a person decided this, not the model",
+			actorType, keeperActorUser)
+	}
+	if actorID != "alice" {
+		t.Errorf("actor_id is %q, want alice; WHO decided is the point of the entry", actorID)
+	}
+	if reason != "no change window declared" {
+		t.Errorf("reason is %q, want the operator's own words", reason)
+	}
+}
+
+// The ledger append rides the same transaction as the decision, so a request
+// that is refused must leave no trace at all — a history showing a DENY that was
+// never applied is worse than one missing an entry.
+func TestKeeperResolve_ARefusedRulingLeavesNoLedgerEntry(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, _ := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	const alice = "user-alice"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'alice@example.com', 'Alice')`, alice)
+	execOrFatal(t, db, `
+		INSERT INTO credentials (id, workspace_id, name, type, security_level, encrypted_value, created_by)
+		VALUES ('cred-l4x', ?, 'PROD_DB_ADMIN', 'SECRET', 4, 'v1:aW52YWxpZA==', ?)`, wsID, alice)
+	execOrFatal(t, db, `UPDATE agents SET created_by_user_id = ? WHERE id = ?`, alice, agentID)
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-refused', 'access', ?, ?, 'cred-l4x', 'migrate orders', 'ESCALATE')`,
+		agentID, crewID)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", alice, "kr-refused",
+		map[string]any{"decision": "ALLOW"}))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("four-eyes did not refuse: %d %s", rr.Code, rr.Body.String())
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keeper_request_events WHERE request_id = 'kr-refused'`).
+		Scan(&n); err != nil {
+		t.Fatalf("count ledger rows: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("the refused ruling left %d ledger entries; a history showing a decision "+
+			"that was never applied is worse than one missing an entry", n)
+	}
+}

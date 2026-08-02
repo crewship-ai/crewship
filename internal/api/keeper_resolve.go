@@ -205,6 +205,31 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The third write, and the one that says WHO. keeper_requests is UPDATEd in
+	// place, so without a ledger entry the audit trail records a person's verdict
+	// as though the model had made it — `keeper history` showed PENDING → ESCALATE
+	// and stopped, while keeper_requests already said DENY. #1369 built this
+	// ledger so the projection and the history could never disagree; this is the
+	// transition where the disagreement costs the most.
+	//
+	// Same transaction as the two above: a history entry for a decision that was
+	// not applied would be worse than a missing one.
+	if err := appendKeeperTransitionTx(r.Context(), tx, keeperTransition{
+		RequestID:    reqID,
+		WorkspaceID:  wsID,
+		State:        decision,
+		RequestType:  string(keeper.RequestTypeAccess),
+		AgentID:      agentID,
+		CrewID:       crewID,
+		CredentialID: credentialID,
+		Reason:       reason,
+		ActorType:    keeperActorUser,
+		ActorID:      actorID,
+	}); err != nil {
+		replyInternalError(w, h.logger, "keeper resolve: append ledger transition", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: commit", err)
 		return

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -17,15 +18,33 @@ import (
 // caller's workspace (#893); a MEMBER should learn *why* they're blocked
 // rather than see a raw RFC-7807 "Forbidden". Non-403 errors pass through
 // unchanged so the underlying status/detail is preserved.
+//
+// It substitutes ONLY when the server offered nothing. Every keeper command
+// routes 403s through here, and not all of them are role problems: `keeper
+// resolve` answers the four-eyes rule with "this escalation was raised by an
+// agent you own, so somebody else must confirm it". Replacing that with a role
+// hint sent an OWNER off to ask an admin to fix a permission that was never
+// wrong, when the actual answer was "get a second person". A message the server
+// took the trouble to write beats one the client guessed.
 func keeperPermissionHint(err error) error {
 	var apiErr *cli.APIError
-	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden {
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && isBareForbidden(apiErr.Detail) {
 		ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 		return cli.WithExitCode(fmt.Errorf(
 			"API error (403): keeper status requires ADMIN or OWNER role in workspace %q — ask a workspace admin or switch workspaces with 'crewship workspace use <slug>'",
 			ws), cli.ExitAuth)
 	}
 	return err
+}
+
+// isBareForbidden reports whether a 403 body said anything beyond "no". The
+// RFC-7807 default title is the only value the substitution is for.
+func isBareForbidden(detail string) bool {
+	switch strings.ToLower(strings.TrimSpace(detail)) {
+	case "", "forbidden":
+		return true
+	}
+	return false
 }
 
 var systemCmd = &cobra.Command{
