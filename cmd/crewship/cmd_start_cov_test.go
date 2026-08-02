@@ -76,7 +76,7 @@ func TestInitProviders_SkipContainerProviders(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Container.Provider = provider
 
-			deps, err := initProviders(context.Background(), cfg, covLogger(), true)
+			deps, err := initProviders(context.Background(), cfg, nil, covLogger(), true)
 			if err != nil {
 				t.Fatalf("initProviders: %v", err)
 			}
@@ -97,7 +97,7 @@ func TestInitProviders_StorageAndState(t *testing.T) {
 	cfg.State.Provider = "bbolt"
 	cfg.State.BoltPath = filepath.Join(dir, "state.db")
 
-	deps, err := initProviders(context.Background(), cfg, covLogger(), true)
+	deps, err := initProviders(context.Background(), cfg, nil, covLogger(), true)
 	if err != nil {
 		t.Fatalf("initProviders: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestInitProviders_UnknownProvidersTolerated(t *testing.T) {
 	cfg.Storage.Provider = "s3" // recognised in config validation but not wired here
 	cfg.State.Provider = "postgres"
 
-	deps, err := initProviders(context.Background(), cfg, covLogger(), true)
+	deps, err := initProviders(context.Background(), cfg, nil, covLogger(), true)
 	if err != nil {
 		t.Fatalf("unknown providers must not error: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestInitProviders_LocalfsError(t *testing.T) {
 	cfg.Storage.Provider = "localfs"
 	cfg.Storage.BasePath = filepath.Join(blocker, "sub")
 
-	if _, err := initProviders(context.Background(), cfg, covLogger(), true); err == nil {
+	if _, err := initProviders(context.Background(), cfg, nil, covLogger(), true); err == nil {
 		t.Fatal("expected init localfs provider error")
 	}
 }
@@ -154,7 +154,7 @@ func TestInitProviders_BboltError(t *testing.T) {
 	cfg.State.Provider = "bbolt"
 	cfg.State.BoltPath = t.TempDir()
 
-	if _, err := initProviders(context.Background(), cfg, covLogger(), true); err == nil {
+	if _, err := initProviders(context.Background(), cfg, nil, covLogger(), true); err == nil {
 		t.Fatal("expected init bbolt provider error")
 	}
 }

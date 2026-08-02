@@ -75,6 +75,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			_, _ = runCLI(ctx, "rm", existing.Configuration.ID)
 			// fall through to create a fresh container below
 		} else {
+			// Admission control (#1668): restarting a stopped container puts
+			// a full lightweight VM back on the host, so it is gated exactly
+			// like a create. The already-running branch above returned before
+			// reaching here and is therefore free.
+			releaseSlot, admitErr := p.admitContainerStart(ctx, team)
+			if admitErr != nil {
+				return "", admitErr
+			}
+			defer releaseSlot()
+
 			// Start stopped container
 			if _, err := runCLI(ctx, "start", existing.Configuration.ID); err != nil {
 				return "", fmt.Errorf("start existing container: %w", err)
@@ -92,6 +102,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if cpus == 0 {
 		cpus = 1.0
 	}
+
+	// Admission control (#1668). Past this point we are adding a container to
+	// the host; everything above either reused one or decided one must be
+	// built. Ahead of the image pull deliberately — work started before the
+	// slot is held is work done on a host that may still say no.
+	releaseSlot, err := p.admitContainerStart(ctx, team)
+	if err != nil {
+		return "", err
+	}
+	defer releaseSlot()
 
 	if err := p.ensureImage(ctx, p.cfg.RuntimeImage); err != nil {
 		return "", fmt.Errorf("ensure image: %w", err)

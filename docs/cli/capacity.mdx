@@ -1,0 +1,96 @@
+---
+title: "crewship capacity"
+description: "What host admission control is holding, and why — the difference between a queued container start and a hung one."
+icon: "gauge"
+---
+
+# `crewship capacity`
+
+Show what host admission control is doing right now.
+
+```bash
+crewship capacity
+crewship capacity --format json
+```
+
+Crewship **holds a crew container start** — before the container is created —
+when the host cannot afford another one, and starts it when it can. This
+command is how to tell a held start from a hung one.
+
+```
+Capacity: 2 container start(s) held for capacity · 4 start(s) in flight · host memory 900/16000 MiB available, pressure 3.10%
+
+Limits: memory floor 3072 MiB · max concurrent starts 4 · stagger 150ms · pressure ceiling 20.00%
+
+Held container starts:
+  alpha  held 42s  reason=host_memory  host has 900 MiB available, 3072 MiB needed for one more agent container
+  beta   held 1s   reason=concurrency  4 container starts already in flight, limit 4
+```
+
+## Reasons
+
+| `reason=` | What it means |
+|---|---|
+| `host_memory` | `MemAvailable` is below the floor: one agent's memory plus the host reserve. |
+| `host_pressure` | The kernel reports the host is already stalling on memory (`/proc/pressure/memory`, `some avg10`) above the ceiling, even though `MemAvailable` looks fine. |
+| `concurrency` | The container-start bound is saturated. Short-lived. |
+| `pacing` | Simultaneous wakes are being staggered. Very short-lived. |
+
+## Thresholds
+
+All four are instance settings, read live — a change takes effect on the next
+held start, not the next restart.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `runtime.host_memory_reserve_mb` | `1024` | Host headroom kept free **on top of** `runtime.agent_min_memory_mb`. The floor is the sum: `3072 MiB` by default. `0` disables the host-memory gate. |
+| `runtime.host_memory_pressure_pct` | `20` | PSI `some avg10` ceiling. `0` disables the veto. |
+| `runtime.max_concurrent_container_starts` | `4` | Container creates/starts in flight. `0` = unbounded. |
+| `runtime.container_start_stagger_ms` | `150` | Minimum spacing between admitted starts. `0` = no stagger. |
+
+```bash
+crewship instance settings set runtime.host_memory_reserve_mb 4096
+```
+
+See [Sizing a crew → Host capacity](/cli/crew#host-capacity) for why the floor
+is an absolute figure rather than a percentage, and why starts are staggered.
+
+## Platform support
+
+<Note>
+The host-memory signal comes from `/proc/meminfo` and `/proc/pressure/memory`,
+which exist on **Linux only**. On macOS — where the `apple` container provider
+runs — the host-memory gate is **inactive**, and this command reports
+`host-memory gate inactive (signal unavailable on this platform)` rather than
+presenting a gate that is quietly doing nothing. The concurrency bound and the
+stagger still apply. `/proc/pressure/memory` further needs a kernel built with
+`CONFIG_PSI`; where it is missing the pressure veto never fires, and its
+absence is never read as pressure.
+</Note>
+
+## Scope
+
+Admission control answers exactly one question: should this host start one
+more crew container right now, or wait. It does not tune cgroups, evict, or
+rebalance, and it never touches a container that is already running — a
+running container cannot be paused to free memory (`docker pause` is a single
+write to `cgroup.freeze`; the cgroup keeps every page).
+
+Reusing a crew container that is **already running** costs the host nothing
+and is never held. Only a create, or the restart of a stopped container, goes
+through the gate.
+
+## API
+
+| Method | Path |
+|---|---|
+| `GET` | `/api/v1/runtime/capacity` |
+
+Read-only and instance-scoped. Any authenticated user can call it: someone
+whose run is being held needs to be able to see that it is held.
+
+## See also
+
+- [`crewship now`](/cli/me#crewship-now) — held starts on the live status board.
+- [`crewship crew`](/cli/crew#host-capacity) — the thresholds in context.
+- [`crewship instance`](/cli/instance) — reading and setting the values.

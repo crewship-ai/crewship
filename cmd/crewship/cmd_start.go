@@ -19,6 +19,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 
+	"github.com/crewship-ai/crewship/internal/admission"
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/chatnotify"
@@ -276,7 +277,21 @@ var startCmd = &cobra.Command{
 			cancel()
 		}()
 
-		deps, err := initProviders(ctx, cfg, logger, noDocker)
+		// Host admission control (#1668). Built before the providers because
+		// they take it at construction: it is the thing that decides whether
+		// this host can afford one more crew container, and the only way to
+		// create one is through code that asks it.
+		//
+		// Its policy is read live from app_settings on every decision, so
+		// `crewship instance settings set runtime.host_memory_reserve_mb …`
+		// takes effect on the next held start rather than the next restart.
+		admissionCtl := admission.New(
+			func(c context.Context) admission.Limits { return api.AdmissionLimits(c, db.DB) },
+			admission.ReadHostMemory,
+			logger,
+		)
+
+		deps, err := initProviders(ctx, cfg, admissionCtl, logger, noDocker)
 		if err != nil {
 			return fmt.Errorf("failed to initialize providers: %w", err)
 		}
@@ -284,6 +299,7 @@ var startCmd = &cobra.Command{
 		deps.DebugLogs = debugBuffer
 		deps.DB = db.DB
 		deps.License = lic
+		deps.Admission = admissionCtl
 
 		webFS, err := web.FS()
 		if err != nil {
@@ -1164,6 +1180,50 @@ const (
 type containerProviderCandidate struct {
 	name string
 	new  func() (provider.ContainerProvider, error)
+	// admission is read back off the very Config the constructor will use, so
+	// the `auto` path's wiring is assertable without a live daemon and cannot
+	// drift from what is actually passed (#1668). Recording the gate
+	// separately from the closure is the only way to see inside a lazy
+	// constructor that needs a running Docker to be called at all.
+	admission provider.AdmissionGate
+}
+
+// dockerProviderConfig / appleProviderConfig build the two providers'
+// configuration from the daemon config plus the host-admission gate (#1668).
+//
+// They exist because the same two literals used to appear four times — once
+// each for the explicit `provider: docker` / `provider: apple` branches and
+// once each again as an `auto` candidate — and a field that four literals have
+// to remember is the same shape of defect admission control was written to
+// fix. One builder per provider means a new field lands in one place, and the
+// gate cannot be present on one construction path and missing on another.
+//
+// A nil gate stays nil: it must not become a non-nil interface holding a nil
+// value, or the providers' `if gate == nil` short-circuit stops working and
+// every start is routed through a controller that is not there.
+func dockerProviderConfig(cfg *config.Config, gate provider.AdmissionGate) docker.Config {
+	return docker.Config{
+		RuntimeImage:      cfg.Container.RuntimeImage,
+		DefaultRuntime:    cfg.Container.DefaultRuntime,
+		Network:           cfg.Container.Network,
+		OutputBasePath:    cfg.Storage.BasePath,
+		ContainerPrefix:   cfg.Container.ContainerPrefix,
+		SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+		EntrypointPath:    cfg.Container.EntrypointPath,
+		Admission:         gate,
+	}
+}
+
+func appleProviderConfig(cfg *config.Config, gate provider.AdmissionGate) apple.Config {
+	return apple.Config{
+		RuntimeImage:      cfg.Container.RuntimeImage,
+		Network:           cfg.Container.Network,
+		OutputBasePath:    cfg.Storage.BasePath,
+		ContainerPrefix:   cfg.Container.ContainerPrefix,
+		SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+		EntrypointPath:    cfg.Container.EntrypointPath,
+		Admission:         gate,
+	}
 }
 
 // autoContainerCandidates returns the runtimes `auto` tries, in the order it
@@ -1178,32 +1238,19 @@ type containerProviderCandidate struct {
 // Apple Containers stay a fallback for hosts with nothing else (#1647).
 // docs/configuration/providers.mdx documents this order and
 // cmd_start_provider_order_test.go pins both sides against drift.
-func autoContainerCandidates(ctx context.Context, cfg *config.Config, logger *slog.Logger) []containerProviderCandidate {
+func autoContainerCandidates(ctx context.Context, cfg *config.Config, gate provider.AdmissionGate, logger *slog.Logger) []containerProviderCandidate {
+	dockerCfg := dockerProviderConfig(cfg, gate)
+	appleCfg := appleProviderConfig(cfg, gate)
 	return []containerProviderCandidate{
-		{name: providerDocker, new: func() (provider.ContainerProvider, error) {
-			d, err := docker.New(ctx, docker.Config{
-				RuntimeImage:      cfg.Container.RuntimeImage,
-				DefaultRuntime:    cfg.Container.DefaultRuntime,
-				Network:           cfg.Container.Network,
-				OutputBasePath:    cfg.Storage.BasePath,
-				ContainerPrefix:   cfg.Container.ContainerPrefix,
-				SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
-				EntrypointPath:    cfg.Container.EntrypointPath,
-			}, logger)
+		{name: providerDocker, admission: dockerCfg.Admission, new: func() (provider.ContainerProvider, error) {
+			d, err := docker.New(ctx, dockerCfg, logger)
 			if err != nil {
 				return nil, err
 			}
 			return d, nil
 		}},
-		{name: providerApple, new: func() (provider.ContainerProvider, error) {
-			a, err := apple.New(ctx, apple.Config{
-				RuntimeImage:      cfg.Container.RuntimeImage,
-				Network:           cfg.Container.Network,
-				OutputBasePath:    cfg.Storage.BasePath,
-				ContainerPrefix:   cfg.Container.ContainerPrefix,
-				SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
-				EntrypointPath:    cfg.Container.EntrypointPath,
-			}, logger)
+		{name: providerApple, admission: appleCfg.Admission, new: func() (provider.ContainerProvider, error) {
+			a, err := apple.New(ctx, appleCfg, logger)
 			if err != nil {
 				return nil, err
 			}
@@ -1245,7 +1292,7 @@ func warnAppleProviderIsolationGap(logger *slog.Logger) {
 		"remedy", "install Docker and set container.provider to docker for the remaining hardening")
 }
 
-func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
+func initProviders(ctx context.Context, cfg *config.Config, gate provider.AdmissionGate, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
@@ -1254,15 +1301,7 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			logger.Info("docker provider disabled via --no-docker")
 			break
 		}
-		d, err := docker.New(ctx, docker.Config{
-			RuntimeImage:      cfg.Container.RuntimeImage,
-			DefaultRuntime:    cfg.Container.DefaultRuntime,
-			Network:           cfg.Container.Network,
-			OutputBasePath:    cfg.Storage.BasePath,
-			ContainerPrefix:   cfg.Container.ContainerPrefix,
-			SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
-			EntrypointPath:    cfg.Container.EntrypointPath,
-		}, logger)
+		d, err := docker.New(ctx, dockerProviderConfig(cfg, gate), logger)
 		if err != nil {
 			logger.Warn("docker provider unavailable, running without containers", "error", err)
 		} else {
@@ -1274,14 +1313,7 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			logger.Info("apple container provider disabled via --no-docker")
 			break
 		}
-		a, err := apple.New(ctx, apple.Config{
-			RuntimeImage:      cfg.Container.RuntimeImage,
-			Network:           cfg.Container.Network,
-			OutputBasePath:    cfg.Storage.BasePath,
-			ContainerPrefix:   cfg.Container.ContainerPrefix,
-			SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
-			EntrypointPath:    cfg.Container.EntrypointPath,
-		}, logger)
+		a, err := apple.New(ctx, appleProviderConfig(cfg, gate), logger)
 		if err != nil {
 			logger.Warn("apple container provider unavailable, running without containers", "error", err)
 		} else {
@@ -1294,7 +1326,7 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			logger.Info("container provider disabled via --no-docker")
 			break
 		}
-		if c, name := selectAutoContainerProvider(autoContainerCandidates(ctx, cfg, logger), logger); c != nil {
+		if c, name := selectAutoContainerProvider(autoContainerCandidates(ctx, cfg, gate, logger), logger); c != nil {
 			logger.Info("auto-detected container provider", "provider", name)
 			deps.Container = c
 		}

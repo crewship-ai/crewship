@@ -543,6 +543,21 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// reads readable without recomputing.
 	runtimeImage := desiredImage
 
+	// Admission control (#1668). Everything above this line either reused an
+	// existing container or decided one has to be built; from here on we are
+	// adding a container, a network namespace and its pages to the host, so
+	// this is where the host gets a say.
+	//
+	// Deliberately below the reconcile and above the create: a warm reuse
+	// costs the host nothing and must never queue behind a memory check, and
+	// an image pull that starts before the slot is held would be work done on
+	// a host that may still say no.
+	releaseSlot, err := p.admitContainerStart(ctx, team, emitProv)
+	if err != nil {
+		return "", err
+	}
+	defer releaseSlot()
+
 	p.logger.Debug("ensuring image", "image", runtimeImage)
 	if err := p.ensureImage(ctx, runtimeImage); err != nil {
 		return "", fmt.Errorf("ensure image: %w", err)
@@ -812,6 +827,17 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 					p.forceTeardown(ctx, c.ID, team.ID)
 					break // fall through to create new container
 				}
+				// Admission control (#1668). Starting a stopped container puts
+				// a network namespace and the container's pages back on the
+				// host, so it is gated exactly like a create. The already-
+				// running fast path above returns before reaching here and is
+				// therefore free, which is the point.
+				releaseSlot, admitErr := p.admitContainerStart(ctx, team, emitProv)
+				if admitErr != nil {
+					return "", false, admitErr
+				}
+				defer releaseSlot()
+
 				if _, err := p.client.ContainerStart(ctx, c.ID, client.ContainerStartOptions{}); err != nil {
 					return "", false, fmt.Errorf("start existing container: %w", err)
 				}

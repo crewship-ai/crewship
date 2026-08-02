@@ -52,7 +52,7 @@ func TestAutoContainerCandidates_DockerBeforeApple(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Container.Provider = "auto"
 
-	got := candidateNames(autoContainerCandidates(context.Background(), cfg, slog.New(slog.NewTextHandler(os.Stderr, nil))))
+	got := candidateNames(autoContainerCandidates(context.Background(), cfg, nil, slog.New(slog.NewTextHandler(os.Stderr, nil))))
 	want := []string{"docker", "apple"}
 
 	if len(got) != len(want) {
@@ -74,7 +74,7 @@ func TestAutoContainerCandidates_ConstructorsAreLazy(t *testing.T) {
 	cfg := &config.Config{}
 	logger, buf := orderCaptureLogger()
 
-	candidates := autoContainerCandidates(context.Background(), cfg, logger)
+	candidates := autoContainerCandidates(context.Background(), cfg, nil, logger)
 	if len(candidates) == 0 {
 		t.Fatal("expected at least one auto candidate")
 	}
@@ -237,7 +237,7 @@ func TestProvidersDocMatchesAutoDetectionOrder(t *testing.T) {
 	}
 	doc := string(raw)
 
-	names := candidateNames(autoContainerCandidates(context.Background(), &config.Config{}, slog.New(slog.NewTextHandler(os.Stderr, nil))))
+	names := candidateNames(autoContainerCandidates(context.Background(), &config.Config{}, nil, slog.New(slog.NewTextHandler(os.Stderr, nil))))
 	docWords := map[string]string{"docker": "Docker", "apple": "Apple Containers"}
 
 	prev := -1

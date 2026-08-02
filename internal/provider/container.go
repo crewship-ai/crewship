@@ -235,6 +235,31 @@ type ContainerProvider interface {
 	CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error
 }
 
+// AdmissionGate holds a crew container start until the host can afford one
+// more, and reports why while it waits. Implemented by
+// internal/admission.Controller; declared here so the providers depend on the
+// two-method shape rather than on that package.
+//
+// Providers call it at the statements that make a container resident —
+// ContainerCreate, and the start of a container that was stopped — and NOT on
+// the warm path, because reusing a container that is already running adds
+// nothing to the host and must never queue behind a memory check.
+//
+// It lives at this depth on purpose. The bound that existed before, the
+// orchestrator's runSem, is taken inside RunAgent, by which point all eleven
+// of its callers have already created and started their container; container
+// creates were therefore unbounded. Repairing that with a gate the callers
+// invoke first would leave a gate eleven call sites have to remember — the
+// same class of defect, waiting for the twelfth caller. Here, the only way to
+// create a crew container is to go through the code that asks.
+//
+// onHold is invoked the first time a start is actually held, and again if the
+// binding reason changes. It is how the run's own provisioning stream says
+// "waiting for capacity" rather than going quiet.
+type AdmissionGate interface {
+	Admit(ctx context.Context, crewID, crewSlug string, onHold func(reason, detail string)) (release func(), err error)
+}
+
 // HostAddressProvider is an optional interface that container providers can
 // implement to advertise the hostname/IP that containers should use to reach
 // the host machine. Docker uses "host.docker.internal"; Apple Containers use

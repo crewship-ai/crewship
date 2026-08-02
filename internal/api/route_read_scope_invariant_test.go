@@ -146,6 +146,18 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/system/license":   "instance license state",
 	"GET /api/v1/system/version":   "instance build version",
 	"GET /api/v1/system/runtime":   "instance runtime detail; the handler redacts for non-admins rather than 403-ing (see admin_authz_floor_test.go)",
+	// #1668. The handler reads ONE in-memory value: the admission controller's
+	// own snapshot. No DB, no query, no workspace column anywhere in the path
+	// — the host's free memory and the list of container starts currently held
+	// against it are properties of the process and the machine, not of a
+	// tenant. The crew ids in the `held` list are the only tenant-adjacent
+	// data, and they are there because the whole point of the endpoint is to
+	// let the person whose run is waiting see that it is waiting rather than
+	// hung; scoping them by workspace would hide a neighbour's crew that is
+	// consuming the host's capacity, which is the one thing an operator
+	// diagnosing a stall needs to see.
+	"GET /api/v1/runtime/capacity": "host admission-control status: an in-memory snapshot of the process " +
+		"and the machine, no DB read and no workspace-scoped rows",
 
 	// Workspace derived inside the handler rather than by wsCtx.
 	"GET /api/v1/chats/{chatId}/participants": "workspace derived from the chat itself via " +

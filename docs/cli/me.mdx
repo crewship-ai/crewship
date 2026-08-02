@@ -6,7 +6,7 @@ icon: "user"
 
 # Me, Today, Now
 
-`cmd/crewship/cmd_quickactions.go` ships three composite commands. Each fans out to 2-3 endpoints with `sync.WaitGroup` + best-effort error handling, so one slow endpoint never blocks the rest of the screen — partial views are preferred over blank ones. Partial errors land on stderr as `[partial] <label>: <err>` lines after the main render.
+`cmd/crewship/cmd_quickactions.go` ships three composite commands. Each fans out to 2-4 endpoints with `sync.WaitGroup` + best-effort error handling, so one slow endpoint never blocks the rest of the screen — partial views are preferred over blank ones. Partial errors land on stderr as `[partial] <label>: <err>` lines after the main render.
 
 ## `crewship me`
 
@@ -48,6 +48,7 @@ Live status board.
 | `GET /api/v1/runs?status=RUNNING&limit=20` | Currently-running runs |
 | `GET /api/v1/agents` | Agent inventory; classified into idle vs busy by `status` |
 | `GET /api/v1/approvals?status=pending` | Pending approvals across the workspace |
+| `GET /api/v1/runtime/capacity` | Container starts held by host admission control |
 
 ```bash
 crewship now
@@ -67,7 +68,17 @@ Agents: 4 idle, 2 busy
 
 Pending approvals: 1
   appr_xyz • Deploy frontend v2.3
+
+Held for capacity: 1
+  alpha  held 42s  reason=host_memory  host has 900 MiB available, 3072 MiB needed for one more agent container
+  (these runs are queued, not hung — `crewship capacity` for the thresholds)
 ```
+
+The **Held for capacity** block appears only when something is actually held.
+It is the one line on this screen that explains why the numbers above it are
+not moving: a container start waiting for host memory otherwise looks exactly
+like a run that has hung. [`crewship capacity`](/cli/capacity) has the
+thresholds and the full list.
 
 ## See also
 
@@ -75,3 +86,4 @@ Pending approvals: 1
 - [`crewship cost`](/cli/cost) — full cost breakdown (`today` only teases this).
 - [`crewship tui`](/cli/tui) — full-screen real-time dashboard.
 - [`crewship approvals`](/cli/approvals) — act on the pending items `me` / `now` surface.
+- [`crewship capacity`](/cli/capacity) — why a container start is being held, and the thresholds behind it.

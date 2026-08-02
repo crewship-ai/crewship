@@ -89,6 +89,17 @@ const (
 	// to a durable journal.EntryProvisioningBuildFailed so the tail is
 	// retrievable post hoc (#829), not only in the live stream.
 	ProvStepBuildFailed = "provision.build_failed"
+	// ProvStepCapacityHold marks a container start that admission control is
+	// HOLDING because the host cannot afford it yet (#1668). Detail names the
+	// binding reason and its numbers. It is the difference between a run that
+	// is waiting for capacity and a run that has hung: without it the wait is
+	// silent on every surface the operator has.
+	//
+	// It can be emitted more than once for a single start, when the binding
+	// reason changes (host memory frees, but the concurrency bound is now what
+	// holds it). It is never terminal — a held start still ends at ready or
+	// provision.failed.
+	ProvStepCapacityHold = "capacity_hold"
 )
 
 // Stable status constants for ProvisionEvent.Status.
