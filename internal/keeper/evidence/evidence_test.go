@@ -62,6 +62,31 @@ func newDB(t *testing.T) *sql.DB {
 			assigned_agent_id TEXT,
 			title TEXT NOT NULL,
 			status TEXT NOT NULL
+		);
+		CREATE TABLE backup_catalog (
+			id TEXT PRIMARY KEY,
+			file_path TEXT NOT NULL UNIQUE,
+			scope TEXT NOT NULL,
+			slug TEXT,
+			workspace_id TEXT,
+			created_at TEXT NOT NULL,
+			created_by TEXT,
+			size INTEGER NOT NULL,
+			sha256 TEXT NOT NULL,
+			encrypted INTEGER NOT NULL,
+			format_version INTEGER NOT NULL
+		);
+		CREATE TABLE credentials (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			encrypted_value TEXT NOT NULL,
+			type TEXT NOT NULL,
+			provider TEXT,
+			security_level INTEGER NOT NULL DEFAULT 1,
+			status TEXT NOT NULL DEFAULT 'ACTIVE',
+			created_by TEXT,
+			deleted_at TEXT
 		);`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
@@ -114,7 +139,7 @@ var now = time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 func gather(t *testing.T, db Querier) Facts {
 	t.Helper()
 	return Gather(context.Background(), db, Query{
-		AgentID: agentRiley, CredentialID: credProd, Now: now,
+		AgentID: agentRiley, CredentialID: credProd, WorkspaceID: "ws-test", Now: now,
 	})
 }
 
@@ -134,8 +159,13 @@ func (f failingQuerier) QueryContext(context.Context, string, ...any) (*sql.Rows
 // never a default that happens to read as reassuring.
 func TestGather_QueryFailureOmitsEveryFact(t *testing.T) {
 	boom := errors.New("database is locked")
+	// WorkspaceID is supplied so every fact reaches its QUERY and fails there.
+	// Without it the backup fact would be omitted for a different reason —
+	// "nothing to scope by" rather than "the database is down" — and this test
+	// would stop proving the thing it exists for: that a driver failure produces
+	// no line anywhere, rather than a reassuring default somewhere.
 	f := Gather(context.Background(), failingQuerier{err: boom}, Query{
-		AgentID: agentRiley, CredentialID: credProd, Now: now,
+		AgentID: agentRiley, CredentialID: credProd, WorkspaceID: "ws-test", Now: now,
 	})
 
 	if f.Binding != nil {
@@ -149,6 +179,15 @@ func TestGather_QueryFailureOmitsEveryFact(t *testing.T) {
 	}
 	if f.OpenWork != nil {
 		t.Errorf("OpenWork = %+v, want nil", f.OpenWork)
+	}
+	if f.LastBackup != nil {
+		t.Errorf("LastBackup = %+v, want nil — a failed query must not report 'no backup', "+
+			"which reads as an argument against approving", f.LastBackup)
+	}
+	if f.NarrowerCredential != nil {
+		t.Errorf("NarrowerCredential = %+v, want nil — a failed query must not report "+
+			"'no narrower key exists', which reads as an argument FOR granting the wide one",
+			f.NarrowerCredential)
 	}
 	if got := f.Render(); got != "" {
 		t.Errorf("Render() = %q, want empty — a block with no facts must not be sent to the judge at all", got)

@@ -255,7 +255,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Run gatekeeper evaluation. (body.Intent was scrubbed at the top of the
 	// handler — before `req` copied it — see the note there.)
-	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
+	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.WorkspaceID, body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:            req,
 		CredentialName:     credName,

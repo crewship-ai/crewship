@@ -81,6 +81,28 @@ func (f Facts) RenderOnly(only []string) string {
 		lines = append(lines, "- "+FactOpenAssignedWork+": "+workSummary(w))
 	}
 
+	// Both phrased as what they ARE, never as what to do. "no backup newer than
+	// 7 days" is checkable; "you should probably deny this" is an opinion in a
+	// fact's clothes, and the moment the block carries one the reader stops
+	// deciding and starts agreeing.
+	if b := f.LastBackup; b != nil && want(FactLastBackup) {
+		if b.Exists {
+			lines = append(lines, fmt.Sprintf("- %s: %dh ago (workspace-wide, not this table)",
+				FactLastBackup, b.AgeHours))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s: none recorded", FactLastBackup))
+		}
+	}
+
+	if n := f.NarrowerCredential; n != nil && want(FactNarrowerCredential) {
+		if n.Exists {
+			lines = append(lines, fmt.Sprintf("- %s: yes (%s, L%d)",
+				FactNarrowerCredential, strconv.Quote(n.Name), n.SecurityLevel))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s: no", FactNarrowerCredential))
+		}
+	}
+
 	if len(lines) == 0 {
 		return ""
 	}
