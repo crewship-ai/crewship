@@ -164,6 +164,25 @@ func bm25Lane(ctx context.Context, db *sql.DB, q Query, limit int) ([]Hit, error
 // still wide, but selective enough to rank).
 const minPrefixRunes = 3
 
+// ftsQuotedTerm wraps one token as an FTS5 string, optionally as a prefix.
+//
+// The doubling is FTS5's own escape for a literal double quote inside a
+// quoted string, and it is what makes this function safe on its own terms
+// rather than safe because of what its only caller happens to pass. Today
+// escapeFTSQuery builds tokens from `unicode.IsLetter || unicode.IsDigit`,
+// so a `"` cannot reach here at all — but that character class is exactly
+// what a future change widens (the tokenizer work in
+// docs/prd/memory-retrieval-layer.md §7.7 touches this area), and an
+// unescaped quote would close the string and hand the rest of the token to
+// the FTS5 parser as syntax.
+func ftsQuotedTerm(tok string, prefix bool) string {
+	q := `"` + strings.ReplaceAll(tok, `"`, `""`) + `"`
+	if prefix {
+		return q + "*"
+	}
+	return q
+}
+
 // escapeFTSQuery turns a free-form query into an FTS5-safe MATCH
 // expression. Each word becomes a quoted term joined with OR (FTS5's
 // default is implicit AND, which is too strict for human queries); words of
@@ -195,9 +214,9 @@ func escapeFTSQuery(s string) string {
 			// A single character is noise in every corpus we index.
 			return
 		case len(cur) < minPrefixRunes:
-			out = append(out, `"`+string(cur)+`"`)
+			out = append(out, ftsQuotedTerm(string(cur), false))
 		default:
-			out = append(out, `"`+string(cur)+`"*`)
+			out = append(out, ftsQuotedTerm(string(cur), true))
 		}
 	}
 	for _, r := range strings.ToLower(s) {

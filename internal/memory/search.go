@@ -237,7 +237,11 @@ func buildPhraseOrTerms(words []string) string {
 		kept = terms
 	}
 
-	parts := make([]string, 0, len(kept)+1)
+	// Capacity without the arithmetic: `len(kept)+1` is what a phrase-plus-
+	// terms expression needs, but CodeQL's go/allocation-size-overflow flags
+	// any arithmetic feeding a make(), and one re-grow of a slice this small
+	// is not worth arguing about.
+	parts := make([]string, 0, len(kept))
 	if len(kept) > 1 {
 		parts = append(parts, "\""+strings.Join(kept, " ")+"\"")
 	}

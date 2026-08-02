@@ -157,6 +157,45 @@ func TestEscapeFTSQuery_NoPrefixBelowThreeCharacters(t *testing.T) {
 	}
 }
 
+// TestFTSQuotedTerm_EscapesAnEmbeddedQuote is the reason the quoting lives
+// in its own function rather than inline. escapeFTSQuery's character class
+// means a `"` cannot reach it today, so the property has to be tested at the
+// function that guarantees it — otherwise the guarantee is "whatever the
+// caller happens to pass", which is not a guarantee.
+//
+// An unescaped quote closes the FTS5 string and hands the rest of the token
+// to the parser as syntax; a doubled one is a literal quote, which is what
+// FTS5 specifies.
+func TestFTSQuotedTerm_EscapesAnEmbeddedQuote(t *testing.T) {
+	cases := []struct {
+		tok    string
+		prefix bool
+		want   string
+	}{
+		{"deploy", true, `"deploy"*`},
+		{"se", false, `"se"`},
+		{`a"b`, false, `"a""b"`},
+		{`a"b`, true, `"a""b"*`},
+		{`" OR x "`, false, `""" OR x """`},
+	}
+	for _, c := range cases {
+		if got := ftsQuotedTerm(c.tok, c.prefix); got != c.want {
+			t.Errorf("ftsQuotedTerm(%q, %v) = %s, want %s", c.tok, c.prefix, got, c.want)
+		}
+	}
+
+	// And the escaped form must still be something FTS5 accepts, matching
+	// the literal token rather than being read as an operator.
+	db := newJournalLikeFTS(t, []string{`a row that mentions a"b literally`, "an unrelated row"})
+	n := matchedRows(t, db, ftsQuotedTerm(`a"b`, false))
+	if n != 1 {
+		t.Errorf("escaped term matched %d rows, want exactly the one containing it", n)
+	}
+	if n := matchedRows(t, db, ftsQuotedTerm(`" OR "`, false)); n != 0 {
+		t.Errorf("an injected OR matched %d rows; it must be a literal, not syntax", n)
+	}
+}
+
 // TestEscapeFTSQuery_ExpressionsRemainValidFTS5 guards the quoting. A bare
 // two-character token that happens to spell an FTS5 operator (`or`, `not`)
 // would be parsed as one and blow up the MATCH.
