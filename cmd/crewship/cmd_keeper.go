@@ -578,6 +578,7 @@ func init() {
 	keeperSecondApproverCmd.AddCommand(keeperSecondApproverDisableCmd)
 
 	keeperCmd.AddCommand(keeperAskCmd)
+	keeperCmd.AddCommand(keeperResolveCmd)
 	keeperCmd.AddCommand(keeperHealthCmd)
 	keeperCmd.AddCommand(keeperStatusCmd)
 	keeperCmd.AddCommand(keeperEnableCmd)

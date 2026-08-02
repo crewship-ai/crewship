@@ -211,9 +211,27 @@ describe("decisionMetaFor — which role the server demands", () => {
     })
   })
 
-  it("flags the keeper access request as having no resolve endpoint", () => {
-    expect(decisionMetaFor(item({ kind: "escalation", payload: { request_type: "access" } }))?.missingEndpoint)
-      .toMatch(/no resolve endpoint/)
+  // Was: "flags the keeper access request as having no resolve endpoint". It has
+  // one now — POST /admin/keeper/requests/{id}/resolve — so the card offers
+  // Approve/Deny instead of admitting the server cannot take the decision. The
+  // endpoint is derived from the request id because that is the row being ruled
+  // on; without one there is nothing to resolve and the field stays undefined.
+  it("points a keeper access request at its resolve endpoint", () => {
+    const meta = decisionMetaFor(item({
+      kind: "escalation",
+      payload: { request_type: "access", request_id: "kr_1" },
+    }))
+    expect(meta?.resolveEndpoint).toBe("/api/v1/admin/keeper/requests/kr_1/resolve")
+    expect(meta?.missingEndpoint).toBeUndefined()
+  })
+
+  // A credential decision is roleManage on the server, and the card has to say
+  // the same thing: telling a MANAGER the ruling is theirs, when the server will
+  // refuse them, is what justified addressing the item to an audience wider than
+  // the people who can act on it.
+  it("requires manage for a credential access request", () => {
+    expect(decisionMetaFor(item({ kind: "escalation", payload: { request_type: "access" } }))?.requires)
+      .toBe("manage")
   })
 
   it("frames the three kinds the old UI could not draw", () => {

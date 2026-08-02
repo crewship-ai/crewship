@@ -424,7 +424,8 @@ func TestKeeperGovernance_EscalateTargetsContactAndPushes(t *testing.T) {
 	if targetUser != ownerID {
 		t.Errorf("target_user_id = %q, want security contact %q", targetUser, ownerID)
 	}
-	if targetRole != "MANAGER" {
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if targetRole != "ADMIN" {
 		t.Errorf("target_role = %q, want MANAGER kept as fallback", targetRole)
 	}
 	if len(bc.inboxUpdated) != 1 {
@@ -457,7 +458,8 @@ func TestKeeperGovernance_EscalateWithoutRowStillPushes(t *testing.T) {
 		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&targetUser, &targetRole); err != nil {
 		t.Fatalf("inbox item: %v", err)
 	}
-	if targetUser != "" || targetRole != "MANAGER" {
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if targetUser != "" || targetRole != "ADMIN" {
 		t.Errorf("target = (%q, %q), want legacy ('', MANAGER)", targetUser, targetRole)
 	}
 	if len(bc.inboxUpdated) != 1 {
@@ -498,7 +500,8 @@ func TestKeeperGovernance_HighRiskDenyNotifiesWhenEnabled(t *testing.T) {
 	if blocking != 0 {
 		t.Errorf("DENY notify must be non-blocking (informational), got blocking=%d", blocking)
 	}
-	if targetUser != ownerID || targetRole != "MANAGER" {
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if targetUser != ownerID || targetRole != "ADMIN" {
 		t.Errorf("target = (%q, %q), want contact %q + MANAGER fallback", targetUser, targetRole, ownerID)
 	}
 	if len(bc.inboxUpdated) != 1 {

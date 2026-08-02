@@ -215,6 +215,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// handler would drift into answering a different question — which is the
 	// mistake this package already made twice with the think and format flags.
 	r.authedMut("POST", "/api/v1/admin/keeper/ask", roleManage, keeperH.HandleAsk)
+	r.authedMut("POST", "/api/v1/admin/keeper/requests/{requestId}/resolve", roleManage, keeperH.HandleResolve)
 	if r.hub != nil {
 		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
 	}

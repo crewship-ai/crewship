@@ -259,6 +259,63 @@ export function KindActions({
       // through the escalation lifecycle (/escalations/{id}/resolve), NOT
       // a blind inbox flip (that 409s, since escalation is source-managed).
       // Real agent escalations carry escalation_type + a source_id that IS
+      // A keeper CREDENTIAL request is not an escalations row — it is a
+      // keeper_requests row, which is why resolving it here used to 404 and the
+      // card admitted "a keeper request has no resolve endpoint yet". It has one
+      // now, and this is the branch that uses it.
+      //
+      // The decision the whole tier system defers to a person was, until this,
+      // the one decision the product could not accept: L4 is never granted by
+      // the model alone, and the human had nowhere to say yes.
+      const keeperRequestID =
+        typeof item.payload?.request_id === "string" ? (item.payload.request_id as string) : ""
+      if (item.payload?.request_type === "access" && keeperRequestID) {
+        const resolveKeeper = (action: "approve" | "reject") =>
+          wrap(action, async () => {
+            const res = await apiFetch(
+              `/api/v1/admin/keeper/requests/${encodeURIComponent(keeperRequestID)}/resolve` +
+                `?workspace_id=${encodeURIComponent(item.workspace_id)}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  decision: action === "approve" ? "ALLOW" : "DENY",
+                  reason: action === "approve" ? "Approved from inbox" : "Denied from inbox",
+                }),
+              },
+            )
+            if (!res.ok) {
+              // 403 here is usually four-eyes, not a permissions mistake, and
+              // the server's message says which — so it is shown rather than
+              // replaced with a generic refusal.
+              let detail = `Could not resolve (HTTP ${res.status})`
+              try {
+                const body = (await res.json()) as { detail?: string; error?: string }
+                detail = body.detail ?? body.error ?? detail
+              } catch {
+                // Keep the status-code message.
+              }
+              toast.error(detail)
+              return
+            }
+            toast.success(action === "approve" ? "Credential approved" : "Credential denied")
+            await onRefresh()
+          })
+
+        return (
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="soft" disabled={disabled || busy !== null}
+              onClick={() => void resolveKeeper("approve")}>
+              {busy === "approve" ? "Approving…" : "Approve"}
+            </Button>
+            <Button size="sm" variant="soft" disabled={disabled || busy !== null}
+              onClick={() => void resolveKeeper("reject")}>
+              {busy === "reject" ? "Denying…" : "Deny"}
+            </Button>
+          </div>
+        )
+      }
+
       // the escalations-row id. Keeper/synthetic escalations don't — for
       // those the inbox can't resolve inline, so we point at the source.
       const escType =

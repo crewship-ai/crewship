@@ -48,6 +48,21 @@ func TestInboxTargetRoleMatchesDecider(t *testing.T) {
 			requiredTier: "roleManage",
 		},
 		{
+			// The one this table did not cover, and the one it would have caught.
+			// The credential escalation was written with TargetRole MANAGER while
+			// its resolve route is roleManage — so every MANAGER and above was
+			// shown "ACCESS REQUEST, decide this" about a production credential
+			// and could not decide it. Exposure without authority: the reader
+			// learns the credential exists, who asked, with what justification and
+			// at what risk, and has no part in the ruling.
+			name:         "keeper credential escalation",
+			writer:       "internal/api/keeper_request.go",
+			targetRole:   "ADMIN",
+			routeFile:    "internal/api/router_internal.go",
+			routeFrag:    "/api/v1/admin/keeper/requests/{requestId}/resolve",
+			requiredTier: "roleManage",
+		},
+		{
 			name:         "routine proposal",
 			writer:       "internal/api/pipeline_governance.go",
 			targetRole:   "MANAGER",

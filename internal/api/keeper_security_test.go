@@ -464,8 +464,9 @@ func TestKeeper_EscalateDecision_CreatesInboxItem(t *testing.T) {
 	// silently drop routing metadata that operators rely on for
 	// triage. CodeRabbit caught these missing assertions on the first
 	// review pass.
-	if !inboxTargetRole.Valid || inboxTargetRole.String != "MANAGER" {
-		t.Errorf("expected target_role=MANAGER, got %v", inboxTargetRole)
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if !inboxTargetRole.Valid || inboxTargetRole.String != "ADMIN" {
+		t.Errorf("expected target_role=ADMIN, got %v", inboxTargetRole)
 	}
 	if inboxPriority != "high" {
 		t.Errorf("expected priority=high (ESCALATE is operator-blocking), got %q", inboxPriority)

@@ -424,14 +424,23 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   "MANAGER",
-			Title:        fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
-			BodyMD:       gkResp.Reason,
-			SenderType:   "system",
-			SenderID:     "keeper",
-			SenderName:   "Keeper",
-			Priority:     "high",
-			Blocking:     true,
+			// ADMIN, not MANAGER. Inbox visibility is HIERARCHICAL and the resolve
+			// route is roleManage, so addressing this to MANAGER — as it did — showed
+			// every MANAGER and above "ACCESS REQUEST, decide this" about a
+			// production credential they could not decide. Exposure without
+			// authority: the reader learns the credential exists, who asked, with
+			// what justification and at what risk, and has no part in the ruling.
+			// Pinned against the route's tier by TestInboxTargetRoleMatchesDecider,
+			// which is why this is a literal and not a shared constant — that test
+			// reads the source.
+			TargetRole: "ADMIN",
+			Title:      fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:     gkResp.Reason,
+			SenderType: "system",
+			SenderID:   "keeper",
+			SenderName: "Keeper",
+			Priority:   "high",
+			Blocking:   true,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    "access",
@@ -460,14 +469,23 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   "MANAGER",
-			Title:        fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
-			BodyMD:       gkResp.Reason,
-			SenderType:   "system",
-			SenderID:     "keeper",
-			SenderName:   "Keeper",
-			Priority:     "high",
-			Blocking:     false,
+			// ADMIN, not MANAGER. Inbox visibility is HIERARCHICAL and the resolve
+			// route is roleManage, so addressing this to MANAGER — as it did — showed
+			// every MANAGER and above "ACCESS REQUEST, decide this" about a
+			// production credential they could not decide. Exposure without
+			// authority: the reader learns the credential exists, who asked, with
+			// what justification and at what risk, and has no part in the ruling.
+			// Pinned against the route's tier by TestInboxTargetRoleMatchesDecider,
+			// which is why this is a literal and not a shared constant — that test
+			// reads the source.
+			TargetRole: "ADMIN",
+			Title:      fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:     gkResp.Reason,
+			SenderType: "system",
+			SenderID:   "keeper",
+			SenderName: "Keeper",
+			Priority:   "high",
+			Blocking:   false,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    "access",
