@@ -44,6 +44,84 @@ hint text in the second column is the remediation.
 crewship doctor --no-color    # plain text output for log capture
 ```
 
+## Which container runtime is Crewship actually using?
+
+**Admin → Runtime** lists every container runtime present on the host —
+each with its own product mark, its own daemon's version, and its own
+socket — and marks the one this server is driving **In use**. Everything
+else is badged **Detected**: installed, not driving anything.
+
+The panel is read by an admin (the endpoint redacts socket paths and
+daemon versions below `ADMIN`), and refreshes when you press
+**Re-detect**. It does not poll: each check re-probes every candidate
+socket, and the answer only changes when someone installs a runtime.
+
+Two distinctions the panel makes that nothing else can:
+
+- **The product, not the socket.** OrbStack, Rancher Desktop and Docker
+  Desktop all offer to point `/var/run/docker.sock` at their own daemon.
+  Detection follows the link, so a machine running OrbStack says
+  *OrbStack*, not *Docker*.
+- **Present vs in use.** If runtimes are listed but none says *In use*,
+  this server started without a container provider — `--no-docker`, or
+  one that failed to start. Agents cannot run until it has one, and that
+  is a different problem from having no runtime installed.
+
+<Warning>
+  **There is no runtime switcher, in the console or anywhere else.**
+  `container.provider` accepts `docker`, `apple` or `auto` — there is no
+  value for OrbStack, Colima, Rancher or Podman, because all of them are
+  reached through the same Docker API and Crewship uses whichever socket
+  answers first.
+
+  To change which one it uses, there are exactly two levers:
+
+  ```bash
+  # 1. Point Crewship at a specific daemon
+  export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock
+
+  # 2. Or stop the daemon currently winning the probe order
+  ```
+
+  Apple Containers is the one real choice, because it is a separate
+  provider rather than another Docker-API daemon:
+
+  ```yaml
+  container:
+    provider: apple   # docker | apple | auto
+  ```
+</Warning>
+
+The same inventory is available over HTTP, and to any tool that can read
+JSON:
+
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/system/runtime?workspace_id=<ws>"
+```
+
+```json
+{
+  "available": true,
+  "runtime": "orbstack",
+  "version": "29.4.0",
+  "socket": "/var/run/docker.sock",
+  "runtimes": [
+    { "runtime": "orbstack", "version": "29.4.0", "socket": "/var/run/docker.sock", "in_use": true },
+    { "runtime": "apple",    "version": "1.2.0",  "socket": "",                     "in_use": false }
+  ],
+  "install_links": { "docker": "…", "podman": "…", "colima": "…", "orbstack": "…", "rancher": "…", "apple": "…" }
+}
+```
+
+`runtime` / `version` / `socket` summarise the entry with `in_use` set,
+and are **`null`** when runtimes are installed but none is in use. One
+daemon produces one entry even when it answers on several paths.
+`install_links` lists every runtime Crewship can drive, so the runtimes
+you have *not* installed are still named; containerd and nerdctl are
+deliberately absent, because containerd serves a gRPC API that Crewship's
+Docker client cannot speak.
+
 ## Symptom catalog
 
 Find your symptom below; each panel expands to its diagnosis and fix.
