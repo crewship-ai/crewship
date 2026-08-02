@@ -294,13 +294,13 @@ type Router struct {
 	// slots whose override needed a server restart. Keyed on
 	// provider|model|ollama-endpoint so an edit is live on the next
 	// verdict and an unchanged wiring still reuses one HTTP client.
-	runVerdictMu       sync.Mutex
-	runVerdictFpr      string
-	runVerdictProvider llm.Provider
-	runVerdictModel    string
-	// runVerdictWarned is the last failure already reported, so a slot that
-	// cannot be built logs once per distinct problem instead of once per run.
-	runVerdictWarned string
+	runVerdictCache auxProviderCache
+
+	// userModelCache backs the operator-model extractor's curator slot
+	// (#1669), on the same terms: resolved per sweep so an aux-slot edit
+	// is live on the next one, cached on the wiring so an unchanged slot
+	// reuses one HTTP client.
+	userModelCache auxProviderCache
 
 	// internalHandler is retained (it is otherwise local to
 	// registerInternalRoutes) so shutdown can drain its in-flight
@@ -340,9 +340,56 @@ func (r *Router) DrainVerdicts(timeout time.Duration) {
 // ANTHROPIC_API_KEY). Callers must read that as "verdict generation is off",
 // not as an error; a later fix to the wiring is picked up on the next call.
 func (r *Router) RunVerdict() (llm.Provider, string) {
-	aux, err := llm.ResolveAux(r.AuxModels(), llm.SlotRunSummary)
+	return r.auxProvider(llm.SlotRunSummary, &r.runVerdictCache,
+		"run verdict: run_summary", "outcome verdicts disabled")
+}
+
+// UserModelAux resolves the curator aux slot for the operator-model
+// extractor (#1669), on the same per-call terms as RunVerdict and for the
+// same reason: the slot is runtime-settable and the sweep that uses it
+// runs daily in a long-lived process, so a pair captured at boot is a
+// pair the operator's edit cannot reach.
+//
+// The curator slot is the right one by its own documented purpose —
+// "memory consolidation, skill review" (internal/llm/aux.go). Note that
+// nothing else routes memory work through it today: the consolidator
+// builds its summariser directly from cfg.Keeper.OllamaURL and never
+// consults the aux slots at all, so an operator repointing curator has
+// until now changed only skill review.
+//
+// A nil provider means "extraction is off", not an error.
+func (r *Router) UserModelAux() (llm.Provider, string) {
+	return r.auxProvider(llm.SlotCurator, &r.userModelCache,
+		"user model: curator", "operator-model extraction disabled")
+}
+
+// auxProviderCache memoises one slot's built (provider, model) pair
+// against the wiring it was built from.
+//
+// Cached on a fingerprint rather than behind a sync.Once (#1556): every
+// aux slot and the fallback behind it are runtime-settable, and a
+// once-built provider makes a slot one whose override needs a server
+// restart. Keyed on provider|model|ollama-endpoint|credential so an edit
+// is live on the next call and an unchanged wiring still reuses one
+// keep-alive'd HTTP client (for Ollama, a rebuild can mean a cold model
+// load).
+type auxProviderCache struct {
+	mu       sync.Mutex
+	fpr      string
+	provider llm.Provider
+	model    string
+	// warned is the last failure already reported, so a slot that cannot
+	// be built logs once per distinct problem rather than once per call.
+	warned string
+}
+
+// auxProvider is the shared body of RunVerdict / UserModelAux. what names
+// the caller and slot for the log line ("run verdict: run_summary");
+// consequence says what stops working ("outcome verdicts disabled").
+func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, consequence string) (llm.Provider, string) {
+	aux, err := llm.ResolveAux(r.AuxModels(), slot)
 	if err != nil {
-		r.dropRunVerdict("run verdict: run_summary aux slot resolve failed; outcome verdicts disabled", err)
+		r.dropAuxProvider(cache, what+" aux slot resolve failed; "+consequence, err)
 		return nil, ""
 	}
 	// An "ollama" slot must dial the endpoint the instance is configured with —
@@ -356,49 +403,49 @@ func (r *Router) RunVerdict() (llm.Provider, string) {
 	// it belongs in the fingerprint: repointing a slot at a different
 	// subscription has to rebuild, not reuse a client authenticated with the
 	// key the operator just moved away from.
-	credID := r.keeperAuxSettings.CredentialFor(string(llm.SlotRunSummary))
+	credID := r.keeperAuxSettings.CredentialFor(string(slot))
 	fpr := aux.Provider + "|" + aux.Model + "|" + ollamaBase + "|" + credID
 
-	r.runVerdictMu.Lock()
-	defer r.runVerdictMu.Unlock()
-	if r.runVerdictProvider != nil && r.runVerdictFpr == fpr {
-		return r.runVerdictProvider, r.runVerdictModel
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.provider != nil && cache.fpr == fpr {
+		return cache.provider, cache.model
 	}
 
-	// Bounded: this resolves the key on the first verdict rather than at boot,
+	// Bounded: this resolves the key on the first call rather than at boot,
 	// and a wedged database must not hang a run's teardown — nor hold this lock
 	// for longer than the deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	provider, err := buildAuxWithCredential(ctx, aux, ollamaBase, credID, NewAuxCredentialLookup(r.db), r.logger)
 	if err != nil {
-		r.dropRunVerdictLocked("run verdict: run_summary provider build failed; outcome verdicts disabled", err)
+		r.dropAuxProviderLocked(cache, what+" provider build failed; "+consequence, err)
 		return nil, ""
 	}
-	r.runVerdictProvider, r.runVerdictModel, r.runVerdictFpr = provider, aux.Model, fpr
-	r.runVerdictWarned = ""
+	cache.provider, cache.model, cache.fpr = provider, aux.Model, fpr
+	cache.warned = ""
 	return provider, aux.Model
 }
 
-// dropRunVerdict forgets any cached provider and logs why. Forgetting matters:
-// the operator moved the slot to a wiring that does not resolve, and quietly
-// billing the model they moved away from would be worse than no verdicts.
-func (r *Router) dropRunVerdict(msg string, err error) {
-	r.runVerdictMu.Lock()
-	defer r.runVerdictMu.Unlock()
-	r.dropRunVerdictLocked(msg, err)
+// dropAuxProvider forgets any cached provider and logs why. Forgetting
+// matters: the operator moved the slot to a wiring that does not resolve,
+// and quietly billing the model they moved away from would be worse than
+// the feature being off.
+func (r *Router) dropAuxProvider(cache *auxProviderCache, msg string, err error) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	r.dropAuxProviderLocked(cache, msg, err)
 }
 
-// dropRunVerdictLocked is dropRunVerdict for callers already holding the mutex.
-// The warning is emitted at most once per distinct failure, so a permanently
-// misconfigured slot does not write a line per run.
-func (r *Router) dropRunVerdictLocked(msg string, err error) {
-	r.runVerdictProvider, r.runVerdictModel, r.runVerdictFpr = nil, "", ""
+// dropAuxProviderLocked is dropAuxProvider for callers already holding
+// the cache mutex.
+func (r *Router) dropAuxProviderLocked(cache *auxProviderCache, msg string, err error) {
+	cache.provider, cache.model, cache.fpr = nil, "", ""
 	key := msg + ": " + err.Error()
-	if r.runVerdictWarned == key {
+	if cache.warned == key {
 		return
 	}
-	r.runVerdictWarned = key
+	cache.warned = key
 	if r.logger != nil {
 		r.logger.Warn(msg, "error", err)
 	}

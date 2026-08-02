@@ -46,11 +46,13 @@ The response is a single JSON bundle containing every row from the four tables t
     "peer_cards": 23,
     "memory_versions": 117,
     "inbox_items": 4,
+    "user_models": 1,
     "gdpr_actions": 2
   },
   "peer_cards": [ {...}, {...} ],
   "memory_versions": [ {...}, {...} ],
   "inbox_items": [ {...}, {...} ],
+  "user_models": [ {...} ],
   "gdpr_actions": [ {...}, {...} ]
 }
 ```
@@ -66,6 +68,10 @@ The export only covers tables that carry a `data_subject_id` foreign key:
 - `peer_cards` — agent-authored peer cards mentioning the subject
 - `memory_versions` — versioned memory blobs the agent wrote about the subject
 - `inbox_items` — inbox rows whose payload references the subject (e.g. persona-suggestion proposals about the subject)
+- `user_models` — the operator model: the subject's role, ownership and stated
+  working constraints. **Exported with its body**, not just the index row —
+  it is the one surface here holding facts the subject stated about themselves,
+  so a row count would not answer the access request
 - `gdpr_actions` — the audit history itself (always included)
 
 Content the operator may also need to surface manually:
@@ -98,6 +104,8 @@ curl -X DELETE \
 | `memory_versions` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
 | `memory_versions` (blob store) | content-addressed blobs deduplicated across the workspace | **NOT** auto-deleted in v107 — rows go but blobs left for cross-tenant dedup safety; tracked as PR-F16 for a separate orphan-GC sweep |
 | `inbox_items` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
+| `user_models` (DB) | row WHERE `user_id = $USER_ID` in this workspace | Hard delete |
+| `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` in the subject's most-active crew | Best-effort — `outputBasePath` must be configured. Failures logged but do not block the DB delete. |
 | `keeper_requests` | All rows | **Excluded** — these record sidecar decisions and don't carry user-attributable content beyond the agent_id |
 | `lessons.md` content scan | Per-crew lessons files | **Manual** — the handler logs a warning naming the subject when it finds the user_slug in any lessons.md; operator decides whether to edit the file by hand |
 | `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions retention](/guides/chat-sessions#retention) |
@@ -110,7 +118,8 @@ The response confirms what landed:
   "rows_deleted": {
     "peer_cards": 23,
     "memory_versions": 117,
-    "inbox_items": 4
+    "inbox_items": 4,
+    "user_models": 1
   },
   "warnings": [
     "lessons.md mentions user_slug=pavel_advine — manual review required"
@@ -145,10 +154,11 @@ A successful cascade returns:
 {
   "subject_user_id": "usr_…",
   "exported_at": "2026-05-21T18:45:30Z",
-  "scope": {"peer_cards": 0, "memory_versions": 0, "inbox_items": 0},
+  "scope": {"peer_cards": 0, "memory_versions": 0, "inbox_items": 0, "user_models": 0},
   "peer_cards": [],
   "memory_versions": [],
-  "inbox_items": []
+  "inbox_items": [],
+  "user_models": []
 }
 ```
 

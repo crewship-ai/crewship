@@ -124,6 +124,17 @@ func RunUserModelSync(
 		// returned unchanged, which then re-writes the same content
 		// (idempotent) unless it too is empty.
 		content := MergeUserModel(prior, extracted)
+		// The merge is unbounded and the write fails closed above the cap,
+		// so a long-lived operator's model would eventually stop updating
+		// with nothing but a daily error line to say so. Trim instead.
+		if trimmed, cut := TrimUserModelToCap(content, memory.UserModelCapBytes); cut {
+			logger.Info("user model trimmed to cap",
+				"user_slug", memory.UserSlug(cand.UserID, cand.WorkspaceID),
+				"workspace_id", cand.WorkspaceID,
+				"was_bytes", len(content), "now_bytes", len(trimmed),
+				"cap_bytes", memory.UserModelCapBytes)
+			content = trimmed
+		}
 		out := SyncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, now)
 		if out.Err != nil {
 			sum.Errors++

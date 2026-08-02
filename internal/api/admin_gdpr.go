@@ -138,6 +138,7 @@ type gdprActionScope struct {
 	PeerCards       int `json:"peer_cards"`
 	MemoryVersions  int `json:"memory_versions"`
 	InboxItems      int `json:"inbox_items"`
+	UserModels      int `json:"user_models"`
 	PeerCardsOnDisk int `json:"peer_cards_on_disk,omitempty"`
 }
 
@@ -362,6 +363,81 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		scope.InboxItems = int(n)
 	}
 
+	// 4) user_models: the operator model — the one surface holding the
+	// subject's OWN stated facts (#1669). UNIQUE on (workspace_id,
+	// user_slug), so at most one row.
+	//
+	// This step had no equivalent before the extractor stopped being a
+	// no-op, and unlike the opt-out path there is nothing behind an admin
+	// erase to catch it later: consolidate.SyncUserModel purges on
+	// user_peer_consent, which a SAR erase does not set. Without this the
+	// file survived indefinitely and kept being read into agent prompts
+	// after the ticket was closed.
+	umRows, err := h.db.QueryContext(r.Context(), `
+		SELECT id, user_slug, COALESCE(crew_id,'')
+		FROM user_models
+		WHERE user_id = ? AND workspace_id = ?
+	`, targetID, wsID)
+	if err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		h.logger.Warn("gdpr delete: user_models select failed",
+			"action_id", actionID, "err", err)
+	} else {
+		type modelRow struct{ id, slug, crewID string }
+		var models []modelRow
+		for umRows.Next() {
+			var m modelRow
+			if scanErr := umRows.Scan(&m.id, &m.slug, &m.crewID); scanErr != nil {
+				// Same rule as peer_cards above: never `continue` past a
+				// scan failure silently in a GDPR cascade, or the row is
+				// skipped while the ticket says deleted.
+				h.logger.Error("gdpr delete: user_models scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
+				continue
+			}
+			models = append(models, m)
+		}
+		if iterErr := umRows.Err(); iterErr != nil {
+			h.logger.Error("gdpr delete: user_models iteration error",
+				"action_id", actionID, "err", iterErr)
+			if firstErr == nil {
+				firstErr = iterErr
+			}
+		}
+		_ = umRows.Close()
+		for _, m := range models {
+			if h.outputBasePath != "" {
+				// Path resolution must match the writer's exactly — see
+				// userModelPathsFor in user_model_privacy.go, which is the
+				// shared one. A crew-less model falls back to the
+				// workspace-level shared dir rather than being skipped.
+				if delErr := memory.DeleteUserModelBySlug(
+					userModelPathsFor(h.outputBasePath, m.crewID), m.slug); delErr != nil {
+					h.logger.Warn("gdpr delete: on-disk user model delete failed",
+						"action_id", actionID, "err", delErr)
+				}
+			}
+			res, delErr := h.db.ExecContext(r.Context(),
+				`DELETE FROM user_models WHERE id = ?`, m.id)
+			if delErr != nil {
+				h.logger.Warn("gdpr delete: user_models row delete failed",
+					"action_id", actionID, "model_id", m.id, "err", delErr)
+				if firstErr == nil {
+					firstErr = delErr
+				}
+				continue
+			}
+			if n, _ := res.RowsAffected(); n > 0 {
+				scope.UserModels++
+			}
+		}
+	}
+
 	// Punted: lessons.md content scan. We do not have a content-
 	// aware redactor at this layer and a naive substring sweep
 	// could corrupt lesson semantics. Log a clear warning so the
@@ -374,7 +450,7 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)
 
-	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems
+	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.UserModels
 	status := http.StatusAccepted
 	resp := map[string]any{
 		"action_id":    actionID,
@@ -402,6 +478,22 @@ type gdprExportBundle struct {
 	PeerCards     []exportPeerCard      `json:"peer_cards"`
 	MemoryVersion []exportMemoryVersion `json:"memory_versions"`
 	InboxItems    []exportInboxItem     `json:"inbox_items"`
+	UserModels    []exportUserModel     `json:"user_models"`
+}
+
+// exportUserModel carries the operator model INCLUDING its body. The
+// other export shapes are index rows because their content is either
+// elsewhere (memory_versions' blob) or already in the row; here the body
+// is the whole point — an access request answered with "30 bytes exist
+// somewhere" tells the subject nothing about what is stored about them.
+type exportUserModel struct {
+	ID        string `json:"id"`
+	UserSlug  string `json:"user_slug"`
+	Path      string `json:"path"`
+	Bytes     int    `json:"bytes"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	Content   string `json:"content,omitempty"`
 }
 
 type exportPeerCard struct {
@@ -465,6 +557,7 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 		PeerCards:     []exportPeerCard{},
 		MemoryVersion: []exportMemoryVersion{},
 		InboxItems:    []exportInboxItem{},
+		UserModels:    []exportUserModel{},
 	}
 
 	scope := gdprActionScope{}
@@ -574,6 +667,64 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 		}
 		_ = ibRows.Close()
 		scope.InboxItems = len(bundle.InboxItems)
+	}
+
+	// user_models — the operator model (#1669). Body included, not just
+	// the index row: this is the surface holding the subject's own stated
+	// facts, and it is the one table here whose content is not derivable
+	// from anything else in the bundle.
+	umRows, err := h.db.QueryContext(r.Context(), `
+		SELECT id, user_slug, path, bytes, created_at, updated_at, COALESCE(crew_id,'')
+		FROM user_models
+		WHERE workspace_id = ? AND user_id = ?
+		ORDER BY updated_at DESC
+	`, wsID, targetID)
+	if err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		h.logger.Warn("gdpr export: user_models query failed",
+			"action_id", actionID, "err", err)
+	} else {
+		for umRows.Next() {
+			var (
+				e      exportUserModel
+				crewID string
+			)
+			if scanErr := umRows.Scan(&e.ID, &e.UserSlug, &e.Path, &e.Bytes,
+				&e.CreatedAt, &e.UpdatedAt, &crewID); scanErr != nil {
+				h.logger.Error("gdpr export: user_models scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
+				continue
+			}
+			if h.outputBasePath != "" {
+				body, readErr := memory.LoadUserModelBySlug(
+					userModelPathsFor(h.outputBasePath, crewID), e.UserSlug)
+				if readErr != nil {
+					// An access request that silently omits a body it
+					// could not read is an access request that lies.
+					h.logger.Error("gdpr export: user model body read failed",
+						"action_id", actionID, "err", readErr)
+					if firstErr == nil {
+						firstErr = readErr
+					}
+				}
+				e.Content = body
+			}
+			bundle.UserModels = append(bundle.UserModels, e)
+		}
+		if iterErr := umRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: user_models iteration error",
+				"action_id", actionID, "err", iterErr)
+			if firstErr == nil {
+				firstErr = iterErr
+			}
+		}
+		_ = umRows.Close()
+		scope.UserModels = len(bundle.UserModels)
 	}
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)

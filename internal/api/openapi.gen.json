@@ -13146,6 +13146,74 @@
         ]
       }
     },
+    "/api/v1/users/me/user-model": {
+      "delete": {
+        "operationId": "delete_api_v1_users_me_user-model",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_v1_users_me_user-model",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/me/user-model/facts/{key}": {
+      "delete": {
+        "operationId": "delete_api_v1_users_me_user-model_facts_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/v1/users/{id}/avatar": {
       "get": {
         "operationId": "get_api_v1_users_id_avatar",

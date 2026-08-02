@@ -1,6 +1,6 @@
 ---
 title: "Privacy Commands"
-description: "GDPR self-service for peer memory — consent and your peer cards."
+description: "GDPR self-service for peer memory — consent, your peer cards, and the operator model agents read about you."
 icon: "shield-user"
 ---
 
@@ -27,6 +27,9 @@ crewship privacy <group> <subcommand> [flags]
 | `peer-consent set <on\|off>` | Opt out of (`on`) or back into (`off`) peer cards. |
 | `peer-cards list` | List every peer card stored about you. |
 | `peer-cards delete` | Delete every peer card stored about you. |
+| `user-model list` | Show every fact stored in the operator model about you. |
+| `user-model forget <field>` | Forget one field and keep the rest. |
+| `user-model delete` | Forget the whole operator model. |
 
 ---
 
@@ -75,6 +78,50 @@ also run `peer-consent set on`.
 
 ---
 
+## `crewship privacy user-model`
+
+The **operator model** is a short profile every agent in your crew reads at
+the start of a session: your role, what you own, and the working preferences
+and constraints you have stated. It records only things you actually said —
+never anything the system concluded about you — and there is no field in it
+for a mood or a personality read. See
+[Memory System → Operator model](/guides/agent-memory#2a-operator-model-per-user)
+for what is recorded and how the refusals are enforced.
+
+```bash
+crewship privacy user-model list             # every field stored about you
+crewship privacy user-model list -f json     # includes the raw file content
+crewship privacy user-model forget timezone  # this one is wrong; keep the rest
+crewship privacy user-model delete -y        # forget all of it
+```
+
+`list` shows one row per field (`FIELD`, `VALUE`). An empty table means nothing
+has been recorded about you in this workspace yet — a fresh operator, or an
+instance with extraction switched off.
+
+`forget <field>` is the answer to "an agent recorded something wrong about me"
+that does not cost you everything it recorded correctly. A field name that is
+not stored returns a 404 rather than reporting success. Forgetting the last
+remaining field removes the model entirely.
+
+`delete` forgets everything but does **not** opt you out: new facts may be
+recorded again from things you state later. To stop recording altogether, use
+`peer-consent set on` — which now also purges the operator model on the same
+request, not on the next daily sweep.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--yes`, `-y` | `bool` | `false` | Skip the confirmation prompt on `delete`. |
+
+<Note>
+`list` shows what is stored, not where each entry came from. Extraction checks
+every fact against a verbatim span of your own words, but that span is not
+persisted — the file has a 1.5 KB budget read into every agent prompt.
+Per-entry provenance is tracked as follow-up work.
+</Note>
+
+---
+
 ## API
 
 | CLI | Endpoint | Auth |
@@ -83,6 +130,9 @@ also run `peer-consent set on`.
 | `peer-consent set` | `PUT /api/v1/users/me/peer-consent` | any authenticated member (self) |
 | `peer-cards list` | `GET /api/v1/users/me/peer-cards` | any authenticated member (self) |
 | `peer-cards delete` | `DELETE /api/v1/users/me/peer-cards` | any authenticated member (self) |
+| `user-model list` | `GET /api/v1/users/me/user-model` | any authenticated member (self) |
+| `user-model forget` | `DELETE /api/v1/users/me/user-model/facts/{key}` | any authenticated member (self) |
+| `user-model delete` | `DELETE /api/v1/users/me/user-model` | any authenticated member (self) |
 
 See also [`crewship memory`](/cli/memory) for the agent-facing memory
 tiers and [`crewship preferences`](/cli/preferences) for personal UI

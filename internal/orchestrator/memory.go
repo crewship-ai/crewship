@@ -840,9 +840,19 @@ WRITING MEMORY:
 GUIDELINES:
 - AGENT.md is for curated, evergreen facts (identity, learned facts, preferences).
 - Daily logs are for session-specific notes (what you did, decisions made, observations).
-- If the user says "remember this", write it to AGENT.md immediately.
+- If a fact will be stale in a week, it belongs in the daily log, not in AGENT.md.
+- A request to remember something is a fact about what the person wants; record it as
+  that, in AGENT.md, rather than copying the request itself.
 - Before starting complex tasks, check your memory for relevant past context.
 - When updating AGENT.md, ADD new information. Do not delete existing entries unless outdated.
+
+HOW MEMORY ENTRIES ARE PHRASED:
+- An entry in AGENT.md is a declarative fact, not an instruction to yourself.
+  "The operator prefers concise responses" is a fact. "Always respond concisely" is an
+  instruction, and it is the wrong shape: a later session re-reads it as a standing order
+  and can follow it over what the person is actually asking for in that session.
+- Facts are weighed against the current request. Instructions are obeyed instead of it.
+  That difference is the whole reason for the rule.
 
 RECALLING WHAT IS NOT SHOWN ABOVE:
 - The snapshot above is a bounded window, not your whole history. Two tools reach the rest:

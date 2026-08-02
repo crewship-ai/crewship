@@ -278,10 +278,66 @@ When a session starts, the orchestrator reads memory files and injects them into
 
 ### 2a. Operator model (per-user)
 
-Alongside the three memory tiers, Crewship distils a small **operator model**
-for each person who works with a crew. It captures *how an operator likes to
-work* — communication style, timezone, language, level of detail — as a hint,
-not as a fact about who they are or what they want.
+Alongside the three memory tiers, Crewship keeps a small **operator model** for
+each person who works with a crew: their role, what they are responsible for,
+and the working preferences and standing constraints they have stated.
+
+#### What it records, and what it refuses to
+
+**Only what the person actually said.** Never what the system concluded from
+watching them work. An inference is often wrong, the person cannot rebut it
+because they do not know it was made, and once written it reads as fact in
+every later session — the prompt carries no notion of provenance to mark it
+otherwise. The cost is that the model grows slowly, and only when somebody says
+something explicitly. That is the intended trade.
+
+**Professional facts, not sentiment.** Think of it as a CRM record rather than a
+character study. There is no field for a mood, an attitude, or a personality
+read, so there is nowhere for one to be written even if a model proposes it.
+
+| Recorded | Refused |
+| --- | --- |
+| `constraint: commits carry no co-author trailer` — the person said so | `mood: frustrated with the review tooling` — no such field exists |
+| `role: runs the platform team` — quoted from their own words | `prefers: is frustrated by slow reviews` — the *agent* said that, not them |
+| `prefers: short answers` | `prefers: Always respond concisely` — an instruction, not a description |
+| `owns: the deploy pipeline` | `owns: the billing service` — quoted from a *colleague* talking about them |
+| | `prefers: always wants replies short` — a habit claimed from one occurrence |
+| | anything with no verbatim quote behind it at all |
+
+The fields are a closed set: `role`, `owns`, `constraint`, `process`, `prefers`,
+`tooling`, `timezone`, `language`, `contact`.
+
+#### How the refusals are enforced
+
+Not by asking the model firmly. Every candidate fact must arrive with the exact
+span of the person's own words that states it, and that span is checked, byte
+for byte (whitespace-insensitive, nothing else), against the turns that person
+authored. The model chooses **which** span; it cannot write one. A quote that
+turns out to come from the agent's own turn, or from a different human in a
+group chat, is refused with that reason rather than accepted.
+
+This matters because prompt instructions alone have been measured to be
+insufficient for exactly this: an independent audit of a comparable system
+found attribution laundering in 12 of 12 trials with its anti-attribution
+prompt in place.
+
+#### Switching the mode
+
+The extraction profile is an instance setting, read fresh on every sweep:
+
+```bash
+crewship instance settings set memory.user_model_profile stated-technical  # default
+crewship instance settings set memory.user_model_profile off               # record nothing
+```
+
+`off` stops extraction while leaving the sweep's opt-out purge and index upkeep
+running. A name that is not one of these two is treated as `off` and logged —
+an unimplemented profile must never silently resolve to one that writes.
+
+Switching to `off` takes effect on the **next sweep**, not on the next server
+restart.
+
+#### Where it lives
 
 The model is keyed on **(operator, workspace)**, independent of which agent is
 answering. Every agent in a crew reads the same model, stored crew-shared at:
@@ -305,9 +361,10 @@ so the broad working-style hint frames the narrower per-agent relationship hint:
 This operator has worked with the crew before. The following profile was
 distilled and merged across prior sessions — treat it as a hint about how
 they prefer to work, not as a fact about who they are or what they want.
+- role: runs the platform team
+- constraint: commits carry no co-author trailer
 - timezone: UTC+1
 - language: Czech
-- tone: terse, technical
 [END OPERATOR MODEL]
 ```
 
@@ -316,17 +373,51 @@ recent sessions. Refreshes **merge**: a field the latest session is silent about
 is preserved from the prior model rather than dropped, so a one-off session that
 only touches one aspect of how an operator works can't erase the stable picture
 built up over time. A field the session *does* re-touch is updated to the newer
-value. The model is capped at 1.5 KB.
+value. The model is capped at 1.5 KB; a merge that would exceed the cap drops
+fields from the end (the newest, least-established ones) rather than failing the
+write, so the profile never silently freezes.
 
 **Eligibility.** An operator gets a model once their interaction with the crew
 crosses a threshold (≥10 messages **or** ≥5 minutes of session time). Below that,
 no model is written.
 
+**Cost.** The extraction runs on the `curator` auxiliary model slot, once per
+active operator per day. An unconfigured or unbuildable slot (no
+`ANTHROPIC_API_KEY`, for instance) means no extraction, not an error — the sweep
+still does its opt-out purge and index upkeep. Point the slot elsewhere with
+`crewship keeper aux set curator`.
+
+#### Reading and correcting your own model
+
+A memory about you that you cannot see is a poor default, so you can read it,
+drop one wrong entry, or drop all of it — without turning the feature off:
+
+```bash
+crewship privacy user-model list             # every field stored about you
+crewship privacy user-model forget timezone  # this one is wrong; keep the rest
+crewship privacy user-model delete           # forget all of it
+```
+
+The same three actions are `GET /api/v1/users/me/user-model`,
+`DELETE /api/v1/users/me/user-model/facts/{key}` and
+`DELETE /api/v1/users/me/user-model`. Each acts only on your own record — the
+server reads your identity from the auth context, so no workspace-admin role is
+needed and no route can reach anyone else's model. Reads and deletions are
+recorded in the peer-card audit log.
+
+<Note>
+`list` shows **what** is stored, not **where each entry came from**. Extraction
+verifies every fact against a verbatim span of your own words, but that span is
+not kept — the file has a 1.5 KB budget that is read into every prompt, and
+carrying provenance inline would halve how much can be recorded. Per-entry
+provenance is tracked as follow-up work.
+</Note>
+
 **Opt-out and deletion.** The operator model reuses the same per-(operator,
-workspace) consent flag as peer cards: opting out of one opts out of both. When
-an operator is opted out, the next sweep purges any existing model from disk and
-its index row, and records the deletion in the audit log. Deleting the user
-cascades the index row away as well.
+workspace) consent flag as peer cards: opting out of one opts out of both.
+Opting out purges any existing model from disk and its index row **immediately**
+— on the same request, alongside your peer cards — and records the deletion in
+the audit log. Deleting the user cascades the index row away as well.
 
 ### 3. Searching Memory
 

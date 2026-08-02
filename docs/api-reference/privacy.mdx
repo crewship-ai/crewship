@@ -1,6 +1,6 @@
 ---
 title: "Privacy"
-description: "GDPR primitives for per-user peer cards -- list, purge, and opt out of peer-card extraction."
+description: "GDPR primitives for per-user peer memory -- list, purge, and opt out of peer cards, and read or correct the operator model."
 icon: "shield-user"
 ---
 
@@ -16,7 +16,14 @@ through a separate admin surface.
 
 Opt-out is a **hard stop**: setting `opted_out=true` triggers an immediate
 purge of every existing card about the user across every agent in the current
-workspace -- it does not wait for the next routine sweep.
+workspace, **and of their operator model** -- it does not wait for the next
+routine sweep.
+
+The **operator model** is a separate surface with its own endpoints below: one
+short profile per (user, workspace) holding the role, ownership and standing
+constraints that person has stated. It records only what they said, never what
+the system inferred. The endpoints let a person read it and drop a single wrong
+entry without turning the whole feature off.
 
 ---
 
@@ -157,14 +164,120 @@ the consent change and an audit row.
   "user_id": "user_123",
   "workspace_id": "ws_123",
   "opted_out": true,
-  "purged": 3
+  "purged": 3,
+  "purged_models": 1
 }
 ```
 
-`purged` reflects the number of cards removed by the opt-out (0 when opting
-back in).
+`purged` reflects the number of peer cards removed by the opt-out and
+`purged_models` the operator model (0 or 1). Both are 0 when opting back in.
 
 | Status | Condition |
 |---|---|
 | `400` | Invalid JSON or missing workspace context |
+| `401` | Not authenticated |
+
+---
+
+## Get My Operator Model
+
+```
+GET /api/v1/users/me/user-model?workspace_id={workspaceId}
+```
+
+Returns the operator model stored about the requesting user in this workspace:
+the raw file plus each `- key: value` bullet split into a field. A read is
+recorded in the peer-card audit log with `action='read'`.
+
+**Auth:** Any authenticated user (own data only)
+
+**Response:** `200 OK`
+
+```json
+{
+  "user_id": "user_123",
+  "workspace_id": "ws_123",
+  "exists": true,
+  "user_slug": "9f2c1a4e7b3d0518",
+  "bytes": 118,
+  "created_at": "2026-08-01T05:00:00.000Z",
+  "updated_at": "2026-08-02T05:00:00.000Z",
+  "content": "- role: runs the platform team\n- timezone: UTC+1",
+  "facts": [
+    { "key": "role", "value": "runs the platform team" },
+    { "key": "timezone", "value": "UTC+1" }
+  ]
+}
+```
+
+`exists: false` with an empty `facts` array means nothing has been recorded
+about this person in this workspace yet. `content` and `facts` are omitted when
+the server has no memory storage path configured.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `401` | Not authenticated |
+
+---
+
+## Forget One Field
+
+```
+DELETE /api/v1/users/me/user-model/facts/{key}?workspace_id={workspaceId}
+```
+
+Removes a single field from the operator model and leaves the rest standing --
+the answer to "an agent recorded something wrong about me" that does not cost
+the person everything it recorded correctly. `{key}` is a field name from the
+`facts` array above; matching is case-insensitive.
+
+Removing the last remaining field removes the model entirely (an empty model is
+not a model), which the response reports as `exists: false`.
+
+**Auth:** Any authenticated user (own data only)
+
+**Response:** `200 OK`
+
+```json
+{
+  "user_id": "user_123",
+  "forgot": "timezone",
+  "exists": true,
+  "remaining": [
+    { "key": "role", "value": "runs the platform team" }
+  ]
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing field key or workspace context |
+| `401` | Not authenticated |
+| `404` | No operator model, or no field by that name -- a miss is never reported as a success |
+| `503` | The server has no memory storage path configured |
+
+---
+
+## Purge My Operator Model
+
+```
+DELETE /api/v1/users/me/user-model?workspace_id={workspaceId}
+```
+
+Forgets the whole operator model. Does **not** opt the caller out: new facts may
+be recorded again from things they state later. Use `PUT /users/me/peer-consent`
+with `opted_out: true` to stop recording altogether.
+
+**Auth:** Any authenticated user (own data only)
+
+**Response:** `200 OK`
+
+```json
+{ "user_id": "user_123", "purged": 1 }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
 | `401` | Not authenticated |

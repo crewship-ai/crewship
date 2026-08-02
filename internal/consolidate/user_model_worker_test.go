@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -429,5 +430,58 @@ func TestStartUserModelSyncWorker_MultiWorkspaceTick(t *testing.T) {
 	}
 	if b2, _ := memory.LoadUserModel(p2, "u2", "ws2"); b2 == "" {
 		t.Errorf("ws2 model not written")
+	}
+}
+
+// A merged model that grows past memory.UserModelCapBytes must still be
+// written — trimmed to fit — rather than failing the write.
+//
+// This was latent for as long as the extractor was a no-op: an empty
+// extraction merges to the prior model unchanged, so the merged body
+// never grew. The moment a real extractor lands, a long-lived operator's
+// model accretes fields until MergeUserModel returns more than the 1.5 KB
+// cap, WriteUserModel refuses it, and the sweep counts an error EVERY DAY
+// FROM THEN ON — while the on-disk model silently stops updating. Failing
+// closed on a memory tier is the wrong direction: the fields that fit are
+// still true.
+func TestRunUserModelSync_TrimsMergedModelToCapInsteadOfFailingTheWrite(t *testing.T) {
+	db := userModelWorkerDB(t)
+	seedUserModelFixture(t, db)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	base := t.TempDir()
+	paths := memory.UserModelPaths{SharedDir: base + "/crews/cr1/shared/.memory"}
+
+	// A prior model just under the cap: 14 fields of ~100 bytes.
+	var prior strings.Builder
+	for i := 0; i < 14; i++ {
+		fmt.Fprintf(&prior, "- field%02d: %s\n", i, strings.Repeat("x", 95))
+	}
+	if err := memory.WriteUserModel(paths, "u1", "ws1", strings.TrimRight(prior.String(), "\n")); err != nil {
+		t.Fatalf("seed prior: %v", err)
+	}
+
+	// One more field pushes the merge over the cap.
+	sum, err := RunUserModelSync(context.Background(), db, logger, "ws1", UserModelSyncOptions{
+		OutputBasePath: base,
+		Extractor:      fixedExtractor{body: "- role: runs the platform team"},
+	})
+	if err != nil {
+		t.Fatalf("RunUserModelSync: %v", err)
+	}
+	if sum.Errors != 0 {
+		t.Fatalf("an over-cap merge must not be an error; got %+v", sum)
+	}
+	if sum.Writes != 1 {
+		t.Fatalf("expected the trimmed model to be written; got %+v", sum)
+	}
+
+	body, _ := memory.LoadUserModel(paths, "u1", "ws1")
+	if len(body) > memory.UserModelCapBytes {
+		t.Fatalf("stored model is %d bytes, over the %d cap", len(body), memory.UserModelCapBytes)
+	}
+	// Trimming drops from the END, so the oldest, most stable fields
+	// survive and the model does not churn every sweep.
+	if !strings.Contains(body, "- field00:") {
+		t.Errorf("trim dropped the oldest field instead of the newest; got:\n%s", body)
 	}
 }
