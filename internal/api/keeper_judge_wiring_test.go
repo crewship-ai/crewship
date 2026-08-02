@@ -65,7 +65,7 @@ func TestRouter_KeeperHandlerWithoutAJudgeProfile(t *testing.T) {
 	if got := h.promptBudget(); got != 0 {
 		t.Errorf("promptBudget() = %d with no store, want 0", got)
 	}
-	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(context.Background(), "agt_1", "cred_1")
+	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(context.Background(), "ws_1", "agt_1", "cred_1")
 	if facts != nil || hardGate || factKeys != nil || inPrompt {
 		t.Errorf("gatherEvidence with no store = (%v, %v, %v, %v), want all zero", facts, hardGate, factKeys, inPrompt)
 	}
@@ -108,7 +108,7 @@ func TestGatherEvidence_HardGateSurvivesEvidenceOff(t *testing.T) {
 	}
 
 	h := &KeeperHandler{db: db, logger: newTestLogger(), judgeCfg: store}
-	_, hardGate, _, inPrompt := h.gatherEvidence(context.Background(), "agt_1", "cred_1")
+	_, hardGate, _, inPrompt := h.gatherEvidence(context.Background(), "ws_1", "agt_1", "cred_1")
 	if !hardGate {
 		t.Error("hard gate was reported off because the evidence BLOCK was off — an operator shrinking the prompt did not ask to stop refusing unbound credentials")
 	}

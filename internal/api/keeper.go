@@ -141,7 +141,7 @@ func (h *KeeperHandler) SetJudgeConfig(s *keepercfg.Store) { h.judgeCfg = s }
 // site: the gatekeeper treats a nil Facts as "not established" and never as a
 // set of negative facts, so a config change and a database outage both degrade
 // to the prose-only judgement rather than to a refusal.
-func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialID string) (*evidence.Facts, bool, []string, bool) {
+func (h *KeeperHandler) gatherEvidence(ctx context.Context, workspaceID, agentID, credentialID string) (*evidence.Facts, bool, []string, bool) {
 	if h.judgeCfg == nil || h.db == nil || agentID == "" || credentialID == "" {
 		return nil, false, nil, false
 	}
@@ -158,7 +158,12 @@ func (h *KeeperHandler) gatherEvidence(ctx context.Context, agentID, credentialI
 	if !prof.Evidence.Value && !prof.HardGate.Value {
 		return nil, false, nil, false
 	}
-	f := evidence.Gather(ctx, h.db, evidence.Query{AgentID: agentID, CredentialID: credentialID})
+	// The workspace is passed rather than derived: the backup fact is scoped by
+	// it, and an empty one omits that fact instead of answering it from every
+	// tenant's catalog.
+	f := evidence.Gather(ctx, h.db, evidence.Query{
+		WorkspaceID: workspaceID, AgentID: agentID, CredentialID: credentialID,
+	})
 	for _, om := range f.Omitted {
 		h.logger.Warn("keeper: evidence fact omitted",
 			"fact", om.Fact, "error", om.Err, "agent_id", agentID, "credential_id", credentialID)

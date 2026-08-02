@@ -80,6 +80,8 @@ func FactKeys() []string {
 		FactPairHistory,
 		FactRecentDenies,
 		FactOpenAssignedWork,
+		FactLastBackup,
+		FactNarrowerCredential,
 	}
 }
 
@@ -110,6 +112,11 @@ type Query struct {
 	AgentID string
 	// CredentialID is the credential being requested.
 	CredentialID string
+	// WorkspaceID scopes the facts that belong to a workspace rather than to the
+	// agent/credential pair — today, the backup age. Empty omits those rather
+	// than widening them: a backup fact answered from every tenant's catalog
+	// would be an argument for approving, manufactured by a missing predicate.
+	WorkspaceID string
 	// Now anchors every relative window (the 7-day denial lookback, "4h ago").
 	// It is a field rather than a time.Now() call so the windows are testable
 	// and so a replay can reproduce the exact block a decision was made on.
@@ -186,6 +193,12 @@ type Facts struct {
 	RecentDenies *RecentDenies
 	OpenWork     *OpenWork
 
+	// LastBackup and NarrowerCredential answer the two questions an operator
+	// asked for by name while ruling on escalations. See human_facts.go, which
+	// also records the third they asked for and why it cannot honestly exist.
+	LastBackup         *LastBackup
+	NarrowerCredential *NarrowerCredential
+
 	// Omitted lists the facts that failed, in a fixed order. Not rendered.
 	Omitted []Omission
 }
@@ -229,7 +242,7 @@ func Gather(ctx context.Context, db Querier, q Query) Facts {
 		// Not a database failure, but the same rule applies: with no ids there
 		// is nothing to verify, and every fact would be a guess.
 		err := fmt.Errorf("evidence: agent id and credential id are both required (got agent=%q credential=%q)", q.AgentID, q.CredentialID)
-		for _, name := range []string{FactBinding, FactPairHistory, FactRecentDenies, FactOpenAssignedWork} {
+		for _, name := range FactKeys() {
 			f.Omitted = append(f.Omitted, Omission{Fact: name, Err: err})
 		}
 		return f
@@ -263,6 +276,22 @@ func Gather(ctx context.Context, db Querier, q Query) Facts {
 		f.Omitted = append(f.Omitted, Omission{Fact: FactOpenAssignedWork, Err: err})
 	} else {
 		f.OpenWork = w
+	}
+
+	// Workspace-scoped. An empty WorkspaceID makes queryLastBackup return an
+	// error like any other failure, so the fact is omitted rather than answered
+	// from every tenant's catalog — and the omission path stays uniform instead
+	// of growing a special case that behaves differently from the rest.
+	if b, err := queryLastBackup(ctx, db, q.WorkspaceID, now); err != nil {
+		f.Omitted = append(f.Omitted, Omission{Fact: FactLastBackup, Err: err})
+	} else {
+		f.LastBackup = b
+	}
+
+	if n, err := queryNarrowerCredential(ctx, db, q.CredentialID); err != nil {
+		f.Omitted = append(f.Omitted, Omission{Fact: FactNarrowerCredential, Err: err})
+	} else {
+		f.NarrowerCredential = n
 	}
 
 	return f
