@@ -138,6 +138,10 @@ type inboxItemResponse struct {
 	// SecurityLevelLabel is the linked credential's tier ("L4 · critical"), from
 	// keeper's own table. Empty when the escalation has no credential behind it.
 	SecurityLevelLabel string `json:"security_level_label,omitempty"`
+	// Evidence is the facts block for a credential escalation — what the person
+	// deciding needs beyond the model's argument for its own verdict. Detail view
+	// only; see inbox_evidence.go for why it is not on the list.
+	Evidence *inboxEvidence `json:"evidence,omitempty"`
 }
 
 // inboxListResponse keeps the count + cursor metadata next to the
@@ -350,6 +354,9 @@ func (h *InboxHandler) Get(w http.ResponseWriter, r *http.Request) {
 	batch := []inboxItemResponse{item}
 	h.enrichAgentAvatars(r.Context(), batch)
 	h.enrichEscalationFourEyes(r.Context(), workspaceID, batch)
+	// Detail only. Two indexed queries for one item; the list deliberately does
+	// not pay this per row.
+	h.enrichKeeperEvidence(r.Context(), workspaceID, &batch[0])
 	writeJSON(w, http.StatusOK, batch[0])
 }
 

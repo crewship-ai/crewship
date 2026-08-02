@@ -75,6 +75,23 @@ export interface InboxItem {
   second_approver_by_tier?: boolean
   /** The linked credential's tier, e.g. "L4 · critical". */
   security_level_label?: string
+  /**
+   * Facts about the consequences of granting this credential — what the person
+   * deciding needs beyond the judge's argument for its own verdict.
+   *
+   * Server-computed at read time (detail view only), and deliberately NOT
+   * recommendations. The moment this carries "you should probably deny" the
+   * reader anchors on the model and stops deciding.
+   *
+   * The optional inner objects carry a third state the UI must not flatten:
+   * absent means the query failed and nobody knows, while `exists: false` means
+   * we looked and there is none. Rendering "no backup" for a failed lookup would
+   * manufacture an argument against approving out of a database outage.
+   */
+  evidence?: {
+    last_backup?: { exists: boolean; age_hours: number; scope: string }
+    narrower_credential?: { exists: boolean; name?: string; security_level?: number }
+  }
 }
 
 interface InboxListResponse {

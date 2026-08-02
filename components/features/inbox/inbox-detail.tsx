@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 import { ActorLabel } from "./inbox-actor"
+import { EvidenceFacts } from "./evidence-facts"
 import { KindActions } from "./kind-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
@@ -217,6 +218,10 @@ export function DecisionCard({
           securityLevelLabel={item.security_level_label ?? null}
           agentSlug={fourEyesAgentOf(item)}
         />
+
+        {/* Above the buttons, below the four-eyes notice: the facts belong where
+            they are read before the click, not after it. */}
+        <EvidenceFacts item={item} />
 
         <KindActions
           item={item}
