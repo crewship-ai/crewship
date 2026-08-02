@@ -110,6 +110,18 @@ feature correctness.
   `storageDir(t)`, not `t.TempDir()` — `t.TempDir()` fails the test when
   its `RemoveAll` races a late write, and a `t.TempDir()` taken after
   `setupTestDB` is cleaned up *before* the drain runs.
+- **`go test -race ./internal/api/` needs `-timeout`.** That package
+  takes ~10m 15s under the race detector and `go test`'s default
+  timeout is 10m, so a plain run is **killed mid-test** — it prints a
+  goroutine dump headed by whichever `t.Parallel()` test was running
+  when the axe fell, and **zero `WARNING: DATA RACE`**. That reads
+  exactly like a failure and it is not one; it is the same ghost people
+  chased in #1597. Run it as `go test -race -timeout 25m ./internal/api/`
+  (`ok … 615s`). CI's dedicated **Go Race (internal/api)** job already
+  passes a longer timeout, so a green CI and a red local run are
+  consistent, not contradictory. Before blaming your diff, check the log
+  for `WARNING: DATA RACE` — no such line plus a `panic: test timed out`
+  means you hit the ceiling, not a race.
 
 ## Frontend data fetching
 

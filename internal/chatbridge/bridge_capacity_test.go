@@ -13,6 +13,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/admission"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -224,5 +225,108 @@ func TestBridge_CapacityHold_ReachesTheCallersStream(t *testing.T) {
 		if strings.Contains(s, "captured-container-id") {
 			t.Errorf("a non-hold provisioning step leaked onto the chat stream: %q", s)
 		}
+	}
+}
+
+// appleReportingContainer answers the capability question with the REAL Apple
+// provider's reporter — that provider declares ProvisionSink among the things
+// it drops — while behaving like the ordinary capturing fake for everything
+// else. UnsupportedCrewConfig reads only the CrewConfig it is handed (its two
+// touches of p.cfg are string comparisons against a zero Config), so a
+// zero-value Provider answers exactly as a live one would for the fields this
+// test cares about. Using the real reporter rather than a hand-written stub
+// matters: a stub could drift from what Apple actually declares, and this test
+// would keep passing while the behaviour it guards changed.
+type appleReportingContainer struct {
+	*capturingContainer
+}
+
+func (appleReportingContainer) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewConfigSupport {
+	return (&apple.Provider{}).UnsupportedCrewConfig(cfg)
+}
+
+var _ provider.CrewConfigReporter = appleReportingContainer{}
+
+// The bridge attaches its ProvisionSink AFTER asking the provider what it will
+// drop, and the correctness of that rests on statement order inside a long
+// function. Grouping the cc.* assignments together is an entirely natural
+// refactor, and it would put "Not honoured by this container provider — …no
+// container-preparation events…" in front of every macOS user on every cold
+// start. No CI job runs the Apple provider, so nothing else would notice.
+//
+// This pins the OUTCOME, not the order: the strings actually streamed to the
+// caller. Three properties together, because each alone is satisfied by a
+// wrong implementation:
+//
+//  1. the capacity hold still reaches the caller — so the sink really is
+//     attached, and "delete the assignment" is not a passing answer;
+//  2. no line about ProvisionSink reaches the caller — the property at risk;
+//  3. the crew's OWN dropped settings are still reported — so "silence the
+//     degraded report wholesale" is not a passing answer either.
+func TestBridge_AppleProvider_DoesNotReportOurOwnProvisionSinkToTheUser(t *testing.T) {
+	resolver := &mockResolver{
+		info: &ChatInfo{
+			AgentID:     "agent-1",
+			AgentSlug:   "valid-slug",
+			CrewID:      "crew-apple",
+			CrewSlug:    "ops",
+			CLIAdapter:  "CLAUDE_CODE",
+			ToolProfile: "CODING",
+			TimeoutSecs: 30,
+			MemoryMB:    2048,
+			// A setting the CREW asked for that the Apple provider drops, so
+			// the degraded report has something legitimate to say.
+			RootPostStart: []string{"./scripts/seed-db.sh"},
+		},
+	}
+	b, ctr := bridgeWithCapturingContainer(t, resolver, BridgeConfig{})
+	b.container = appleReportingContainer{capturingContainer: ctr}
+
+	ctr.onEnsure = func(cc provider.CrewConfig) {
+		if cc.ProvisionSink == nil {
+			return
+		}
+		cc.ProvisionSink(devcontainer.ProvisionEvent{
+			Step:       devcontainer.ProvStepCapacityHold,
+			Status:     devcontainer.ProvStatusStarted,
+			Reason:     admission.ReasonConcurrency,
+			Detail:     "4 container starts already in flight, limit 4",
+			DurationMs: 7_000,
+		})
+	}
+
+	var statuses []string
+	streamFn := func(e ws.ChatEvent) {
+		if e.Type == "status" {
+			statuses = append(statuses, e.Content)
+		}
+	}
+	_ = b.HandleChatMessage(context.Background(), "u", "sess-apple", "hello", streamFn)
+
+	var sawHold, sawCrewDrop bool
+	for _, s := range statuses {
+		lower := strings.ToLower(s)
+		if strings.Contains(lower, "waiting for host capacity") {
+			sawHold = true
+		}
+		if strings.Contains(lower, "post-start hooks are not executed") {
+			sawCrewDrop = true
+		}
+		// The regression. Matched on the field name AND on the wording the
+		// Apple provider actually emits, so a reworded detail does not quietly
+		// stop this test from covering anything.
+		if strings.Contains(lower, "provisionsink") ||
+			strings.Contains(lower, "container-preparation steps are not emitted") {
+			t.Errorf("the user was told about ProvisionSink, which the crew never asked for "+
+				"and which is our own diagnostics: %q", s)
+		}
+	}
+	if !sawHold {
+		t.Error("no capacity line reached the caller — the sink is not attached at all, " +
+			"which is not the fix, it is the bug this PR removes")
+	}
+	if !sawCrewDrop {
+		t.Errorf("the crew's own dropped setting was not reported; the degraded report has been "+
+			"silenced wholesale rather than kept honest. statuses = %v", statuses)
 	}
 }
