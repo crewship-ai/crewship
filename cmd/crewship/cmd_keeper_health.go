@@ -105,10 +105,16 @@ func printKeeperHealth(h keeperHealthResult) {
 	fmt.Printf("  Got somewhere:%s %s%s  (granted or escalated; alarms under %s)\n",
 		colour, progressed, cli.Reset, pct(h.AlarmProgressedRate))
 
-	if h.JudgeFailures > 0 {
-		fmt.Printf("  %sJudge failed:  %d  %s%s  (unreachable, timed out or unparseable — each one is a DENY)\n",
-			cli.Red, h.JudgeFailures, pct(h.JudgeFailureRate), cli.Reset)
+	// Printed even at zero. The count is the good news and the threshold is what
+	// makes it legible — "0" alone does not tell an operator how much room they
+	// have before the judge's own failures start denying credentials.
+	failColour := ""
+	failReset := ""
+	if h.JudgeFailureRate >= h.AlarmJudgeFailureRate {
+		failColour, failReset = cli.Red, cli.Reset
 	}
+	fmt.Printf("  Judge failed: %s%-4d %s%s  (unreachable, timed out or unparseable — each one is a DENY; alarms at %s)\n",
+		failColour, h.JudgeFailures, pct(h.JudgeFailureRate), failReset, pct(h.AlarmJudgeFailureRate))
 	if h.P95LatencyMS > 0 {
 		fmt.Printf("  p95 latency:  %.1fs\n", float64(h.P95LatencyMS)/1000)
 	}

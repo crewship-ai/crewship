@@ -34,6 +34,7 @@ func healthReq(t *testing.T, ws string) *http.Request {
 
 func TestAdminKeeperHealth_ReportsTheWindowTheAlarmReads(t *testing.T) {
 	health.Default.Reset()
+	t.Cleanup(health.Default.Reset)
 	for i := 0; i < 12; i++ {
 		health.Default.Record(health.Verdict{WorkspaceID: "ws1", Decision: "ALLOW"})
 	}
@@ -59,11 +60,11 @@ func TestAdminKeeperHealth_ReportsTheWindowTheAlarmReads(t *testing.T) {
 	if out.Allow != 12 || out.Deny != 4 || out.Escalate != 1 {
 		t.Errorf("counts = %d/%d/%d, want 12/4/1", out.Allow, out.Deny, out.Escalate)
 	}
-	// The share the alarm actually reads — granted OR escalated — not the ALLOW
-	// share, because an all-L4 workspace escalates by design and runs at an
-	// ALLOW rate of zero while perfectly healthy.
-	if out.ProgressedRate < 0.7 {
-		t.Errorf("progressed_rate = %v, want the allow+escalate share", out.ProgressedRate)
+	// Exact, not a floor. 12/17 is 0.706, so a loose ">= 0.7" would also pass if
+	// ProgressedRate quietly returned the ALLOW share — which is the one thing
+	// this assertion exists to rule out. 13/17 can only come from allow+escalate.
+	if want := 13.0 / 17.0; out.ProgressedRate < want-0.001 || out.ProgressedRate > want+0.001 {
+		t.Errorf("progressed_rate = %v, want %v (allow+escalate, not allow alone)", out.ProgressedRate, want)
 	}
 	if out.Alarm != nil {
 		t.Errorf("healthy window raised %q", out.Alarm.Kind)
@@ -74,6 +75,7 @@ func TestAdminKeeperHealth_ReportsTheWindowTheAlarmReads(t *testing.T) {
 // as a healthy one either — zero samples is its own answer.
 func TestAdminKeeperHealth_UntrackedWorkspaceIsEmptyNotHealthy(t *testing.T) {
 	health.Default.Reset()
+	t.Cleanup(health.Default.Reset)
 
 	h := NewAdminKeeperHealthHandler(newTestLogger())
 	rr := httptest.NewRecorder()
@@ -97,6 +99,7 @@ func TestAdminKeeperHealth_UntrackedWorkspaceIsEmptyNotHealthy(t *testing.T) {
 // shape — a judge answering unusably while every response looks well-formed.
 func TestAdminKeeperHealth_SurfacesTheAlarmWithoutWaitingForIt(t *testing.T) {
 	health.Default.Reset()
+	t.Cleanup(health.Default.Reset)
 	for i := 0; i < 20; i++ {
 		health.Default.Record(health.Verdict{WorkspaceID: "ws1", Decision: "DENY"})
 	}

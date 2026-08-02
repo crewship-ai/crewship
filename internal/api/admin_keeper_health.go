@@ -82,7 +82,10 @@ type keeperHealthResponse struct {
 func (h *AdminKeeperHealthHandler) Get(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID == "" {
-		replyError(w, http.StatusBadRequest, "workspace is required")
+		// RFC 7807, matching the rest of the admin surface. An operator scripting
+		// against this endpoint should not have to branch on which shape a given
+		// route happens to answer with.
+		writeProblem(w, r, http.StatusBadRequest, "workspace is required")
 		return
 	}
 
