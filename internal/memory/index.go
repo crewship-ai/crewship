@@ -153,12 +153,14 @@ func (e *Engine) ReindexContext(ctx context.Context) error {
 // b-tree segments into one. See optimizeEveryNWrites for why this is worth
 // doing and how often.
 //
-// Failure is logged-by-omission and never returned: optimize is pure
-// maintenance, it changes nothing about what the index contains, and a
-// memory write must not fail because a merge could not run. The caller
-// already holds e.mu.
+// Failure is swallowed and never returned: optimize is pure maintenance, it
+// changes nothing about what the index contains, and a memory write must not
+// fail because a merge could not run. The counter resets either way — a
+// merge that failed because its context was already cancelled would
+// otherwise be retried on the very next write, turning an O(index) operation
+// into a per-write cost. Skipping one cycle costs nothing but a little
+// fragmentation. The caller already holds e.mu.
 func (e *Engine) optimizeIndex(ctx context.Context) {
-	//nolint:errcheck // maintenance only; a failed merge must not fail a write
 	_, _ = e.db.ExecContext(ctx, "INSERT INTO memory_chunks(memory_chunks) VALUES('optimize')")
 	e.writesSinceOptimize = 0
 }

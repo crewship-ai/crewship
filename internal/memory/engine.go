@@ -156,10 +156,10 @@ func normaliseDDL(s string) string {
 // 197µs to 36µs per query for 3ms of total optimize work.
 //
 // The cadence is a cost/benefit pick, not a tuned constant. `optimize` is
-// O(index), so running it per write would dominate an 86µs write; running
-// it never is what we have today. 200 writes is ~1% overhead on the write
-// path at the measured cost, and bounds fragmentation to roughly one
-// merge's worth. It is also well inside a single agent's daily write
+// O(index), so running it on every write would dominate an 86µs write, and
+// running it never is what produced the 197µs above. 200 writes is ~1%
+// overhead on the write path at the measured cost, and bounds fragmentation
+// to roughly one merge's worth. It is also well inside a single agent's daily write
 // volume, so an index that is quiet overnight is never left fragmented for
 // long. Nothing depends on the exact value: it changes when maintenance
 // happens, never what the index contains.

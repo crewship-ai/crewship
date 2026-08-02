@@ -274,6 +274,29 @@ func TestSearch_AllStopwordQueryStaysBounded(t *testing.T) {
 	}
 }
 
+// TestSearch_PunctuationOnlyQueriesDoNotError guards the new construct. The
+// phrase leg quotes whatever the caller typed, and a "word" made only of
+// punctuation quotes to a phrase with no tokens in it — the shape most
+// likely to trip the FTS5 parser and turn a nonsense query into a 500.
+func TestSearch_PunctuationOnlyQueriesDoNotError(t *testing.T) {
+	eng := setupRetrievalCorpus(t)
+
+	for _, q := range []string{
+		"—", "— —", "-", "--", "…", "🙂", "!!!", "?", ". .", "«»", "'", "``",
+		"™ ®", "e.g.", "n/a", "50%", "#1606", "keeper —", "— keeper —",
+	} {
+		if _, err := eng.Search(context.Background(), q, 10); err != nil {
+			t.Errorf("Search(%q) errored: %v (expression: %q)", q, err, sanitizeFTSQuery(q))
+		}
+	}
+
+	// A punctuation-wrapped real word must still find its file, so the loop
+	// above is not passing merely because everything returns nothing.
+	if got := topFiles(t, eng, "— gatekeeper —", 3); !containsFile(got, "AGENT.md") {
+		t.Errorf("punctuation around a real word lost the hit: %v", got)
+	}
+}
+
 // TestSearch_ExactPhraseLeadsTheExpression is why the built expression
 // starts with the whole question as a phrase rather than only its terms.
 // An OR of single terms has no way to prefer adjacency: BM25 rewards term
