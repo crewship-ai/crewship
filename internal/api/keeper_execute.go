@@ -158,6 +158,21 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The intent travels exactly as it does on the access path, so it is scrubbed
+	// exactly the same way and in the same position — before anything copies it.
+	// See the note in HandleRequest for why the position, not the call, is the
+	// property that matters.
+	body.Intent = scrubJudgeText(body.Intent)
+
+	// body.Command is deliberately NOT scrubbed, and the asymmetry is the point.
+	// It is executed verbatim below (`sh -c body.Command`), so rewriting a span
+	// the scrubber mistook for a token would silently run a DIFFERENT command
+	// than the one that was judged — a worse failure than the leak it prevents.
+	// It is also the very thing the judge is asked to inspect: a redacted command
+	// cannot be evaluated for whether it should run. Secrets pasted into a command
+	// are the SelfServiceDelivery compromise that PRD §5 already puts out of
+	// scope, not something a filter here could fix.
+	//
 	// Cross-tenant binding: same guard as HandleRequest, and more critical
 	// here — an ALLOW on /execute injects the plaintext secret into
 	// body.container_id and runs a command there. This route is internalAuth-only

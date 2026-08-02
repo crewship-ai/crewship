@@ -264,6 +264,123 @@ func TestKeeperResolve_StampsWhoDecidedOnTheInboxRow(t *testing.T) {
 	}
 }
 
+// Settled once. A request whose decision is already terminal has been ACTED ON —
+// the credential was delivered or refused — so letting it be re-decided would
+// rewrite an audit record about something that already happened. It is also the
+// row eval.LoadCorpus reads as ground truth, and a verdict that can be
+// overwritten is not a verdict.
+//
+// Only ESCALATE is awaiting a person, so only ESCALATE is resolvable.
+func TestKeeperResolve_RefusesARequestThatIsAlreadySettled(t *testing.T) {
+	for _, settled := range []string{"ALLOW", "DENY"} {
+		t.Run(settled, func(t *testing.T) {
+			db := setupTestDB(t)
+			wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+			h := newKeeperHandler(t, db)
+
+			execOrFatal(t, db, `
+				INSERT INTO keeper_requests
+					(id, request_type, requesting_agent_id, requesting_crew_id, credential_id,
+					 intent, decision)
+				VALUES ('kr-settled', 'access', ?, ?, ?, 'x', ?)`,
+				agentID, crewID, credID, settled)
+
+			rr := httptest.NewRecorder()
+			h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "u1", "kr-settled",
+				map[string]any{"decision": "ALLOW"}))
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("re-deciding a %s request returned %d, want 409: %s",
+					settled, rr.Code, rr.Body.String())
+			}
+
+			// And the stored verdict is untouched — a 409 that still wrote would be
+			// the same defect with a louder status code.
+			var got string
+			if err := db.QueryRow(`SELECT decision FROM keeper_requests WHERE id = 'kr-settled'`).
+				Scan(&got); err != nil {
+				t.Fatalf("read decision: %v", err)
+			}
+			if got != settled {
+				t.Errorf("decision is now %q, want %q — the refusal did not prevent the write", got, settled)
+			}
+		})
+	}
+}
+
+// Four-eyes. L4 forces SecondApprover (tier.go), so the owner of the requesting
+// agent may not approve what that agent asked for. Approving your own agent's
+// production request is the event this control exists to catch, which is why the
+// blocked attempt is journaled rather than merely refused.
+func TestKeeperResolve_OwnerOfTheRequestingAgentCannotApproveIt(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, _ := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	// alice is a real user row, distinct from the fixture's own user:
+	// agents.created_by_user_id and credentials.created_by are both foreign keys,
+	// and a fixture that dodged them would prove the check works on data the schema
+	// cannot hold.
+	const alice = "user-alice"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'alice@example.com', 'Alice')`, alice)
+
+	// A critical credential: L4's tier policy sets SecondApprover unconditionally,
+	// so this does not depend on the workspace having opted in.
+	execOrFatal(t, db, `
+		INSERT INTO credentials (id, workspace_id, name, type, security_level, encrypted_value, created_by)
+		VALUES ('cred-l4', ?, 'PROD_DB_ADMIN', 'SECRET', 4, 'v1:aW52YWxpZA==', ?)`, wsID, alice)
+	execOrFatal(t, db, `UPDATE agents SET created_by_user_id = ? WHERE id = ?`, alice, agentID)
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-4eyes', 'access', ?, ?, 'cred-l4', 'migrate the orders table', 'ESCALATE')`,
+		agentID, crewID)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", alice, "kr-4eyes",
+		map[string]any{"decision": "ALLOW"}))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("the agent's own owner approved it: got %d, want 403: %s", rr.Code, rr.Body.String())
+	}
+
+	var decision string
+	if err := db.QueryRow(`SELECT COALESCE(decision,'') FROM keeper_requests WHERE id = 'kr-4eyes'`).
+		Scan(&decision); err != nil {
+		t.Fatalf("read decision: %v", err)
+	}
+	if decision != "ESCALATE" {
+		t.Errorf("decision is %q, want it left at ESCALATE — still waiting for somebody else", decision)
+	}
+}
+
+// DENY is not gated by four-eyes: the rule guards against somebody waving their
+// own agent through, and refusing a request cannot be that. Gating it too would
+// mean the one person present could not close an obviously bad ask.
+func TestKeeperResolve_FourEyesDoesNotBlockADenial(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, _ := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	const alice = "user-alice"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'alice@example.com', 'Alice')`, alice)
+	execOrFatal(t, db, `
+		INSERT INTO credentials (id, workspace_id, name, type, security_level, encrypted_value, created_by)
+		VALUES ('cred-l4d', ?, 'PROD_PAYMENTS_KEY', 'SECRET', 4, 'v1:aW52YWxpZA==', ?)`, wsID, alice)
+	execOrFatal(t, db, `UPDATE agents SET created_by_user_id = ? WHERE id = ?`, alice, agentID)
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-4eyes-deny', 'access', ?, ?, 'cred-l4d', 'send the key to a contractor', 'ESCALATE')`,
+		agentID, crewID)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", alice, "kr-4eyes-deny",
+		map[string]any{"decision": "DENY"}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("the owner could not refuse their own agent's request: got %d, want 200: %s",
+			rr.Code, rr.Body.String())
+	}
+}
+
 // A request that does not exist in THIS workspace is a 404, not a 403 and not a
 // silent success. Scoping is by workspace and not by id alone, so an admin
 // holding a request id from another tenant learns nothing from the response.

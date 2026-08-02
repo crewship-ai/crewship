@@ -426,16 +426,21 @@ func TestKeeperHandleExecute_NoSecretsConfigured_Returns500(t *testing.T) {
 
 // --- Security hardening tests (audit findings C1, C2, H1, H3) ---
 
-// capturingEvaluator records whether Evaluate was called and what Command was passed.
+// capturingEvaluator records whether Evaluate was called and what it was handed.
+// `seen` holds the whole EvalRequest because some properties are about what the
+// judge did NOT receive (see the intent-scrub test in keeper_scrub_test.go), and
+// that can only be asserted against the real argument.
 type capturingEvaluator struct {
 	called  bool
 	command string
+	seen    gatekeeper.EvalRequest
 	resp    keeper.GatekeeperResponse
 }
 
 func (m *capturingEvaluator) Evaluate(_ context.Context, req gatekeeper.EvalRequest) (keeper.GatekeeperResponse, error) {
 	m.called = true
 	m.command = req.Command
+	m.seen = req
 	return m.resp, nil
 }
 

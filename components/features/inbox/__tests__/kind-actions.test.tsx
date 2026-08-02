@@ -304,3 +304,67 @@ describe("resolved items", () => {
     expect(screen.getByRole("button", { name: /Dismiss/ })).toBeDisabled()
   })
 })
+
+// The credential escalation is the one decision the tier system defers to a
+// person, so the button that carries it gets the closest reading: what it
+// posts, what it does when the server refuses, and what it does when the
+// request never arrives at all.
+describe("keeper credential escalations", () => {
+  const keeperItem = () =>
+    item({
+      kind: "escalation",
+      payload: { request_type: "access", request_id: "kr_1" },
+    })
+
+  it("posts the verdict to the keeper resolve route", async () => {
+    mount(keeperItem())
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() => {
+      expect(apiFetch.mock.calls[0][0]).toContain("/api/v1/admin/keeper/requests/kr_1/resolve")
+      expect(JSON.parse(apiFetch.mock.calls[0][1].body).decision).toBe("ALLOW")
+    })
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled())
+  })
+
+  it("sends DENY, not a bare rejection, when the operator refuses", async () => {
+    mount(keeperItem())
+    fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
+
+    await waitFor(() =>
+      expect(JSON.parse(apiFetch.mock.calls[0][1].body).decision).toBe("DENY"))
+  })
+
+  // A 403 here is normally the four-eyes rule, not a permissions mistake, and
+  // the server says which. Replacing that with a generic refusal would send the
+  // operator hunting for a role problem that does not exist.
+  it("shows the server's own reason when it refuses", async () => {
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        detail: "critical credential tier requires a second approver: this escalation was raised by an agent you own",
+      }),
+    })
+    mount(keeperItem())
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("second approver")))
+    expect(onRefresh).not.toHaveBeenCalled()
+  })
+
+  // apiFetch rejects on a transport failure rather than resolving non-ok, and
+  // the click handler discards the promise. Uncaught, the operator gets nothing
+  // at all — and cannot tell a refused approval from an unsent one.
+  it("reports a network failure instead of silently doing nothing", async () => {
+    apiFetch.mockRejectedValueOnce(new Error("Failed to fetch"))
+    mount(keeperItem())
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch")))
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(onRefresh).not.toHaveBeenCalled()
+  })
+})

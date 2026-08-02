@@ -272,18 +272,34 @@ export function KindActions({
       if (item.payload?.request_type === "access" && keeperRequestID) {
         const resolveKeeper = (action: "approve" | "reject") =>
           wrap(action, async () => {
-            const res = await apiFetch(
-              `/api/v1/admin/keeper/requests/${encodeURIComponent(keeperRequestID)}/resolve` +
-                `?workspace_id=${encodeURIComponent(item.workspace_id)}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  decision: action === "approve" ? "ALLOW" : "DENY",
-                  reason: action === "approve" ? "Approved from inbox" : "Denied from inbox",
-                }),
-              },
-            )
+            // apiFetch REJECTS on a transport failure rather than resolving with
+            // a non-ok Response, and the click handler discards this promise — so
+            // an uncaught rejection would leave the operator staring at a button
+            // that did nothing. On a decision this consequential, "no feedback"
+            // is the worst possible answer: they cannot tell a refused approval
+            // from an unsent one, and the honest recovery is to try again.
+            let res: Response
+            try {
+              res = await apiFetch(
+                `/api/v1/admin/keeper/requests/${encodeURIComponent(keeperRequestID)}/resolve` +
+                  `?workspace_id=${encodeURIComponent(item.workspace_id)}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    decision: action === "approve" ? "ALLOW" : "DENY",
+                    reason: action === "approve" ? "Approved from inbox" : "Denied from inbox",
+                  }),
+                },
+              )
+            } catch (e) {
+              toast.error(
+                e instanceof Error
+                  ? `Could not reach the server: ${e.message}`
+                  : "Could not reach the server",
+              )
+              return
+            }
             if (!res.ok) {
               // 403 here is usually four-eyes, not a permissions mistake, and
               // the server's message says which — so it is shown rather than
