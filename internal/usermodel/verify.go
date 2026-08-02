@@ -162,13 +162,9 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 		quote := strings.TrimSpace(c.Quote)
 
 		reason := ""
-		switch {
-		case key == "":
+		if _, ok := p.hasKey(key); !ok {
+			// Covers the empty key too: "" is in no profile.
 			reason = ReasonUnknownKey
-		default:
-			if _, ok := p.hasKey(key); !ok {
-				reason = ReasonUnknownKey
-			}
 		}
 		if reason == "" && taken[key] {
 			reason = ReasonDuplicateKey

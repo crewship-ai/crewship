@@ -184,6 +184,18 @@ func TestVerify_WritesWhatWasStatedAndRefusesTheRest(t *testing.T) {
 			wantReason: ReasonValueTooLong,
 		},
 		{
+			name: "an empty key",
+			cand: Candidate{
+				Key:    "  ",
+				Value:  "runs the platform team",
+				Quote:  "I run the platform team here",
+				Source: "stated",
+			},
+			// "" is in no profile, so the closed-key-set check answers it
+			// without a special case.
+			wantReason: ReasonUnknownKey,
+		},
+		{
 			name: "an empty value",
 			cand: Candidate{
 				Key:    "role",
