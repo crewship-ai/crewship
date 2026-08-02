@@ -155,6 +155,18 @@ crew's concurrency budget; lowering it does the reverse. A value that
 does not parse, or that falls outside the hard bounds, is ignored in
 favour of the default.
 
+<Note>
+**On upgrade: crews that were set to `0` change size.** `crewship crew update
+--memory-mb 0` used to store the literal `0` instead of resolving it, and the
+runtime then substituted its own fallback of `8192` MB — twice the documented
+default, and `2.0` CPUs became a fallback too. Those rows are corrected on
+first boot after this release, so an affected crew moves from an effective
+`8192` MB to the `4096` it always said it had, and its concurrent-run budget
+goes from `1` back to `2`. Crews with an explicitly configured size are not
+touched. Run `crewship crew get <slug>` to see where a crew landed, and
+`--memory-mb <n>` if it needs more.
+</Note>
+
 ### Host capacity
 
 A crew's own size says nothing about whether the **host** can afford to start

@@ -889,13 +889,19 @@ func (h *InternalHandler) resolveNetworkPolicy(data *agentConfigData) (string, [
 
 // resolveContainerResources extracts container resource limits from crew data.
 func (h *InternalHandler) resolveContainerResources(data *agentConfigData) (int, float64, int) {
-	memoryMB := 4096
+	// The NULL case and the stored-sentinel case are the same answer, and
+	// used to be two: a NULL column fell back to 4096 here while a stored 0
+	// (which sql.NullInt64 reports as Valid) passed straight through to the
+	// docker provider's own `<= 0` fallback of 8192 — twice what this line
+	// promises four characters earlier (#1643). resolveCrewContainer* owns
+	// the number now, so the default is written down once.
+	memoryMB := defaultCrewContainerMemoryMB
 	if data.crewMemoryMB.Valid {
-		memoryMB = int(data.crewMemoryMB.Int64)
+		memoryMB = resolveCrewContainerMemoryMB(int(data.crewMemoryMB.Int64))
 	}
-	cpus := 2.0
+	cpus := defaultCrewContainerCPUs
 	if data.crewCPUs.Valid {
-		cpus = data.crewCPUs.Float64
+		cpus = resolveCrewContainerCPUs(data.crewCPUs.Float64)
 	}
 	// #1662: this yielded 0 for a NULL column, and the reaper reads 0 as
 	// "never stop" — the line that made the missing column default visible on
