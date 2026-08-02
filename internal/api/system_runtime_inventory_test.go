@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 )
 
@@ -312,6 +313,20 @@ func TestActiveRuntimeFrom(t *testing.T) {
 
 	t.Run("nil provider means nothing is in use", func(t *testing.T) {
 		got, isApple, ok := activeRuntimeFrom(nil)()
+		if ok || isApple || got != (docker.DetectResult{}) {
+			t.Errorf("got (%+v,%v,%v), want (zero,false,false)", got, isApple, ok)
+		}
+	})
+
+	// The router passes r.activeContainer(), typed provider.ContainerProvider,
+	// into a parameter typed `any`. If that conversion produced a non-nil `any`
+	// the way a nil *T inside an interface does, every --no-docker server would
+	// fall through to the by-elimination branch and report Apple Containers as
+	// in use. It does not — a nil interface converts to a nil interface — but
+	// the failure mode is bad enough to pin at the exact seam the router uses.
+	t.Run("a nil ContainerProvider is still nothing in use", func(t *testing.T) {
+		var cp provider.ContainerProvider // nil, as the router leaves it
+		got, isApple, ok := activeRuntimeFrom(cp)()
 		if ok || isApple || got != (docker.DetectResult{}) {
 			t.Errorf("got (%+v,%v,%v), want (zero,false,false)", got, isApple, ok)
 		}
