@@ -189,7 +189,34 @@ func TestRuntimeConformance(t *testing.T) {
 
 	facts := readContainerFacts(ctx, t, p, created.ID)
 	probes := evaluate(t, p, hostCfg, facts)
+	probes = append(probes, contractLabelProbe(ctx, t, p, created.ID))
 	report(t, p, probes)
+}
+
+// contractLabelProbe checks that the runtime-contract stamp survives the round
+// trip through this runtime: set on the create request, read back off the
+// container (#1642).
+//
+// It is the one invariant in this file that is not read from inside the
+// container, because it is not about the kernel — it is about whether the
+// runtime stores and returns a container label it was given. A runtime that
+// drops it fails in the direction this harness exists to catch: every crew
+// container reads as "created by an older build" forever, so `crewship crew
+// container-status` reports a permanent false `stale`, and every stopped crew
+// is torn down and rebuilt on every single wake instead of being started.
+// Nothing errors; the fleet just gets slower and noisier for no reason.
+func contractLabelProbe(ctx context.Context, t *testing.T, p *Provider, id string) probe {
+	t.Helper()
+	want := p.crewRuntimeContractDigest()
+	got := "(inspect failed)"
+	if res, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{}); err == nil {
+		got = emptyAs(runtimeContractOf(res.Container.Config), "(absent)")
+	}
+	return probe{
+		name: "runtime-contract label survives create", want: want, got: got,
+		honoured: want != "" && got == want, loadBearing: true,
+		why: "a runtime that drops container labels makes every crew read as created by an older build, so each stopped crew is rebuilt on every wake",
+	}
 }
 
 // newConformanceProvider builds a real Provider against whatever runtime is
