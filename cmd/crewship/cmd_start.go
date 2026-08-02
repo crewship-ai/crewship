@@ -416,7 +416,11 @@ var startCmd = &cobra.Command{
 		// purely to avoid an api → chatbridge import (api already depends on
 		// chatbridge for ChatHandler, so the dep flows the other way).
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
-			apiRouter.SetVersion(version)
+			// Full build identity, not just the version (#1645): every
+			// binary an ldflags-less `go build` has produced calls itself
+			// "dev", so version alone cannot tell a slot that redeployed
+			// from one that silently did not.
+			apiRouter.SetBuild(version, commit, date)
 			if ph := apiRouter.Provisioning(); ph != nil {
 				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
 			}
