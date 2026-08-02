@@ -240,6 +240,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
 	// Run gatekeeper evaluation
+	// The intent is agent-authored and reaches the prompt verbatim, so it goes
+	// through the same filter as the history it sits next to.
+	body.Intent = scrubJudgeText(body.Intent)
 	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:            req,

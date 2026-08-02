@@ -326,3 +326,41 @@ func TestResolveKeeperEvalJudge_UnconfiguredSaysWhatToDo(t *testing.T) {
 		t.Fatalf("err = %v, want the missing-incumbent hint", err)
 	}
 }
+
+// A candidate may name a hosted provider, because the question this harness
+// exists to answer is "which model should judge", and the product supports
+// hosted judges (keeper model set --provider anthropic).
+//
+// Until now it could only build Ollama clients, so it could compare local
+// models against each other and nothing else — which meant an operator weighing
+// a local judge against Haiku had to decide on intuition. That is exactly the
+// decision this harness was built to take away from intuition.
+func TestKeeperEvalCandidate_ParsesAHostedSpec(t *testing.T) {
+	for _, tc := range []struct {
+		in       string
+		provider string
+		model    string
+	}{
+		{"qwen3.5:9b", "ollama", "qwen3.5:9b"},
+		{"ollama/qwen3.5:9b", "ollama", "qwen3.5:9b"},
+		{"anthropic/claude-haiku-4-5", "anthropic", "claude-haiku-4-5"},
+		{"openai/gpt-5", "openai", "gpt-5"},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			provider, model := splitCandidateSpec(tc.in)
+			if provider != tc.provider || model != tc.model {
+				t.Errorf("splitCandidateSpec(%q) = %q/%q, want %q/%q",
+					tc.in, provider, model, tc.provider, tc.model)
+			}
+		})
+	}
+}
+
+// A bare model name stays local. Anything else would silently re-point an
+// operator's existing command at a paid endpoint.
+func TestKeeperEvalCandidate_BareNameStaysLocal(t *testing.T) {
+	// Colons are part of Ollama tags, not a provider separator.
+	if p, m := splitCandidateSpec("llama3.2:3b-instruct-q4"); p != "ollama" || m != "llama3.2:3b-instruct-q4" {
+		t.Errorf("got %q/%q, want ollama/llama3.2:3b-instruct-q4", p, m)
+	}
+}

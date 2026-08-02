@@ -353,6 +353,30 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+### Local judge or hosted? Measure it
+
+`keeper eval` scores candidates against decisions a person ruled on, and a
+candidate may name a hosted provider:
+
+```bash
+crewship keeper eval --candidate qwen3.5:9b --candidate anthropic/claude-haiku-4-5
+```
+
+A bare name is Ollama; `anthropic/` and `openai/` prefixes are hosted, and the
+key comes from your own environment (`ANTHROPIC_API_KEY`) rather than the vault —
+this command reads a local database and dials from your machine.
+
+Two things the numbers will not tell you, so decide them yourself:
+
+- **Keeper is fail-closed.** If the judge is unreachable, every credential
+  request is denied. A hosted judge makes that dependent on somebody else's
+  network, an expired key or a rate limit; a local one depends on a machine you
+  own. A strict judge causes friction, an unreachable one causes an outage.
+- **The prompt carries the agent's conversation.** It never carries a
+  credential's value, and secrets matching the scrubber's patterns are redacted
+  before it is built — but the surrounding conversation is still your agents'
+  work, and a hosted judge means it leaves the machine.
+
 ### Checking how the judge has been deciding
 
 Keeper is fail-closed, so a broken judge and a strict one produce the same

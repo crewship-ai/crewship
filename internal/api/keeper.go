@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // SecretGetter retrieves a plaintext credential value by ID.
@@ -278,6 +279,47 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 
 const keeperConvHistoryLimit = 10
 
+// judgeScrubber redacts secrets from text on its way to the judge.
+//
+// Built once: the pattern set is fixed and compiling seventeen regexes per
+// credential request would be paid on the hot path for nothing.
+var judgeScrubber = scrubber.New()
+
+// scrubJudgeText removes secrets from agent-authored text before it reaches the
+// judge, the model, or the audit row.
+//
+// The judge never sees a credential's VALUE — the prompt carries its name and
+// tier, which is the point: it judges behaviour, not secrets. The conversation
+// history was the hole. Agents put secrets in conversations without being asked
+// to: they echo an environment variable, paste a token into a command, print a
+// config while debugging. That text went into the prompt verbatim, travelled to
+// whatever model judges, and was stored in keeper_requests.ollama_prompt — so a
+// secret mentioned once was durably recorded beside the request that mentioned
+// it, and left the machine if the judge was hosted.
+//
+// # What this does and does not catch
+//
+// The generic pattern set: AWS keys, bearer and API tokens, PEM blocks, JWTs,
+// provider-specific token shapes. It does NOT catch a secret with no
+// distinguishing shape — a password like "hunter2" matches nothing.
+//
+// Catching those would mean registering the workspace's actual credential
+// values, which means decrypting every secret it holds on every credential
+// request. That is a WORSE posture, not a better one: more plaintext, in memory,
+// more often, to defend against a case the generic set already covers whenever
+// the secret looks like a secret. The limit is real and is stated here rather
+// than papered over.
+//
+// Redaction markers are left in place rather than removed. An agent that pasted
+// a token into its own conversation is a fact about that agent's behaviour, and
+// behaviour is exactly what the judge is being asked about.
+func scrubJudgeText(s string) string {
+	if s == "" {
+		return ""
+	}
+	return judgeScrubber.Scrub(s)
+}
+
 // loadConversationHistory fetches the last N messages from the agent's most recent
 // active chat. Returns a formatted string for the Keeper prompt, or "" if unavailable.
 
@@ -319,5 +361,8 @@ func (h *KeeperHandler) loadConversationHistory(ctx context.Context, agentID str
 		}
 		fmt.Fprintf(&sb, "[%s]: %s\n", m.Role, content)
 	}
-	return sb.String()
+	// Scrubbed HERE, at the one point both credential paths load history, so the
+	// prompt, the model call and the stored audit row are clean by construction
+	// rather than by three callers each remembering to do it.
+	return scrubJudgeText(sb.String())
 }
