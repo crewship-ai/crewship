@@ -270,6 +270,39 @@ func candidateSocketsFor(goos, home string, uid int) []socketCandidate {
 // Short enough that multiple failing sockets don't block the overall detection.
 const socketPingTimeout = 1500 * time.Millisecond
 
+// resolveRuntimeLabel names the runtime actually answering at c, following the
+// socket through a symlink first.
+//
+// Every runtime that offers to "set up the Docker socket for you" does the same
+// thing: it points /var/run/docker.sock at its own. OrbStack does it from its
+// privileged helper, Rancher Desktop does it when administrative access is on,
+// Docker Desktop does it for ~/.docker/run/docker.sock. That path is candidate
+// #1 and matches on path alone, so whichever of them did it is reported as a
+// plain "docker" — the same product landing under two different labels
+// depending only on whether its helper is installed.
+//
+// It is worth the twenty lines because DetectResult.Runtime is not decoration:
+// knownRuntimeGaps switches on it, so a gap recorded against a runtime silently
+// stops applying the moment that runtime takes the generic socket, and the
+// startup warning an operator does get names the wrong product.
+//
+// resolve is os.Realpath-shaped and injected for testing. A resolution failure,
+// a link to somewhere unrecognised, and a plain non-symlink socket all keep the
+// candidate's own label — this only ever replaces a label with a more specific
+// one that is already in the candidate list, never invents one.
+func resolveRuntimeLabel(c socketCandidate, all []socketCandidate, resolve func(string) (string, error)) string {
+	target, err := resolve(c.path)
+	if err != nil || target == c.path {
+		return c.runtime
+	}
+	for _, other := range all {
+		if other.path == target {
+			return other.runtime
+		}
+	}
+	return c.runtime
+}
+
 // containerdSocketPaths are the endpoints containerd itself listens on. They
 // are deliberately NOT in candidateSocketsFor: containerd serves its own gRPC
 // API over HTTP/2, while the moby client this provider is built on issues
@@ -393,7 +426,8 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 	// Try candidate sockets in order, using a short per-socket timeout so a
 	// hung daemon (socket file exists but daemon unresponsive) doesn't block
 	// the entire detection for the full outer context deadline.
-	for _, c := range candidateSockets() {
+	all := candidateSockets()
+	for _, c := range all {
 		if _, err := os.Stat(c.path); err != nil {
 			continue
 		}
@@ -413,7 +447,11 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 
 		sv, _ := cli.ServerVersion(ctx, client.ServerVersionOptions{})
 		ver := sv.Version
-		rt := c.runtime
+		// Not c.runtime: a runtime that installed its "set up the Docker socket
+		// for you" helper is answering on /var/run/docker.sock under its own
+		// name, and reporting it as plain "docker" both misnames it and stops
+		// its knownRuntimeGaps entry from ever applying.
+		rt := resolveRuntimeLabel(c, all, filepath.EvalSymlinks)
 		// Podman masquerades as Docker -- check server components
 		for _, comp := range sv.Components {
 			if strings.EqualFold(comp.Name, "Podman Engine") {
