@@ -292,7 +292,7 @@ func TestRunUserModelSync_PurgeOptOutCounter(t *testing.T) {
 }
 
 // A chat opened against an agent with NULL crew_id → candidate has an
-// empty CrewID → userModelPathsFor falls back to the workspace-level
+// empty CrewID → UserModelPathsFor falls back to the workspace-level
 // shared dir.
 func TestRunUserModelSync_NullCrewFallbackPath(t *testing.T) {
 	db := userModelWorkerDB(t)
@@ -332,13 +332,13 @@ func TestRunUserModelSync_NullCrewFallbackPath(t *testing.T) {
 	}
 }
 
-// userModelPathsFor unit: empty crew → workspace fallback; non-empty →
+// UserModelPathsFor unit: empty crew → workspace fallback; non-empty →
 // crew-scoped.
 func TestUserModelPathsFor(t *testing.T) {
-	if got := userModelPathsFor("/base", "").SharedDir; got != "/base/workspace/shared/.memory" {
+	if got := UserModelPathsFor("/base", "").SharedDir; got != "/base/workspace/shared/.memory" {
 		t.Errorf("empty crew fallback path wrong: %q", got)
 	}
-	if got := userModelPathsFor("/base", "cr1").SharedDir; got != "/base/crews/cr1/shared/.memory" {
+	if got := UserModelPathsFor("/base", "cr1").SharedDir; got != "/base/crews/cr1/shared/.memory" {
 		t.Errorf("crew-scoped path wrong: %q", got)
 	}
 }

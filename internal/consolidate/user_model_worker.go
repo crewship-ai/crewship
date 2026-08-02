@@ -110,7 +110,7 @@ func RunUserModelSync(
 	sum := UserModelSyncSummary{WorkspaceID: workspaceID, Candidates: len(cands)}
 	now := time.Now()
 	for _, cand := range cands {
-		paths := userModelPathsFor(opts.OutputBasePath, cand.CrewID)
+		paths := UserModelPathsFor(opts.OutputBasePath, cand.CrewID)
 		prior, _ := memory.LoadUserModel(paths, cand.UserID, cand.WorkspaceID)
 		extracted, eerr := opts.Extractor.Extract(ctx, cand, prior)
 		if eerr != nil {
@@ -158,11 +158,16 @@ func RunUserModelSync(
 	return sum, nil
 }
 
-// userModelPathsFor resolves the crew-shared memory directory that
-// holds a user model. crewID may be empty (a workspace with no crew on
+// UserModelPathsFor resolves the crew-shared memory directory that holds
+// one operator model. crewID may be empty (a workspace with no crew on
 // the chat path); in that case the model lands in a workspace-level
 // fallback shared dir so the file still has a home.
-func userModelPathsFor(basePath, crewID string) memory.UserModelPaths {
+//
+// Exported because the readers are in another package: the GDPR and
+// self-service surfaces in internal/api have to delete and read exactly
+// the file this sweep writes, and two functions that merely agree today
+// about where a file lives are how a purge silently misses one.
+func UserModelPathsFor(basePath, crewID string) memory.UserModelPaths {
 	if crewID == "" {
 		return memory.UserModelPaths{
 			SharedDir: filepath.Join(basePath, "workspace", "shared", ".memory"),

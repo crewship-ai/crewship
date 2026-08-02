@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
@@ -50,18 +50,14 @@ import (
 // daily sweep. purgeUserModel below is now called from that path too.
 
 // userModelPathsFor resolves the crew-shared memory directory holding one
-// operator model. Must stay byte-identical to
-// consolidate.userModelPathsFor — two functions disagreeing about where a
-// file lives is a delete that silently misses.
+// operator model.
+//
+// It delegates to the writer's own function rather than reimplementing
+// it. Two functions that merely AGREE today about where a file lives is
+// how a purge silently misses one — and a purge that misses is the exact
+// class of bug this file exists to close.
 func userModelPathsFor(basePath, crewID string) memory.UserModelPaths {
-	if crewID == "" {
-		return memory.UserModelPaths{
-			SharedDir: filepath.Join(basePath, "workspace", "shared", ".memory"),
-		}
-	}
-	return memory.UserModelPaths{
-		SharedDir: filepath.Join(basePath, "crews", crewID, "shared", ".memory"),
-	}
+	return consolidate.UserModelPathsFor(basePath, crewID)
 }
 
 // userModelRow is one index row plus where its file lives.
