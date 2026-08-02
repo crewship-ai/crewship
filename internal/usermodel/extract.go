@@ -190,7 +190,17 @@ func (e *Extractor) Extract(ctx context.Context, cand consolidate.UserModelCandi
 	}
 	facts, refused := Verify(p, turns, cands)
 
-	if e.logger != nil && (len(facts) > 0 || len(refused) > 0) {
+	if e.logger != nil {
+		// Logged on EVERY call the model actually answered, including the
+		// one where it proposed nothing. #1698 measured that outcome to be
+		// the common one on a haiku-class model, and a conditional line
+		// made it indistinguishable from a sweep that never ran — the same
+		// silence the no-op extractor produced for a year (#1669).
+		//
+		// `proposed` is what makes the refusal histogram readable: without
+		// it, "the model said nothing" and "the gate refused everything"
+		// are both zero written and cannot be told apart.
+		//
 		// user_slug, never user_id: the whole storage layer is
 		// deliberately PII-free and a log line is a directory listing
 		// with extra steps.
@@ -198,6 +208,7 @@ func (e *Extractor) Extract(ctx context.Context, cand consolidate.UserModelCandi
 			"workspace_id", cand.WorkspaceID,
 			"user_slug", memory.UserSlug(cand.UserID, cand.WorkspaceID),
 			"profile", p.Name,
+			"proposed", len(cands),
 			"written", len(facts),
 			"refused", len(refused),
 			"reasons", refusalReasons(refused))

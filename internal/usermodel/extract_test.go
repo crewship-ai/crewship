@@ -1,6 +1,7 @@
 package usermodel
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"io"
@@ -229,6 +230,69 @@ func TestExtract_ProfileIsReadPerCallNotCaptured(t *testing.T) {
 	}
 }
 
+// A sweep that called the model and got nothing back must SAY so.
+//
+// #1698 measured this live: on a haiku-class model, most conversations
+// legitimately yield no fact, and the outcome line was emitted only when
+// something was written or refused. So the commonest real outcome —
+// "asked, and the model proposed nothing" — logged nothing at all, which
+// is byte-for-byte what an extractor that never ran looks like. The
+// issue's own diagnosis table reads a silent sweep as "the curator slot
+// is unbuildable"; it is not, and no operator could tell the two apart.
+// `proposed` is what separates "the model said nothing" from "the gate
+// refused everything", and it is the number the histogram is read
+// against.
+func TestExtract_LogsTheOutcomeEvenWhenTheModelProposesNothing(t *testing.T) {
+	db := testutil.MigratedDB(t).DB
+	seedTranscript(t, db, []struct{ role, content, author string }{
+		{"user", "Why is the nightly build failing on the migration step?", "u1"},
+	})
+	var log bytes.Buffer
+	prov := &fakeProvider{reply: `{"facts":[]}`}
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
+		func(context.Context) Profile { return ProfileStatedTechnical },
+		slog.New(slog.NewTextHandler(&log, nil)))
+
+	if _, err := ex.Extract(context.Background(),
+		consolidate.UserModelCandidate{WorkspaceID: "ws1", UserID: "u1"}, ""); err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if prov.calls != 1 {
+		t.Fatalf("the model was called %d times, want 1", prov.calls)
+	}
+	got := log.String()
+	for _, want := range []string{"user model extraction", "proposed=0", "written=0", "refused=0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("an empty extraction logged nothing to distinguish it from a sweep that never ran\nwant %q in:\n%s", want, got)
+		}
+	}
+}
+
+// The candidate count is reported alongside the refusals, so a histogram
+// can be read as a RATE rather than a raw tally.
+func TestExtract_LogsHowManyCandidatesTheModelProposed(t *testing.T) {
+	db := testutil.MigratedDB(t).DB
+	seedTranscript(t, db, []struct{ role, content, author string }{
+		{"user", "I run the platform team here.", "u1"},
+	})
+	var log bytes.Buffer
+	prov := &fakeProvider{reply: `{"facts":[
+	  {"key":"role","value":"runs the platform team","quote":"I run the platform team here","source":"stated"},
+	  {"key":"mood","value":"frustrated","quote":"I run the platform team here","source":"stated"}
+	]}`}
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
+		func(context.Context) Profile { return ProfileStatedTechnical },
+		slog.New(slog.NewTextHandler(&log, nil)))
+
+	if _, err := ex.Extract(context.Background(),
+		consolidate.UserModelCandidate{WorkspaceID: "ws1", UserID: "u1"}, ""); err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if got := log.String(); !strings.Contains(got, "proposed=2") {
+		t.Errorf("want proposed=2 in the outcome line:\n%s", got)
+	}
+}
+
 // A malformed reply is an error, not "no facts today". Treating it as an
 // empty extraction would make a broken extractor indistinguishable from a
 // working one with nothing to say — which is exactly the state #1669 was
@@ -242,6 +306,52 @@ func TestParseCandidates_MalformedReplyIsAnError(t *testing.T) {
 	got, err := ParseCandidates("```json\n{\"facts\":[]}\n```")
 	if err != nil || len(got) != 0 {
 		t.Errorf("a fenced empty result should parse cleanly; got %v / %v", got, err)
+	}
+}
+
+// The SETTINGS-backed reader — the one production actually wires — had
+// no test at all, and it is the switch: if its query missed the row the
+// CLI writes, `instance settings set memory.user_model_profile off`
+// would resolve to the default, which is ON. A switch that silently
+// fails open is worse than no switch, and #1698's live check is what
+// surfaced that nothing covered it.
+//
+// The row is written the way internal/api's instance-settings handler
+// writes it, so this fails if either side moves.
+func TestProfileFromSettings_ReadsTheRowTheCLIWrites(t *testing.T) {
+	db := testutil.MigratedDB(t).DB
+	read := ProfileFromSettings(db, quietLogger())
+	ctx := context.Background()
+
+	if got := read(ctx); got.Name != DefaultProfileName {
+		t.Errorf("no row should mean the default profile; got %q", got.Name)
+	}
+
+	set := func(v string) {
+		t.Helper()
+		if _, err := db.Exec(`INSERT INTO app_settings (key, value, updated_at)
+			VALUES (?, ?, datetime('now'))
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, SettingProfile, v); err != nil {
+			t.Fatalf("set %q: %v", v, err)
+		}
+	}
+
+	set("off")
+	if got := read(ctx); got.Writes() {
+		t.Errorf("the off profile still writes (%q)", got.Name)
+	}
+
+	// Live on the NEXT read, with no rebuild — the whole point of a
+	// ProfileReader rather than a captured Profile (#1556, #1606).
+	set("stated-technical")
+	if got := read(ctx); got.Name != ProfileStatedTechnical.Name {
+		t.Errorf("switching back did not take effect; got %q", got.Name)
+	}
+
+	// A name nobody implements must never resolve to one that writes.
+	set("inferred-everything")
+	if got := read(ctx); got.Writes() {
+		t.Errorf("an unknown profile resolved to something that writes: %q", got.Name)
 	}
 }
 

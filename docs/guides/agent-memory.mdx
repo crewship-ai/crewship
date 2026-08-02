@@ -387,6 +387,29 @@ active operator per day. An unconfigured or unbuildable slot (no
 still does its opt-out purge and index upkeep. Point the slot elsewhere with
 `crewship keeper aux set curator`.
 
+**Telling whether it is working.** An empty operator model is ambiguous on its
+face — nobody said anything durable, or every candidate was refused, or the slot
+never answered all look the same from outside. The sweep says which, once per
+operator per day, whether or not anything was written:
+
+```
+INFO user model extraction workspace_id=… user_slug=… profile=stated-technical
+     proposed=3 written=1 refused=2 reasons=map[evidence_quote_too_short:2]
+```
+
+- `proposed=0` — the model found nothing worth recording in that conversation.
+  This is the ordinary outcome for a session that was purely technical, and it
+  is what most days look like.
+- `proposed>0` with `written=0` — the model proposed facts and the gate refused
+  all of them. `reasons` says why; `quote_not_in_transcript` dominating means it
+  is paraphrasing rather than quoting, which is a prompt problem and not a
+  reason to loosen the check.
+- **no line at all** — the extraction never reached the model: the operator is
+  below the interaction threshold, the profile is `off`, the person opted out,
+  they spoke in no chat they opened, or the `curator` slot could not be built.
+  Check `crewship keeper aux test curator` first — it calls the slot's model
+  once and reports what happened.
+
 #### Reading and correcting your own model
 
 A memory about you that you cannot see is a poor default, so you can read it,
