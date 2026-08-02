@@ -1,0 +1,171 @@
+name: Runtime Conformance
+
+# Does a crew container actually GET what we asked the runtime for?
+#
+# Crewship advertises five container runtimes and has only ever been run
+# against one (#1672). The detected runtime string reaches a log line, the
+# /system/runtime payload and `crewship doctor` — and nothing reads it. So a
+# runtime that accepts a HostConfig field and silently declines to apply it is
+# indistinguishable from success: PidsLimit unapplied brings back the zombie
+# leak #1666 fixed, `core: 0` unapplied writes the agent's credential
+# environment to a host-persistent bind on the next crash, ReadonlyRootfs
+# unapplied removes the reason a user-supplied base image is safe. Every one of
+# those fails open and quiet.
+#
+# internal/provider/docker/runtime_conformance_test.go starts a real crew
+# container built by the product's own buildCrewContainerConfig and reads the
+# result back from inside it — /proc/self/status, /proc/mounts, the cgroup
+# files, id, ulimit, getent. Values, not shapes.
+#
+# This is also the first job in this repo that exercises the Linux container
+# path at all.
+#
+# Apple Containers are deliberately absent: that runtime needs macOS 26 and a
+# different harness, and it is tracked separately as #1650.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "40 3 * * *" # nightly, after e2e-devcontainer
+
+concurrency:
+  group: runtime-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.5"
+  # Small, has bash (scripts/entrypoint.sh needs it) plus the coreutils/mawk
+  # the probe script reads facts with.
+  CREWSHIP_CONFORMANCE_IMAGE: "debian:bookworm-slim"
+
+jobs:
+  # Docker is the runtime every other CI job and every developer already uses,
+  # so a miss here is a real breakage rather than a portability difference.
+  docker:
+    name: docker (rootful)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Runtime facts
+        run: |
+          docker version
+          echo "cgroup version: $(stat -fc %T /sys/fs/cgroup)"
+
+      - name: Conformance
+        run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
+
+  # There is deliberately NO leg for a current podman here, and the reason is
+  # worth writing down so nobody re-adds one.
+  #
+  # Ubuntu 24.04 ships podman 4.9.3, two majors behind what anyone installing
+  # podman today gets, so a current-podman answer genuinely matters — 4.9.3 and
+  # 6.0.2 do NOT behave the same (see the GroupAdd note below). The obvious way
+  # to get one on a GitHub runner is to run quay.io/podman/stable inside docker.
+  # That rig lies: podman-in-docker does not create its own IPC namespace, sees
+  # itself as being in the host one, and rejects the crew HostConfig outright
+  # with `cannot set shmsize when running in the {host } IPC Namespace` — a
+  # failure that belongs to the test scaffolding and to no environment this
+  # product ships into.
+  #
+  # Current podman is verified instead against a real `podman machine`
+  # (6.0.2, applehv, macOS 26), where the full matrix passes 27/27. That is a
+  # developer-machine run rather than CI; it is also a faithful one, which the
+  # nested rig was not.
+
+  # Podman is the runtime we advertise and have never run. Both modes are here
+  # because they fail differently: rootful diverges only where podman's compat
+  # layer maps a field differently, while rootless additionally runs the agent
+  # uid inside a user namespace — which is what can make the /crew, /workspace
+  # and /output host binds unwritable for it (agent-isolation-findings §1.6).
+  #
+  # Nothing in this workflow runs on pull_request, on purpose. Every leg starts
+  # real containers and pulls real images, and PR feedback has to stay fast — a
+  # multi-minute job on every provider change buys a portability answer that
+  # does not change between one commit and the next. It is answered per runtime
+  # release, not per commit. Nightly and on demand, and the results get read.
+  #
+  # These legs are EXPECTED TO BE RED on 4.9.3 today, for one measured reason:
+  # podman below 5 drops supplementary GIDs that have no /etc/group entry, so
+  # the agent does not hold gid 1002 and crew-shared memory reads fail with
+  # EACCES. It cannot be delivered another way through the compat API, so the
+  # provider reports it at startup (knownRuntimeGaps) rather than pretending.
+  # Everything else on 4.9.3 is green, and podman 6.0.2 is green end to end.
+  # Rootless additionally does not apply nofile/nproc/fsize — core=0, the one
+  # that carries credentials out of a crash, does hold.
+  podman:
+    name: podman (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [rootless, rootful]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install podman
+        run: |
+          if ! command -v podman >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq podman
+          fi
+          podman --version
+
+      # podman's Docker-compat API is a service, not a daemon that is already
+      # running. Each mode gets its own socket so a leftover from the other mode
+      # can never be the thing under test.
+      - name: Start the podman compat API (${{ matrix.mode }})
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.mode }}" = "rootless" ]; then
+            # A rootless podman with no XDG_RUNTIME_DIR falls back to a
+            # root-owned path and fails in ways that look like our bug.
+            export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/podman-run-$(id -u)}"
+            mkdir -p "$XDG_RUNTIME_DIR"
+            echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+            podman system service --time=0 unix:///tmp/podman-conf.sock &
+          else
+            sudo podman system service --time=0 unix:///tmp/podman-conf.sock &
+          fi
+          for _ in $(seq 1 30); do
+            [ -S /tmp/podman-conf.sock ] && break
+            sleep 1
+          done
+          if [ ! -S /tmp/podman-conf.sock ]; then
+            echo "podman compat socket never appeared" >&2
+            exit 1
+          fi
+          # The rootful service runs as root; the test process does not. Written
+          # as an `if` rather than `[ … ] && …`: under `set -e` the latter form
+          # exits 1 on the rootless leg, where the test is simply false.
+          if [ "${{ matrix.mode }}" = "rootful" ]; then
+            sudo chmod 666 /tmp/podman-conf.sock
+          fi
+          echo "DOCKER_HOST=unix:///tmp/podman-conf.sock" >> "$GITHUB_ENV"
+
+      - name: Runtime facts
+        run: |
+          podman info --format '{{.Host.CgroupsVersion}} {{.Host.CgroupManager}} {{.Host.Security.Rootless}}' || true
+          # What the compat endpoint claims to be is itself part of the finding:
+          # Detect() decides "podman" from the ServerVersion components.
+          curl -s --unix-socket /tmp/podman-conf.sock http://d/version || true
+
+      - name: Conformance
+        run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/

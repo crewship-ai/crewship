@@ -121,11 +121,25 @@ func TestCrewContainer_SwapIsDisabled(t *testing.T) {
 	if res.MemorySwap != res.Memory {
 		t.Errorf("MemorySwap = %d, want == Memory (%d) so the container gets zero swap", res.MemorySwap, res.Memory)
 	}
-	if res.MemorySwappiness == nil {
-		t.Fatal("MemorySwappiness = nil, want 0")
-	}
-	if *res.MemorySwappiness != 0 {
-		t.Errorf("MemorySwappiness = %d, want 0", *res.MemorySwappiness)
+	// MemorySwappiness deliberately absent here. This test drives a provider
+	// with no daemon-reported cgroup version, and swappiness is now sent only on
+	// cgroup v1 — the one generation where the knob exists.
+	//
+	// It used to be asserted unconditionally, which was correct as far as unit
+	// tests could see and wrong against every modern host: docker 28.0.4 on
+	// cgroup v2 accepts the create and warns "Memory swappiness discarded",
+	// while podman 6.0.2 accepts the create and then FAILS THE START with
+	// `crun: cannot set memory swappiness with cgroupv2`, leaving a container
+	// that exists, is configured, and can never run.
+	//
+	// Nothing is lost: swap is off because MemorySwap == Memory, asserted above,
+	// and that is honoured on both cgroup generations. The conditional behaviour
+	// has its own coverage in TestMemorySwappinessOnlyOnCgroupV1, including the
+	// case that matters most — an UNKNOWN cgroup version must not be treated as
+	// v1, because sending the field to a host we failed to identify kills every
+	// crew on it.
+	if res.MemorySwappiness != nil {
+		t.Errorf("MemorySwappiness = %d on a provider with no known cgroup version; podman/crun refuses to start a container carrying it on cgroup v2", *res.MemorySwappiness)
 	}
 }
 

@@ -1182,7 +1182,25 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	// every co-resident crew on the same host. MemorySwap == Memory is Docker's
 	// documented way to say "no swap"; swappiness 0 additionally stops the
 	// kernel from paging out anonymous memory under host pressure.
-	memorySwappiness := int64(0)
+	// MemorySwappiness only on cgroup v1, where the knob exists at all. On v2
+	// there is no memory.swappiness file and the runtimes disagree about how to
+	// say so: docker 28.0.4 accepts the create and warns "Memory swappiness
+	// discarded" (a warning nothing was reading until #1672), while podman
+	// 6.0.2 accepts the create and then fails the START with `crun: cannot set
+	// memory swappiness with cgroupv2` — leaving a container that exists, is
+	// configured, and can never run. Both observed, not inferred.
+	//
+	// Nothing is lost by omitting it: swap is off because MemorySwap == Memory,
+	// which is honoured on both generations, and on v2 swappiness was never in
+	// effect on any runtime — docker simply declined to make that visible.
+	//
+	// An unknown cgroup version is treated as "not v1" deliberately; see
+	// detectCgroupVersion.
+	var memorySwappinessPtr *int64
+	if p.cgroupVersion == "1" {
+		memorySwappiness := int64(0)
+		memorySwappinessPtr = &memorySwappiness
+	}
 	// /dev/shm and /tmp are tmpfs, so their contents are unswappable shmem
 	// charged to the memory cgroup we just closed swap on — their caps have to
 	// be derived from the same budget rather than set as free-standing
@@ -1223,7 +1241,7 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 		Resources: container.Resources{
 			Memory:           memoryBytes,
 			MemorySwap:       memoryBytes,
-			MemorySwappiness: &memorySwappiness,
+			MemorySwappiness: memorySwappinessPtr,
 			NanoCPUs:         int64(cpus * 1e9),
 			PidsLimit:        &pidsLimit,
 			Ulimits:          crewUlimits(),
@@ -1241,10 +1259,12 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 			// size is in bytes and scales with the memory limit alongside
 			// ShmSize above; see crewTmpfsSizes.
 			"/tmp": fmt.Sprintf("rw,noexec,nosuid,size=%d", tmpTmpfsSize),
-			// In-memory /secrets owned by the agent UID; must be here and
-			// not in Mounts — the daemon rejects uid/gid TmpfsOptions on a
-			// Mounts-API tmpfs (see secretsTmpfsSpec).
-			"/secrets": secretsTmpfsSpec,
+			// In-memory /secrets. On Docker it is owned by the agent UID and
+			// must ride here rather than the Mounts API, which rejects uid/gid
+			// TmpfsOptions. On Podman the same directives are rejected on BOTH
+			// paths and every crew container failed at create until this became
+			// runtime-aware — see secretsTmpfsSpecFor and secretsTmpfsSpecPodman.
+			"/secrets": secretsTmpfsSpecFor(p.detected.Runtime),
 		},
 		NetworkMode: container.NetworkMode(p.cfg.Network),
 	}
