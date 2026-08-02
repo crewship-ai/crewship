@@ -25,6 +25,11 @@ import (
 type Config struct {
 	DefaultMemoryMB int
 	DefaultCPUs     float64
+
+	// MaxConcurrentDispatches bounds simultaneous scheduled fires (#1668).
+	// 0 = the package default. See dispatch_bound.go for why this is not a
+	// duplicate of the container-start bound.
+	MaxConcurrentDispatches int
 }
 
 // Scheduler runs agents on cron schedules, managing cron entries and
@@ -60,6 +65,11 @@ type Scheduler struct {
 	// deploy triggers each occurrence once. Nil = single-instance (always
 	// fire), the unchanged default (#1376).
 	leaderGate leader.Gate
+
+	// dispatchSem bounds simultaneous scheduled fires. Sized in New; a nil
+	// semaphore (a Scheduler built by hand) is a pass-through. See
+	// dispatch_bound.go.
+	dispatchSem chan struct{}
 
 	mu       sync.Mutex
 	entryMap map[string]cron.EntryID // agentID → cron entry
@@ -105,7 +115,7 @@ func New(
 	if db != nil {
 		idem = pipeline.NewIdempotencyStore(db)
 	}
-	return &Scheduler{
+	s := &Scheduler{
 		c:         cron.New(cron.WithParser(parser)),
 		db:        db,
 		resolver:  resolver,
@@ -122,6 +132,8 @@ func New(
 		cancel:    cancel,
 		entryMap:  make(map[string]cron.EntryID),
 	}
+	s.initDispatchBound(cfg.MaxConcurrentDispatches)
+	return s
 }
 
 type scheduledAgent struct {
@@ -343,6 +355,20 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	if !s.isLeader() {
 		return
 	}
+
+	// Concurrency bound (#1668). Placed here rather than in addEntry's closure
+	// because UpdateSchedule registers a second closure of its own, and a
+	// bound the two registration sites have to remember is a bound that the
+	// third one will not have.
+	//
+	// Blocking, not skipping: the occurrence is genuinely due, and the right
+	// answer to a busy host is "later", not "never". The wait costs a parked
+	// goroutine, which is what robfig/cron has already spent by getting here.
+	releaseDispatch, ok := s.acquireDispatchSlot()
+	if !ok {
+		return // shutting down
+	}
+	defer releaseDispatch()
 
 	ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
 	defer cancel()

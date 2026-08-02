@@ -164,6 +164,14 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/instance/settings/{key}", authed(wsCtx(http.HandlerFunc(inst.Get))))
 	r.authedMut("PUT", "/api/v1/instance/settings/{key}", roleManage, inst.Put)
 	r.authedMut("DELETE", "/api/v1/instance/settings/{key}", roleManage, inst.Delete)
+	// Runtime capacity: what host admission control is holding, and why
+	// (#1668). Instance-scoped and read-only — the host is a property of the
+	// instance, not of a workspace. Authenticated but not admin-gated: any
+	// user whose run is being held needs to be able to see that it is being
+	// held rather than hung.
+	cap := NewRuntimeCapacityHandler(r.admission)
+	r.mux.Handle("GET /api/v1/runtime/capacity", authed(http.HandlerFunc(cap.Get)))
+
 	// Issue Bulk Operations
 	r.authedMut("PATCH", "/api/v1/issues/bulk", roleCreate, issues.BulkUpdate)
 	// Issue Sub-issues

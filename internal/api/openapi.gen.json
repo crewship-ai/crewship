@@ -12143,6 +12143,26 @@
         ]
       }
     },
+    "/api/v1/runtime/capacity": {
+      "get": {
+        "operationId": "get_api_v1_runtime_capacity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "runtime"
+        ]
+      }
+    },
     "/api/v1/runtimes/catalog": {
       "get": {
         "operationId": "get_api_v1_runtimes_catalog",

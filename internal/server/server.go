@@ -135,6 +135,12 @@ type Deps struct {
 	WebFS     fs.FS
 	License   *license.License
 
+	// Admission is the host-admission controller (#1668). Read-only here:
+	// the server exposes its status through GET /api/v1/runtime/capacity, and
+	// the providers — which hold it at construction — are what actually
+	// acquire slots. nil leaves the endpoint answering enabled:false.
+	Admission goapi.AdmissionSnapshotter
+
 	// EpisodicEmbedder overrides the embedder used for episodic recall
 	// and the boot-time indexer sweeper. Production leaves it nil — the
 	// server then builds an Ollama embedder from cfg.Keeper when one is
@@ -884,6 +890,10 @@ func (s *Server) mountAPIRouter(
 	// provisioning / agent-webhook. A load failure is non-fatal: the store
 	// starts empty (all shipped defaults) so a transient DB hiccup at boot
 	// degrades to shipped behaviour rather than blocking startup.
+	if deps.Admission != nil {
+		opts = append(opts, goapi.WithAdmissionController(deps.Admission))
+	}
+
 	rateLimitStore := ratelimitcfg.New(deps.DB)
 	if err := rateLimitStore.Load(context.Background()); err != nil {
 		logger.Warn("rate limit overrides failed to load; using shipped defaults", "error", err)

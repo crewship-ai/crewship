@@ -96,11 +96,14 @@ type Router struct {
 	internalLoopbackURL string
 	hub                 *ws.Hub
 	orch                *orchestrator.Orchestrator
-	keeperGK            gatekeeper.Evaluator
-	keeperSecrets       SecretGetter
-	keeperContainer     provider.ContainerProvider
-	keeperConfig        *config.KeeperConfig
-	keeperSettings      *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
+	// admission is the read side of host admission control (#1668). nil =
+	// not wired; GET /api/v1/runtime/capacity then reports enabled:false.
+	admission       AdmissionSnapshotter
+	keeperGK        gatekeeper.Evaluator
+	keeperSecrets   SecretGetter
+	keeperContainer provider.ContainerProvider
+	keeperConfig    *config.KeeperConfig
+	keeperSettings  *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
 	// keeperHandler is kept so the credential path's wiring is assertable. It is
 	// the seam the judge profile crosses, and a constructor call that is simply
 	// absent is invisible to any test that builds the handler itself.

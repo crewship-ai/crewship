@@ -191,16 +191,46 @@ var nowCmd = &cobra.Command{
 			*into = body.Data
 			mu.Unlock()
 		}
+		// Host admission control (#1668). Without this, a run held because
+		// the host is short of memory is invisible here: it shows as a
+		// running run that never produces anything, which is exactly what a
+		// hang looks like.
+		//
+		// It is fetched OUTSIDE the fanout counter, and its error is held
+		// aside rather than appended to errs, for two reasons. The
+		// session-expired check below means "every workspace endpoint said
+		// 401" — a capacity call that failed for its own reason must not be
+		// able to mask an expired session. And a server older than this
+		// endpoint answers 404 forever, which as a [partial] line would be
+		// permanent noise on a screen people read every day.
+		var (
+			capacity runtimeCapacity
+			capErr   error
+		)
 		const fanout = 3
-		wg.Add(fanout)
+		wg.Add(fanout + 1)
 		go fetchData("/api/v1/runs?status=RUNNING&limit=20", &runningRuns, "runs")
 		go fetchData("/api/v1/agents", &agents, "agents")
 		go fetchData("/api/v1/approvals?status=pending", &approvals, "approvals")
+		go func() {
+			defer wg.Done()
+			rc, err := fetchCapacity(client)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				capErr = err
+				return
+			}
+			capacity = rc
+		}()
 		wg.Wait()
 		if len(errs) == fanout && allSessionInvalid(errs) {
 			return errSessionExpired()
 		}
-		return renderNow(runningRuns, agents, approvals, errs)
+		if e := capacityFetchNoise(capErr); e != "" {
+			errs = append(errs, e)
+		}
+		return renderNow(runningRuns, agents, approvals, capacity, errs)
 	},
 }
 
@@ -262,13 +292,14 @@ func renderToday(runs []map[string]any, cost map[string]any, errs []string) erro
 	return nil
 }
 
-func renderNow(runs, agents, approvals []map[string]any, errs []string) error {
+func renderNow(runs, agents, approvals []map[string]any, capacity runtimeCapacity, errs []string) error {
 	f := newFormatter()
 	if f.Format == "json" || f.Format == "yaml" || f.Format == "ndjson" {
 		return f.Auto(map[string]any{
 			"running_runs": runs,
 			"agents":       agents,
 			"approvals":    approvals,
+			"capacity":     capacity,
 			"errors":       errs,
 		}, nil, nil)
 	}
@@ -292,6 +323,18 @@ func renderNow(runs, agents, approvals []map[string]any, errs []string) error {
 	for _, a := range approvals {
 		fmt.Printf("  %s • %s\n", str(a["id"]), str(a["title"]))
 	}
+
+	// Held-for-capacity goes LAST and loud when non-empty: it is the one
+	// state on this screen that explains why the numbers above are not
+	// moving. `crewship capacity` has the rest.
+	if held := capacityHeldLines(capacity); len(held) > 0 {
+		fmt.Printf("\n%sHeld for capacity:%s %d\n", cli.Bold, cli.Reset, len(held))
+		for _, l := range held {
+			fmt.Printf("  %s%s%s\n", cli.Yellow, l, cli.Reset)
+		}
+		fmt.Printf("  %s(these runs are queued, not hung — `crewship capacity` for the thresholds)%s\n", cli.Dim, cli.Reset)
+	}
+
 	for _, e := range errs {
 		fmt.Fprintf(os.Stderr, "%s[partial]%s %s\n", cli.Dim, cli.Reset, e)
 	}

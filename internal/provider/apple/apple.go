@@ -52,6 +52,18 @@ type Config struct {
 	// entrypoint so a user-provided base image runs it instead of its own
 	// CMD. Required, as above.
 	EntrypointPath string
+
+	// Admission holds a container start until the host can afford it (#1668).
+	// nil disables admission control, which is the pre-#1668 behaviour.
+	//
+	// Note what this does and does not do on this provider's platform. Apple
+	// Containers run on macOS, which publishes neither /proc/meminfo nor
+	// /proc/pressure/memory, so the HOST MEMORY leg of the gate is inactive
+	// there and says so on the status surface. The concurrency bound and the
+	// stagger still apply: they need no kernel file, and each Apple container
+	// is a full lightweight VM, which is if anything a stronger argument for
+	// not starting twenty of them at once.
+	Admission provider.AdmissionGate
 }
 
 // Provider implements provider.ContainerProvider using the Apple Container CLI.

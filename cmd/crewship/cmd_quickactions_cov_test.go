@@ -251,7 +251,7 @@ func TestRenderNow_TableFormat(t *testing.T) {
 	approvals := []map[string]any{{"id": "apr_9", "title": "Spend cap"}}
 
 	out := covCaptureStdoutCli5(t, func() {
-		if err := renderNow(runs, agents, approvals, []string{"agents: partial"}); err != nil {
+		if err := renderNow(runs, agents, approvals, runtimeCapacity{}, []string{"agents: partial"}); err != nil {
 			t.Errorf("renderNow: %v", err)
 		}
 	})
@@ -267,7 +267,7 @@ func TestRenderNow_JSONFormat(t *testing.T) {
 	flagFormat = "json"
 
 	out := covCaptureStdoutCli5(t, func() {
-		if err := renderNow(nil, nil, nil, nil); err != nil {
+		if err := renderNow(nil, nil, nil, runtimeCapacity{}, nil); err != nil {
 			t.Errorf("renderNow: %v", err)
 		}
 	})

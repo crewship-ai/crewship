@@ -46,6 +46,19 @@ type Config struct {
 	// container's Entrypoint is forced to that path so custom base images
 	// (debian, ubuntu, etc.) use our init script instead of /bin/sh.
 	EntrypointPath string
+
+	// Admission holds a container start until the host can afford it (#1668).
+	// nil disables admission control entirely, which is the pre-#1668
+	// behaviour and what every test that builds a Provider by hand gets.
+	//
+	// Carried on Config rather than set by a later SetAdmission call so it is
+	// fixed before the first EnsureCrewRuntime can run, and so it cannot be
+	// lost by a decorator: wrapping the provider in a ContainerProvider
+	// facade would have been the tidier-looking place for this gate, but the
+	// value is type-asserted to nine optional interfaces plus, at
+	// internal/server/server.go, to the concrete *docker.Provider — a wrapper
+	// silently turns devcontainer provisioning off.
+	Admission provider.AdmissionGate
 }
 
 // DetectResult contains info about the detected container runtime.

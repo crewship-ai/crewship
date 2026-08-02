@@ -118,6 +118,18 @@ func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	}
 }
 
+// WithAdmissionController attaches the host-admission controller (#1668) so
+// GET /api/v1/runtime/capacity can report what is being held and why. Read
+// only — the router never acquires a slot; the providers do that. nil (any
+// deployment that has not wired one) leaves the endpoint answering
+// enabled:false rather than 503, because "no admission control" is a real
+// answer an operator needs.
+func WithAdmissionController(s AdmissionSnapshotter) RouterOption {
+	return func(r *Router) {
+		r.admission = s
+	}
+}
+
 // WithKeeperGatekeeper attaches the Keeper gatekeeper policy evaluator.
 func WithKeeperGatekeeper(gk gatekeeper.Evaluator) RouterOption {
 	return func(r *Router) {

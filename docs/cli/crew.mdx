@@ -143,7 +143,7 @@ who knows their workload can change them:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `runtime.agent_min_memory_mb` | `2048` | Memory one agent needs. Also the divisor behind a crew's concurrent-run budget — a crew's memory divided by this is how many agents may run at once. |
+| `runtime.agent_min_memory_mb` | `2048` | Memory one agent needs. Three consumers: this warning, a crew's concurrent-run budget (a crew's memory divided by this), and the host memory floor admission control holds starts against — see [Host capacity](#host-capacity). |
 | `runtime.agent_min_cpus` | `0.5` | CPU one agent needs. Advisory only. |
 
 ```bash
@@ -154,6 +154,73 @@ Raising `runtime.agent_min_memory_mb` warns earlier **and** lowers every
 crew's concurrency budget; lowering it does the reverse. A value that
 does not parse, or that falls outside the hard bounds, is ignored in
 favour of the default.
+
+### Host capacity
+
+A crew's own size says nothing about whether the **host** can afford to start
+its container. Twenty crews waking on the same cron minute used to start
+twenty containers in parallel; the only limit in the product sat *inside* the
+run, after every one of those containers already existed.
+
+Crewship now **holds a container start** — before the container is created —
+while the host cannot afford another one, and starts it when it can. A held
+start is not a failed one and not a hung one; `crewship capacity` shows what
+is being held and why, and `crewship now` says so on its status board.
+
+```bash
+crewship capacity
+# Capacity: 2 container start(s) held for capacity · 4 start(s) in flight · host memory 900/16000 MiB available, pressure 3.10%
+#
+# Limits: memory floor 3072 MiB · max concurrent starts 4 · stagger 150ms · pressure ceiling 20.00%
+#
+# Held container starts:
+#   alpha  held 42s  reason=host_memory  host has 900 MiB available, 3072 MiB needed for one more agent container
+#   beta   held 1s   reason=concurrency  4 container starts already in flight, limit 4
+```
+
+Four thresholds, all instance settings:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `runtime.host_memory_reserve_mb` | `1024` | Host headroom kept free **on top of** `runtime.agent_min_memory_mb`. The floor a start is held against is the sum of the two — `2048 + 1024 = 3072 MiB` by default. `0` disables the host-memory gate. |
+| `runtime.host_memory_pressure_pct` | `20` | Ceiling on the kernel's memory-pressure figure (`/proc/pressure/memory`, `some avg10`). A host already stalling on memory is not handed another container even when it looks like it has room. `0` disables the veto. |
+| `runtime.max_concurrent_container_starts` | `4` | How many container creates/starts may be in flight at once. `0` = unbounded. |
+| `runtime.container_start_stagger_ms` | `150` | Minimum spacing between two admitted starts. `0` = no stagger. |
+
+```bash
+crewship instance settings set runtime.host_memory_reserve_mb 4096
+```
+
+**Why the floor is one agent plus a reserve, and not a percentage.** The
+question is absolute — does the *next* container fit — so a fraction of total
+memory answers the wrong one: "keep 10% free" is 819 MiB on an 8 GiB host and
+51 GiB on a 512 GiB host, for identical work. The agent's own memory figure is
+already configured; the reserve is what is left for the kernel, the container
+runtime and its shims, `crewshipd`, and enough page cache that the host stays
+responsive.
+
+**Why starts are staggered.** Creating a network namespace takes a single
+global kernel lock whose cost grows steeply with concurrency — measured at
+1.45 ms serial and ~418 ms at 24× concurrency on a production fleet. Spreading
+a twenty-crew wake over a few seconds makes every start in it cheaper than
+firing them together would.
+
+<Note>
+The host-memory signal is read from `/proc/meminfo` and
+`/proc/pressure/memory`, which exist on **Linux only**. On macOS — where the
+`apple` container provider runs — the host-memory gate is **inactive**, and
+`crewship capacity` says so rather than reporting a gate that is quietly doing
+nothing. The concurrency bound and the stagger still apply there; they need no
+kernel file. `/proc/pressure/memory` additionally requires a kernel built with
+`CONFIG_PSI`; where it is absent the pressure veto simply never fires, and is
+never treated as infinite pressure.
+</Note>
+
+Admission control is deliberately narrow. It answers "do not start the
+twenty-first container while the host is thrashing" — it does not tune
+cgroups, evict, rebalance, or pause anything that is already running. (A
+running container cannot be paused to free memory: `docker pause` is one write
+to `cgroup.freeze` and the cgroup keeps every page.)
 
 ### Idle crews are stopped
 

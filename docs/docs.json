@@ -260,6 +260,7 @@
             "icon": "users",
             "expanded": false,
             "pages": [
+              "cli/capacity",
               "cli/crew",
               "cli/project",
               "cli/workspace"
