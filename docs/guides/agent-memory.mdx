@@ -364,8 +364,7 @@ for you, and the rules are worth knowing because they decide what comes back:
   *entirely* of function words keeps them rather than searching for nothing.
 - **File paths are not searched.** Searching `daily` or `md` matches notes that
   say those words, not every file under `daily/` or every `.md`. To scope by
-  location, use the `tier` argument (`memory.search {"q": "...", "tier":
-  "daily"}`) — that is what it is for.
+  location, pass the `tier` argument — that is what it is for.
 - **Write real FTS5 and it is passed through.** If your query contains `AND`,
   `OR`, `NOT`, a `"quoted phrase"` or a `prefix*`, the engine assumes you meant
   it and does not rewrite. `gatekeeper AND credential` really is an AND.
