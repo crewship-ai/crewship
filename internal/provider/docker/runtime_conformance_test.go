@@ -60,6 +60,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
@@ -128,6 +129,20 @@ func TestRuntimeConformance(t *testing.T) {
 	// probes below would report a false negative on every runtime — the host
 	// dirs are owned by whoever runs the test, not by uid 1001.
 	p.fixBindMountOwnership(ctx, image, dirs)
+
+	// /home/agent and /opt/crew-tools are named volumes, and a named volume
+	// initialises from the image content at its mount point. A real crew image
+	// carries both owned by 1001 because the provisioner puts them there
+	// (devcontainer.EnsureAgentHomeOwnership); the plain base image this harness
+	// runs on carries neither, so both volumes would come up root-owned and the
+	// write probes would report a defect that belongs to the test image rather
+	// than to the runtime. Reproduce the provisioner's guarantee instead of
+	// testing the base image.
+	//
+	// This is also how the /opt/crew-tools defect surfaced: before that fix the
+	// provisioner made this guarantee for /home/agent only, and the probe caught
+	// a tool directory on the agent's PATH that the agent could not write.
+	stageCrewVolumes(ctx, t, p, image, crew)
 
 	name := p.CrewContainerName(crew.ID, crew.Slug)
 	// A previous aborted run leaves the container behind; the create would then
@@ -742,4 +757,55 @@ func firstNonEmpty(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// stageCrewVolumes creates the crew's two named volumes and hands them to the
+// agent uid through a short-lived root helper — the same shape
+// fixBindMountOwnership uses for the host binds, and the same command the
+// provisioner runs during an image build. CHOWN plus DAC_OVERRIDE and FOWNER
+// because CapDrop: ALL otherwise leaves root unable to chown or to write into a
+// root-owned 0755 target.
+func stageCrewVolumes(ctx context.Context, t *testing.T, p *Provider, image string, crew provider.CrewConfig) {
+	t.Helper()
+	home, tools := p.homeVolumeName(crew.ID, crew.Slug), p.toolsVolumeName(crew.ID, crew.Slug)
+	for _, v := range []string{home, tools} {
+		if err := p.ensureVolume(ctx, v); err != nil {
+			t.Fatalf("ensure volume %s: %v", v, err)
+		}
+	}
+	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:      image,
+			User:       "0:0",
+			Entrypoint: []string{"sh", "-c", "chown -R 1001:1001 /h /t && chmod 755 /h /t"},
+		},
+		HostConfig: &container.HostConfig{
+			NetworkMode: "none",
+			CapDrop:     []string{"ALL"},
+			CapAdd:      []string{"CHOWN", "DAC_OVERRIDE", "FOWNER"},
+			Mounts: []mount.Mount{
+				{Type: mount.TypeVolume, Source: home, Target: "/h"},
+				{Type: mount.TypeVolume, Source: tools, Target: "/t"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create volume-staging helper: %v", err)
+	}
+	defer func() { _, _ = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}) }()
+	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		t.Fatalf("start volume-staging helper: %v", err)
+	}
+	// Short poll rather than a wait channel: the helper is two syscalls' worth
+	// of work and this keeps the harness free of the runtime-specific wait
+	// semantics it is meant to be testing.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		inspect, err := p.client.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
+		if err == nil && inspect.Container.State != nil && !inspect.Container.State.Running {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("volume-staging helper never exited")
 }
