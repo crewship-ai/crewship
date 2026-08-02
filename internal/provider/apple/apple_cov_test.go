@@ -71,9 +71,11 @@ func (f *fakeCLI) hasCall(t *testing.T, prefix string) bool {
 }
 
 // newTestProvider builds a Provider without going through New (no Detect).
+// The two mandatory host artefacts (sidecar binary, entrypoint.sh) are filled
+// in when the caller left them unset — see withTestSidecarArtefacts.
 func newTestProvider(cfg Config) *Provider {
 	return &Provider{
-		cfg:    cfg,
+		cfg:    withTestSidecarArtefacts(cfg),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		execs:  make(map[string]*execEntry),
 		done:   make(chan struct{}),

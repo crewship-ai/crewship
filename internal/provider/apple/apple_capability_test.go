@@ -14,6 +14,19 @@ func supportFor(t *testing.T, cfg provider.CrewConfig) provider.CrewConfigSuppor
 	return p.UnsupportedCrewConfig(cfg)
 }
 
+// supportForUnfenced asks the same question of a deployment with no sidecar
+// binary to mount — the only remaining state in which this provider cannot
+// enforce a restricted egress mode (#1649). The egress assertions below were
+// written when that was every deployment; they are kept and pointed here
+// rather than deleted, because the reporting they pin still has to work for
+// the case that survives.
+func supportForUnfenced(t *testing.T, cfg provider.CrewConfig) provider.CrewConfigSupport {
+	t.Helper()
+	p := newTestProvider(Config{OutputBasePath: t.TempDir(), RuntimeImage: "crewship/runtime:base"})
+	p.cfg.SidecarBinaryPath = ""
+	return p.UnsupportedCrewConfig(cfg)
+}
+
 func hasField(fields []provider.DroppedField, name string) *provider.DroppedField {
 	for i := range fields {
 		if fields[i].Field == name {
@@ -23,14 +36,35 @@ func hasField(fields []provider.DroppedField, name string) *provider.DroppedFiel
 	return nil
 }
 
-// TestUnsupportedCrewConfig_RestrictedEgressIsReportedNotRefused is the
-// judgement at the centre of #1648. "restricted" is the create-time default
-// (database.DefaultCrewNetworkMode) and this provider has no proxy binary to
-// enforce it — but the crew still runs, because the product is meant to work
-// on every platform it can. What must not happen is silence: the drop is
-// reported so the read surfaces can mark the crew unenforced.
-func TestUnsupportedCrewConfig_RestrictedEgressIsReportedNotRefused(t *testing.T) {
+// TestUnsupportedCrewConfig_RestrictedEgressIsEnforcedOnceTheSidecarIsMounted
+// is the half of #1648's judgement that #1649 changed. The proxy binary is
+// bind-mounted into the crew container now, and nothing else in the chain is
+// provider-specific — the orchestrator starts the proxy through the plain Exec
+// interface and every exec carries the proxy environment. So the fence is
+// real, and the report must stop saying otherwise.
+//
+// This is not cosmetic. The entry feeds the crew read paths AND the agent's
+// own system prompt, so a stale "not enforced" instructs every agent on this
+// provider to treat its egress as open when it is not.
+func TestUnsupportedCrewConfig_RestrictedEgressIsEnforcedOnceTheSidecarIsMounted(t *testing.T) {
 	s := supportFor(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", NetworkMode: "restricted"})
+
+	if got := hasField(s.Degraded, "NetworkMode"); got != nil {
+		t.Fatalf("egress is enforced once the sidecar binary is mounted; reporting it unenforced tells "+
+			"every agent here to act unfenced when it is not. Got: %+v", got)
+	}
+	if _, ok := s.Drop("NetworkMode"); ok {
+		t.Error("the read surfaces look this up by name; it must be absent, not merely empty")
+	}
+}
+
+// TestUnsupportedCrewConfig_RestrictedEgressIsReportedNotRefused is the
+// judgement at the centre of #1648, kept intact and pointed at the state that
+// still produces it: a deployment with no sidecar binary configured. The crew
+// still runs, because the product is meant to work on every platform it can.
+// What must not happen is silence.
+func TestUnsupportedCrewConfig_RestrictedEgressIsReportedNotRefused(t *testing.T) {
+	s := supportForUnfenced(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", NetworkMode: "restricted"})
 
 	if len(s.Refused) != 0 {
 		t.Fatalf("a crew must not be blocked over an unenforceable egress mode; Refused = %+v", s.Refused)
@@ -43,8 +77,11 @@ func TestUnsupportedCrewConfig_RestrictedEgressIsReportedNotRefused(t *testing.T
 		t.Errorf("Value = %q, want the requested mode %q", got.Value, "restricted")
 	}
 	// The detail is what every read surface quotes back to the operator, so it
-	// has to say what is missing and that the setting is kept as intent.
-	for _, want := range []string{"crewship-sidecar", "unrestricted", "intent", "docker"} {
+	// has to say what is missing and how to fix it. The remedy changed with
+	// #1649 — it is no longer "move the crew to docker" but "give this
+	// provider the binary it mounts", so the fragments pinned here changed
+	// with it.
+	for _, want := range []string{"crewship-sidecar", "unrestricted", "CREWSHIP_SIDECAR_PATH"} {
 		if !strings.Contains(got.Detail, want) {
 			t.Errorf("report detail must mention %q; got:\n%s", want, got.Detail)
 		}
@@ -86,7 +123,7 @@ func TestUnsupportedCrewConfig_NothingIsRefusedToday(t *testing.T) {
 // two independent failures. It also keeps the one entry that the read surfaces
 // look up by name from being ambiguous.
 func TestUnsupportedCrewConfig_AllowedDomainsRideOnTheEgressReport(t *testing.T) {
-	s := supportFor(t, provider.CrewConfig{
+	s := supportForUnfenced(t, provider.CrewConfig{
 		ID: "crew-1", Slug: "ops",
 		NetworkMode:    "restricted",
 		AllowedDomains: []string{"api.example.com"},
@@ -107,7 +144,7 @@ func TestUnsupportedCrewConfig_AllowedDomainsRideOnTheEgressReport(t *testing.T)
 // so renaming the field in the report silently turns every crew back into
 // "enforced".
 func TestUnsupportedCrewConfig_EgressDropIsFindableByFieldName(t *testing.T) {
-	s := supportFor(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", NetworkMode: "restricted"})
+	s := supportForUnfenced(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", NetworkMode: "restricted"})
 	drop, ok := s.Drop("NetworkMode")
 	if !ok {
 		t.Fatalf("Drop(\"NetworkMode\") found nothing in %+v", s)
@@ -116,7 +153,7 @@ func TestUnsupportedCrewConfig_EgressDropIsFindableByFieldName(t *testing.T) {
 		t.Error("the entry must carry a reason — it is what every surface quotes")
 	}
 
-	free := supportFor(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", NetworkMode: "free"})
+	free := supportForUnfenced(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", NetworkMode: "free"})
 	if _, ok := free.Drop("NetworkMode"); ok {
 		t.Error("free egress is honoured, so it must not appear as a drop")
 	}
@@ -159,7 +196,6 @@ func TestUnsupportedCrewConfig_EveryDroppedFieldIsReported(t *testing.T) {
 		{"ContainerEnv", func(c *provider.CrewConfig) { c.ContainerEnv = map[string]string{"FOO": "bar"} }, []string{"FOO"}},
 		{"LoginPath", func(c *provider.CrewConfig) { c.LoginPath = "/usr/local/py-utils/bin:/usr/bin" }, []string{"PATH"}},
 		{"Privileged", func(c *provider.CrewConfig) { c.Privileged = true }, []string{"privileged"}},
-		{"Init", func(c *provider.CrewConfig) { c.Init = true }, []string{"sleep infinity"}},
 		{"CapAdd", func(c *provider.CrewConfig) { c.CapAdd = []string{"SYS_PTRACE"} }, []string{"SYS_PTRACE"}},
 		{"SecurityOpt", func(c *provider.CrewConfig) { c.SecurityOpt = []string{"seccomp=unconfined"} }, []string{"seccomp=unconfined"}},
 		{"ExtraMounts", func(c *provider.CrewConfig) {
@@ -195,6 +231,21 @@ func TestUnsupportedCrewConfig_EveryDroppedFieldIsReported(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestUnsupportedCrewConfig_InitIsHonouredNotDropped replaces the Init row
+// that used to sit in the table above. The container is created with --init
+// unconditionally (#1649), the same way the docker provider sets
+// HostConfig.Init unconditionally, so there is no longer a configuration of
+// this field the provider fails to honour. Reporting it would be the same
+// stale-entry problem as the egress one, just cheaper.
+func TestUnsupportedCrewConfig_InitIsHonouredNotDropped(t *testing.T) {
+	for _, init := range []bool{true, false} {
+		s := supportFor(t, provider.CrewConfig{ID: "crew-1", Slug: "ops", Init: init})
+		if got := hasField(s.Degraded, "Init"); got != nil {
+			t.Errorf("Init=%v: an init process is always created now; got %+v", init, got)
+		}
 	}
 }
 
