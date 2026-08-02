@@ -379,6 +379,11 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		"socket", detected.Socket,
 	)
 
+	// Say what this runtime will not do before anything relies on it having
+	// done it (#1672). Startup rather than per-create: it is a property of the
+	// daemon, not of a crew, and repeating it per container would bury it.
+	logRuntimeGaps(logger, *detected)
+
 	if cfg.Network != "" {
 		if err := p.ensureNetwork(ctx, cfg.Network); err != nil {
 			logger.Warn("failed to create docker network", "network", cfg.Network, "error", err)

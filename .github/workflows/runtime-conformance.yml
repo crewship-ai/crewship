@@ -65,60 +65,23 @@ jobs:
       - name: Conformance
         run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
 
-  # Ubuntu 24.04 ships podman 4.9.3, which is two majors behind what a user who
-  # installs podman today gets (6.x on Homebrew, 5.x on current distros). That
-  # matters for the verdict, not just the coverage: "Crewship does not work on
-  # Podman" and "Crewship does not work on Podman older than 5" are different
-  # answers with different fixes, and the apt leg alone cannot tell them apart.
+  # There is deliberately NO leg for a current podman here, and the reason is
+  # worth writing down so nobody re-adds one.
   #
-  # quay.io/podman/stable is podman's own image. Run rootful inside it, with the
-  # runner's /tmp and workspace bind-mounted at their real paths so the crew
-  # container's own bind mounts — which are host paths chosen by the test —
-  # resolve to the same files from inside that podman's view.
-  podman-current:
-    name: podman (current, in image)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Start a current podman
-        run: |
-          set -euo pipefail
-          docker run -d --name podman-current --privileged \
-            -v /tmp:/tmp \
-            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
-            quay.io/podman/stable \
-            podman system service --time=0 unix:///tmp/podman-current.sock
-          for _ in $(seq 1 60); do
-            [ -S /tmp/podman-current.sock ] && break
-            sleep 1
-          done
-          if [ ! -S /tmp/podman-current.sock ]; then
-            echo "podman compat socket never appeared" >&2
-            docker logs podman-current || true
-            exit 1
-          fi
-          sudo chmod 666 /tmp/podman-current.sock
-          echo "DOCKER_HOST=unix:///tmp/podman-current.sock" >> "$GITHUB_ENV"
-
-      - name: Runtime facts
-        run: |
-          docker exec podman-current podman version || true
-          curl -s --unix-socket /tmp/podman-current.sock http://d/version || true
-
-      - name: Conformance
-        run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
-
-      - name: Podman service logs
-        if: always()
-        run: docker logs podman-current 2>&1 | tail -50 || true
+  # Ubuntu 24.04 ships podman 4.9.3, two majors behind what anyone installing
+  # podman today gets, so a current-podman answer genuinely matters — 4.9.3 and
+  # 6.0.2 do NOT behave the same (see the GroupAdd note below). The obvious way
+  # to get one on a GitHub runner is to run quay.io/podman/stable inside docker.
+  # That rig lies: podman-in-docker does not create its own IPC namespace, sees
+  # itself as being in the host one, and rejects the crew HostConfig outright
+  # with `cannot set shmsize when running in the {host } IPC Namespace` — a
+  # failure that belongs to the test scaffolding and to no environment this
+  # product ships into.
+  #
+  # Current podman is verified instead against a real `podman machine`
+  # (6.0.2, applehv, macOS 26), where the full matrix passes 27/27. That is a
+  # developer-machine run rather than CI; it is also a faithful one, which the
+  # nested rig was not.
 
   # Podman is the runtime we advertise and have never run. Both modes are here
   # because they fail differently: rootful diverges only where podman's compat
@@ -126,11 +89,20 @@ jobs:
   # uid inside a user namespace — which is what can make the /crew, /workspace
   # and /output host binds unwritable for it (agent-isolation-findings §1.6).
   #
-  # Nothing here runs on pull_request, on purpose. Every leg starts real
-  # containers and pulls real images, and PR feedback has to stay fast — a
+  # Nothing in this workflow runs on pull_request, on purpose. Every leg starts
+  # real containers and pulls real images, and PR feedback has to stay fast — a
   # multi-minute job on every provider change buys a portability answer that
-  # does not change between one commit and the next. Nightly and on demand is
-  # the right cadence for it, and the results get read.
+  # does not change between one commit and the next. It is answered per runtime
+  # release, not per commit. Nightly and on demand, and the results get read.
+  #
+  # These legs are EXPECTED TO BE RED on 4.9.3 today, for one measured reason:
+  # podman below 5 drops supplementary GIDs that have no /etc/group entry, so
+  # the agent does not hold gid 1002 and crew-shared memory reads fail with
+  # EACCES. It cannot be delivered another way through the compat API, so the
+  # provider reports it at startup (knownRuntimeGaps) rather than pretending.
+  # Everything else on 4.9.3 is green, and podman 6.0.2 is green end to end.
+  # Rootless additionally does not apply nofile/nproc/fsize — core=0, the one
+  # that carries credentials out of a crash, does hold.
   podman:
     name: podman (${{ matrix.mode }})
     runs-on: ubuntu-latest
