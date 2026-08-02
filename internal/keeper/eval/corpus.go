@@ -19,6 +19,22 @@ const (
 	// LabelHuman: a named person resolved the request one way or the other.
 	// This is the only label a correctness claim may rest on.
 	LabelHuman LabelSource = "human"
+	// LabelReference: an AI reference model adjudicated this row — a stronger
+	// model than the one under test, ruling deliberately so the corpus has
+	// labels at all. It is a legitimate technique and it answers a real question
+	// ("can a 9B model on a laptop match a frontier model's judgement?"), which
+	// scales and reproduces where twenty human clicks do not.
+	//
+	// It is NOT ground truth, and the distinction is not pedantry: recorded as
+	// human, the eval would report "agrees with the person 0.81" about a number
+	// that measured "agrees with Claude 0.81" — a false claim inside the figure a
+	// security decision rests on. IsHuman() is false for it, so every caller that
+	// gates on ground truth excludes it by default.
+	//
+	// P3 (precedent few-shot) must NEVER draw on it. Precedent is a learning
+	// loop, and feeding a model's own judgement back as worked examples is how a
+	// wrong call becomes house style.
+	LabelReference LabelSource = "reference"
 	// LabelIncumbent: no human ever ruled on this row, so the label falls back
 	// to keeper_requests.decision. Kept (rather than dropped) because a large
 	// incumbent-labelled segment still detects gross behavioural drift, but it
@@ -26,8 +42,16 @@ const (
 	LabelIncumbent LabelSource = "incumbent"
 )
 
-// IsHuman reports whether a row carries genuine ground truth.
+// IsHuman reports whether a row carries genuine ground truth — a PERSON's
+// ruling. Deliberately false for LabelReference: an AI adjudication is a useful
+// label and it is not ground truth, and every caller that gates on this excludes
+// it by default rather than having to remember to.
 func (s LabelSource) IsHuman() bool { return s == LabelHuman }
+
+// keeperActorReference is the ledger actor_type an AI reference adjudication
+// writes. It lives here rather than in internal/api because this package is what
+// gives it meaning — the API only records it.
+const keeperActorReference = "reference"
 
 // LabelOrigin names the exact column a label was read from, so an operator
 // auditing a surprising score can go straight to the row that produced it.
@@ -110,6 +134,26 @@ var corpusRequestTypes = []string{"access", "execute"}
 // retried / cancelled / acknowledged / dismissed / archived, all of which mean
 // "I cleared my inbox" — reading any of them as a decision would invent a label,
 // and an invented label is worse than a missing one because it looks like data.
+// referenceLedgerSQL reads the provenance of the terminal decision.
+//
+// keeper_request_events is already the record of WHO decided — actor_type
+// carries keeper / user / system / agent — so an adjudication does not need a
+// new column anywhere, only a new actor. A request whose terminal transition was
+// made by a `reference` actor is labelled reference, never human.
+//
+// Empty for a resolution with no ledger entry, which is what every pre-ledger
+// row looks like. Those keep reading as human: downgrading them would erase
+// every human label the product collected before the ledger existed.
+const referenceLedgerSQL = `
+	COALESCE((
+		SELECT LOWER(e.actor_type)
+		FROM keeper_request_events e
+		WHERE e.request_id = kr.id
+		  AND UPPER(e.state) IN ('ALLOW','DENY')
+		ORDER BY e.seq DESC
+		LIMIT 1
+	), '')`
+
 const humanInboxSQL = `
 	COALESCE((
 		SELECT LOWER(i.resolved_action)
@@ -189,14 +233,15 @@ func LoadCorpus(ctx context.Context, db *sql.DB, limit int) ([]CorpusRow, error)
 		SELECT kr.id, kr.request_type, kr.ollama_prompt, kr.decision, kr.risk_score,
 		       kr.requesting_agent_id, kr.credential_id,
 		       %s AS human_inbox_action,
-		       %s AS human_escalation_action
+		       %s AS human_escalation_action,
+		       %s AS terminal_actor
 		FROM keeper_requests kr
 		WHERE kr.request_type IN (%s)
 		  AND kr.ollama_prompt IS NOT NULL AND kr.ollama_prompt != ''
 		  AND UPPER(kr.decision) IN ('ALLOW','DENY','ESCALATE')
 		ORDER BY (human_inbox_action != '' OR human_escalation_action != '') DESC,
 		         kr.created_at DESC`,
-		humanInboxSQL, humanEscalationSQL, strings.Join(placeholders, ","))
+		humanInboxSQL, humanEscalationSQL, referenceLedgerSQL, strings.Join(placeholders, ","))
 	if limit > 0 {
 		q += "\n\t\tLIMIT ?"
 		args = append(args, limit)
@@ -216,9 +261,10 @@ func LoadCorpus(ctx context.Context, db *sql.DB, limit int) ([]CorpusRow, error)
 			id, reqType, prompt, decision string
 			agentID, credID               string
 			inboxAction, escAction        string
+			terminalActor                 string
 			risk                          sql.NullInt64
 		)
-		if err := rows.Scan(&id, &reqType, &prompt, &decision, &risk, &agentID, &credID, &inboxAction, &escAction); err != nil {
+		if err := rows.Scan(&id, &reqType, &prompt, &decision, &risk, &agentID, &credID, &inboxAction, &escAction, &terminalActor); err != nil {
 			return nil, fmt.Errorf("scan keeper corpus row: %w", err)
 		}
 		incumbent := Decision(strings.ToUpper(decision))
@@ -238,7 +284,17 @@ func LoadCorpus(ctx context.Context, db *sql.DB, limit int) ([]CorpusRow, error)
 		if d, ok := decisionFromInboxAction(inboxAction); ok {
 			// Per-request: an inbox resolution links to THIS request, so N of them
 			// really are N human decisions. No cap.
-			row.Label, row.LabelSource, row.LabelOrigin = d, LabelHuman, OriginInbox
+			//
+			// WHO decided comes from the ledger, not from the inbox row: the inbox
+			// only records that somebody resolved it, and an AI adjudication and a
+			// person's ruling look identical there. Labelling both `human` would
+			// make the eval report agreement with a person about a number that
+			// measured agreement with a model.
+			src := LabelHuman
+			if terminalActor == keeperActorReference {
+				src = LabelReference
+			}
+			row.Label, row.LabelSource, row.LabelOrigin = d, src, OriginInbox
 		} else if d, ok := decisionFromEscalationAction(escAction); ok {
 			// Pair-level, so it must be counted ONCE. The join matches on
 			// (agent, credential), which means one operator decision would

@@ -574,3 +574,73 @@ func TestKeeperResolve_ConcurrentRulingsSettleExactlyOnce(t *testing.T) {
 		t.Errorf("the ledger holds %d terminal entries for one decision, want 1", n)
 	}
 }
+
+// An AI reference adjudication must be distinguishable from a person's ruling
+// in the LEDGER, because that is what the eval reads to classify the label.
+//
+// Recorded as `user`, the corpus would call it ground truth and the eval would
+// report "agrees with the human 0.81" about a number that measured "agrees with
+// Claude 0.81" — a false claim inside the figure a security decision rests on.
+func TestKeeperResolve_RecordsAnAdjudicatorAsReferenceNotUser(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-adj', 'access', ?, ?, ?, 'x', 'ESCALATE')`, agentID, crewID, credID)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "alice", "kr-adj", map[string]any{
+		"decision": "DENY", "reason": "no change window", "adjudicator": "claude-opus-5",
+	}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var actorType, actorID string
+	if err := db.QueryRow(`
+		SELECT actor_type, COALESCE(actor_id,'') FROM keeper_request_events
+		 WHERE request_id = 'kr-adj' ORDER BY seq DESC LIMIT 1`).Scan(&actorType, &actorID); err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if actorType != keeperActorReference {
+		t.Errorf("actor_type = %q, want %q — the corpus reads this to decide whether "+
+			"the row is ground truth", actorType, keeperActorReference)
+	}
+	if actorID != "claude-opus-5" {
+		t.Errorf("actor_id = %q, want the model that judged it", actorID)
+	}
+}
+
+// Without the field it is still a person, which is the default and must stay so:
+// a change that made every resolution look adjudicated would erase the ground
+// truth the eval actually wants.
+func TestKeeperResolve_WithoutAnAdjudicatorItIsStillAPerson(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
+	h := newKeeperHandler(t, db)
+
+	execOrFatal(t, db, `
+		INSERT INTO keeper_requests
+			(id, request_type, requesting_agent_id, requesting_crew_id, credential_id, intent, decision)
+		VALUES ('kr-person', 'access', ?, ?, ?, 'x', 'ESCALATE')`, agentID, crewID, credID)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "alice", "kr-person",
+		map[string]any{"decision": "ALLOW"}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var actorType, actorID string
+	if err := db.QueryRow(`
+		SELECT actor_type, COALESCE(actor_id,'') FROM keeper_request_events
+		 WHERE request_id = 'kr-person' ORDER BY seq DESC LIMIT 1`).Scan(&actorType, &actorID); err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	if actorType != keeperActorUser || actorID != "alice" {
+		t.Errorf("actor = (%q, %q), want (user, alice)", actorType, actorID)
+	}
+}
