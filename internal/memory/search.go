@@ -199,9 +199,17 @@ func hasExplicitFTSSyntax(words []string) bool {
 // Stopwords are dropped from the term list because a bare OR inherits the
 // opposite failure from AND: "what did we decide about journal retention"
 // OR-expands to include `what`, `did`, `we` and `about`, which match nearly
-// every chunk and bury the two terms that carried the meaning. Measured on
-// this repository's docs/ tree, dropping them moved top-3 accuracy from
-// 7/10 to 8/10.
+// every chunk and bury the two terms that carried the meaning.
+//
+// The measurable effect is precision, not rank. Left in, "what is a
+// kubernetes ingress" returns chunks against a corpus containing no word of
+// the actual question — an answer to a question that was not asked, which is
+// worse than an empty result because the caller cannot tell. That is what
+// TestSearch_OrDoesNotBecomeMatchEverything pins. (PRD §3.7 credits the list
+// with 7/10 → 8/10 top-3 on this repository's docs/ tree; that measurement
+// predates `file UNINDEXED` and does not survive it — see PRD §7.0. Once the
+// path column is out, stopword removal and the phrase leg are what separate
+// the shipped builder from a bare OR, and neither does it by rank alone.)
 func buildPhraseOrTerms(words []string) string {
 	terms := make([]string, 0, len(words))
 	for _, w := range words {
