@@ -63,7 +63,11 @@ type Config struct {
 
 // DetectResult contains info about the detected container runtime.
 type DetectResult struct {
-	Runtime string // "docker" | "podman" | "colima" | "orbstack" | "rancher" | "nerdctl"
+	// Runtime is one of "docker" | "podman" | "colima" | "orbstack" | "rancher".
+	// There is deliberately no "nerdctl": containerd has no Docker REST API for
+	// the moby client to talk to, so that value was never reachable — see
+	// containerdSocketPaths.
+	Runtime string
 	Socket  string // socket path used (display); on Windows the npipe path
 	Host    string // full Docker client URL (unix://…, npipe://…, or DOCKER_HOST verbatim)
 	Version string // server version string
@@ -216,8 +220,8 @@ func candidateSockets() []socketCandidate {
 }
 
 // candidateSocketsFor is the OS-injectable core of candidateSockets. Unix
-// covers Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman
-// (rootless/root), and nerdctl; Windows (#946) covers Docker Desktop's
+// covers Docker Desktop, Colima, OrbStack, Rancher Desktop (in its dockerd
+// mode) and Podman (rootless/root); Windows (#946) covers Docker Desktop's
 // named pipe (every unix path is meaningless there, and os.Getuid()
 // returns -1). The rootless-podman candidate is only offered for a real
 // (non-negative) uid so a junk /run/user/-1/... path never enters the
@@ -255,9 +259,10 @@ func candidateSocketsFor(goos, home string, uid int) []socketCandidate {
 		unixSock(filepath.Join(home, ".local", "share", "containers", "podman", "machine", "podman.sock"), "podman"),
 		// Podman root
 		unixSock("/run/podman/podman.sock", "podman"),
-		// containerd/nerdctl
-		unixSock("/run/containerd/containerd.sock", "nerdctl"),
 	)
+	// containerd's own socket is deliberately absent — see containerdSocketPaths.
+	// It speaks gRPC, not the Docker REST API, so probing it can only ever burn
+	// a dial and produce a misleading "tried everything" failure.
 	return candidates
 }
 
@@ -265,9 +270,71 @@ func candidateSocketsFor(goos, home string, uid int) []socketCandidate {
 // Short enough that multiple failing sockets don't block the overall detection.
 const socketPingTimeout = 1500 * time.Millisecond
 
+// containerdSocketPaths are the endpoints containerd itself listens on. They
+// are deliberately NOT in candidateSocketsFor: containerd serves its own gRPC
+// API over HTTP/2, while the moby client this provider is built on issues
+// HTTP/1.1 requests against the Docker REST API. No version of containerd, and
+// no version of nerdctl — which is a client for that gRPC API rather than a
+// Docker-API server — can ever answer a GET /_ping here.
+//
+// Measured against containerd v2.3.3 running alone in a Linux container: the
+// moby client's ping comes back as
+// `malformed HTTP response "\x00\x00\x06\x04\x00\x00\x00\x00\x00\x00\x05\x00\x00@\x00"`,
+// which is an HTTP/2 SETTINGS frame — containerd starting a gRPC handshake in
+// reply to a REST request.
+//
+// They are kept only so a failed detection can name what it found and say why
+// it is useless. A host that plainly has a container runtime installed deserves
+// better than "nothing found".
+var containerdSocketPaths = []string{
+	"/run/containerd/containerd.sock",
+	"/var/run/containerd/containerd.sock",
+}
+
+// existingContainerdSockets returns those of paths that exist on this host, one
+// entry per actual socket. The de-duplication is load-bearing rather than
+// tidiness: on Debian-family images /var/run is a symlink to /run, so both
+// entries of containerdSocketPaths stat the same inode and an operator would be
+// told two containerd endpoints are present when there is one.
+func existingContainerdSockets(paths []string) []string {
+	var found []string
+	seen := map[string]bool{}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		key := p
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			key = resolved
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		found = append(found, p)
+	}
+	return found
+}
+
+// noRuntimeError is what Detect returns when no candidate answered. When a
+// containerd socket is sitting right there it says so, because the alternative
+// — a bare "no Docker-compatible runtime found" on a machine running containerd
+// and nerdctl perfectly well — sends the reader off to restart a daemon that is
+// already up and can never help.
+func noRuntimeError(containerdPresent []string) error {
+	const base = "no Docker-compatible runtime found (tried Docker, Podman, Colima, OrbStack, Rancher Desktop)"
+	if len(containerdPresent) == 0 {
+		return errors.New(base)
+	}
+	return fmt.Errorf("%s; %s is present but containerd serves its own gRPC API rather than the Docker REST API, "+
+		"so Crewship cannot drive containerd or nerdctl through it — run Docker Engine, `podman system service`, "+
+		"or switch Rancher Desktop's container engine to dockerd (moby)",
+		base, strings.Join(containerdPresent, ", "))
+}
+
 // Detect probes for a Docker-API-compatible socket and returns info about
 // the detected runtime. It checks DOCKER_HOST first, then iterates candidate
-// sockets (Docker, Colima, OrbStack, Rancher, Podman, nerdctl). The ctx
+// sockets (Docker, Colima, OrbStack, Rancher, Podman). The ctx
 // parameter is used as an outer deadline; each socket gets its own short timeout.
 func Detect(ctx context.Context) (*DetectResult, error) {
 	// If DOCKER_HOST is set, use that directly.
@@ -332,7 +399,7 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		return &DetectResult{Runtime: rt, Socket: c.path, Host: c.host, Version: ver}, nil
 	}
 
-	return nil, fmt.Errorf("no Docker-compatible runtime found (tried Docker, Podman, Colima, OrbStack, Rancher Desktop)")
+	return nil, noRuntimeError(existingContainerdSockets(containerdSocketPaths))
 }
 
 // New creates a Provider by auto-detecting the container runtime and

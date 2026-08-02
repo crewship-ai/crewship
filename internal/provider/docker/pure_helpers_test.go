@@ -397,13 +397,15 @@ func TestCandidateSockets_NoDuplicates(t *testing.T) {
 func TestCandidateSockets_KnownRuntimes(t *testing.T) {
 	t.Parallel()
 
+	// No "nerdctl": containerd's socket is not a Docker-API endpoint and is no
+	// longer probed, so that label is unreachable — see containerdSocketPaths
+	// and detect_containerd_test.go.
 	allowed := map[string]bool{
 		"docker":   true,
 		"podman":   true,
 		"colima":   true,
 		"orbstack": true,
 		"rancher":  true,
-		"nerdctl":  true,
 	}
 	for _, c := range candidateSockets() {
 		if !allowed[c.runtime] {
@@ -413,7 +415,7 @@ func TestCandidateSockets_KnownRuntimes(t *testing.T) {
 }
 
 // TestCandidateSockets_DockerFirst — Docker sockets must come BEFORE
-// Podman/nerdctl because in mixed environments the user probably installed
+// Podman because in mixed environments the user probably installed
 // Docker explicitly. Reordering would silently flip detection.
 func TestCandidateSockets_DockerFirst(t *testing.T) {
 	t.Parallel()
