@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
@@ -151,8 +152,37 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "resolved by an operator"
 	}
+	actorID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		actorID = user.ID
+	}
+
+	// The ruling lands in TWO places and both are load-bearing, so they commit
+	// together or not at all (the pattern issue #1247 established for hire
+	// decisions, for the same reason: a terminal decision must never leave its
+	// projection behind).
+	//
+	//   keeper_requests — what the credential path reads to release the secret.
+	//   inbox_items     — what the OPERATOR sees, and what eval.LoadCorpus reads
+	//                     as ground truth (humanInboxSQL: state='resolved', a
+	//                     named resolved_by_user_id, resolved_action in
+	//                     approved/denied).
+	//
+	// Settling only the first would fail twice over and both failures are quiet:
+	// the item the person just decided stays sitting in their inbox, and their
+	// ruling is invisible to the eval — which then goes on scoring candidates
+	// against keeper_requests.decision, i.e. the previous model's own verdict.
+	// That is precisely the defect the ground-truth work exists to remove, so it
+	// would have been reintroduced by the endpoint meant to fix it.
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "keeper resolve: begin", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(r.Context(), `
 		UPDATE keeper_requests
 		   SET decision = ?, reason = ?, decided_at = ?
 		 WHERE id = ?`, decision, reason, now, reqID); err != nil {
@@ -160,9 +190,24 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actorID := ""
-	if user := UserFromContext(r.Context()); user != nil {
-		actorID = user.ID
+	// The inbox vocabulary is approved/denied, not ALLOW/DENY, and the mapping is
+	// not cosmetic: humanInboxSQL reads only those two as verdicts and treats
+	// everything else in the action vocabulary (retried, dismissed, archived…) as
+	// "I cleared my inbox". A near-miss here yields no label rather than a wrong
+	// one, which is the safer failure but still a silent one.
+	action := "approved"
+	if decision == string(keeper.DecisionDeny) {
+		action = "denied"
+	}
+	if err := inbox.ResolveBySourceTx(r.Context(), tx,
+		string(inbox.KindEscalation), reqID, action, actorID); err != nil {
+		replyInternalError(w, h.logger, "keeper resolve: resolve inbox item", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "keeper resolve: commit", err)
+		return
 	}
 	_, _ = h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: wsID,
