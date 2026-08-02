@@ -184,13 +184,16 @@ export interface DecisionMeta {
   requires: "create" | "manage"
   /** Set when the endpoint this card implies does not exist yet. */
   missingEndpoint?: string
+  /** Where a decision on this item is POSTed, when the server can take one. */
+  resolveEndpoint?: string
 }
 
 /**
  * What this row asks of a human, and which role the server lets do it.
  *
- * The `requires` values are read off the router: waitpoint approve, escalation
- * resolve and routine approve are roleCreate (MANAGER+), while skill-proposal
+ * The `requires` values are read off the router: waitpoint approve and routine
+ * approve are roleCreate (MANAGER+), credential access requests and
+ * skill-proposal
  * and consolidation approve are roleManage (OWNER/ADMIN). That mismatch — a
  * MANAGER-targeted row whose decision needs ADMIN — is why the card names who
  * decides instead of offering a button that returns 403.
@@ -211,12 +214,18 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
     if (sub === "routine_proposal") {
       return { heading: "Proposed routine", tone: "warn", requires: "create" }
     }
+    // A credential decision is resolved with roleManage — OWNER or ADMIN — and
+    // the server addresses the item to ADMIN for exactly that reason. Saying
+    // "create" here told a MANAGER the ruling was theirs to make when the server
+    // would refuse them, and justified an audience wider than the people who can
+    // act. The audience and the authority are one fact; this is its second copy,
+    // and internal/api pins the first.
     return {
       heading: "Access request",
       tone: "warn",
-      requires: "create",
-      missingEndpoint: payloadString(item, "request_type") === "access"
-        ? "a keeper request has no resolve endpoint yet"
+      requires: "manage",
+      resolveEndpoint: payloadString(item, "request_id")
+        ? `/api/v1/admin/keeper/requests/${payloadString(item, "request_id")}/resolve`
         : undefined,
     }
   }

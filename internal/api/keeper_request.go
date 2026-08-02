@@ -53,6 +53,20 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Scrubbed HERE, before anything reads it, and the position is the whole
+	// point: keeper.Request copies Intent by VALUE, and that copy is what
+	// gatekeeper.EvalRequest carries into buildAccessPrompt. Scrubbing further
+	// down — after `req` is built — sanitises a string nobody goes on to use,
+	// so the judge still receives the raw intent, keeper_requests.intent still
+	// stores it, and the keeper.request journal payload still carries it. A
+	// scrub that satisfies review by existing and protects nothing.
+	//
+	// The intent is agent-authored, exactly like the conversation history it
+	// sits beside in the prompt, and an agent that pastes a token into a chat
+	// will paste one into a justification. Validation comes first so an empty
+	// intent is still rejected as empty rather than as scrubbed-to-empty.
+	body.Intent = scrubJudgeText(body.Intent)
+
 	// Cross-tenant binding: a workspace-bound sidecar token is scoped to
 	// one workspace, but this handler reads workspace_id from the JSON body
 	// (not the query the auth middleware scopes), so the body claim must be
@@ -239,7 +253,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// Load agent's recent conversation history for Keeper context
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
-	// Run gatekeeper evaluation
+	// Run gatekeeper evaluation. (body.Intent was scrubbed at the top of the
+	// handler — before `req` copied it — see the note there.)
 	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.RequestingAgentID, body.CredentialID)
 	evalReq := gatekeeper.EvalRequest{
 		Request:            req,
@@ -421,14 +436,23 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   "MANAGER",
-			Title:        fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
-			BodyMD:       gkResp.Reason,
-			SenderType:   "system",
-			SenderID:     "keeper",
-			SenderName:   "Keeper",
-			Priority:     "high",
-			Blocking:     true,
+			// ADMIN, not MANAGER. Inbox visibility is HIERARCHICAL and the resolve
+			// route is roleManage, so addressing this to MANAGER — as it did — showed
+			// every MANAGER and above "ACCESS REQUEST, decide this" about a
+			// production credential they could not decide. Exposure without
+			// authority: the reader learns the credential exists, who asked, with
+			// what justification and at what risk, and has no part in the ruling.
+			// Pinned against the route's tier by TestInboxTargetRoleMatchesDecider,
+			// which is why this is a literal and not a shared constant — that test
+			// reads the source.
+			TargetRole: "ADMIN",
+			Title:      fmt.Sprintf("Keeper escalation: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:     gkResp.Reason,
+			SenderType: "system",
+			SenderID:   "keeper",
+			SenderName: "Keeper",
+			Priority:   "high",
+			Blocking:   true,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    "access",
@@ -457,14 +481,23 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Kind:         inbox.KindEscalation,
 			SourceID:     reqID,
 			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   "MANAGER",
-			Title:        fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
-			BodyMD:       gkResp.Reason,
-			SenderType:   "system",
-			SenderID:     "keeper",
-			SenderName:   "Keeper",
-			Priority:     "high",
-			Blocking:     false,
+			// ADMIN, not MANAGER. Inbox visibility is HIERARCHICAL and the resolve
+			// route is roleManage, so addressing this to MANAGER — as it did — showed
+			// every MANAGER and above "ACCESS REQUEST, decide this" about a
+			// production credential they could not decide. Exposure without
+			// authority: the reader learns the credential exists, who asked, with
+			// what justification and at what risk, and has no part in the ruling.
+			// Pinned against the route's tier by TestInboxTargetRoleMatchesDecider,
+			// which is why this is a literal and not a shared constant — that test
+			// reads the source.
+			TargetRole: "ADMIN",
+			Title:      fmt.Sprintf("Keeper high-risk DENY: %s requested %s (risk %d)", agentName, credName, gkResp.RiskScore),
+			BodyMD:     gkResp.Reason,
+			SenderType: "system",
+			SenderID:   "keeper",
+			SenderName: "Keeper",
+			Priority:   "high",
+			Blocking:   false,
 			Payload: map[string]interface{}{
 				"request_id":      reqID,
 				"request_type":    "access",

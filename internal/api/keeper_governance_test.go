@@ -414,8 +414,8 @@ func TestKeeperGovernance_EscalateTargetsContactAndPushes(t *testing.T) {
 	}
 	res := covKReqDecode(t, rr.Body.Bytes())
 
-	// Superset targeting: the contact is highlighted via target_user_id AND
-	// the MANAGER fanout is kept, so managers still see it as a fallback.
+	// Superset targeting: the contact is highlighted via target_user_id AND the
+	// role fanout is kept, so the rest of the deciding tier still sees it.
 	var targetUser, targetRole string
 	if err := db.QueryRow(`SELECT COALESCE(target_user_id, ''), COALESCE(target_role, '') FROM inbox_items
 		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&targetUser, &targetRole); err != nil {
@@ -424,8 +424,9 @@ func TestKeeperGovernance_EscalateTargetsContactAndPushes(t *testing.T) {
 	if targetUser != ownerID {
 		t.Errorf("target_user_id = %q, want security contact %q", targetUser, ownerID)
 	}
-	if targetRole != "MANAGER" {
-		t.Errorf("target_role = %q, want MANAGER kept as fallback", targetRole)
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if targetRole != "ADMIN" {
+		t.Errorf("target_role = %q, want ADMIN (the resolve route's tier) kept as fallback", targetRole)
 	}
 	if len(bc.inboxUpdated) != 1 {
 		t.Fatalf("inbox.updated broadcasts = %d, want 1", len(bc.inboxUpdated))
@@ -457,8 +458,9 @@ func TestKeeperGovernance_EscalateWithoutRowStillPushes(t *testing.T) {
 		WHERE workspace_id = ? AND source_id = ?`, wsID, res.RequestID).Scan(&targetUser, &targetRole); err != nil {
 		t.Fatalf("inbox item: %v", err)
 	}
-	if targetUser != "" || targetRole != "MANAGER" {
-		t.Errorf("target = (%q, %q), want legacy ('', MANAGER)", targetUser, targetRole)
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if targetUser != "" || targetRole != "ADMIN" {
+		t.Errorf("target = (%q, %q), want ('', ADMIN)", targetUser, targetRole)
 	}
 	if len(bc.inboxUpdated) != 1 {
 		t.Fatalf("inbox.updated broadcasts = %d, want 1", len(bc.inboxUpdated))
@@ -498,8 +500,9 @@ func TestKeeperGovernance_HighRiskDenyNotifiesWhenEnabled(t *testing.T) {
 	if blocking != 0 {
 		t.Errorf("DENY notify must be non-blocking (informational), got blocking=%d", blocking)
 	}
-	if targetUser != ownerID || targetRole != "MANAGER" {
-		t.Errorf("target = (%q, %q), want contact %q + MANAGER fallback", targetUser, targetRole, ownerID)
+	// ADMIN since the audience was aligned with the resolve route's roleManage tier: a MANAGER shown a production-credential decision they cannot take is exposure without authority. Pinned by TestInboxTargetRoleMatchesDecider.
+	if targetUser != ownerID || targetRole != "ADMIN" {
+		t.Errorf("target = (%q, %q), want contact %q + ADMIN fallback", targetUser, targetRole, ownerID)
 	}
 	if len(bc.inboxUpdated) != 1 {
 		t.Fatalf("inbox.updated broadcasts = %d, want 1", len(bc.inboxUpdated))

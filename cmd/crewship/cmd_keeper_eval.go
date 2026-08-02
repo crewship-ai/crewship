@@ -70,6 +70,7 @@ reachable from here.
 
 Examples:
   crewship keeper eval --candidate qwen2.5:3b --candidate qwen2.5:7b
+  crewship keeper eval --candidate qwen3.5:9b --candidate anthropic/claude-haiku-4-5
   crewship keeper eval --candidate llama3.2:3b --passes 1 --limit 200
   crewship keeper eval --candidate qwen2.5:7b --format json`,
 	Args: cobra.NoArgs,
@@ -124,11 +125,55 @@ type keeperEvalOptions struct {
 // scores against, what it refuses to print — is downstream of the provider, and
 // a test that could not reach it would only be testing flag parsing.
 var newKeeperEvalProvider = func(endpoint, model string) llm.Provider {
+	provider, name := splitCandidateSpec(model)
+	if provider != keepercfg.ProviderOllama {
+		// Hosted. The key comes from the environment the operator is running in
+		// (ANTHROPIC_API_KEY / OPENAI_API_KEY) rather than from the vault: this
+		// command reads a local database and dials from this machine, so the
+		// instance's stored credentials are not necessarily reachable and
+		// borrowing them would be a surprising thing for a read-only tool to do.
+		p, err := llm.BuildAuxProviderWithKey(llm.AuxModel{Provider: provider, Model: name}, "", "")
+		if err != nil {
+			// Surfaced as a provider that fails every call, which the replay
+			// already scores as a fail-closed DENY — the same thing an
+			// unreachable local endpoint produces, reported the same way.
+			return badProvider{err: err}
+		}
+		return p
+	}
 	// Same guarded transport the server's judge probe uses. The endpoint is
 	// operator-supplied and usually a private address, which TrustedEndpointClient
 	// permits while still refusing link-local and other hard-blocked ranges.
-	return llm.NewOllamaWithClient(endpoint, model, httpsafe.TrustedEndpointClient(60*time.Second))
+	return llm.NewOllamaWithClient(endpoint, name, httpsafe.TrustedEndpointClient(60*time.Second))
 }
+
+// splitCandidateSpec reads "provider/model", defaulting to Ollama.
+//
+// Only the FIRST slash separates, and only when the prefix is a provider we
+// know. Ollama tags carry colons and sometimes slashes ("library/llama3"), so a
+// naive split would silently re-point an operator's existing local command at a
+// paid endpoint — the one mistake this parsing must not make.
+func splitCandidateSpec(spec string) (provider, model string) {
+	prefix, rest, found := strings.Cut(spec, "/")
+	if !found {
+		return keepercfg.ProviderOllama, spec
+	}
+	switch prefix {
+	case keepercfg.ProviderOllama, "anthropic", "openai":
+		return prefix, rest
+	}
+	return keepercfg.ProviderOllama, spec
+}
+
+// badProvider defers a construction error to call time so a missing API key is
+// reported per candidate rather than aborting a run that was scoring three.
+type badProvider struct{ err error }
+
+func (b badProvider) Complete(context.Context, llm.Request) (*llm.Response, error) { return nil, b.err }
+func (b badProvider) Stream(context.Context, llm.Request, func(llm.StreamEvent) error) (*llm.Response, error) {
+	return nil, b.err
+}
+func (b badProvider) Name() string { return "unavailable" }
 
 // resolveKeeperEvalJudge decides which endpoint and which incumbent model the
 // run is measured against: explicit flags first, otherwise whatever the instance

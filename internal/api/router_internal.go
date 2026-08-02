@@ -206,6 +206,16 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// TestRouter_KeeperHandlerReceivesTheJudgeProfile.
 	keeperH.SetJudgeConfig(r.keeperSettings)
 	r.keeperHandler = keeperH
+
+	// An ADMIN route, registered here rather than in router_admin.go because that
+	// group runs BEFORE this one and the handler does not exist yet when it does.
+	// Deliberately the same handler: an operator asking "how would my judge rule
+	// on this?" must travel the path an agent's request travels, including the
+	// tier floors, the audit row, the inbox item and the health record. A second
+	// handler would drift into answering a different question — which is the
+	// mistake this package already made twice with the think and format flags.
+	r.authedMut("POST", "/api/v1/admin/keeper/ask", roleManage, keeperH.HandleAsk)
+	r.authedMut("POST", "/api/v1/admin/keeper/requests/{requestId}/resolve", roleManage, keeperH.HandleResolve)
 	if r.hub != nil {
 		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
 	}
