@@ -353,6 +353,61 @@ KEEPER_MODEL=claude-haiku-4-5
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper unless `KEEPER_ENABLED` is explicitly set to `false`. There is **no default model** — an enabled Keeper with an empty `keeper.model` (and no `KEEPER_MODEL`) fails validation at startup with `keeper.enabled=true but keeper.model is empty`. The earlier silent `phi3:mini` fallback was removed (PR-Z).
 </Note>
 
+### Rule on an escalation
+
+An escalation exists so a **person** decides. `crewship inbox list` shows the
+ones waiting; this is how you answer one:
+
+```bash
+crewship keeper resolve <request-id> --decision allow --reason "change window is declared in OPS-31"
+crewship keeper resolve <request-id> --decision deny  --reason "no corroborating work"
+```
+
+The same decision is one click in the inbox reading pane (**Approve** /
+**Deny**), and both go to `POST /api/v1/admin/keeper/requests/{id}/resolve`.
+
+Four things worth knowing before you use it:
+
+- **OWNER or ADMIN only.** The inbox item is addressed at the same tier, so the
+  people who see it are the people who can act on it.
+- **Only `allow` or `deny`.** This command *is* the escalation being answered;
+  there is nothing left to escalate to.
+- **Once.** A settled request answers `409`. Your ruling is what
+  [`keeper eval`](#local-judge-or-hosted-measure-it) later reads as ground
+  truth, and a verdict that can be rewritten is not one — including when two
+  admins answer the same request at the same moment.
+- **Four-eyes may refuse you.** See [Watchdog
+  Governance](#watchdog-governance-per-workspace) — a refusal there is not about
+  your role.
+
+Your ruling lands in three places: the request's decision, the inbox item
+(resolved, stamped with your user id), and the append-only ledger —
+`crewship keeper history <request-id>` shows it as the final transition, with
+`user` as the actor, so the audit trail records that a **person** decided rather
+than the model.
+
+### Ask the judge yourself
+
+`keeper judge test` proves the judge answers, but it asks one fixed scenario.
+This asks yours — your credential, your tier, your wording:
+
+```bash
+crewship keeper ask --agent riley --crew ops \
+  --credential PROD_DB_ADMIN \
+  --intent "Run the approved schema migration on the orders table during tonight's change window"
+```
+
+It travels the **same path** an agent's request does: the tier floors apply, the
+decision lands on the audit trail, an escalation reaches the inbox, and the
+health window records it. So the verdict you see is the verdict an agent would
+have got.
+
+Two uses beyond curiosity. **Tuning** — change the judge profile, re-ask, and
+compare; the profile in force is stamped on each decision, so `keeper requests`
+tells you which regime produced which answer. **Ground truth** — `keeper eval`
+needs about twenty human-ruled decisions before it will quote a rate, and this
+is how you produce varied cases to rule on instead of waiting for them to happen.
+
 ### Local judge or hosted? Measure it
 
 `keeper eval` scores candidates against decisions a person ruled on, and a
@@ -1016,6 +1071,18 @@ when the escalation was raised — both inputs move afterwards (an admin flips
 the toggle; a credential is re-tiered), and an answer frozen at raise time would
 go stale in the direction that matters: a one-click Approve still offered for a
 credential somebody has since marked critical.
+
+<Warning>
+Four-eyes needs a **second person who can resolve**, and resolving is
+OWNER/ADMIN. A workspace whose only admin also created the requesting agent has
+nobody left to approve an L4 request — the rule is doing its job, but there is
+no one for it to hand the decision to. Promote a second person to ADMIN before
+you need one: `crewship workspace member role <member-id> ADMIN`.
+
+A refusal is **not** a permissions problem, and the message says so. If you see
+*"requires a second approver: this escalation was raised by an agent you own"*,
+changing your own role will not help — somebody else has to rule on it.
+</Warning>
 
 ```text
   2nd approver: off

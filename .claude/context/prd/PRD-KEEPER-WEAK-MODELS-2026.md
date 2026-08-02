@@ -486,3 +486,42 @@ dělá z „funguje" → „robustní a kompletní".
   má P4 zjistit.** Dokud P4 neběží, je §1.1 jedno silné pozorování, ne důkaz.
 - Odhady dnů jsou odhady.
 - `internal/llm/endpoint` wire kontrakt vs. `format` — prověřit v P2.
+
+---
+
+## 8. Doplněno 2026-08-02 — P4 nemělo kudy dostat lidský verdikt
+
+P4 se nezadrhlo na eval kódu. Zadrhlo se na tom, že **produkt neuměl eskalaci
+přijmout.** Karta v inboxu to říkala nahlas — *„missing on the server: a keeper
+request has no resolve endpoint yet"* — a `inbox resolve` označil **oznámení**
+za přečtené, aniž by zapsal verdikt k žádosti, o které to oznámení bylo.
+
+Rozhodnutí, kvůli kterému celý patrový systém existuje, bylo jediné, které
+produkt neuměl přijmout. Doplněno v **#1671** a **#1674**:
+
+| | |
+|---|---|
+| `POST /api/v1/admin/keeper/requests/{id}/resolve` + `crewship keeper resolve` + tlačítka v inboxu | roleManage, workspace scope přes credential, **jen jednou** (409 i při souběhu), four-eyes se žurnálovaným zablokovaným self-approvem |
+| verdikt zapisuje **na tři místa v jedné transakci** | `keeper_requests` · `inbox_items` (to čte `humanInboxSQL`) · append-only ledger s `actor_type='user'` |
+| `crewship keeper ask` + `build-keeper-corpus.sh` | 50 případů napříč patry, aby korpus nebyl jedna situace padesátkrát |
+| scrub konverzace **i intentu** před soudcem | intent se scrubboval až za tím, kde ho `keeper.Request` zkopíroval — volání tam bylo, pozice špatná |
+
+**Poučení, které patří do PRD, ne do commitu:** třikrát po sobě prošel test,
+který nemohl selhat z důvodu, kvůli kterému existoval — protože si sám nastavil
+svět, který pak kontroloval. Chytil to až běh proti dev2 a CodeRabbit.
+U P3 a P5 to bude stejné riziko: obojí se dá „ověřit" testem, který si předem
+řekne, jakou odpověď má model dát.
+
+**P3 a P5 zůstávají nepostavené a je to záměr.** §6 má jako riziko
+*„'zlepšení' bez důkazu → P4 je vstupní podmínka pro merge P3 a P5"*. Korpus má
+21 nerozhodnutých položek a **nula lidských řádků**, takže P4 zatím neumí nic
+odměřit. Postavit P3 teď by znamenalo zopakovat chybu z §1.1: silné pozorování
+prohlásit za důkaz.
+
+**Další krok je lidský, ne technický:** rozhodnout ~20 položek → `keeper eval
+--candidate qwen3.5:9b --candidate anthropic/claude-haiku-4-5` → teprve pak P3/P5.
+
+**Provozní poznámka:** four-eyes potřebuje druhého člověka s `manage`
+(OWNER/ADMIN). Workspace, kde jediný admin zároveň vytvořil žádajícího agenta,
+nemá L4 komu předat — pravidlo funguje správně, jen nemá adresáta. Na dev2 to
+řeší povýšení druhého člena na ADMIN.
