@@ -144,6 +144,69 @@ func TestNoRuntimeErrorExplainsContainerd(t *testing.T) {
 	})
 }
 
+// Two genuinely distinct containerd sockets survive de-duplication, and the
+// sentence has to stay readable when they do — "a, b is present" reads as a
+// single mangled path rather than as two endpoints.
+func TestNoRuntimeErrorReadsCorrectlyForTwoSockets(t *testing.T) {
+	t.Parallel()
+
+	msg := noRuntimeError([]string{"/run/containerd/containerd.sock", "/opt/ctr/containerd.sock"}).Error()
+	if !strings.Contains(msg, "are present") {
+		t.Errorf("two sockets are described in the singular: %q", msg)
+	}
+	if strings.Contains(msg, "is present") {
+		t.Errorf("two sockets are described in the singular: %q", msg)
+	}
+	one := noRuntimeError([]string{"/run/containerd/containerd.sock"}).Error()
+	if !strings.Contains(one, "is present") {
+		t.Errorf("one socket is described in the plural: %q", one)
+	}
+}
+
+// DOCKER_HOST is the one way a user can deliberately point Crewship at
+// containerd, and it is exactly what somebody following a nerdctl blog post
+// will try. Detect short-circuits on it, so the candidate-list diagnostic never
+// runs and the raw client error is all they get:
+//
+//	malformed HTTP response "\x00\x00\x06\x04\x00\x00\x00\x00\x00\x00\x05\x00\x00@\x00"
+//
+// which says nothing anyone can act on.
+func TestContainerdHostHint(t *testing.T) {
+	t.Parallel()
+
+	for _, host := range []string{
+		"unix:///run/containerd/containerd.sock",
+		"unix:///Users/u/.colima/default/containerd.sock",
+		"unix:///var/run/containerd/containerd.sock",
+	} {
+		hint := containerdHostHint(host)
+		if hint == "" {
+			t.Errorf("no hint for containerd endpoint %q", host)
+			continue
+		}
+		if !strings.Contains(hint, "gRPC") {
+			t.Errorf("hint for %q does not name the protocol mismatch: %q", host, hint)
+		}
+		if !strings.Contains(hint, "cannot") {
+			t.Errorf("hint for %q does not say it cannot work: %q", host, hint)
+		}
+	}
+
+	// A hint on an ordinary Docker endpoint would be a lie, and would attach
+	// itself to every unrelated connection failure.
+	for _, host := range []string{
+		"unix:///var/run/docker.sock",
+		"unix:///Users/u/.rd/docker.sock",
+		"tcp://10.0.0.5:2375",
+		"npipe:////./pipe/docker_engine",
+		"",
+	} {
+		if hint := containerdHostHint(host); hint != "" {
+			t.Errorf("containerdHostHint(%q) = %q, want none", host, hint)
+		}
+	}
+}
+
 // The production paths must be the ones containerd actually listens on, or the
 // diagnostic never fires where it matters. Pinned as values because a typo here
 // is invisible: the check simply never matches and the message silently reverts

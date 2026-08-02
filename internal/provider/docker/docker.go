@@ -326,16 +326,42 @@ func noRuntimeError(containerdPresent []string) error {
 	if len(containerdPresent) == 0 {
 		return errors.New(base)
 	}
-	return fmt.Errorf("%s; %s is present but containerd serves its own gRPC API rather than the Docker REST API, "+
+	verb := "is"
+	if len(containerdPresent) > 1 {
+		verb = "are"
+	}
+	return fmt.Errorf("%s; %s %s present but containerd serves its own gRPC API rather than the Docker REST API, "+
 		"so Crewship cannot drive containerd or nerdctl through it — run Docker Engine, `podman system service`, "+
 		"or switch Rancher Desktop's container engine to dockerd (moby)",
-		base, strings.Join(containerdPresent, ", "))
+		base, strings.Join(containerdPresent, ", "), verb)
+}
+
+// containerdHostHint explains a DOCKER_HOST that points at containerd.
+//
+// Detect short-circuits on DOCKER_HOST, so the candidate-list diagnostic above
+// never runs on that path — and DOCKER_HOST is precisely how somebody following
+// a nerdctl guide will try to force the issue. Without this they get the moby
+// client's raw complaint about a `malformed HTTP response "\x00\x00\x06\x04…"`,
+// which is the truth and is useless.
+//
+// Keyed on the endpoint's own name rather than on the error text: the socket is
+// called containerd.sock by universal convention, whereas the error string
+// belongs to net/http and has no stability guarantee across moby releases.
+// Returns "" for anything else, so an ordinary connection failure is never
+// decorated with a claim about a runtime that is not involved.
+func containerdHostHint(host string) string {
+	if !strings.Contains(host, "containerd.sock") && !strings.Contains(host, "/containerd/") {
+		return ""
+	}
+	return " — this endpoint looks like containerd, which serves its own gRPC API rather than the Docker REST API; " +
+		"Crewship cannot drive containerd or nerdctl through it, so point DOCKER_HOST at Docker Engine, " +
+		"`podman system service`, or Rancher Desktop in dockerd (moby) mode"
 }
 
 // Detect probes for a Docker-API-compatible socket and returns info about
 // the detected runtime. It checks DOCKER_HOST first, then iterates candidate
-// sockets (Docker, Colima, OrbStack, Rancher, Podman). The ctx
-// parameter is used as an outer deadline; each socket gets its own short timeout.
+// sockets (Docker, Colima, OrbStack, Rancher, Podman). The ctx parameter is
+// used as an outer deadline; each socket gets its own short timeout.
 func Detect(ctx context.Context) (*DetectResult, error) {
 	// If DOCKER_HOST is set, use that directly.
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
@@ -346,7 +372,7 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		defer cli.Close()
 		info, err := cli.Ping(ctx, client.PingOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("docker ping (DOCKER_HOST=%s): %w", host, err)
+			return nil, fmt.Errorf("docker ping (DOCKER_HOST=%s): %w%s", host, err, containerdHostHint(host))
 		}
 		rt := "docker"
 		if strings.Contains(info.APIVersion, "libpod") {
