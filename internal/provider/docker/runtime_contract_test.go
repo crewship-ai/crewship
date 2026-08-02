@@ -407,6 +407,48 @@ func TestEnsureCrewRuntime_RunningContainerWithOldContractIsNotKilled(t *testing
 	}
 }
 
+// A PAUSED container is not a stopped one, and the drift path must not treat
+// it as one (CodeRabbit on #1680).
+//
+// `docker pause` is a single write to cgroup.freeze: every process is still
+// there, still holding its memory, merely unschedulable. Tearing one down
+// destroys live process state exactly as tearing down a running container
+// does — so the "nothing is running inside it, the rebuild is free" argument
+// does not apply, and the honest answer is the same as for a running crew:
+// warn, leave it alone.
+//
+// The guard is an allowlist of states that are genuinely dead rather than a
+// `!= running` test, so a state neither this code nor moby has today lands on
+// the safe side.
+func TestEnsureCrewRuntime_PausedContainerWithOldContractIsNotTornDown(t *testing.T) {
+	t.Parallel()
+
+	cfg := covRTConfig(t)
+	covCrewBindDirs(t, cfg)
+
+	f := &covRT{
+		listBody: covExistingList(string(container.StatePaused)),
+		// Paused containers report Running: true in an inspect — the freezer
+		// does not change the daemon's notion of running — so the fixture says
+		// so too, and the state that decides is the one on the list entry.
+		inspectBody: covLabelledInspect(covRuntimeRef, true, map[string]string{"crewship.kind": "crew"}),
+	}
+	p := f.provider(t, cfg)
+
+	if _, err := p.EnsureCrewRuntime(context.Background(), covTeam()); err != nil {
+		t.Fatalf("EnsureCrewRuntime: %v", err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.deletes) != 0 {
+		t.Errorf("a PAUSED crew container was torn down for a configuration change (deletes = %v); its processes are frozen, not gone, and they die with it", f.deletes)
+	}
+	if len(f.creates) != 0 {
+		t.Errorf("a replacement was created for a paused container (%d creates)", len(f.creates))
+	}
+}
+
 // The report itself. `crewship crew container-status` is where an operator
 // finds out, so the verdict has to reach provider.ContainerStatus.
 func TestContainerStatus_ReportsRuntimeContract(t *testing.T) {

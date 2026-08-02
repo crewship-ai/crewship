@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // crewContainerStatusCmd surfaces a crew's runtime container state — the CLI
@@ -62,9 +63,9 @@ var crewContainerStatusCmd = &cobra.Command{
 		// whose container is recreated afterwards. This is where an operator
 		// finds out which those are (#1642).
 		switch status.RuntimeContract {
-		case "current":
+		case provider.RuntimeContractCurrent:
 			fmt.Printf("%sConfig:%s    %scurrent%s\n", cli.Bold, cli.Reset, cli.Green, cli.Reset)
-		case "stale":
+		case provider.RuntimeContractStale:
 			fmt.Printf("%sConfig:%s    %sfrom an older build%s\n", cli.Bold, cli.Reset, cli.Yellow, cli.Reset)
 			fmt.Printf("           This container was created before the current container configuration and does not\n")
 			fmt.Printf("           carry the settings added since — including hardening that is applied at create time\n")

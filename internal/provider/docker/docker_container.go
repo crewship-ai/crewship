@@ -814,7 +814,7 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 				//     meanwhile — here, and on `crewship crew
 				//     container-status` via ContainerStatus.
 				if want := p.crewRuntimeContractDigest(); want != "" && runtimeContractOf(inspect.Config) != want {
-					if c.State != container.StateRunning {
+					if crewContainerHoldsNoProcesses(c.State) {
 						p.logger.Info("recreating stopped container (runtime configuration predates this build)",
 							"container", containerName,
 							"container_contract", runtimeContractOf(inspect.Config),
@@ -904,6 +904,29 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 		}
 	}
 	return "", false, nil
+}
+
+// crewContainerHoldsNoProcesses reports whether a container in this state can
+// be torn down without destroying live process state — the precondition for
+// the runtime-contract rebuild above, where the whole argument is that a
+// rebuild at this moment costs nothing.
+//
+// An ALLOWLIST rather than `state != running`, because `!= running` is wrong
+// for at least one real state and would be wrong again for any state added
+// later. `docker pause` is a single write to cgroup.freeze: every process is
+// still there, still holding its pages, merely unschedulable — so a paused
+// container is a running container that cannot answer, and tearing it down
+// kills exactly what tearing down a running one kills. `removing` is the
+// daemon already deleting it, and racing that buys nothing. Anything this list
+// does not name gets the report-and-leave-alone path, which is the failure
+// direction that costs an operator a warning rather than a workload.
+func crewContainerHoldsNoProcesses(state container.ContainerState) bool {
+	switch state {
+	case container.StateExited, container.StateDead, container.StateCreated:
+		return true
+	default:
+		return false
+	}
 }
 
 // ociRuntime resolves the OCI runtime handed to the daemon for crew
