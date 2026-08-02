@@ -248,6 +248,31 @@ func TestSystemRuntime_InstallLinksAccompanyAnAvailableRuntime(t *testing.T) {
 	}
 }
 
+// The machine with nothing installed is where install_links matters most, and
+// where a missing entry is least likely to be noticed — the operator has no
+// runtime to compare the list against.
+func TestSystemRuntime_NoRuntimeAtAllStillOffersEveryInstallLink(t *testing.T) {
+	t.Parallel()
+	h := stubbedRuntimeHandler(t, nil, "")
+
+	body := runtimeBody(t, h)
+	if body["available"] != false {
+		t.Errorf("available = %v, want false", body["available"])
+	}
+	links, ok := body["install_links"].(map[string]any)
+	if !ok {
+		t.Fatalf("install_links = %v, want a map when nothing is installed", body["install_links"])
+	}
+	if len(links) != len(installLinks) {
+		t.Errorf("install_links has %d entries, want all %d", len(links), len(installLinks))
+	}
+	for want := range installLinks {
+		if _, ok := links[want]; !ok {
+			t.Errorf("install_links missing %q (have %v)", want, links)
+		}
+	}
+}
+
 // The #865 redaction still holds: a caller below ADMIN gets availability and
 // nothing else — no socket paths, no daemon versions, no inventory.
 func TestSystemRuntime_NonAdminSeesNoHostDetail(t *testing.T) {
