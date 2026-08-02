@@ -2041,6 +2041,11 @@ END;
 	// new number is a timestamp, which is the whole point of the scheme.
 	// See migrate_consts_notify_taxonomy.go.
 	{version: 20260728110100, name: "notify_taxonomy", fn: migrationNotifyTaxonomy},
+
+	// Re-target open credential escalations from MANAGER to ADMIN, so #1671's
+	// audience fix reaches the rows already sitting in people's inboxes and not
+	// only the next ones. See migrate_consts_keeper_inbox_audience.go.
+	{version: 20260802160000, name: "keeper_inbox_audience", sql: migrationKeeperInboxAudience},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
