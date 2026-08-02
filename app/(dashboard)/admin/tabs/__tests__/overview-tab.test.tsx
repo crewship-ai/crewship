@@ -132,4 +132,26 @@ describe("Admin overview — integrity", () => {
     renderTab({ health: { ...HEALTH, encryption_key_source: "generated" } })
     expect(screen.getByText(/beside the database/i)).toBeInTheDocument()
   })
+
+  // The runtime line used to capitalise whatever string arrived, so a machine
+  // running OrbStack read "Orbstack" and one running Rancher Desktop read
+  // "Rancher". Product names are not a capitalisation of their socket label.
+  it("names the runtime in use the way its vendor writes it", () => {
+    renderTab({ runtimeInfo: { runtime: "orbstack", version: "29.4.0", socket: "/var/run/docker.sock" } })
+    expect(screen.getByText(/OrbStack 29\.4\.0/)).toBeInTheDocument()
+  })
+
+  // Runtimes installed, none driving anything: the server started without a
+  // container provider. That is neither "Docker 29" nor "Not detected", and
+  // the old label rendered it as "Unknown " (#1690).
+  it("distinguishes a detected runtime from one that is actually in use", () => {
+    renderTab({ runtimeAvailable: true, runtimeInfo: null })
+    expect(screen.getByText(/none in use/i)).toBeInTheDocument()
+    expect(screen.queryByText(/unknown/i)).toBeNull()
+  })
+
+  it("still says so when nothing is detected at all", () => {
+    renderTab({ runtimeAvailable: false, runtimeInfo: null })
+    expect(screen.getByText(/not detected/i)).toBeInTheDocument()
+  })
 })

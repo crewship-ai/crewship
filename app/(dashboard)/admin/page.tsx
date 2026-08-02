@@ -22,6 +22,7 @@ import type {
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
+import type { RuntimeEntry } from "./tabs/runtime-tab"
 import { KeeperTab } from "./tabs/keeper-tab"
 import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
@@ -171,7 +172,7 @@ export default function AdminPage() {
 
   const [runtimeAvailable, setRuntimeAvailable] = useState<boolean | null>(null)
   const [runtimeInfo, setRuntimeInfo] = useState<{ runtime: string; version: string; socket: string } | null>(null)
-  const [allRuntimes, setAllRuntimes] = useState<{ runtime: string; version: string; socket: string }[]>([])
+  const [allRuntimes, setAllRuntimes] = useState<RuntimeEntry[]>([])
   const [runtimeInstallLinks, setRuntimeInstallLinks] = useState<Record<string, string>>({})
   const [runtimeChecking, setRuntimeChecking] = useState(false)
 
@@ -198,13 +199,19 @@ export default function AdminPage() {
       }
       const data = await res.json()
       setRuntimeAvailable(data.available)
-      if (data.available) {
-        setRuntimeInfo({ runtime: data.runtime, version: data.version, socket: data.socket })
-        setAllRuntimes(data.runtimes ?? [])
-      } else {
-        setRuntimeInstallLinks(data.install_links ?? {})
-        setAllRuntimes([])
-      }
+      // install_links arrives on both paths since #1690 — an operator with one
+      // runtime installed still needs to be told what the others are.
+      setRuntimeInstallLinks(data.install_links ?? {})
+      setAllRuntimes(data.runtimes ?? [])
+      // The top-level summary is null when runtimes are installed but none is
+      // in use (the server booted without a container provider). Keep it null
+      // rather than manufacturing a {runtime: null} object — the overview
+      // renders "none in use" off exactly that distinction.
+      setRuntimeInfo(
+        data.available && data.runtime
+          ? { runtime: data.runtime, version: data.version, socket: data.socket }
+          : null,
+      )
     } catch {
       setRuntimeAvailable(false)
     } finally {
@@ -363,7 +370,6 @@ export default function AdminPage() {
         <RuntimeTab
           runtimeChecking={runtimeChecking}
           runtimeAvailable={runtimeAvailable}
-          runtimeInfo={runtimeInfo}
           allRuntimes={allRuntimes}
           runtimeInstallLinks={runtimeInstallLinks}
           onCheckRuntime={checkRuntime}

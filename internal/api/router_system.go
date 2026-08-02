@@ -48,7 +48,14 @@ func (r *Router) registerSystemRoutes() {
 	// initial string for the entire process lifetime. Wrap in a closure
 	// so each request re-reads the current r.version value at call time.
 	// CodeRabbit caught this on review.
-	system := NewSystemHandler(r.logger, r.version)
+	//
+	// WithActiveContainer hands it the container provider this process is
+	// holding, so `in_use` names the daemon actually dialled instead of
+	// re-deriving it from the probe order — which is wrong whenever
+	// DOCKER_HOST is set, and wrong in the other direction when the server
+	// booted with --no-docker and is driving nothing at all (#1690).
+	system := NewSystemHandler(r.logger, r.version).
+		WithActiveContainer(r.activeContainer())
 	// Runtime info is reachable by any authed user (the runtime banner, the
 	// crew docker tab, and onboarding all probe it — sometimes before a
 	// workspace exists), but host detail (container versions, socket paths) is

@@ -5,6 +5,7 @@ import {
 } from "lucide-react"
 import { StatusDot } from "@/components/ui/status-badge"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { runtimeBrand } from "@/components/icons/runtime-icons"
 import { cn } from "@/lib/utils"
 import type {
   Stats, AdminHealth, LicenseInfo, TelemetryInfo, VersionInfo,
@@ -81,12 +82,20 @@ export const OverviewTab = React.memo(function OverviewTab({
   stats, runtimeAvailable, runtimeInfo, health, license, telemetry,
   version, posture, journal, keeper,
 }: OverviewTabProps) {
+  // runtimeInfo is the runtime actually IN USE, and it is null when runtimes
+  // are installed but the server holds no container provider (--no-docker, or
+  // one that failed to start). That is a different state from "not detected"
+  // and the old label could not express it — it capitalised whatever string
+  // arrived, so a machine running OrbStack read "Docker" and a machine running
+  // nothing read "Unknown " (#1690).
   const runtimeLabel =
     runtimeAvailable === null
       ? "Checking…"
-      : runtimeAvailable
-        ? `${runtimeInfo?.runtime === "apple" ? "Apple Containers" : (runtimeInfo?.runtime ?? "unknown").charAt(0).toUpperCase() + (runtimeInfo?.runtime ?? "").slice(1)} ${runtimeInfo?.version ?? ""}`
-        : "Not detected"
+      : !runtimeAvailable
+        ? "Not detected"
+        : runtimeInfo
+          ? `${runtimeBrand(runtimeInfo.runtime).label} ${runtimeInfo.version ?? ""}`.trim()
+          : "Detected · none in use"
 
   // Real probes, not hardcoded green (#868). DB status comes from the health
   // endpoint's ping; the engine dot reflects whether the API process (the

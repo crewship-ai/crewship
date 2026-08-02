@@ -182,9 +182,16 @@ After starting, verify everything is working:
 curl http://localhost:8080/api/health
 
 # Check container runtime detection (requires an auth token)
+# Add ?workspace_id=<ws> to resolve as ADMIN and get the full inventory:
+# every runtime present, each with its own version and socket, and which
+# one is in use. Without it the response is just {"available": true}.
 curl -H "Authorization: Bearer <token>" \
   http://localhost:8080/api/v1/system/runtime
 ```
+
+See [Which container runtime is Crewship actually
+using?](/guides/troubleshooting) for the payload and the admin console
+panel that renders it.
 
 ## Seeding Demo Data
 
