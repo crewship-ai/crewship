@@ -226,6 +226,24 @@ Examples:
 // the label the SERVER sent. The CLI deliberately keeps no copy of which tier
 // that is: against a server whose tier table has moved, a locally-derived "L4"
 // would be a confident wrong answer.
+// fourEyesAgent names the agent the four-eyes rule is about: whoever OWNS it
+// cannot resolve. The payload's agent_name is authoritative because the server
+// compares against agents.created_by_user_id of the REQUESTING agent, and on a
+// keeper credential escalation the sender is the keeper rather than that agent.
+// Falls back to the sender for the escalations-backed flow, where the two are
+// the same, and to a description when neither is known.
+func fourEyesAgent(payload map[string]any, sender string) string {
+	if payload != nil {
+		if name, ok := payload["agent_name"].(string); ok && name != "" {
+			return name
+		}
+	}
+	if sender != "" {
+		return sender
+	}
+	return "the agent that raised this"
+}
+
 func tierReason(label string) string {
 	if label == "" {
 		return "the credential's tier"
@@ -336,10 +354,14 @@ Examples:
 				case item.SecondApproverByTier:
 					why = tierReason(item.SecurityLevelLabel)
 				}
-				who := from
-				if who == "" {
-					who = "the agent that raised this"
-				}
+				// The agent whose OWNER is refused — not the sender. On a keeper
+				// credential escalation the keeper raises the item, so SenderName
+				// is "Keeper" while the server compares the approver against the
+				// owner of the agent that ASKED. "whoever owns Keeper cannot
+				// resolve it" names nobody: the Keeper has no owner, and Riley
+				// does. A security notice pointing at the wrong party is as bad as
+				// one that never renders.
+				who := fourEyesAgent(item.Payload, from)
 				fmt.Printf("%s2nd approver required · %s%s\n", cli.Yellow, why, cli.Reset)
 				fmt.Printf("%swhoever owns %s cannot resolve it — someone else has to%s\n",
 					cli.Dim, who, cli.Reset)

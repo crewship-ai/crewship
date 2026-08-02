@@ -197,3 +197,41 @@ describe("inbox four-eyes notice (#1574)", () => {
     expect(panel.getByTestId("escalation-four-eyes").textContent).toBe(inboxText)
   })
 })
+
+// The notice names the agent whose OWNER is refused, and on a keeper escalation
+// that is not the sender. The keeper raises the item, so sender_name is
+// "Keeper" — while the rule compares the approver against the owner of the agent
+// that ASKED. On dev2 the notice read "whoever owns Keeper cannot resolve it",
+// which names nobody: the Keeper has no owner, and Riley does.
+//
+// A security notice that names the wrong party is the same defect as one that
+// does not render — it sends the reader to the wrong person.
+describe("the notice names the requesting agent, not the sender", () => {
+  beforeEach(() => apiFetch.mockReset())
+  afterEach(() => cleanup())
+
+  it("prefers the payload's agent over the item's sender", () => {
+    renderInbox({
+      sender_name: "Keeper",
+      second_approver_required: true,
+      second_approver_by_tier: true,
+      security_level_label: "L4 · critical",
+      payload: { request_type: "access", request_id: "kr_1", agent_name: "Riley" },
+    })
+
+    const notice = screen.getByTestId("escalation-four-eyes")
+    expect(notice.textContent).toContain("Riley")
+    expect(notice.textContent).not.toContain("Keeper")
+  })
+
+  it("still falls back to the sender when the payload names no agent", () => {
+    renderInbox({
+      sender_name: "casey",
+      second_approver_required: true,
+      second_approver_by_workspace: true,
+      payload: { escalation_type: "CREDENTIAL" },
+    })
+
+    expect(screen.getByTestId("escalation-four-eyes").textContent).toContain("casey")
+  })
+})

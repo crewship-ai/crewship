@@ -215,7 +215,7 @@ export function DecisionCard({
           byWorkspace={item.second_approver_by_workspace === true}
           byTier={item.second_approver_by_tier === true}
           securityLevelLabel={item.security_level_label ?? null}
-          agentSlug={item.sender_name ?? null}
+          agentSlug={fourEyesAgentOf(item)}
         />
 
         <KindActions
@@ -321,6 +321,21 @@ export interface InboxDetailProps {
   onArchive: () => void | Promise<void>
   onMarkUnread: () => void
   onRefresh: () => void | Promise<void>
+}
+
+/**
+ * The agent the four-eyes rule is about: whoever OWNS it cannot resolve.
+ *
+ * On a keeper credential escalation that is not the sender. The keeper raises
+ * the item, so `sender_name` is "Keeper" — while the server compares the
+ * approver against `agents.created_by_user_id` of the agent that ASKED, which
+ * the payload carries as `agent_name`. Falls back to the sender for the
+ * escalations-backed flow, where the two are the same agent.
+ */
+function fourEyesAgentOf(item: InboxItem): string | null {
+  const fromPayload = item.payload?.agent_name
+  if (typeof fromPayload === "string" && fromPayload !== "") return fromPayload
+  return item.sender_name ?? null
 }
 
 export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh }: InboxDetailProps) {
