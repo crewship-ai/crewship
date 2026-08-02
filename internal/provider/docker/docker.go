@@ -407,7 +407,12 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("docker ping (DOCKER_HOST=%s): %w%s", host, err, containerdHostHint(host))
 		}
-		rt := "docker"
+		// Not a hardcoded "docker": a DOCKER_HOST aimed at a specific runtime's
+		// own socket names that runtime, the same way the candidate path does.
+		// Without this, Detect and DetectAll disagree about the same endpoint,
+		// and the API's top-level `runtime` contradicts its own `runtimes[]`
+		// entry marked in_use.
+		rt := labelForHost(host, candidateSockets(), filepath.EvalSymlinks)
 		if strings.Contains(info.APIVersion, "libpod") {
 			rt = "podman"
 		}
