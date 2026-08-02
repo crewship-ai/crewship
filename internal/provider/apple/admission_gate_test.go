@@ -17,6 +17,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -162,6 +163,59 @@ exit 0`)
 	}
 	if calls := gate.calls(); len(calls) != 1 {
 		t.Fatalf("admission consulted %v when restarting a stopped container, want exactly one call", calls)
+	}
+}
+
+// Parity with the Docker provider on the one event that matters here (#1675).
+// This provider deliberately emits no other container-preparation event, so
+// it would be easy to read the hold's absence as consistent — it is not. The
+// host-memory leg is inactive on macOS, but the concurrency bound and the
+// stagger bind here, so a start CAN be held, and a hold nobody can see is
+// indistinguishable from a hang on any platform.
+func TestAppleEnsureCrewRuntime_CapacityHold_ReachesTheProvisionSink(t *testing.T) {
+	installFakeContainer(t, crewBody)
+	gate := &appleStubGate{holdReason: "concurrency"}
+
+	var mu sync.Mutex
+	var events []devcontainer.ProvisionEvent
+	cfg := provider.CrewConfig{ID: "crew1", Slug: "eng", ProvisionSink: func(ev devcontainer.ProvisionEvent) {
+		mu.Lock()
+		events = append(events, ev)
+		mu.Unlock()
+	}}
+
+	p := newTestProvider(Config{OutputBasePath: t.TempDir(), Admission: gate})
+	if _, err := p.EnsureCrewRuntime(context.Background(), cfg); err != nil {
+		t.Fatalf("EnsureCrewRuntime: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var hold *devcontainer.ProvisionEvent
+	for i := range events {
+		if events[i].Step == devcontainer.ProvStepCapacityHold {
+			hold = &events[i]
+			break
+		}
+	}
+	if hold == nil {
+		t.Fatalf("the apple provider held a start and said nothing on the run's own stream: %+v", events)
+	}
+	if hold.Phase != devcontainer.ProvisionPhase {
+		t.Errorf("hold event phase = %q, want %q", hold.Phase, devcontainer.ProvisionPhase)
+	}
+	if hold.Reason != "concurrency" {
+		t.Errorf("hold event Reason = %q, want %q", hold.Reason, "concurrency")
+	}
+	if hold.Detail == "" {
+		t.Error("hold event carries no detail; the caller cannot see why")
+	}
+	// And nothing else: this provider's asymmetry is deliberate, and a test
+	// that only checked "a hold arrived" would not notice it quietly growing
+	// a half-populated audit trail.
+	if len(events) != 1 {
+		t.Errorf("the apple provider emitted %d provisioning events, want only the capacity hold: %+v",
+			len(events), events)
 	}
 }
 

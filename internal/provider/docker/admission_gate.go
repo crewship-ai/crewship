@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -36,21 +37,36 @@ func (p *Provider) admitContainerStart(
 		return func() {}, nil
 	}
 
+	// Measured here rather than inside the gate so the event can say how long
+	// the wait has been going. "Held for capacity" on its own reads the same
+	// at second one and at minute twenty-five; the elapsed time is what tells
+	// somebody whether to keep waiting.
+	asked := time.Now()
+
 	release, err := gate.Admit(ctx, team.ID, team.Slug, func(reason, detail string) {
+		waited := time.Since(asked)
 		p.logger.Info("crew container start held for host capacity",
-			"crew_id", team.ID, "crew_slug", team.Slug, "reason", reason, "detail", detail)
+			"crew_id", team.ID, "crew_slug", team.Slug,
+			"reason", reason, "detail", detail, "waited", waited.Round(time.Second))
 		if emitProv != nil {
 			emitProv(devcontainer.ProvisionEvent{
 				Step:   devcontainer.ProvStepCapacityHold,
 				Status: devcontainer.ProvStatusStarted,
-				Detail: fmt.Sprintf("%s: %s", reason, detail),
+				Reason: reason,
+				Detail: detail,
+				// Elapsed wait, not the duration of a completed step — this
+				// event is emitted repeatedly while the wait is still going.
+				DurationMs: waited.Milliseconds(),
 			})
 		}
 	})
 	if err != nil {
 		// Wrapped, not swallowed: a start that was held until its context ran
 		// out has to fail as a capacity problem, not as a generic timeout the
-		// operator will read as a broken daemon.
+		// operator will read as a broken daemon. %w keeps
+		// *admission.HoldExpiredError reachable through errors.As, which is
+		// what lets the chat classifier name the host resource that ran out
+		// instead of matching "container start" out of this very sentence.
 		return nil, fmt.Errorf("admission control refused a container start for crew %s: %w", team.ID, err)
 	}
 	return release, nil

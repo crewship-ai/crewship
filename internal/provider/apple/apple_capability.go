@@ -171,8 +171,8 @@ func (p *Provider) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewC
 	if cfg.ProvisionSink != nil {
 		s.Degraded = append(s.Degraded, provider.DroppedField{
 			Field: "ProvisionSink",
-			Detail: "no container-preparation events are emitted, so this crew's start is absent from the " +
-				"run journal and the provisioning progress UI",
+			Detail: "container-preparation steps are not emitted, so this crew's start is absent from the " +
+				"run journal and the provisioning progress UI; capacity holds ARE reported (#1675)",
 		})
 	}
 	if len(cfg.Services) > 0 {

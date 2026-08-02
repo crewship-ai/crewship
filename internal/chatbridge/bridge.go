@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/admission"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -696,6 +697,18 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}
 		}
 
+		// Attached AFTER the capability report on purpose. Every other field
+		// that report covers is something the crew asked for and will not get;
+		// this one is server plumbing the crew never named, so listing it as
+		// "not honoured by this container provider" would put a line about our
+		// own diagnostics in front of the user on every cold start. Both
+		// providers deliver the one event the sink consumes.
+		//
+		// Its job: a start held for host capacity says so on the stream the
+		// person waiting is already watching, instead of leaving
+		// "Starting container..." on screen for up to thirty minutes (#1675).
+		cc.ProvisionSink = capacityHoldSink(streamFn)
+
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
 			// Classify the cause into a closed set so the user gets an
@@ -1077,12 +1090,25 @@ func (b *Bridge) persistInBandFailureTurn(
 // substring classifier (the provider wraps most causes as %w strings, not typed
 // sentinels), and it never leaks the raw daemon text — that goes to logs / the
 // run record via the caller's wrapped return. Codes are a closed set the UI /
-// agent can branch on: provider_capability, legacy_volume_conflict,
+// agent can branch on: provider_capability, capacity, legacy_volume_conflict,
 // image_missing, resource_limit, provision_failed, internal.
 func classifyCrewRuntimeError(err error) (code, message string) {
 	raw := ""
 	if err != nil {
 		raw = err.Error()
+	}
+	// A start held until its deadline is a CAPACITY failure, and the gate
+	// already knows which host resource ran out and by how much. Checked
+	// first, and structurally, because the substring rules below are exactly
+	// what destroyed this reason (#1675): the gate's own wrapper reads
+	// "admission control refused a container start for crew X", so the
+	// provision_failed case claimed it and reported "provisioning error" —
+	// sending the operator to the journal to find something the error was
+	// already holding. A second substring rule would have been the same bug
+	// with a different keyword, so the gate grew a typed error instead.
+	var held *admission.HoldExpiredError
+	if errors.As(err, &held) {
+		return "capacity", capacityHoldMessage(held)
 	}
 	// A capability refusal is our own text, not the daemon's, and the field it
 	// names is the only thing the operator can act on — so it is passed
@@ -1123,5 +1149,65 @@ func classifyCrewRuntimeError(err error) (code, message string) {
 			"The agent container failed to start (provisioning error)." + hint
 	default:
 		return "internal", "The agent container could not be started." + hint
+	}
+}
+
+// capacityHoldMessage turns an expired capacity hold into the sentence the
+// person waiting gets. It carries the gate's own figures rather than a generic
+// phrase: "the host does not have enough memory" tells an operator what to do,
+// "provisioning error" tells them to go and read the journal for a number the
+// error already had.
+func capacityHoldMessage(h *admission.HoldExpiredError) string {
+	var b strings.Builder
+	phrase := admission.ReasonPhrase(h.Reason)
+	b.WriteString(strings.ToUpper(phrase[:1]))
+	b.WriteString(phrase[1:])
+	if h.Detail != "" {
+		b.WriteString(" — ")
+		b.WriteString(h.Detail)
+	}
+	fmt.Fprintf(&b, ". The start waited %s for capacity and then gave up.",
+		h.Waited.Round(time.Second))
+	if remedy := admission.ReasonRemedy(h.Reason); remedy != "" {
+		b.WriteString(" ")
+		b.WriteString(remedy)
+	}
+	return b.String()
+}
+
+// capacityHoldSink is the ProvisionSink the bridge hands the container
+// provider. It forwards exactly one thing onto the caller's chat stream: the
+// admission hold.
+//
+// Narrow on purpose. The rest of the provisioning pipeline already has two
+// surfaces (the journal and the Activity Bar, via the API's
+// RuntimeProvisionSink) and replaying it into the chat would be noise. The
+// hold is different: it is the only step that can last thirty minutes, and
+// until now it produced no line anywhere the person waiting was looking — the
+// chat showed "Starting container..." for the whole wait, which reads exactly
+// like a hang (#1675).
+//
+// The gate rate-limits its own notices, so this cannot become a per-poll line.
+func capacityHoldSink(streamFn func(ws.ChatEvent)) func(devcontainer.ProvisionEvent) {
+	if streamFn == nil {
+		return nil
+	}
+	return func(ev devcontainer.ProvisionEvent) {
+		if ev.Step != devcontainer.ProvStepCapacityHold {
+			return
+		}
+		var b strings.Builder
+		b.WriteString("Waiting for host capacity — ")
+		b.WriteString(admission.ReasonPhrase(ev.Reason))
+		if ev.Detail != "" {
+			b.WriteString(" (")
+			b.WriteString(ev.Detail)
+			b.WriteString(")")
+		}
+		if ev.DurationMs > 0 {
+			fmt.Fprintf(&b, "; waiting %s so far",
+				(time.Duration(ev.DurationMs) * time.Millisecond).Round(time.Second))
+		}
+		streamFn(ws.ChatEvent{Type: "status", Content: b.String()})
 	}
 }

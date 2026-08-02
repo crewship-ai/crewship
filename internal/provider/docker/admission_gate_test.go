@@ -18,8 +18,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -34,7 +36,8 @@ type stubGate struct {
 	err         error  // non-nil => refuse
 	holdReason  string // non-empty => call onHold once before admitting
 	holdDetail  string
-	beforeAdmit func() // observed at the moment of the call, for ordering assertions
+	holdDelay   time.Duration // waited before onHold fires, so elapsed time is measurable
+	beforeAdmit func()        // observed at the moment of the call, for ordering assertions
 
 	// recordings
 	crewIDs   []string
@@ -47,13 +50,16 @@ func (g *stubGate) Admit(_ context.Context, crewID, crewSlug string, onHold func
 	g.crewIDs = append(g.crewIDs, crewID)
 	g.crewSlugs = append(g.crewSlugs, crewSlug)
 	before := g.beforeAdmit
-	reason, detail, err := g.holdReason, g.holdDetail, g.err
+	reason, detail, delay, err := g.holdReason, g.holdDetail, g.holdDelay, g.err
 	g.mu.Unlock()
 
 	if before != nil {
 		before()
 	}
 	if reason != "" && onHold != nil {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
 		onHold(reason, detail)
 	}
 	if err != nil {
@@ -228,6 +234,7 @@ func TestEnsureCrewRuntime_CapacityHold_EmitsProvisionEvent(t *testing.T) {
 	cfg.Admission = &stubGate{
 		holdReason: "host_memory",
 		holdDetail: "host has 900 MiB available, 3072 MiB needed for one more agent container",
+		holdDelay:  20 * time.Millisecond,
 	}
 	p := f.provider(t, cfg)
 
@@ -261,6 +268,23 @@ func TestEnsureCrewRuntime_CapacityHold_EmitsProvisionEvent(t *testing.T) {
 	}
 	if hold.Detail == "" {
 		t.Error("hold event carries no detail; the operator cannot see why")
+	}
+	// The binding leg travels as a field, not as a prefix glued into Detail:
+	// the consumer that turns it into a sentence must not have to parse one
+	// back out of prose.
+	if hold.Reason != "host_memory" {
+		t.Errorf("hold event Reason = %q, want %q", hold.Reason, "host_memory")
+	}
+	if !strings.Contains(hold.Detail, "900 MiB available") ||
+		!strings.Contains(hold.Detail, "3072 MiB needed") {
+		t.Errorf("hold event Detail = %q; it does not carry the gate's figures", hold.Detail)
+	}
+	// Elapsed wait so far. Without it "held for capacity" reads the same at
+	// second one and at minute twenty-five, and the caller cannot tell
+	// whether waiting longer is worth it.
+	if hold.DurationMs < 15 {
+		t.Errorf("hold event DurationMs = %d after a 20ms wait; the event does not say how long it has been held",
+			hold.DurationMs)
 	}
 }
 
