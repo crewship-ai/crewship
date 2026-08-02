@@ -837,6 +837,26 @@
         ]
       }
     },
+    "/api/v1/admin/keeper/health": {
+      "get": {
+        "operationId": "get_api_v1_admin_keeper_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/keeper/judge/models": {
       "get": {
         "operationId": "get_api_v1_admin_keeper_judge_models",

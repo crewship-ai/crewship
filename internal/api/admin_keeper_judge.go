@@ -24,6 +24,33 @@ import (
 // comments at each call site.
 var judgeNoThink = false
 
+// verdictProbeRequest is the exact call the judge check measures — extracted so
+// the budget stage's warm re-measure cannot drift from the first attempt. Two
+// calls that are supposed to be the same call have to BE the same call, or the
+// comparison between them means nothing.
+func verdictProbeRequest(model string, temperature *float64) llm.Request {
+	return llm.Request{
+		Model:     model,
+		System:    "You are a security gatekeeper. Reply with ONLY compact JSON: {\"decision\":\"ALLOW|DENY|ESCALATE\",\"reason\":\"...\",\"risk\":1-10}. No prose, no code fence.",
+		Messages:  []llm.Message{{Role: "user", Content: "Agent 'ci-bot' asks for credential 'npm-publish-token' (level L1). Intent: \"publish the release tarball to npm as part of the tagged build\". Decide."}},
+		MaxTokens: 200,
+		// A security verdict must be reproducible; an audit trail of sampled
+		// decisions is not defensible.
+		Temperature: temperature,
+		// Reasoning OFF, because the gatekeeper turns it off. A probe that asks
+		// differently from the credential path measures a different call: with
+		// thinking on, a live qwen3.5:9b spent 13.2s reasoning and returned no
+		// verdict, so this check failed a model that answers correctly in 3.4s
+		// when asked the way production asks.
+		Think: &judgeNoThink,
+		// Constrained decoding, because the gatekeeper constrains it too. Without
+		// this the probe asks the model to volunteer well-formed JSON from a prose
+		// instruction — a harder question than production poses, which failed
+		// models that judge fine.
+		Format: judgeVerdictSchema,
+	}
+}
+
 // judgeVerdictSchema is the shape a verdict must have, sent as llm.Request.Format
 // so Ollama constrains decoding to it instead of trusting the prose instruction
 // above it. It mirrors the schema the gatekeeper sends on the credential path —
@@ -300,26 +327,7 @@ func (h *AdminKeeperJudgeHandler) run(ctx context.Context, root, model string) j
 	defer cancelChat()
 	zero := 0.0
 	started = time.Now()
-	answer, err := provider.Complete(chatCtx, llm.Request{
-		Model:     model,
-		System:    "You are a security gatekeeper. Reply with ONLY compact JSON: {\"decision\":\"ALLOW|DENY|ESCALATE\",\"reason\":\"...\",\"risk\":1-10}. No prose, no code fence.",
-		Messages:  []llm.Message{{Role: "user", Content: "Agent 'ci-bot' asks for credential 'npm-publish-token' (level L1). Intent: \"publish the release tarball to npm as part of the tagged build\". Decide."}},
-		MaxTokens: 200,
-		// A security verdict must be reproducible; an audit trail of sampled
-		// decisions is not defensible.
-		Temperature: &zero,
-		// Reasoning OFF, because the gatekeeper turns it off. A probe that asks
-		// differently from the credential path measures a different call: with
-		// thinking on, a live qwen3.5:9b spent 13.2s reasoning and returned no
-		// verdict, so this check failed a model that answers correctly in 3.4s
-		// when asked the way production asks.
-		Think: &judgeNoThink,
-		// Constrained decoding, because the gatekeeper constrains it too. Without
-		// this the probe asks the model to volunteer well-formed JSON from a prose
-		// instruction — a harder question than production poses, which failed
-		// models that judge fine.
-		Format: judgeVerdictSchema,
-	})
+	answer, err := provider.Complete(chatCtx, verdictProbeRequest(model, &zero))
 	stage3 := judgeStage{Name: "verdict", Label: "Returns a verdict", LatencyMS: time.Since(started).Milliseconds()}
 	switch {
 	case err != nil:
@@ -351,6 +359,30 @@ func (h *AdminKeeperJudgeHandler) run(ctx context.Context, root, model string) j
 	// cannot answer in time does not work, however well it reasons.
 	if stage3.OK {
 		stage4 := h.budgetStage(stage3.LatencyMS)
+		if !stage4.OK {
+			// Re-measure once against a NOW-RESIDENT model.
+			//
+			// The first call to a model server after an idle period pays a cold
+			// load — several gigabytes of weights before the first token. On the
+			// reference deployment that is ~20s against a 20s budget, so this
+			// stage fails and reports a working judge as too slow; the identical
+			// check seconds later measures 2.7s. Seen three times in one
+			// afternoon: a fresh seed left the watchdog off, the escalation
+			// harness skipped its whole suite in preflight, and a manual run
+			// called a healthy judge unusable.
+			//
+			// suggestBudget's comment already assumed "the measurement is one
+			// warm call". This is what makes that true. Bounded at one retry:
+			// twice slow is a slow judge, and the operator needs to hear that.
+			warmStart := time.Now()
+			warm, werr := provider.Complete(chatCtx, verdictProbeRequest(model, &zero))
+			if werr == nil {
+				if _, ok := parseSmokeVerdict(warm.Content); ok {
+					stage4 = h.budgetStage(time.Since(warmStart).Milliseconds())
+					stage4.Detail += " (first call was slower — it included the model load)"
+				}
+			}
+		}
 		out.Stages = append(out.Stages, stage4)
 		out.OK = out.OK && stage4.OK
 	}

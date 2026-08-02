@@ -1,12 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/keepercfg"
 )
 
 // recordingOllama is fakeOllama with the chat request body kept, so a test can
@@ -94,5 +98,88 @@ func TestJudgeTest_ProbeSuppressesThinkingLikeTheGatekeeper(t *testing.T) {
 	}
 	if !strings.Contains(body, `"stream":false`) {
 		t.Errorf("probe should not stream: %s", body)
+	}
+}
+
+// The first call to a model server after an idle period pays a COLD LOAD —
+// ~6GB of weights before the first token. On the reference deployment that is
+// 20s against a 20s budget, so stage 4 fails and the check reports the judge as
+// too slow. The same check seconds later measures 2.7s.
+//
+// Hit three times in one afternoon: a fresh `crewship seed` left the watchdog
+// off, the escalation harness skipped its whole suite in preflight, and a manual
+// run reported a working judge as unusable. Each of those is a false negative in
+// a situation that is not rare — it is what every first check looks like.
+//
+// suggestBudget's own comment already assumed "the measurement is one warm
+// call". It was not. So when the budget stage fails, the verdict is measured
+// once more against a now-resident model, and THAT is the number reported.
+// runJudgeTestWithBudget drives the probe against a handler whose judge budget
+// is short enough to test the cold-load path without sleeping for the default.
+func runJudgeTestWithBudget(t *testing.T, body string, budget time.Duration) judgeTestResponse {
+	t.Helper()
+	db := setupTestDB(t)
+	store := keepercfg.New(db, keepercfg.Defaults{})
+	if err := store.Load(context.Background()); err != nil {
+		t.Fatalf("load judge config: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u_probe','p@example.com','P')`); err != nil {
+		t.Fatalf("seed actor: %v", err)
+	}
+	ms := budget.Milliseconds()
+	if _, err := store.Apply(context.Background(), keepercfg.Patch{TimeoutMS: &ms}, "u_probe"); err != nil {
+		t.Fatalf("set budget: %v", err)
+	}
+
+	h := NewAdminKeeperJudgeHandler(store, newTestLogger())
+	rr := httptest.NewRecorder()
+	h.Test(rr, judgeReq(t, body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp judgeTestResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp
+}
+
+func TestJudgeTest_ColdLoadIsNotReportedAsASlowJudge(t *testing.T) {
+	var calls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/tags", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"qwen3.5:9b"}]}`))
+	})
+	mux.HandleFunc("/api/chat", func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			// The cold load. Slow enough to blow any sane budget.
+			time.Sleep(1500 * time.Millisecond)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"m","message":{"role":"assistant","content":"{\"decision\":\"ALLOW\",\"reason\":\"ok\",\"risk\":2}"},"done":true}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	resp := runJudgeTestWithBudget(t,
+		`{"judge_endpoint_url":"`+srv.URL+`","judge_model":"qwen3.5:9b"}`,
+		1000*time.Millisecond)
+
+	if calls < 2 {
+		t.Fatalf("chat calls = %d — the budget stage did not re-measure against a warm model", calls)
+	}
+	budget := stageByName(t, resp, "budget")
+	if !budget.OK {
+		t.Errorf("budget stage failed on a judge that answers fast once loaded: %s", budget.Detail)
+	}
+	if !resp.OK {
+		t.Error("the check reported a working judge as unusable")
+	}
+	// The operator must be told the first call was slower, or a genuinely
+	// marginal judge looks comfortable.
+	if !strings.Contains(strings.ToLower(budget.Detail), "load") {
+		t.Errorf("the re-measure was silent: %q", budget.Detail)
 	}
 }

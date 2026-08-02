@@ -1,6 +1,6 @@
 # PRD — Keeper na slabých modelech (cesta k 1.0)
 
-**Stav:** návrh, neimplementováno
+**Stav:** P0/P1/P2/P4/P6/P7/P8 IMPLEMENTOVÁNO a mergnuto (#1635, #1655). P3 a P5 záměrně odloženy — čekají na měření z P4, které potřebuje 20 lidsky rozhodnutých řádků v korpusu.
 **Datum:** 2026-08-01
 **Souvisí:** #1624 / PR #1625 (`think:false` + seed fáze) — merged/open, je to předpoklad tohoto PRD
 **Cíl vydání:** 1.0

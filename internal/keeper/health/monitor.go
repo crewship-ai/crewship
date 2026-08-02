@@ -320,6 +320,15 @@ func (m *Monitor) Snapshot(workspaceID string) (Stats, bool) {
 
 // TrackedWorkspaces reports how many windows are live. Exists so the bound
 // from MaxWorkspaces is assertable rather than a comment.
+// Reset drops every window. For tests, and for a caller that genuinely wants
+// the rolling picture to start over — the windows are in memory, so a restart
+// does this anyway.
+func (m *Monitor) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.windows = make(map[string]*window, len(m.windows))
+}
+
 func (m *Monitor) TrackedWorkspaces() int {
 	if m == nil {
 		return 0

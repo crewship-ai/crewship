@@ -87,6 +87,7 @@ func (r *Router) registerAdminRoutes() {
 	// and an operator with no shell access could not turn Keeper on at all.
 	// A change takes effect on the next credential request; no restart.
 	keeperCfg := NewAdminKeeperConfigHandler(r.keeperSettings, r.Journal(), r.logger)
+	r.authedAdmin("GET", "/api/v1/admin/keeper/health", NewAdminKeeperHealthHandler(r.logger).Get)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/config", keeperCfg.Get)
 	r.authedMut("PUT", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Put)
 	r.authedMut("DELETE", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Reset)
