@@ -54,6 +54,47 @@ func TestCrewContainerStatusRunE_NotConfiguredNoUptime(t *testing.T) {
 	}
 }
 
+// #1642: a crew container created by an older build keeps that build's
+// container configuration until it is recreated, and this command is where an
+// operator can see it. The line has to name the remedy — a status that says
+// "stale" and stops there sends the reader to the source.
+func TestCrewContainerStatusRunE_ReportsStaleRuntimeContract(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4+"/container-status", clitest.JSONResponse(200, map[string]any{
+		"crew_id": covCrewIDCli4, "status": "running", "runtime_contract": "stale",
+	}))
+
+	c := covFreshCmd(crewContainerStatusCmd, nil)
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "older build") {
+		t.Errorf("stale runtime contract not reported: %q", out)
+	}
+	if !strings.Contains(out, "restart-agents") {
+		t.Errorf("the remedy is not named, so the report is not actionable: %q", out)
+	}
+}
+
+// A provider with no opinion must produce no claim. Printing "current" for an
+// absent verdict would assert exactly the thing that was not checked.
+func TestCrewContainerStatusRunE_SaysNothingWhenContractUnknown(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4+"/container-status", clitest.JSONResponse(200, map[string]any{
+		"crew_id": covCrewIDCli4, "status": "running",
+	}))
+
+	c := covFreshCmd(crewContainerStatusCmd, nil)
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "Config:") {
+		t.Errorf("a config verdict was printed for a provider that reported none: %q", out)
+	}
+}
+
 func TestCrewContainerStatusRunE_ServerError(t *testing.T) {
 	stub := covSetupCli4(t)
 	stub.OnGet("/api/v1/crews/"+covCrewIDCli4+"/container-status", clitest.ErrorResponse(404, "Crew not found"))

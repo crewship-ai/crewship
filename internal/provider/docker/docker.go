@@ -134,6 +134,14 @@ type Provider struct {
 	// died inside the TTL window, which the step's exec then surfaces as a
 	// normal failure — never a silent wrong result.
 	warmCrew sync.Map // crew_id (string) → warmCrewEntry
+
+	// contractDigest is this build's crew-container contract, computed once
+	// (see runtime_contract.go). Once, not per call, because it is consulted
+	// on every cold reconcile and every container-status request and is a pure
+	// function of the binary plus this provider's configuration — neither of
+	// which changes while the process runs.
+	contractOnce   sync.Once
+	contractDigest string
 }
 
 // warmCrewTTL bounds how long a "container running" fact is trusted without

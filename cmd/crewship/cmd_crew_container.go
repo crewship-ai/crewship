@@ -43,6 +43,9 @@ var crewContainerStatusCmd = &cobra.Command{
 			CrewID string `json:"crew_id"`
 			Status string `json:"status"`
 			Uptime string `json:"uptime"`
+			// RuntimeContract is absent when the provider has no opinion, and
+			// absent is not "current" — nothing is printed in that case.
+			RuntimeContract string `json:"runtime_contract"`
 		}
 		if err := cli.ReadJSON(resp, &status); err != nil {
 			return err
@@ -52,6 +55,21 @@ var crewContainerStatusCmd = &cobra.Command{
 			containerStatusColor(status.Status), sanitizeTerminal(status.Status), cli.Reset)
 		if status.Uptime != "" {
 			fmt.Printf("%sStarted:%s   %s\n", cli.Bold, cli.Reset, sanitizeTerminal(status.Uptime))
+		}
+		// The crew container is created once and reused for days, so a merged
+		// change to how it is created — the init process, the core-dump
+		// ulimit, supplementary groups, swap, /dev/shm — reaches only crews
+		// whose container is recreated afterwards. This is where an operator
+		// finds out which those are (#1642).
+		switch status.RuntimeContract {
+		case "current":
+			fmt.Printf("%sConfig:%s    %scurrent%s\n", cli.Bold, cli.Reset, cli.Green, cli.Reset)
+		case "stale":
+			fmt.Printf("%sConfig:%s    %sfrom an older build%s\n", cli.Bold, cli.Reset, cli.Yellow, cli.Reset)
+			fmt.Printf("           This container was created before the current container configuration and does not\n")
+			fmt.Printf("           carry the settings added since — including hardening that is applied at create time\n")
+			fmt.Printf("           and nowhere else. It picks them up the next time the container is recreated: an\n")
+			fmt.Printf("           idle-TTL stop, or `crewship crew restart-agents %s`.\n", sanitizeTerminal(args[0]))
 		}
 		return nil
 	},

@@ -277,12 +277,32 @@ func (f *covRT) realCreate(t *testing.T) *container.CreateRequest {
 
 func covRTConfig(t *testing.T) Config {
 	t.Helper()
+	cfg := covBaseConfig()
+	cfg.OutputBasePath = t.TempDir()
+	return cfg
+}
+
+// covBaseConfig is covRTConfig without the per-test temp dir, so the
+// runtime-contract digest a covRT provider produces can be computed without
+// holding one (covContractDigest). OutputBasePath is deliberately the only
+// difference: it feeds the crew's bind-mount paths, which are canonicalised
+// out of the contract digest, so every covRT provider shares one digest.
+func covBaseConfig() Config {
 	return Config{
 		RuntimeImage:      covRuntimeRef,
-		OutputBasePath:    t.TempDir(),
 		SidecarBinaryPath: "/cov/sidecar",
 		EntrypointPath:    "/cov/entrypoint.sh",
 	}
+}
+
+// covContractDigest is the runtime-contract stamp a container created by a
+// covRT provider carries (#1642). Fixtures need it because a container
+// WITHOUT the current stamp is, correctly, torn down and rebuilt when it is
+// found stopped — so a fixture that means "a healthy modern container" has to
+// carry it, exactly as it already has to carry the /secrets tmpfs entry.
+func covContractDigest() string {
+	p := &Provider{cfg: covBaseConfig(), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return p.crewRuntimeContractDigest()
 }
 
 func (f *covRT) provider(t *testing.T, cfg Config) *Provider {
@@ -314,9 +334,13 @@ func covTeam() provider.CrewConfig {
 // and the desired image.
 func covHealthyInspect(image string) string {
 	b, _ := json.Marshal(map[string]any{
-		"Id":     "old-cid",
-		"State":  map[string]any{"Running": true},
-		"Config": map[string]any{"Image": image},
+		"Id":    "old-cid",
+		"State": map[string]any{"Running": true},
+		// The contract stamp belongs in "healthy modern container" for the
+		// same reason the /secrets tmpfs entry does: without it this
+		// container was created by an older build, and a STOPPED one is
+		// rebuilt rather than started (#1642).
+		"Config": map[string]any{"Image": image, "Labels": map[string]string{crewRuntimeContractLabel: covContractDigest()}},
 		"Mounts": []map[string]any{
 			{"Destination": "/crew"},
 			{"Destination": "/home/agent"},

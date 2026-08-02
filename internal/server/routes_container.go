@@ -64,11 +64,21 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	payload := map[string]interface{}{
 		"crew_id": id,
 		"status":  status.State,
 		"uptime":  status.Uptime,
-	})
+	}
+	// Whether this container was created with the container configuration
+	// this build applies today (#1642). Omitted rather than defaulted when
+	// the provider has no opinion — the Apple provider does not track it, and
+	// a docker provider that could not compute its own contract says nothing
+	// rather than claiming "current", which is the direction that would hide
+	// the defect.
+	if status.RuntimeContract != "" {
+		payload["runtime_contract"] = status.RuntimeContract
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
