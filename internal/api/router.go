@@ -99,9 +99,13 @@ type Router struct {
 	orch                *orchestrator.Orchestrator
 	// admission is the read side of host admission control (#1668). nil =
 	// not wired; GET /api/v1/runtime/capacity then reports enabled:false.
-	admission       AdmissionSnapshotter
-	keeperGK        gatekeeper.Evaluator
-	keeperSecrets   SecretGetter
+	admission     AdmissionSnapshotter
+	keeperGK      gatekeeper.Evaluator
+	keeperSecrets SecretGetter
+	// keeperContainer is the process's ONE container provider — server.go
+	// passes deps.Container here, and leaves it nil when the server has none
+	// (--no-docker, or a provider that failed to build). The name records its
+	// first consumer, not an exclusive owner; read it through activeContainer.
 	keeperContainer provider.ContainerProvider
 	keeperConfig    *config.KeeperConfig
 	keeperSettings  *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
@@ -339,6 +343,13 @@ func (r *Router) DrainVerdicts(timeout time.Duration) {
 // A nil provider means the slot is unconfigured or unbuildable (e.g. no
 // ANTHROPIC_API_KEY). Callers must read that as "verdict generation is off",
 // not as an error; a later fix to the wiring is picked up on the next call.
+// activeContainer returns the container provider this process is holding, or
+// nil when it has none. One field, one object: server.go wires deps.Container
+// into keeperContainer, and that is the provider every crew container is
+// created through — reading it under this name keeps the "which runtime is
+// actually in use" question from looking like a keeper concern.
+func (r *Router) activeContainer() provider.ContainerProvider { return r.keeperContainer }
+
 func (r *Router) RunVerdict() (llm.Provider, string) {
 	aux, err := llm.ResolveAux(r.AuxModels(), llm.SlotRunSummary)
 	if err != nil {

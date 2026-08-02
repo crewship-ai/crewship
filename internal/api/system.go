@@ -18,6 +18,29 @@ type SystemHandler struct {
 	logger  *slog.Logger
 	version string
 	build   buildinfo.Info
+
+	// detectDocker enumerates every Docker-API-compatible runtime that answers
+	// on this host. It is a field rather than a direct call so the tests can
+	// pin the inventory logic to a fixed set of runtimes instead of whatever
+	// the machine running `go test` happens to have installed.
+	detectDocker func(context.Context) []docker.DetectResult
+
+	// detectApple reports the Apple Containers version, or an error when the
+	// runtime is absent. Apple is probed separately, and composed in here,
+	// because it is not a Docker-API daemon at all — it has no socket, so
+	// docker.DetectAll neither knows nor can know about it.
+	detectApple func(context.Context) (string, error)
+
+	// activeRuntime names the runtime this PROCESS actually connected to.
+	//
+	//	detected — the docker provider's own DetectResult, for comparison via
+	//	           docker.SameRuntimeEndpoint; zero when the provider is Apple
+	//	apple    — the active provider is Apple Containers
+	//	ok       — false when the server holds no container provider at all
+	//	           (--no-docker, or one that failed to build), in which case
+	//	           nothing on this host is in use however many runtimes
+	//	           answered the probe
+	activeRuntime func() (detected docker.DetectResult, apple bool, ok bool)
 }
 
 // NewSystemHandler creates a SystemHandler with the given logger and the
@@ -30,10 +53,57 @@ type SystemHandler struct {
 // Wiring that has the ldflags values calls WithBuild to override.
 func NewSystemHandler(logger *slog.Logger, version string) *SystemHandler {
 	return &SystemHandler{
-		logger:  logger,
-		version: version,
-		build:   buildinfo.Resolve(version, "", ""),
+		logger:        logger,
+		version:       version,
+		build:         buildinfo.Resolve(version, "", ""),
+		detectDocker:  docker.DetectAll,
+		detectApple:   detectAppleVersion,
+		activeRuntime: activeRuntimeFrom(nil),
 	}
+}
+
+func detectAppleVersion(ctx context.Context) (string, error) {
+	res, err := apple.Detect(ctx)
+	if err != nil {
+		return "", err
+	}
+	return res.Version, nil
+}
+
+// dockerDaemonNamer is implemented by *docker.Provider: it is the only
+// container provider that can say which daemon it dialled.
+type dockerDaemonNamer interface {
+	Detected() docker.DetectResult
+}
+
+// activeRuntimeFrom derives the in_use accessor from the container provider
+// this process is holding (server.go passes deps.Container to the router).
+//
+// It takes `any` rather than provider.ContainerProvider so that the honest
+// answer for "no provider at all" is reachable — and so the mapping can be
+// tested without standing up a ten-method fake.
+//
+// A provider that cannot name a daemon is the Apple one: `container.provider`
+// accepts only docker, apple or auto (internal/config/config.go), and auto
+// resolves to one of those two, so elimination is exhaustive rather than a
+// guess.
+func activeRuntimeFrom(cp any) func() (docker.DetectResult, bool, bool) {
+	if cp == nil {
+		return func() (docker.DetectResult, bool, bool) { return docker.DetectResult{}, false, false }
+	}
+	if d, isDocker := cp.(dockerDaemonNamer); isDocker {
+		return func() (docker.DetectResult, bool, bool) { return d.Detected(), false, true }
+	}
+	return func() (docker.DetectResult, bool, bool) { return docker.DetectResult{}, true, true }
+}
+
+// WithActiveContainer teaches the handler which runtime the running server
+// actually connected to, so `in_use` reports ground truth rather than
+// re-deriving it from the probe order — the two differ whenever DOCKER_HOST is
+// set, and disagree entirely when the server booted with --no-docker.
+func (h *SystemHandler) WithActiveContainer(cp any) *SystemHandler {
+	h.activeRuntime = activeRuntimeFrom(cp)
+	return h
 }
 
 // WithBuild replaces the resolved build identity — used by the router so the
@@ -44,17 +114,120 @@ func (h *SystemHandler) WithBuild(b buildinfo.Info) *SystemHandler {
 	return h
 }
 
+// installLinks is the set of runtimes an operator can install and Crewship can
+// then actually drive — one entry per label the detection vocabulary can
+// produce, which is what runtime_install_links_test.go pins against the
+// detector's own candidate list rather than against a copy of it.
+//
+// `rancher` was missing. That was nearly unreachable while Detect labelled by
+// candidate path — Rancher Desktop with administrative access on points
+// /var/run/docker.sock at ~/.rd/docker.sock, and the entry came back as
+// `docker`, quietly using the Docker link. #1688 made the name honest and in
+// doing so exposed the hole.
+//
+// containerd/nerdctl is deliberately NOT here, and is not in the detector's
+// candidates either: containerd serves its own gRPC API rather than the Docker
+// REST API, so no version of it can ever answer the probe (#1687). Offering an
+// install link would be advertising a runtime this server cannot drive — the
+// exact dishonesty this endpoint exists to remove.
 var installLinks = map[string]string{
 	"docker":   "https://docs.docker.com/get-docker/",
 	"podman":   "https://podman.io/docs/installation",
 	"colima":   "https://github.com/abiosoft/colima",
 	"orbstack": "https://orbstack.dev/",
+	"rancher":  "https://rancherdesktop.io/",
 	"apple":    "https://github.com/apple/container",
 }
 
-// Runtime probes for a Docker-compatible container runtime and returns its status.
+// runtimeEntry is one container runtime present on the host.
+type runtimeEntry struct {
+	Runtime string `json:"runtime"`
+	Version string `json:"version"`
+	Socket  string `json:"socket"`
+	// InUse marks the single runtime this server is actually driving. At most
+	// one entry carries it, and when the server has no container provider no
+	// entry does — a runtime being installed and a runtime being used are
+	// different facts, and this endpoint is the only place that can tell them
+	// apart.
+	InUse bool `json:"in_use"`
+}
+
+// inventory probes the host and returns every runtime that answered, with the
+// one this process is driving marked.
+//
+// There is no cache behind this: docker.DetectAll re-probes every candidate on
+// every call. It is bounded and fast (single-digit milliseconds, concurrent,
+// and a cancelled context yields a partial list rather than a hang), which is
+// right for a status panel and wrong for anything on a hot path. Nothing here
+// should end up on one — see the fetch-policy comment in
+// app/(dashboard)/admin/tabs/runtime-tab.tsx.
+func (h *SystemHandler) inventory(ctx context.Context) []runtimeEntry {
+	dockerResults := h.detectDocker(ctx)
+	entries := make([]runtimeEntry, 0, len(dockerResults)+1)
+	for _, d := range dockerResults {
+		entries = append(entries, runtimeEntry{Runtime: d.Runtime, Version: d.Version, Socket: d.Socket})
+	}
+
+	appleVersion, appleErr := h.detectApple(ctx)
+	if appleErr == nil {
+		entries = append(entries, runtimeEntry{Runtime: "apple", Version: appleVersion})
+	}
+
+	active, activeIsApple, running := h.activeRuntime()
+	if !running {
+		if len(entries) == 0 {
+			h.logger.Debug("no container runtime found", "apple_error", appleErr)
+		}
+		return entries
+	}
+
+	if activeIsApple {
+		for i := range entries {
+			if entries[i].Runtime == "apple" {
+				entries[i].InUse = true
+				return entries
+			}
+		}
+		// The Apple provider is running but its CLI probe just failed — a
+		// transient `container system status`. It is still what agents run on.
+		return append(entries, runtimeEntry{Runtime: "apple", InUse: true})
+	}
+
+	// entries[i] is the runtimeEntry built from dockerResults[i] — the docker
+	// results were appended first, in order, before Apple.
+	for i, d := range dockerResults {
+		// NOT a Socket string comparison. Detect stores DOCKER_HOST verbatim
+		// ("unix:///var/run/docker.sock") where DetectAll stores a plain path,
+		// and one daemon is reachable under several paths that resolve to the
+		// same socket. SameRuntimeEndpoint resolves both before comparing;
+		// string equality here would silently report nothing in use on exactly
+		// the setups this endpoint was built for.
+		if docker.SameRuntimeEndpoint(d, active) {
+			entries[i].InUse = true
+			return entries
+		}
+	}
+
+	// The daemon in use was not among the probed candidates — DOCKER_HOST can
+	// point at a remote tcp:// engine that no socket path covers. Listing it is
+	// the whole point of the endpoint; dropping it would leave the inventory
+	// claiming nothing is in use while agents are running on it.
+	return append(entries, runtimeEntry{
+		Runtime: active.Runtime, Version: active.Version, Socket: active.Socket, InUse: true,
+	})
+}
+
+// Runtime reports every container runtime present on this host, and which one
+// the server is actually driving.
+//
 // GET /api/v1/system/runtime
 // Accessible to any authenticated user (no workspace role required).
+//
+// The `runtimes` array is the inventory; `runtime`/`version`/`socket` summarise
+// the entry with `in_use` set. Those top-level fields are null when runtimes
+// are installed but none is in use — the server booted without a container
+// provider — because naming one of them there would report a runtime that is
+// running nothing.
 func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -65,31 +238,9 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	// Build list of all available runtimes
-	var runtimes []map[string]interface{}
-
-	// Check Docker-compatible runtimes
-	dockerResult, dockerErr := docker.Detect(ctx)
-	if dockerErr == nil {
-		runtimes = append(runtimes, map[string]interface{}{
-			"runtime": dockerResult.Runtime,
-			"version": dockerResult.Version,
-			"socket":  dockerResult.Socket,
-		})
-	}
-
-	// Check Apple Containers
-	appleResult, appleErr := apple.Detect(ctx)
-	if appleErr == nil {
-		runtimes = append(runtimes, map[string]interface{}{
-			"runtime": "apple",
-			"version": appleResult.Version,
-			"socket":  "",
-		})
-	}
+	runtimes := h.inventory(ctx)
 
 	if len(runtimes) == 0 {
-		h.logger.Debug("no container runtime found", "docker_error", dockerErr, "apple_error", appleErr)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"available":     false,
 			"runtime":       nil,
@@ -113,15 +264,24 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Primary runtime is the first detected one
-	primary := runtimes[0]
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"available": true,
-		"runtime":   primary["runtime"],
-		"version":   primary["version"],
-		"socket":    primary["socket"],
+		"runtime":   nil,
+		"version":   nil,
+		"socket":    nil,
 		"runtimes":  runtimes,
-	})
+		// Alongside an available runtime too, not only when none was found: an
+		// operator with one runtime installed still needs to be told what the
+		// others are (#1690).
+		"install_links": installLinks,
+	}
+	for _, rt := range runtimes {
+		if rt.InUse {
+			resp["runtime"], resp["version"], resp["socket"] = rt.Runtime, rt.Version, rt.Socket
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Version reports the running binary's build identity plus the latest
