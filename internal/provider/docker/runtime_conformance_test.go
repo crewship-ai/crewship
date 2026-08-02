@@ -193,7 +193,21 @@ func newConformanceProvider(ctx context.Context, t *testing.T) (*Provider, func(
 		t.Fatalf("write sidecar stub: %v", err)
 	}
 
-	entrypoint := repoFile(t, "scripts", "entrypoint.sh")
+	// Copy the entrypoint next to the sidecar stub rather than bind-mounting it
+	// straight out of the checkout. A VM-backed runtime can only bind host paths
+	// that are shared into its VM — podman machine shares /Users, /private and
+	// /var/folders and nothing else — so a repo living anywhere outside that set
+	// fails the create with `mkdir /Volumes: operation not permitted`, which is
+	// a fact about where this clone sits and not about the runtime. t.TempDir()
+	// is under TMPDIR, which is shared everywhere this runs.
+	entrypoint := filepath.Join(base, "entrypoint.sh")
+	src, err := os.ReadFile(repoFile(t, "scripts", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read entrypoint: %v", err)
+	}
+	if err := os.WriteFile(entrypoint, src, 0o755); err != nil {
+		t.Fatalf("stage entrypoint: %v", err)
+	}
 
 	cfg := Config{
 		OutputBasePath:    filepath.Join(base, "output"),
@@ -298,10 +312,16 @@ echo "PID1_COMM=$(cat /proc/1/comm 2>/dev/null)"
 echo "WHOAMI=$(id -u):$(id -g)"
 echo "GROUPS=$(id -G | tr ' ' ',')"
 echo "NNP=$(awk '/^NoNewPrivs:/{print $2}' /proc/self/status)"
-echo "ULIMIT_CORE=$(ulimit -c)"
-echo "ULIMIT_NOFILE=$(ulimit -n)"
-echo "ULIMIT_NPROC=$(ulimit -u)"
-echo "ULIMIT_FSIZE=$(ulimit -f)"
+# /proc/self/limits rather than ulimit(1): the shell builtin is not uniform
+# across shells — dash silently prints nothing for 'ulimit -u', which reads
+# as "the runtime dropped nproc" when the limit is in fact applied — and it
+# reports core/fsize in 512-byte blocks, so every comparison needs a
+# conversion that can itself be wrong. The kernel file is in bytes, always
+# present, and is the authority the shell is paraphrasing.
+awk -F'  +' '/^Max core file size/{print "RLIMIT_CORE=" $2}
+             /^Max open files/{print "RLIMIT_NOFILE=" $2}
+             /^Max processes/{print "RLIMIT_NPROC=" $2}
+             /^Max file size/{print "RLIMIT_FSIZE=" $2}' /proc/self/limits
 echo "SHM_BYTES=$(df -B1 /dev/shm 2>/dev/null | awk 'NR==2{print $2}')"
 echo "TMP_OPTS=$(awk '$2=="/tmp"{print $4}' /proc/mounts)"
 echo "TMP_BYTES=$(df -B1 /tmp 2>/dev/null | awk 'NR==2{print $2}')"
@@ -315,7 +335,7 @@ echo "PIDS_MAX=$(cat /sys/fs/cgroup/pids.max 2>/dev/null || cat /sys/fs/cgroup/p
 echo "CPU_MAX=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo "$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null) $(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null)")"
 echo "HOST_GATEWAY=$(getent hosts host.docker.internal 2>/dev/null | head -1 | awk '{print $1}')"
 echo "HOST_CONTAINERS_INTERNAL=$(getent hosts host.containers.internal 2>/dev/null | head -1 | awk '{print $1}')"
-for d in /crew /workspace /output /home/agent /opt/crew-tools; do
+for d in /crew /workspace /output /home/agent /opt/crew-tools /secrets; do
   k=$(echo "$d" | tr '/-' '__' | tr '[:lower:]' '[:upper:]')
   echo "WRITE$k=$(touch "$d/.crewship-conformance" 2>/dev/null && echo yes || echo no)"
 done
@@ -424,18 +444,10 @@ func evaluate(t *testing.T, p *Provider, hostCfg *container.HostConfig, f contai
 	// ulimit reports `core` and `fsize` in 512-byte blocks and `nofile`/`nproc`
 	// as plain counts, so the expectation is converted rather than compared raw.
 	for _, u := range hostCfg.Resources.Ulimits {
-		key, blocks := "ULIMIT_"+strings.ToUpper(u.Name), false
-		switch u.Name {
-		case "core", "fsize":
-			blocks = true
-		}
-		want := u.Soft
-		if blocks {
-			want /= 512
-		}
+		key := "RLIMIT_" + strings.ToUpper(u.Name)
 		add(probe{
-			name: "rlimit " + u.Name + " is applied", want: strconv.FormatInt(want, 10), got: f[key],
-			honoured:    f[key] == strconv.FormatInt(want, 10),
+			name: "rlimit " + u.Name + " is applied", want: strconv.FormatInt(u.Soft, 10), got: f[key],
+			honoured:    f[key] == strconv.FormatInt(u.Soft, 10),
 			loadBearing: u.Name == "core",
 			why:         "rootless runtimes cannot raise an rlimit above the invoking user's hard limit, so these can silently land lower than asked",
 		})
@@ -447,10 +459,36 @@ func evaluate(t *testing.T, p *Provider, hostCfg *container.HostConfig, f contai
 		honoured: f["ETC_WRITABLE"] == "no", loadBearing: true,
 		why: "read-only /etc is what makes a user-supplied base image safe to hand an agent",
 	})
+	// The expectation is read out of the spec the provider emitted, not restated
+	// here, because the two runtimes legitimately differ: Docker gets a mount
+	// root owned by the agent at 0700, Podman rejects uid/gid directives
+	// entirely and gets a sticky 1777 root instead (secretsTmpfsSpecFor). A
+	// hardcoded "700 1001 1001" would report the supported Podman
+	// configuration as a failure and teach the reader to ignore the matrix.
+	secretsSpec := hostCfg.Tmpfs["/secrets"]
+	wantSecretsMode := strings.TrimPrefix(tmpfsOption(secretsSpec, "mode"), "0")
+	gotSecretsMode, _, _ := strings.Cut(f["SECRETS_STAT"], " ")
 	add(probe{
-		name: "/secrets is a private tmpfs owned by the agent", want: "700 1001 1001", got: f["SECRETS_STAT"],
-		honoured: f["SECRETS_STAT"] == "700 1001 1001", loadBearing: true,
-		why: "credential files land here; a wrong mode or owner exposes them to every sibling process",
+		name: "/secrets carries the mode the spec asks for", want: wantSecretsMode, got: gotSecretsMode,
+		honoured: wantSecretsMode != "" && gotSecretsMode == wantSecretsMode, loadBearing: true,
+		why: "credential files land here; a wrong mode exposes them to every sibling process or locks the agent out of its own mount",
+	})
+	if uid := tmpfsOption(secretsSpec, "uid"); uid != "" {
+		add(probe{
+			name: "/secrets mount root is owned by the agent", want: uid + ":" + tmpfsOption(secretsSpec, "gid"),
+			got:      strings.TrimSpace(strings.TrimPrefix(f["SECRETS_STAT"], gotSecretsMode)),
+			honoured: strings.Fields(f["SECRETS_STAT"]) != nil && strings.HasSuffix(f["SECRETS_STAT"], uid+" "+tmpfsOption(secretsSpec, "gid")),
+			why:      "only a runtime that accepts uid/gid mount directives gets this; the others rely on the mode alone",
+		})
+	}
+	// Whatever the mode and owner turn out to be, this is the invariant that
+	// actually matters and the one a mode-only assertion misses: a 0700
+	// root-owned /secrets creates cleanly on Podman and then fails every
+	// credential-bearing run one layer later, at the mkdir preflight.
+	add(probe{
+		name: "agent can create its directory under /secrets", want: "yes", got: f["WRITE_SECRETS"],
+		honoured: f["WRITE_SECRETS"] == "yes", loadBearing: true,
+		why: "writeCredentialFiles does `mkdir -p /secrets/<slug>` as uid 1001; if that fails the run aborts with no credentials",
 	})
 	add(probe{
 		name: "/secrets carries noexec,nosuid", want: "noexec,nosuid", got: f["SECRETS_OPTS"],
@@ -462,14 +500,20 @@ func evaluate(t *testing.T, p *Provider, hostCfg *container.HostConfig, f contai
 		honoured: hasMountOpts(f["TMP_OPTS"], "noexec", "nosuid"),
 		why:      "defense in depth against staging and execve-ing a payload",
 	})
+	// A tmpfs size= request is rounded UP to a whole number of pages by the
+	// kernel, so exact equality is the wrong assertion and fails on both
+	// runtimes for a number that is in fact correct. Compare against the
+	// rounded value, which is what was actually asked for.
+	wantTmp := roundUpToPage(tmpfsSizeFromSpec(hostCfg.Tmpfs["/tmp"]))
 	add(probe{
-		name: "/tmp tmpfs is sized from the memory budget", want: humanBytes(tmpfsSizeFromSpec(hostCfg.Tmpfs["/tmp"])), got: humanBytes(parseInt64(f["TMP_BYTES"])),
-		honoured: parseInt64(f["TMP_BYTES"]) == tmpfsSizeFromSpec(hostCfg.Tmpfs["/tmp"]),
+		name: "/tmp tmpfs is sized from the memory budget", want: humanBytes(wantTmp), got: humanBytes(parseInt64(f["TMP_BYTES"])),
+		honoured: parseInt64(f["TMP_BYTES"]) == wantTmp,
 		why:      "/tmp is unswappable shmem charged to the crew's memory cgroup; an unbounded one OOM-kills the crew",
 	})
+	wantShm := roundUpToPage(hostCfg.ShmSize)
 	add(probe{
-		name: "/dev/shm honours ShmSize", want: humanBytes(hostCfg.ShmSize), got: humanBytes(parseInt64(f["SHM_BYTES"])),
-		honoured: parseInt64(f["SHM_BYTES"]) == hostCfg.ShmSize,
+		name: "/dev/shm honours ShmSize", want: humanBytes(wantShm), got: humanBytes(parseInt64(f["SHM_BYTES"])),
+		honoured: parseInt64(f["SHM_BYTES"]) == wantShm,
 		why:      "the default 64 MiB breaks toolchains that size their shared memory from the container's memory limit",
 	})
 	for _, m := range []struct{ key, path string }{
@@ -597,6 +641,19 @@ func hasMountOpts(opts string, want ...string) bool {
 		}
 	}
 	return true
+}
+
+// roundUpToPage mirrors what the kernel does with a tmpfs size= request: round
+// up to a whole number of 4 KiB pages. 4096 is the page size on every
+// architecture this product's Linux containers run on (amd64 and arm64 both;
+// arm64 kernels with 16 KiB pages exist but no container runtime we support
+// ships one).
+func roundUpToPage(n int64) int64 {
+	const page = 4096
+	if n <= 0 {
+		return n
+	}
+	return (n + page - 1) / page * page
 }
 
 func parseInt64(s string) int64 {

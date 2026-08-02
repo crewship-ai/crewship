@@ -115,6 +115,17 @@ type Provider struct {
 	// explicitly.
 	checkVolumeMountpoint bool
 
+	// cgroupVersion is the daemon's reported host cgroup generation ("1", "2",
+	// or "" when the daemon could not be asked). Read once at construction —
+	// a host does not change cgroup generation without a reboot, and a
+	// per-create Info() call would add a daemon round-trip to every wake.
+	//
+	// It exists because MemorySwappiness has no cgroup v2 equivalent and the
+	// runtimes disagree violently about what to do with it: docker discards it
+	// with a warning, podman/crun refuses to START the container. See
+	// buildCrewContainerConfig.
+	cgroupVersion string
+
 	// warmCrew caches "crew <id>'s container <cid> was confirmed running at
 	// <t>" so a burst of same-crew EnsureCrewRuntime calls — a DAG wave, or a
 	// prewarm immediately followed by the first step — skips the host-wide
@@ -359,6 +370,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		// Docker Desktop on Linux is VM-backed too, so a host-OS check would
 		// false-positive there.
 		checkVolumeMountpoint: daemonSharesHostFS(ctx, cli),
+		cgroupVersion:         detectCgroupVersion(ctx, cli),
 	}
 
 	logger.Info("container runtime detected",
@@ -621,6 +633,80 @@ func (p *Provider) toolsVolumeName(id, slug string) string {
 // mkdir-preflight / writeCredentialFiles failure paths) instead of starting
 // the agent with zero credentials or persisting secrets anywhere.
 const secretsTmpfsSpec = "rw,noexec,nosuid,size=16m,mode=0700,uid=1001,gid=1001"
+
+// secretsTmpfsSpecPodman is the same mount for Podman, which rejects the uid
+// and gid directives outright — in BOTH the option-string path and the Mounts
+// API, i.e. everywhere Docker offers a way to express them:
+//
+//	container create: unknown mount option "uid=1001": invalid mount option
+//
+// Measured, not inferred: podman 4.9.3 on ubuntu-latest (rootful and rootless)
+// and podman 6.0.2 on applehv/macOS 26 refuse identically. Two majors apart,
+// two hosts, two privilege modes. Every crew container failed at CREATE, so
+// Crewship did not work on Podman at all — on a runtime the README, PRIVACY.md
+// and `crewship doctor` all advertise (#1672).
+//
+// Dropping the two directives is not on its own a fix. A tmpfs is mounted by
+// the kernel as root:root, the crew container runs as uid 1001, and CapDrop:
+// ALL leaves no exec — not even one asking for user 0 — with CAP_CHOWN to
+// correct it afterwards. Measured on podman 6.0.2, same container, three specs:
+//
+//	mode=0700,uid=1001,gid=1001 → create refused
+//	mode=0700                   → mounts root:root, agent write DENIED
+//	mode=1777                   → mounts root:root, agent write OK, size honoured
+//
+// So the mount root is either agent-writable at 1777 or it is useless, and the
+// 0700 variant is the worst of the three: it creates cleanly and then fails
+// every credential-bearing run one layer later, at the mkdir preflight, where
+// the cause is far harder to see.
+//
+// The Apple provider reached this exact conclusion independently for the same
+// underlying reason — its CLI has no uid/gid mount directive either — and its
+// secretsMountSpec has carried mode=1777 since it shipped
+// (apple_create_args.go). Docker is the outlier that can do better, and keeps
+// doing better; it is not the baseline the other two failed to meet.
+//
+// What 1777 costs, precisely. With one shared agent uid the practical delta is
+// small: every agent already runs as 1001 and could already read a 0700 mount
+// root owned by 1001. What changes is that the sidecar uid (1002) can now LIST
+// /secrets and see agent slugs. It still cannot read a credential —
+// writeCredentialFiles chmods each per-agent directory to 0700 and each file to
+// 0400/0600 as uid 1001, so the secrets themselves keep Docker's protection —
+// and the sticky bit stops one uid unlinking another's directory. Closing the
+// remainder needs a directive Podman's compat API does not have.
+const secretsTmpfsSpecPodman = "rw,noexec,nosuid,size=16m,mode=1777"
+
+// secretsTmpfsSpecFor picks the /secrets mount spec for the detected runtime.
+//
+// Unknown runtimes get Docker's spec deliberately. It is the stronger of the
+// two, everything reaching this code answered a Docker-API socket, and a
+// runtime that turns out to share Podman's restriction fails loudly at create
+// with the message quoted above — a far better outcome than quietly handing
+// every runtime the weaker mount root on the chance that one of them needs it.
+func secretsTmpfsSpecFor(runtime string) string {
+	if strings.EqualFold(strings.TrimSpace(runtime), "podman") {
+		return secretsTmpfsSpecPodman
+	}
+	return secretsTmpfsSpec
+}
+
+// tmpfsOption returns the value of one directive in a HostConfig.Tmpfs option
+// string ("mode" out of "rw,noexec,size=16m,mode=1777"), or "" when absent.
+func tmpfsOption(spec, name string) string {
+	for _, part := range strings.Split(spec, ",") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(part), name+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// parseOctalMode parses a mount mode directive as octal, with or without a
+// leading zero, so callers can assert what a mode MEANS (world-writable, sticky)
+// rather than string-matching a value a wrong-but-similar one could imitate.
+func parseOctalMode(mode string) (int64, error) {
+	return strconv.ParseInt(strings.TrimSpace(mode), 8, 32)
+}
 
 // Supplementary groups handed to the crew container via HostConfig.GroupAdd.
 //
@@ -1015,6 +1101,20 @@ func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
 		return true
 	}
 	return false
+}
+
+// detectCgroupVersion asks the daemon which cgroup generation the host runs.
+// Returns "1", "2", or "" — and "" specifically means "could not be
+// determined", never a guess. Callers must treat the empty case as "do not send
+// cgroup-v1-only fields": a field that is merely useless on v2 costs nothing to
+// omit, while sending one that is fatal on v2 (MemorySwappiness, under
+// podman/crun) kills every crew on a host we failed to identify.
+func detectCgroupVersion(ctx context.Context, cli *client.Client) string {
+	info, err := cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(info.Info.CgroupVersion)
 }
 
 // ensureVolume creates a Docker named volume if it doesn't already
