@@ -25,6 +25,16 @@
 //
 //	container system start
 //	go test -tags conformance -run TestAppleRuntimeConformance -v ./internal/provider/apple/
+//
+// The _darwin_ in the filename is load-bearing rather than decorative: Apple
+// Containers exist on no other platform, so the constraint is a compile-time
+// decision instead of a runtime t.Skip that reads as a pass in CI output —
+// which is the whole argument scripts/skip-budget.sh makes.
+//
+// The remaining environment checks FAIL rather than skip. This file is behind a
+// build tag; reaching it means somebody asked for a conformance run, and
+// answering "ok" because there was no runtime to test against is the exact
+// failure mode a skip budget exists to prevent.
 package apple
 
 import (
@@ -59,11 +69,8 @@ type appleProbe struct {
 }
 
 func TestAppleRuntimeConformance(t *testing.T) {
-	if goruntime.GOOS != "darwin" {
-		t.Skip("Apple Containers only exist on macOS")
-	}
 	if _, err := exec.LookPath("container"); err != nil {
-		t.Skip("the `container` CLI is not installed")
+		t.Fatalf("the `container` CLI is not on PATH: %v — install it, or do not build with -tags conformance", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -94,7 +101,7 @@ func TestAppleRuntimeConformance(t *testing.T) {
 	}
 	p, err := New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		t.Skipf("apple container runtime unavailable: %v", err)
+		t.Fatalf("apple container runtime unavailable: %v — run `container system start` first", err)
 	}
 	defer p.Close()
 

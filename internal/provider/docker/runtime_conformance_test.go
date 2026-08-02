@@ -232,7 +232,11 @@ func newConformanceProvider(ctx context.Context, t *testing.T) (*Provider, func(
 	}
 	p, err := New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
-		t.Skipf("no container runtime reachable: %v", err)
+		// Fails rather than skips. This file is behind a build tag, so getting
+		// here means somebody asked for a conformance run — and reporting "ok"
+		// because there was no runtime to test against is precisely the silent
+		// non-coverage scripts/skip-budget.sh exists to prevent.
+		t.Fatalf("no container runtime reachable: %v — start one, or point DOCKER_HOST at it", err)
 	}
 	return p, func() { _ = p.client.Close() }
 }
