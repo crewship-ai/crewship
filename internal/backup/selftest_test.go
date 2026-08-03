@@ -43,6 +43,7 @@ type fakeDockerOps struct {
 
 	copyFromCalls int
 	execCalls     int
+	execCmds      []string
 }
 
 func newFakeDockerOps() *fakeDockerOps {
@@ -205,6 +206,7 @@ func (f *fakeDockerOps) Exec(_ context.Context, _ string, cmd []string) (int, []
 		return -1, nil, f.execErr
 	}
 	f.execCalls++
+	f.execCmds = append(f.execCmds, strings.Join(cmd, " "))
 	if len(cmd) == 3 && cmd[0] == "rm" && cmd[1] == "-f" {
 		path := cmd[2]
 		name := strings.TrimPrefix(path, ContainerWorkspacePath+"/")

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"os"
 	goruntime "runtime"
 	"strings"
@@ -1588,9 +1589,11 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 	for _, dir := range allDirs {
 		chownCmd += " " + mnt(dir)
 	}
-	chownCmd += ` && find ` + mnt(crewPath) + ` -name .memory -type d -exec chgrp -R 1002 {} +`
-	chownCmd += ` ; find ` + mnt(crewPath) + ` -name .memory -type d -exec chmod 2775 {} +`
-	chownCmd += ` ; find ` + mnt(crewPath) + ` -path '*/.memory/*' -type f -exec chmod g+rw {} +`
+	// The memory tree's ownership contract lives in internal/memory, not
+	// here: restore needs the same guarantee, and when it was spelled
+	// out only in this function the restore path could discover it only
+	// by failing (#1746).
+	chownCmd += ` && ` + memory.MemoryOwnershipCmd(mnt(crewPath))
 	for _, target := range volumeTargets {
 		chownCmd += ` ; chown 1001:1001 ` + shellQuote(target) + ` ; chmod 755 ` + shellQuote(target)
 	}

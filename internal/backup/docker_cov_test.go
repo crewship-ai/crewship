@@ -763,3 +763,29 @@ func TestRepackTarWithExcludes_CorruptInputErrors(t *testing.T) {
 		t.Fatalf("expected repack tar error, got %v", err)
 	}
 }
+
+// UnlinkFirst swaps --overwrite for --unlink-first: GNU tar refuses the
+// two together, and the crew memory section needs the second because
+// overwriting in place makes tar chmod a file another uid owns (#1746).
+func TestCopyToPath_UnlinkFirstReplacesOverwrite(t *testing.T) {
+	ctx := context.Background()
+	d := newFakeDaemon()
+	d.execReadStdin = true
+	ops := newMobyOps(t, d)
+	spec := ExtractSpec{Dest: "/crew", User: "1002:1002", UnlinkFirst: true}
+	if err := ops.CopyToPath(ctx, "c1", spec, strings.NewReader("inner-tar")); err != nil {
+		t.Fatalf("CopyToPath: %v", err)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	got := fmt.Sprint(d.execCmd)
+	if !strings.Contains(got, "--unlink-first") {
+		t.Errorf("cmd = %v, want --unlink-first", d.execCmd)
+	}
+	if strings.Contains(got, "--overwrite") {
+		t.Errorf("cmd = %v, must not carry both — GNU tar refuses them together", d.execCmd)
+	}
+	if d.execUser != "1002:1002" {
+		t.Errorf("exec user = %q, want the memory writer", d.execUser)
+	}
+}

@@ -103,6 +103,24 @@ type ExtractSpec struct {
 	// utime on the volume root returns EPERM; on for content whose
 	// timestamps carry meaning (memory daily notes, workspace files).
 	PreserveTimes bool
+
+	// UnlinkFirst removes an existing entry before writing it, instead
+	// of overwriting in place. The two are mutually exclusive in GNU tar
+	// ("'--unlink-first' cannot be used with '--overwrite'"), so setting
+	// this swaps one for the other.
+	//
+	// It exists for the crew memory section (#1746). Overwriting in
+	// place makes tar chmod the existing file, and chmod is an OWNER
+	// right — so replacing a file the AGENT wrote, while extracting as
+	// the memory writer, fails with "Cannot change mode: Operation not
+	// permitted" after the content is already written. Unlinking needs
+	// write on the parent directory instead, which the memory group has
+	// by design.
+	//
+	// Safe only for a section carrying no directory entries: on its own
+	// --unlink-first tries to unlink directories too and fails on the
+	// first non-empty one. The crew memory section filters them out.
+	UnlinkFirst bool
 }
 
 // MobyDockerOps is the production implementation backed by the moby
@@ -237,7 +255,11 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, 
 	// So an entry the exec identity cannot replace is not made
 	// replaceable here; it is caught by RestoreCrew's preflight, before
 	// anything is written, and named to the operator.
-	cmd := []string{"tar", "-x", "--overwrite", "--no-same-owner"}
+	replace := "--overwrite"
+	if spec.UnlinkFirst {
+		replace = "--unlink-first"
+	}
+	cmd := []string{"tar", "-x", replace, "--no-same-owner"}
 	if spec.PreserveModes {
 		cmd = append(cmd, "--same-permissions")
 	} else {

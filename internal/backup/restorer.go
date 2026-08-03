@@ -621,7 +621,10 @@ func splitFirst(s string) (head, tail string, ok bool) {
 // permits is an owner changing a file's group to a group it is itself a
 // member of, which is exactly this.
 const (
-	agentUser         = "1001:1001"
+	agentUser = "1001:1001"
+	// memoryWriterUser is the sidecar's identity, which owns the files
+	// in a crew's .memory tree. See the crew-memory section.
+	memoryWriterUser  = "1002:1002"
 	sidecarWriterUser = "1001:1002"
 	rootUser          = "0:0"
 )
@@ -646,14 +649,58 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 			spec: ExtractSpec{Dest: ContainerWorkspacePath, User: agentUser, PreserveTimes: true},
 		},
 		{
-			// The crew memory tree. PreserveModes is not cosmetic here:
-			// the .memory directories are setgid 2775 so that everything
-			// the agent creates later inherits group 1002 and stays
-			// readable by the memory sidecar. A restore that drops the
-			// bit leaves memory that works today and silently stops
-			// being shared tomorrow.
-			open: func() (io.ReadCloser, bool, error) { return payload.OpenCrew(ctx, crewSlug) },
+			// The crew memory tree, restored as the MEMORY writer and
+			// files only. Both halves are forced by what the tree
+			// actually looks like once agents have used it (#1746).
+			//
+			// Identity: the sidecar writes an agent's memory as uid 1002
+			// — deliberately, so the agent process cannot read its
+			// /proc/<pid>/mem — at mode 0644. Extracting as the agent
+			// could not replace those files, and the preflight rightly
+			// refused the whole restore, which made a crew unrestorable
+			// the moment its agents used memory at all. Nothing can fix
+			// that after the fact: the container runs CapDrop ALL, so
+			// even root inside it cannot chown, and crewshipd on the
+			// host is neither uid. So the restore has to BE the writer
+			// that owns the files, and that writer is 1002.
+			//
+			// Files only: the section's tar also carries `agents/` and
+			// `agents/<slug>/`, which are 1001-owned. chmod and utime
+			// are owner rights, so tar exits 2 on them as 1002 —
+			// "Cannot utime: Operation not permitted" — having already
+			// written part of the section. Directory entries are
+			// therefore dropped: every .memory directory is created by
+			// prepMemoryDirs when the agent starts, and a restore
+			// already requires a running container.
+			//
+			// Which is also why PreserveModes is gone. It was here for
+			// the setgid bit on .memory, and .memory is one of the
+			// directories no longer extracted. The bit is set by the
+			// provider at container start and this no longer touches it.
+			open: func() (io.ReadCloser, bool, error) {
+				r, ok, err := payload.OpenCrew(ctx, crewSlug)
+				if !ok || err != nil {
+					return r, ok, err
+				}
+				return memoryFilesTar(r), true, nil
+			},
 			name: "crew-memory",
+			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser, UnlinkFirst: true},
+		},
+		{
+			// The other half of the crew tree: an agent's own state —
+			// .claude.json, .mcp.json, .claude/ — which is 1001-owned at
+			// mode 0600 and restores under the agent exactly as it
+			// always did. Splitting it from .memory is what lets each
+			// half be written by the identity that owns it.
+			open: func() (io.ReadCloser, bool, error) {
+				r, ok, err := payload.OpenCrew(ctx, crewSlug)
+				if !ok || err != nil {
+					return r, ok, err
+				}
+				return agentStateTar(r), true, nil
+			},
+			name: "crew-agent-state",
 			spec: ExtractSpec{Dest: ContainerCrewPath, User: agentUser, PreserveModes: true, PreserveTimes: true},
 		},
 		{
@@ -860,15 +907,25 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 // section had already landed. ownershipSweep adds that condition for
 // exactly those sections.
 func probeWritable(ctx context.Context, ops DockerOps, containerID, crewSlug string, spec ExtractSpec, writesInto, writesPaths map[string]bool) error {
-	probe := path.Join(spec.Dest, ".crewship-restore-probe")
+	// The root touch answers "can this identity write here at all", and
+	// it is only a fair question when the section actually writes at the
+	// root. The crew memory section does not — it writes inside
+	// `.memory`, several levels down, and `/crew` itself belongs to the
+	// agent — so demanding write on the root refused a restore over a
+	// directory nothing was going to touch (#1746). Where the section
+	// writes deeper, the per-directory sweep below is the check.
+	rootProbe := ""
+	if writesInto[""] || writesInto["."] || len(writesInto) == 0 {
+		probe := path.Join(spec.Dest, ".crewship-restore-probe")
+		rootProbe = fmt.Sprintf("touch %q 2>&1 || exit 4\nrm -f %q", probe, probe)
+	}
 	script := fmt.Sprintf(
 		`[ -d %q ] || { echo "destination does not exist"; exit 3; }
-touch %q 2>&1 || exit 4
-rm -f %q
+%s
 find %q -maxdepth 0 -writable >/dev/null 2>&1 || { echo UNSUPPORTED; exit 0; }
 find %q ! -writable -print 2>/dev/null | head -n 500
 %s`,
-		spec.Dest, probe, probe, spec.Dest, spec.Dest, ownershipSweep(spec))
+		spec.Dest, rootProbe, spec.Dest, spec.Dest, ownershipSweep(spec))
 
 	code, out, err := ops.ExecAs(ctx, containerID, spec.User, []string{"sh", "-c", script})
 	if err != nil {
@@ -956,16 +1013,28 @@ func sectionWriteDirs(r io.Reader) (dirs, paths map[string]bool, err error) {
 		}
 		if hdr.Typeflag == tar.TypeDir {
 			dirs[name] = true
-		} else {
-			// Non-directory entries are the ones tar opens for writing,
-			// so an existing unwritable file at this exact path is what
-			// fails the extraction.
-			paths[name] = true
+			// A directory ENTRY is created by tar, so every ancestor
+			// above it may have to be created too.
+			for d := path.Dir(name); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+				dirs[d] = true
+			}
+			continue
 		}
-		// Every ancestor is written into as well: tar creates
-		// intermediate directories, and creating an entry needs write on
-		// its immediate parent.
-		for d := path.Dir(name); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+		// Non-directory entries are the ones tar opens for writing,
+		// so an existing unwritable file at this exact path is what
+		// fails the extraction.
+		paths[name] = true
+		// Only the IMMEDIATE parent, not the whole chain. Creating a
+		// file needs write on the directory holding it and nothing
+		// above; an ancestor further up matters only when tar has to
+		// create it, which is the directory-entry case handled above.
+		//
+		// Walking the full chain here refused restores it should not:
+		// the crew memory section writes into `agents/<slug>/.memory`,
+		// which is group-writable by design, while `agents/` above it
+		// is not — and the section never touches `agents/` because it
+		// already exists (#1746).
+		if d := path.Dir(name); d != "." && d != "/" && d != "" {
 			dirs[d] = true
 		}
 	}
