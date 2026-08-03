@@ -5,6 +5,7 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -146,14 +147,33 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify crew exists and belongs to workspace
-	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	// Verify the crew exists and belongs to the workspace, and take its slug
+	// from the SAME row in the SAME read.
+	//
+	// The slug is how the container runtime names everything belonging to this
+	// crew, so the teardown below cannot find any of it once the row is
+	// soft-deleted. It used to be a second query whose failure only logged,
+	// which meant a transient DB error produced: crew deleted, {"success":true},
+	// and a Postgres container plus its volume on disk forever with no caller
+	// left that could name them — while the operator had just answered a prompt
+	// saying those volumes were being deleted. One read, and no slug means no
+	// delete.
+	crewSlug, found, err := loadCrewForDelete(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		replyInternalError(w, h.logger, "get crew for delete", err)
 		return
 	}
 	if !found {
 		replyError(w, http.StatusNotFound, "Crew not found")
+		return
+	}
+	if crewSlug == "" {
+		// A crew row with no slug cannot have its sidecars torn down, and
+		// deleting it would strand them permanently. Refuse the whole delete
+		// rather than half-honour it.
+		replyInternalError(w, h.logger, "get crew for delete",
+			fmt.Errorf("crew %s has no slug; refusing to delete it because its sidecar containers "+
+				"and volumes are named by slug and could not be removed", crewID))
 		return
 	}
 
@@ -191,9 +211,19 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	teardown := h.removeCrewSidecars(r.Context(), crewID, crewSlug)
+
 	auditFromRequest(r, h.db, "crew.delete", "CREW", crewID, nil)
 
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	// The teardown outcome travels with the response. The operator answered a
+	// confirmation that named the volumes this would delete; if it did not
+	// delete them — because another crew shares the slug-keyed namespace, or the
+	// daemon refused — they have to hear it from the command they ran, not from
+	// a server log they will never read.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":          true,
+		"sidecar_teardown": teardown,
+	})
 
 	h.broadcastCrewEvent("crew.deleted", workspaceID, map[string]string{"id": crewID})
 }

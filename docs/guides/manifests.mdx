@@ -362,6 +362,108 @@ A service that **publishes a port to the host** cannot use `auto_credentials`
 bridge, the external attack surface deserves an operator-chosen credential.
 </Warning>
 
+### When sidecars start — and when they are removed
+
+Sidecars come up with the crew's container, whatever woke it: a chat
+message, `crewship issue start`, a scheduled agent, an inbound webhook, a
+routine's agent or script step, the web terminal, or the dashboard's start
+button. All of those go through the same crew-start contract
+(`internal/crewstart`), so a crew that declares `services:` gets them on every
+path.
+
+<Note>
+Before v1.x this was true of the **chat path only** — a crew whose first
+activity was `issue start`, a schedule or a webhook came up with no sidecars at
+all and no error anywhere, so `redis:6379` simply did not resolve inside the
+container (#1708). If you drove Crewship headlessly and concluded `services:`
+did not work, this is why. Verify with `crewship crew services <crew>`: it
+reads the live container runtime, not your manifest.
+</Note>
+
+Starting them is idempotent — a sidecar that is already up is reattached to,
+not recreated — as long as its spec has not changed. The spec includes the
+service's environment, which is why `env_refs` resolve against the **crew's**
+credentials (the `credential_crews` link a workspace secret gets when it is
+attached to a crew) rather than against whichever agent happened to trigger the
+start: a per-agent value would give the same crew a different Postgres per
+agent and restart it whenever the trigger changed.
+
+On a container provider without sidecar support (Apple Containers today) the
+crew still starts. The drop is logged, and chat shows *"Sidecar services
+declared but this container provider doesn't support them yet"* rather than
+letting the crew believe it has a database.
+
+A sidecar that fails to start (image pull, port clash, failing healthcheck)
+fails the crew start everywhere **except the web terminal**, which opens the
+shell anyway and says so — that is the surface you use to diagnose the failure,
+and the crew's own container is up by then.
+
+<Warning>
+**`crewship crew delete` now destroys the crew's sidecars and their named
+volumes.** The containers are force-removed and `crewship-svc-{crew}-vol-*` —
+including a Postgres data directory — is deleted with them. Previously both
+were left running forever (#1709), which leaked disk and a live,
+still-authenticated database per deleted crew; the flip side is that deleting a
+crew is now the same decision as dropping its datastores. Back up first
+(`crewship backup create`) if the data matters. The crew's own runtime
+container is not removed — it has an idle TTL and a reaper; sidecars have
+neither, which is why they are handled here.
+</Warning>
+
+The confirmation prompt says this too, and names the volumes, so it does not
+depend on having read this page:
+
+```text
+$ crewship crew delete data-crew
+Delete crew "data-crew"?
+
+This also destroys the crew's sidecar services — their containers are
+force-removed and their named volumes are deleted with them:
+
+  redis        redis:7-alpine
+  postgres     postgres:16
+               volume crewship-svc-data-crew-vol-pg-data
+
+Whatever those volumes hold — a database, a queue, an index — is gone for
+good; it cannot be recovered afterwards. Back it up first if it matters:
+  crewship backup create
+[y/N]:
+```
+
+A crew with no `services:` gets the plain one-line prompt it always had, and
+`--yes` skips the confirmation as it always did — so a script that already
+passes `--yes` deletes volumes without asking. Audit those before upgrading.
+
+<Note>
+**When two crews share a slug, nothing is removed.** Sidecar containers are
+labelled `crewship.crew=<slug>` and their volumes are named
+`<prefix>-svc-<slug>-vol-<name>` — neither carries the crew id, while the crew's
+own container deliberately does. Since `crews` is unique on
+(workspace, slug), two workspaces can both hold a `data-crew`, and one delete
+would otherwise take the other's live Postgres and its data directory with it.
+The same applies to a slug that extends another past the volume infix (`data`
+vs `data-vol-x`).
+
+So the delete checks first: if any other live crew shares that namespace, the
+crew is deleted and its **sidecars are left running**, with the reason printed
+by the command:
+
+```text
+$ crewship crew delete data-crew --yes
+Crew deleted.
+warning: Sidecar services were NOT removed: the sidecar containers and volumes
+for "data-crew" are named by slug alone, with no crew id, and 1 other live
+crew(s) share that namespace ([data-crew]) — removing them would remove those
+crews' containers and data volumes too. Nothing was removed; delete the sidecars
+for "data-crew" by hand once no other crew uses that slug.
+```
+
+Leaking a container you can remove by hand beats deleting a database you cannot
+get back. Give crews distinct slugs across workspaces on a shared daemon (dev
+slots that seed identical names are the common case) if you want the automatic
+cleanup.
+</Note>
+
 ### Inventory: what's actually running
 
 The manifest above is what you *declared*. What's actually running can

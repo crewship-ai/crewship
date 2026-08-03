@@ -90,7 +90,11 @@ func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
+	// The crew's own provisioned image, declared sidecars and slug are filled in
+	// by the starter (#1717, #1708): this route used to hand the provider a
+	// config with an id and two resource limits, which started the crew from the
+	// global default image under a container name derived from an empty slug.
+	containerID, err := s.startCrew(r.Context(), provider.CrewConfig{
 		ID:       id,
 		MemoryMB: s.cfg.Container.DefaultMemoryMB,
 		CPUs:     s.cfg.Container.DefaultCPUs,

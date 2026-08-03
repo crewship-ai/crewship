@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -309,6 +310,10 @@ type Orchestrator struct {
 	// the TTL each run registered, which is the pre-#1662 behaviour.
 	crewTTL       CrewTTLResolver
 	containerBusy ContainerBusyProbe
+	// crewCompleter resolves a crew id into its full container config
+	// (provisioned image, declared sidecars, limits) for the crew-start
+	// contract — see SetCrewCompleter. nil in tests/headless.
+	crewCompleter crewstart.Completer
 	mu            sync.RWMutex
 	accepting     bool
 	crews         map[string]*crewState

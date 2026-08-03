@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -389,14 +390,15 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 	}
 
 	// 3. Ensure container is running
-	containerID, err := h.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-		ID:          info.CrewID,
-		Slug:        info.CrewSlug,
-		MemoryMB:    info.MemoryMB,
-		CPUs:        info.CPUs,
-		Image:       info.RuntimeImage,
-		CachedImage: info.CachedImage,
-	})
+	// Same assembly as chat (chatbridge.ChatInfo.CrewRuntimeConfig), so a crew
+	// woken by a webhook gets the container it would have got from a chat
+	// message — declared sidecars included (#1708).
+	whCfg, whCfgErr := info.CrewRuntimeConfig(0, 0)
+	if whCfgErr != nil {
+		h.logger.Warn("webhook: crew services unresolved, starting without them",
+			"agent_id", agentID, "crew_id", info.CrewID, "error", whCfgErr)
+	}
+	containerID, err := crewstart.New(h.container, NewCrewConfigCompleter(h.db), h.logger).Start(ctx, whCfg)
 	if err != nil {
 		if releaseSlot != nil {
 			releaseSlot()

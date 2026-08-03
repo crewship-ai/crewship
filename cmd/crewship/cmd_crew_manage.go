@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"unicode"
 
@@ -385,13 +388,22 @@ var crewDeleteCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
-		if err := confirmAction(cmd, fmt.Sprintf("Delete crew %q?", args[0])); err != nil {
-			return err
-		}
-
+		// The crew is resolved BEFORE the prompt, not after: the prompt has to
+		// name what it is about to destroy, and that is a property of the crew
+		// (#1709). The cost is that an unresolvable slug now fails before the
+		// question instead of after the answer, which is the better order
+		// anyway.
 		client := newAPIClient()
 		crewID, err := resolveCrewID(client, args[0])
 		if err != nil {
+			return err
+		}
+
+		prompt := fmt.Sprintf("Delete crew %q?", args[0])
+		if warning := crewSidecarDeleteWarning(client, crewID); warning != "" {
+			prompt += "\n\n" + warning
+		}
+		if err := confirmAction(cmd, prompt); err != nil {
 			return err
 		}
 
@@ -402,9 +414,41 @@ var crewDeleteCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+
+		// What actually happened to the sidecars. The prompt above named the
+		// volumes this was going to delete; if the server did not delete them —
+		// because another live crew shares the slug-keyed namespace, or the
+		// daemon refused — the operator has to hear it here rather than believe
+		// a promise the server could not keep.
+		var deleted struct {
+			SidecarTeardown struct {
+				Status string `json:"status"`
+				Reason string `json:"reason"`
+			} `json:"sidecar_teardown"`
+		}
+		// Read defensively: the crew is ALREADY deleted at this point, so a body
+		// this build cannot parse (an older server answering 204, a proxy
+		// rewriting it) must not turn a successful delete into a command error.
+		// A body that is present and unparseable is still worth a word — that is
+		// the case where an outcome existed and was lost.
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
+		unreadable := readErr != nil
+		if !unreadable && len(bytes.TrimSpace(body)) > 0 {
+			unreadable = json.Unmarshal(body, &deleted) != nil
+		}
 
 		cli.PrintSuccess("Crew deleted.")
+		switch {
+		case unreadable:
+			cli.PrintWarning("Could not read what happened to the crew's sidecar services — " +
+				"check `docker ps` / `docker volume ls` if it declared any.")
+		case deleted.SidecarTeardown.Status == "skipped" || deleted.SidecarTeardown.Status == "failed":
+			cli.PrintWarning("Sidecar services were NOT removed: " + deleted.SidecarTeardown.Reason)
+		case deleted.SidecarTeardown.Status == "unsupported":
+			cli.PrintWarning("This container provider cannot remove sidecar services; " +
+				"any the crew had are still running.")
+		}
 		return nil
 	},
 }

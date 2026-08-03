@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -523,14 +524,24 @@ func TestCrewDeleteRunE_PromptAborts(t *testing.T) {
 	c := covFreshCmd(crewDeleteCmd, func(c *cobra.Command) {
 		c.Flags().BoolP("yes", "y", false, "")
 	})
-	// Piped (non-TTY) stdin answering "n" → confirmAction must abort
-	// before any API call happens.
+	// Piped (non-TTY) stdin answering "n" → confirmAction must abort.
 	err := covWithStdinCli4(t, "n\n", func() error { return c.RunE(c, []string{covCrewIDCli4}) })
 	if err == nil || err.Error() != "aborted" {
 		t.Fatalf("want aborted, got %v", err)
 	}
-	if got := len(stub.Calls()); got != 0 {
-		t.Errorf("no API calls expected on abort, got %d", got)
+	// This used to assert ZERO calls. The prompt now reads the crew before it
+	// asks, because it has to name the sidecar volumes the delete would destroy
+	// (#1709) — so the guarantee worth pinning is the one that actually
+	// mattered: an abort must not MUTATE anything. Every call the aborted run
+	// makes has to be a read.
+	for _, call := range stub.Calls() {
+		if call.Method != http.MethodGet {
+			t.Errorf("aborted delete issued a %s to %s — an answer of \"n\" must leave the "+
+				"server untouched", call.Method, call.Path)
+		}
+	}
+	if got := len(stub.CallsFor("DELETE", "/api/v1/crews/"+covCrewIDCli4)); got != 0 {
+		t.Errorf("aborted delete still deleted the crew (%d DELETE calls)", got)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -24,7 +25,7 @@ func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewI
 	if o.container == nil {
 		return "", fmt.Errorf("container provider not configured")
 	}
-	containerID, err := o.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
+	containerID, err := o.crewStarter().Start(ctx, provider.CrewConfig{
 		ID:   crewID,
 		Slug: crewSlug,
 	})
@@ -56,7 +57,7 @@ func (o *Orchestrator) GetOrCreateContainerCfg(ctx context.Context, cfg provider
 	if o.container == nil {
 		return "", fmt.Errorf("container provider not configured")
 	}
-	containerID, err := o.container.EnsureCrewRuntime(ctx, cfg)
+	containerID, err := o.crewStarter().Start(ctx, cfg)
 	if err != nil {
 		return "", fmt.Errorf("ensure crew runtime for crew %s (workspace %s): %w", cfg.ID, workspaceID, err)
 	}
@@ -102,6 +103,28 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 			o.checkTTLs(ctx)
 		}
 	}
+}
+
+// SetCrewCompleter wires the crews table into the crew-start contract, so a
+// crew the orchestrator starts from an id (the dispatch path's minimal config)
+// comes up from its provisioned image and with its declared sidecars rather
+// than from the bare default image with none. Called once at server bootstrap;
+// nil-safe if never called (tests, headless harnesses), which then reproduces
+// the pre-#1708 behaviour of starting exactly what the caller assembled.
+func (o *Orchestrator) SetCrewCompleter(c crewstart.Completer) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.crewCompleter = c
+}
+
+// crewStarter is the orchestrator's handle on the crew-start contract. Built
+// per call because o.container and the completer are both settable after
+// construction.
+func (o *Orchestrator) crewStarter() *crewstart.Starter {
+	o.mu.RLock()
+	completer := o.crewCompleter
+	o.mu.RUnlock()
+	return crewstart.New(o.container, completer, o.logger)
 }
 
 // SetCrewTTLResolver wires the crews table into the reaper as the authority

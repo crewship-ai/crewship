@@ -123,41 +123,40 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 }
 
 // PrewarmCrew warms the crew's container ahead of a run's first step (#836).
-// It resolves the crew's PROVISIONED container config by crew id — no agent
-// resolution needed, the runtime image is a crew-level property — and calls
-// EnsureCrewRuntime, the same idempotent primitive RunStep uses. Concurrent
+// It goes through the crew-start contract by crew id — no agent resolution
+// needed, the runtime image and the declared sidecars are both crew-level
+// properties — which is the same idempotent primitive RunStep uses. Concurrent
 // prewarms for one crew serialize on the provider's per-crew lock and collapse
 // to a single container start. No run row, LLM call, or cost event is produced;
 // this only provisions the runtime, off the critical path.
 //
-// crewRuntime is the same resolver a cold script step uses; when it's absent or
-// errors we fall back to a minimal {ID} config — EnsureCrewRuntime then reuses
-// a warm container (a cold create would use the base image, same as today).
+// A prewarm brings the crew's sidecars up too: the point of warming is that the
+// first step pays nothing, and a first step that finds no database has not been
+// warmed. When the crew's config cannot be resolved the starter logs and starts
+// from the minimal {ID} config, which reuses a warm container.
 func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceID string) error {
 	if r.container == nil || crewID == "" {
 		return nil
 	}
-	cfg := provider.CrewConfig{ID: crewID}
-	if r.crewRuntime != nil {
-		if c, err := r.crewRuntime(ctx, crewID, workspaceID); err == nil {
-			cfg = c
-		} else {
-			r.logger.Debug("prewarm: crew runtime config unavailable, using minimal config",
-				"crew_id", crewID, "error", err)
-		}
-	}
-	containerID, err := r.container.EnsureCrewRuntime(ctx, cfg)
-	if err != nil {
-		return err
-	}
+	containerID, cfg, err := r.startCrew(ctx, provider.CrewConfig{ID: crewID}, workspaceID)
 	// #1662: prewarm used to discard the container id and register nothing.
 	// A container it started was tracked by no subsystem at all — no TTL, so
 	// the reaper never saw it; no stats, so the dashboard tile stayed empty —
 	// and it ran until crewshipd restarted. No hold: prewarm only warms the
 	// runtime, it does not occupy it, so the idle clock starts now.
-	if r.orch != nil {
+	//
+	// Registration comes BEFORE the error check, because the error can arrive
+	// with a live container behind it: the sidecars start after the runtime, so
+	// an ErrSidecarStart means "container up, sidecars not". Returning first
+	// leaks exactly the container #1662 was about — and prewarm's caller
+	// swallows the error into a debug line, so it would leak one per prewarm for
+	// as long as the sidecar image stayed broken.
+	if r.orch != nil && containerID != "" {
 		r.orch.NoteCrewActivity(crewID, containerID, cfg.TTLHours)
 		r.orch.RegisterStatsContainer(containerID, crewID, workspaceID)
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -193,32 +192,39 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		return AgentStepResult{}, fmt.Errorf("resolve agent config: %w", err)
 	}
 
-	// 3. EnsureCrewRuntime — spawn the container if missing, reuse
-	//    if already running. This is the same primitive the chat
-	//    handler uses; pipelines don't get a separate container
-	//    pool, they share the crew's existing runtime.
+	// 3. Start the crew — spawn the container if missing, reuse if already
+	//    running, and bring the crew's declared sidecars up either way. This
+	//    is literally the same function the chat handler calls
+	//    (internal/crewstart); pipelines don't get a separate container pool,
+	//    they share the crew's existing runtime.
 	// Time the container acquire so `routine logs` can isolate the
 	// provision cost from the LLM/tool time in the step's total duration —
 	// the quantity the #902 prewarm shortens (#911). A warm hit is near-zero;
 	// a cold provision is seconds. Emitted as its own run-keyed journal entry
 	// after a successful ensure.
 	containerAcquireStart := time.Now()
-	containerID, err := r.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-		ID:          info.CrewID,
-		Slug:        info.CrewSlug,
-		Image:       info.RuntimeImage,
-		CachedImage: info.CachedImage,
-		// Size the crew container from the crew's configured limits,
-		// the same source the AgentRunRequest below uses. Without this
-		// a cold pipeline run that *creates* the container would pin it
-		// to the Docker fallback (8 GiB / 2 CPU) while the chat path
-		// (bridge.go) would have sized it to the crew's config. When
-		// these are zero the docker provider applies its own safe
-		// default, so unconfigured crews are unaffected.
-		MemoryMB: info.MemoryMB,
-		CPUs:     info.CPUs,
-	})
+	// The container config comes from the resolved agent (ChatInfo), the same
+	// assembly the chat path uses — including the crew's configured limits, so
+	// a cold pipeline run that CREATES the container doesn't pin it to the
+	// Docker fallback (8 GiB / 2 CPU) that a hand-rolled config left it with —
+	// and including the crew's declared sidecars (#1708).
+	stepCfg, cfgErr := info.CrewRuntimeConfig(0, 0)
+	if cfgErr != nil {
+		r.logger.Warn("pipeline orchestrator runner: crew services unresolved, starting without them",
+			"crew_id", info.CrewID, "error", cfgErr)
+	}
+	containerID, startedCfg, err := r.startCrew(ctx, stepCfg, req.WorkspaceID)
 	if err != nil {
+		// The runtime container can be UP behind this error — the sidecars are
+		// started after it, so ErrSidecarStart means "container running,
+		// sidecars not". Registering it before bailing out is what keeps the
+		// step's failure from also leaking an untracked container that no
+		// reaper will ever stop (#1662). On the success path RunAgent does the
+		// same registration further down.
+		if r.orch != nil && containerID != "" {
+			r.orch.NoteCrewActivity(info.CrewID, containerID, startedCfg.TTLHours)
+			r.orch.RegisterStatsContainer(containerID, info.CrewID, req.WorkspaceID)
+		}
 		return AgentStepResult{}, fmt.Errorf("ensure container: %w", err)
 	}
 	emitStepContainerReady(ctx, r.journalE, req.WorkspaceID, info.CrewID, containerReady{
