@@ -67,6 +67,12 @@ type Row struct {
 	// segments, never a correctness measure.
 	IncumbentRisk int
 
+	// PromptChars is the length of the replayed prompt. Carried so
+	// ConsistencyByPromptSize can test whether prompt volume drives the judge's
+	// instability — the hypothesis behind every retrieval-on-demand memory
+	// architecture, and cheaper to measure than to adopt.
+	PromptChars int
+
 	Replays []Replay
 }
 
@@ -168,6 +174,16 @@ type Verdict struct {
 
 	// Strength grades Human.Rows; every printed comparison carries it.
 	Strength CorpusStrength
+
+	// ShortPrompts / LongPrompts split the corpus at the median prompt length and
+	// report how often the judge agreed WITH ITSELF in each half.
+	//
+	// Separate from the two label segments because it answers a different
+	// question: those ask whether the judge was right, this asks whether it was
+	// stable, and an unstable judge makes every other number here a measurement
+	// of noise. Measured 2026-08-02: 0.625 self-agreement across three passes.
+	ShortPrompts ConsistencySegment
+	LongPrompts  ConsistencySegment
 }
 
 // Score aggregates a candidate's replayed rows into a Verdict, keeping the two
@@ -190,6 +206,7 @@ func Score(rows []Row) Verdict {
 
 	v.Human = human.metrics()
 	v.ModelLabelled = model.metrics()
+	v.ShortPrompts, v.LongPrompts = ConsistencyByPromptSize(rows)
 	v.Strength = Strength(v.Human.Rows)
 	return v
 }

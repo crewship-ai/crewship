@@ -10,6 +10,7 @@ import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { KeeperGovernancePanel } from "@/components/features/admin/keeper-governance-panel"
 import { KeeperJudgeCard } from "@/components/features/admin/keeper-judge-card"
+import { KeeperHealthCard } from "@/components/features/admin/keeper-health-card"
 import { KeeperProfileCard } from "@/components/features/admin/keeper-profile-card"
 import { JudgeModelsCard } from "@/components/features/admin/judge-models-card"
 import { cn } from "@/lib/utils"
@@ -292,6 +293,15 @@ export const KeeperTab = React.memo(function KeeperTab({
         <h3 className="text-body font-medium text-foreground/80 leading-none shrink-0">Configuration</h3>
         <div className="h-px flex-1 bg-border/60" />
       </div>
+
+      {/* Above the configuration, because it is the reason to change any of it.
+          The Keeper had no metric on its own decisions until #1664 and the cost
+          is on the record: #1624 made the judge deny everything and survived
+          several milestones, because a gate that refuses every request looks
+          exactly like a gate nobody is testing. The readout has been on the API
+          and in the CLI ever since and nowhere in the product, which is the same
+          failure one level up — nobody runs `keeper health` on a hunch. */}
+      <KeeperHealthCard />
 
       <KeeperJudgeCard workspaceId={workspaceId} />
 

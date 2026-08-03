@@ -78,6 +78,7 @@ func ReplayCandidate(ctx context.Context, c Candidate, corpus []CorpusRow, passe
 			Label:         cr.Label,
 			Source:        cr.LabelSource,
 			IncumbentRisk: cr.IncumbentRisk,
+			PromptChars:   len(cr.Prompt),
 			Replays:       make([]Replay, 0, passes),
 		}
 		for p := 0; p < passes; p++ {

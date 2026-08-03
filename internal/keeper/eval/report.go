@@ -73,10 +73,15 @@ type Report struct {
 	// candidate, and are the first thing both renderers print. A reader who sees
 	// only the percentages cannot tell a benchmark from an anecdote; these three
 	// fields are what makes the difference visible without having to be looked up.
-	HumanRows          int            `json:"human_rows"`
-	IncumbentLabelRows int            `json:"incumbent_label_rows"`
-	Strength           CorpusStrength `json:"strength"`
-	Caveat             string         `json:"caveat"`
+	HumanRows int `json:"human_rows"`
+	// SelfConsistency reports how often the INCUMBENT agreed with itself, split
+	// at the median prompt length. It grades the corpus, not a candidate: if the
+	// judge is unstable, every agreement figure below is measuring noise.
+	SelfConsistencyShort ConsistencySegment `json:"self_consistency_short"`
+	SelfConsistencyLong  ConsistencySegment `json:"self_consistency_long"`
+	IncumbentLabelRows   int                `json:"incumbent_label_rows"`
+	Strength             CorpusStrength     `json:"strength"`
+	Caveat               string             `json:"caveat"`
 
 	Candidates []RankedCandidate `json:"candidates"`
 }
@@ -146,13 +151,15 @@ func BuildReport(incumbent LabeledVerdict, candidates []LabeledVerdict, toleranc
 	out = append(out, ranked...)
 
 	return Report{
-		Incumbent:          incumbent.Label,
-		Tolerance:          tolerance,
-		HumanRows:          incumbent.Verdict.Human.Rows,
-		IncumbentLabelRows: incumbent.Verdict.ModelLabelled.Rows,
-		Strength:           incumbent.Verdict.Strength,
-		Caveat:             Caveat(incumbent.Verdict.Human.Rows),
-		Candidates:         out,
+		Incumbent:            incumbent.Label,
+		Tolerance:            tolerance,
+		HumanRows:            incumbent.Verdict.Human.Rows,
+		SelfConsistencyShort: incumbent.Verdict.ShortPrompts,
+		SelfConsistencyLong:  incumbent.Verdict.LongPrompts,
+		IncumbentLabelRows:   incumbent.Verdict.ModelLabelled.Rows,
+		Strength:             incumbent.Verdict.Strength,
+		Caveat:               Caveat(incumbent.Verdict.Human.Rows),
+		Candidates:           out,
 	}
 }
 
@@ -190,6 +197,32 @@ func (r Report) JSON() ([]byte, error) {
 // The caveat is printed BEFORE the table, not as a footnote: on an
 // under-powered corpus the rate columns render as "—" so there is no confident
 // percentage to skim past in the first place.
+// consistencyReading states what the split does and does not support. It is
+// deliberately cautious in both directions: a gap here is evidence that prompt
+// volume drives instability, not proof, and no gap is evidence that it does not
+// — which is the more expensive conclusion to get wrong, because it is the one
+// that stops somebody rebuilding retrieval for nothing.
+func consistencyReading(short, long ConsistencySegment) string {
+	if short.Rows == 0 || long.Rows == 0 {
+		return "Not enough replayed rows to split by prompt size; run with --passes 2 or more."
+	}
+	gap := short.MeanConsistency - long.MeanConsistency
+	switch {
+	case gap >= 0.10:
+		return "Long prompts are markedly less stable. Prompt volume looks like a driver, " +
+			"which is the case for retrieving what a decision needs instead of injecting " +
+			"everything available — and the case for sampling L3/L4 more than once."
+	case gap <= -0.10:
+		return "SHORT prompts are less stable, which is the opposite of the usual hypothesis: " +
+			"the judge may be guessing when it has too little to go on rather than losing " +
+			"the thread when it has too much. Trimming the prompt would make it worse."
+	default:
+		return "Prompt length does not explain the instability. Rebuilding retrieval would be " +
+			"an expensive answer to the wrong question; look at sampling and at the decision " +
+			"criteria instead."
+	}
+}
+
 func (r Report) Table() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Keeper governance-model replay — incumbent=%s, tolerance=%.3f\n",
@@ -197,6 +230,17 @@ func (r Report) Table() string {
 	fmt.Fprintf(&sb, "Corpus: %d human-labelled, %d incumbent-labelled — %s\n",
 		r.HumanRows, r.IncumbentLabelRows, r.Strength)
 	fmt.Fprintf(&sb, "%s\n\n", wrap(r.Caveat, 78))
+
+	// Before the comparison table, because it decides whether the table means
+	// anything. A judge that answers three ways to one question is not one judge.
+	if s, l := r.SelfConsistencyShort, r.SelfConsistencyLong; s.Rows > 0 || l.Rows > 0 {
+		fmt.Fprintf(&sb, "Judge self-agreement (incumbent, replays vs each other — NOT vs a label):\n")
+		fmt.Fprintf(&sb, "  short prompts  %.3f over %d rows (median %d chars)\n",
+			s.MeanConsistency, s.Rows, s.MedianPromptChars)
+		fmt.Fprintf(&sb, "  long prompts   %.3f over %d rows (median %d chars)\n",
+			l.MeanConsistency, l.Rows, l.MedianPromptChars)
+		fmt.Fprintf(&sb, "%s\n\n", wrap(consistencyReading(s, l), 78))
+	}
 
 	quotable := r.Strength.Quotable()
 	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
