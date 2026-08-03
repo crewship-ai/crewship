@@ -142,30 +142,7 @@ func TestRuntimeConformance(t *testing.T) {
 	// A restore into such a crew failed on its first entry with `tar: Cannot
 	// open: Permission denied` — after the workspace and memory sections were
 	// already written.
-	crewVolumes := []string{
-		p.homeVolumeName(crew.ID, crew.Slug),
-		p.toolsVolumeName(crew.ID, crew.Slug),
-	}
-	for _, v := range crewVolumes {
-		if err := p.ensureVolume(ctx, v); err != nil {
-			t.Fatalf("ensure volume %s: %v", v, err)
-		}
-	}
-	// Registered here, not alongside the container's cleanup below: the
-	// volumes exist from this line onward, and a create that fails after
-	// it (a runtime rejecting the HostConfig, a bind source its VM does
-	// not share) would otherwise leave them behind on the very runtimes
-	// whose failures this harness exists to record.
-	if os.Getenv("CREWSHIP_CONFORMANCE_KEEP") == "" {
-		t.Cleanup(func() {
-			rmCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			for _, v := range crewVolumes {
-				_, _ = p.client.VolumeRemove(rmCtx, v, client.VolumeRemoveOptions{Force: true})
-			}
-		})
-	}
-	p.fixBindMountOwnership(ctx, image, dirs, crewVolumes)
+	ensureCrewVolumesOwned(ctx, t, p, image, crew, dirs)
 
 	name := p.CrewContainerName(crew.ID, crew.Slug)
 	// A previous aborted run leaves the container behind; the create would then
@@ -811,4 +788,46 @@ func firstNonEmpty(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// ensureCrewVolumesOwned runs the crew-creation ownership step exactly as
+// EnsureCrewRuntime does: create the two named volumes, then hand both
+// them and the host binds to uid 1001 through the root init container.
+//
+// Every conformance harness in this package needs this prelude, and each
+// used to open-code it plus a privileged helper of its own that chowned
+// the volumes before create. That helper WAS the bug (#1715): a named
+// volume initialises from the image content at its mount point, so a
+// volume whose mount point the image does not carry comes up root-owned
+// 0755 against a container running as 1001 with CapDrop: ALL, and nothing
+// in the tree chowned it. Staging it in the harness meant the write
+// probes were testing the harness's own setup. The product does it now,
+// so the harnesses call the product.
+//
+// Volume cleanup registers here rather than beside the container's,
+// because the volumes exist from this point on and a create that fails
+// after it — a runtime rejecting the HostConfig, a bind source its VM
+// does not share — would otherwise leave them behind on exactly the
+// runtimes whose failures these harnesses exist to record.
+func ensureCrewVolumesOwned(ctx context.Context, t *testing.T, p *Provider, image string, crew provider.CrewConfig, dirs crewDirs) {
+	t.Helper()
+	crewVolumes := []string{
+		p.homeVolumeName(crew.ID, crew.Slug),
+		p.toolsVolumeName(crew.ID, crew.Slug),
+	}
+	for _, v := range crewVolumes {
+		if err := p.ensureVolume(ctx, v); err != nil {
+			t.Fatalf("ensure volume %s: %v", v, err)
+		}
+	}
+	if os.Getenv("CREWSHIP_CONFORMANCE_KEEP") == "" {
+		t.Cleanup(func() {
+			rmCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			for _, v := range crewVolumes {
+				_, _ = p.client.VolumeRemove(rmCtx, v, client.VolumeRemoveOptions{Force: true})
+			}
+		})
+	}
+	p.fixBindMountOwnership(ctx, image, dirs, crewVolumes)
 }

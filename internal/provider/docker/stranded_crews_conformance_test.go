@@ -102,8 +102,7 @@ func TestStrandedCrewIsFoundAndDisarmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare crew dirs: %v", err)
 	}
-	old.fixBindMountOwnership(ctx, image, dirs)
-	stageCrewVolumes(ctx, t, old, image, crew)
+	ensureCrewVolumesOwned(ctx, t, old, image, crew, dirs)
 
 	name := old.CrewContainerName(crew.ID, crew.Slug)
 	_, _ = oldCli.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
