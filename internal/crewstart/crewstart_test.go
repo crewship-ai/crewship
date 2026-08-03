@@ -195,6 +195,37 @@ func TestStartFillsWhatTheCallerDidNotResolveAndKeepsWhatItDid(t *testing.T) {
 	}
 }
 
+// A completer is allowed to answer PARTIALLY — "here is the crew's config, but
+// I could not decode its services" — and what it did resolve must survive the
+// error. Discarding the whole completion is how a stale services_json silently
+// downgraded a provisioned crew to the default runtime image.
+func TestStartKeepsWhatAPartialCompletionDidResolve(t *testing.T) {
+	f := &fakeRuntime{}
+	completer := CompleterFunc(func(_ context.Context, cfg provider.CrewConfig) (provider.CrewConfig, error) {
+		return provider.CrewConfig{
+			ID:          cfg.ID,
+			Slug:        "data",
+			CachedImage: "crewship-cache:db6c6fcbdb34",
+			TTLHours:    4,
+			// Services deliberately absent: that is the part that failed.
+		}, errors.New("decode services_json: services[0]: name and image are required")
+	})
+
+	if _, err := New(f, completer, nil).Start(context.Background(), provider.CrewConfig{ID: "crew-4"}); err != nil {
+		t.Fatalf("a partial completion must not fail the start: %v", err)
+	}
+	if f.runtimeCfg.CachedImage != "crewship-cache:db6c6fcbdb34" {
+		t.Errorf("CachedImage = %q — the parts that DID resolve were thrown away with the error, "+
+			"which starts a provisioned crew from the bare default image (#1717)", f.runtimeCfg.CachedImage)
+	}
+	if f.runtimeCfg.Slug != "data" || f.runtimeCfg.TTLHours != 4 {
+		t.Errorf("slug/ttl lost from a partial completion: %+v", f.runtimeCfg)
+	}
+	if len(f.runtimeCfg.Services) != 0 {
+		t.Errorf("Services = %+v, want none — that is the half that failed", f.runtimeCfg.Services)
+	}
+}
+
 // A completer that cannot answer must not take the crew down with it: that
 // would turn one unreachable row into every start path failing at once.
 func TestStartSurvivesACompleterFailure(t *testing.T) {

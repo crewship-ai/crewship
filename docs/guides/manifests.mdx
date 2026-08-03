@@ -434,6 +434,36 @@ A crew with no `services:` gets the plain one-line prompt it always had, and
 `--yes` skips the confirmation as it always did — so a script that already
 passes `--yes` deletes volumes without asking. Audit those before upgrading.
 
+<Note>
+**When two crews share a slug, nothing is removed.** Sidecar containers are
+labelled `crewship.crew=<slug>` and their volumes are named
+`<prefix>-svc-<slug>-vol-<name>` — neither carries the crew id, while the crew's
+own container deliberately does. Since `crews` is unique on
+(workspace, slug), two workspaces can both hold a `data-crew`, and one delete
+would otherwise take the other's live Postgres and its data directory with it.
+The same applies to a slug that extends another past the volume infix (`data`
+vs `data-vol-x`).
+
+So the delete checks first: if any other live crew shares that namespace, the
+crew is deleted and its **sidecars are left running**, with the reason printed
+by the command:
+
+```text
+$ crewship crew delete data-crew --yes
+Crew deleted.
+warning: Sidecar services were NOT removed: the sidecar containers and volumes
+for "data-crew" are named by slug alone, with no crew id, and 1 other live
+crew(s) share that namespace ([data-crew]) — removing them would remove those
+crews' containers and data volumes too. Nothing was removed; delete the sidecars
+for "data-crew" by hand once no other crew uses that slug.
+```
+
+Leaking a container you can remove by hand beats deleting a database you cannot
+get back. Give crews distinct slugs across workspaces on a shared daemon (dev
+slots that seed identical names are the common case) if you want the automatic
+cleanup.
+</Note>
+
 ### Inventory: what's actually running
 
 The manifest above is what you *declared*. What's actually running can

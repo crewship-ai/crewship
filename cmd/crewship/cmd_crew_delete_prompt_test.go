@@ -100,6 +100,53 @@ func TestCrewDeletePromptStaysQuietWithoutSidecars(t *testing.T) {
 	}
 }
 
+// The prompt promises the volumes will be deleted. When the server then does
+// NOT delete them — because another live crew shares the slug-keyed sidecar
+// namespace — the operator has to hear it from the command they ran.
+func TestCrewDeleteReportsASkippedSidecarTeardown(t *testing.T) {
+	stub := stubCrewWithServices(t, `[{"name":"postgres","image":"postgres:16","volumes":[{"name":"pg-data","mount":"/v"}]}]`)
+	stub.OnDelete("/api/v1/crews/"+covCrewIDCli4, clitest.JSONResponse(200, map[string]any{
+		"success": true,
+		"sidecar_teardown": map[string]string{
+			"status": "skipped",
+			"reason": "another live crew shares the slug \"data-crew\"; nothing was removed",
+		},
+	}))
+
+	c := covFreshCmd(crewDeleteCmd, func(c *cobra.Command) {
+		c.Flags().BoolP("yes", "y", false, "")
+	})
+	covSetFlagsCli4(t, c, map[string]string{"yes": "true"})
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	if !strings.Contains(out, "NOT removed") || !strings.Contains(out, "shares the slug") {
+		t.Errorf("the operator was told the crew was deleted and nothing else — they answered a "+
+			"prompt that named volumes which are still on disk.\ngot:\n%s", out)
+	}
+}
+
+// A server that answers the old way (no teardown field, or no body at all) must
+// not turn a successful delete into a command error.
+func TestCrewDeleteToleratesAServerWithoutTheTeardownField(t *testing.T) {
+	stub := stubCrewWithServices(t, "")
+	stub.OnDelete("/api/v1/crews/"+covCrewIDCli4, clitest.EmptyResponse(204))
+
+	c := covFreshCmd(crewDeleteCmd, func(c *cobra.Command) {
+		c.Flags().BoolP("yes", "y", false, "")
+	})
+	covSetFlagsCli4(t, c, map[string]string{"yes": "true"})
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatalf("an empty 204 must still be a successful delete, got %v", err)
+	}
+	if !strings.Contains(out, "Crew deleted.") {
+		t.Errorf("missing success line: %q", out)
+	}
+}
+
 // An unreadable crew is not the same as a crew with no sidecars, and must not
 // be reported as one: the whole point of this PR is that silence about a
 // destructive unknown is the defect.

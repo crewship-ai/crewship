@@ -139,17 +139,24 @@ func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceI
 		return nil
 	}
 	containerID, cfg, err := r.startCrew(ctx, provider.CrewConfig{ID: crewID}, workspaceID)
-	if err != nil {
-		return err
-	}
 	// #1662: prewarm used to discard the container id and register nothing.
 	// A container it started was tracked by no subsystem at all — no TTL, so
 	// the reaper never saw it; no stats, so the dashboard tile stayed empty —
 	// and it ran until crewshipd restarted. No hold: prewarm only warms the
 	// runtime, it does not occupy it, so the idle clock starts now.
-	if r.orch != nil {
+	//
+	// Registration comes BEFORE the error check, because the error can arrive
+	// with a live container behind it: the sidecars start after the runtime, so
+	// an ErrSidecarStart means "container up, sidecars not". Returning first
+	// leaks exactly the container #1662 was about — and prewarm's caller
+	// swallows the error into a debug line, so it would leak one per prewarm for
+	// as long as the sidecar image stayed broken.
+	if r.orch != nil && containerID != "" {
 		r.orch.NoteCrewActivity(crewID, containerID, cfg.TTLHours)
 		r.orch.RegisterStatsContainer(containerID, crewID, workspaceID)
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -206,8 +213,18 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		r.logger.Warn("pipeline orchestrator runner: crew services unresolved, starting without them",
 			"crew_id", info.CrewID, "error", cfgErr)
 	}
-	containerID, _, err := r.startCrew(ctx, stepCfg, req.WorkspaceID)
+	containerID, startedCfg, err := r.startCrew(ctx, stepCfg, req.WorkspaceID)
 	if err != nil {
+		// The runtime container can be UP behind this error — the sidecars are
+		// started after it, so ErrSidecarStart means "container running,
+		// sidecars not". Registering it before bailing out is what keeps the
+		// step's failure from also leaking an untracked container that no
+		// reaper will ever stop (#1662). On the success path RunAgent does the
+		// same registration further down.
+		if r.orch != nil && containerID != "" {
+			r.orch.NoteCrewActivity(info.CrewID, containerID, startedCfg.TTLHours)
+			r.orch.RegisterStatsContainer(containerID, info.CrewID, req.WorkspaceID)
+		}
 		return AgentStepResult{}, fmt.Errorf("ensure container: %w", err)
 	}
 	emitStepContainerReady(ctx, r.journalE, req.WorkspaceID, info.CrewID, containerReady{

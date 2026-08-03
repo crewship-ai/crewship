@@ -219,9 +219,18 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 }
 
 // complete asks the Completer for the crew's full config and merges it under
-// the caller's. A completion failure is logged and the caller's config is used
-// as-is: the crew still starts, exactly as it did before this package existed,
-// rather than a DB hiccup taking down every start path at once.
+// the caller's. A completion failure is logged and the crew still starts,
+// exactly as it did before this package existed, rather than a DB hiccup taking
+// down every start path at once.
+//
+// The merge happens EVEN ON ERROR, and that is load-bearing. A completer is
+// allowed to answer partially — internal/api returns the crew's full config
+// alongside ErrCrewServicesUnresolved when only the services column is
+// undecodable — and discarding everything it returned because part of it
+// failed is how a stale services_json silently downgraded a provisioned crew to
+// the default runtime image. mergeConfig only ever fills fields the caller left
+// empty, so a completer that genuinely failed returns its zero value and
+// contributes nothing.
 func (s *Starter) complete(ctx context.Context, cfg provider.CrewConfig, notify func(Notice)) provider.CrewConfig {
 	if s.completer == nil {
 		return cfg
@@ -229,16 +238,16 @@ func (s *Starter) complete(ctx context.Context, cfg provider.CrewConfig, notify 
 	resolved, err := s.completer.CompleteCrewConfig(ctx, cfg)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("crew runtime config unresolved; starting from the caller's config",
+			s.logger.Warn("crew runtime config partially unresolved; starting with what did resolve",
 				"crew_id", cfg.ID, "crew_slug", cfg.Slug, "error", err)
 		}
-		if len(cfg.Services) == 0 {
+		if len(cfg.Services) == 0 && len(resolved.Services) == 0 {
 			emit(notify, Notice{
-				Kind:    NoticeServicesUnresolved,
-				Message: "Crew runtime config could not be read; declared sidecar services are not being started",
+				Kind: NoticeServicesUnresolved,
+				Message: "Part of the crew's runtime config could not be read; any declared sidecar " +
+					"services are not being started",
 			})
 		}
-		return cfg
 	}
 	return mergeConfig(cfg, resolved)
 }

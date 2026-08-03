@@ -219,6 +219,27 @@ func agentExists(ctx context.Context, db *sql.DB, agentID, workspaceID string) (
 // and is not soft-deleted. Returns (true, nil) if the crew exists,
 // (false, nil) if it does not exist, or (false, err) on a real DB failure.
 // See agentExists for the 404-vs-500 contract.
+// loadCrewForDelete proves the crew exists in this workspace AND returns its
+// slug from the same row, in one read.
+//
+// It is crewExists plus the one column the delete path needs, because the two
+// facts have to come from the same statement: a delete that establishes
+// existence and then fails to read the slug would soft-delete a crew whose
+// sidecar containers and volumes can no longer be named by anything (#1709's
+// teardown is keyed on the slug). Callers treat an empty slug as a hard failure.
+func loadCrewForDelete(ctx context.Context, db *sql.DB, crewID, workspaceID string) (slug string, found bool, err error) {
+	err = db.QueryRowContext(ctx,
+		"SELECT COALESCE(slug, '') FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		crewID, workspaceID).Scan(&slug)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return slug, true, nil
+}
+
 func crewExists(ctx context.Context, db *sql.DB, crewID, workspaceID string) (bool, error) {
 	var id string
 	err := db.QueryRowContext(ctx,

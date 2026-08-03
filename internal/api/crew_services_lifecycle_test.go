@@ -102,6 +102,102 @@ func TestCrewRuntimeConfigResolvesEnvRefsFromTheCrewsCredentials(t *testing.T) {
 	}
 }
 
+// mustEncrypt is the vault write a test needs before it can assert what a
+// sidecar reads back out.
+func mustEncrypt(t *testing.T, plain string) string {
+	t.Helper()
+	enc, err := encryption.Encrypt(plain)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	return enc
+}
+
+// A crew's env_refs must resolve from the crew's WHOLE delivery set, not just
+// the legacy credential_crews link.
+//
+// credential_bindings (scope CREW / WORKSPACE) is the supported model — it is
+// what makes two crews able to bind POSTGRES_PASSWORD to two different secrets.
+// Reading only credential_crews meant a crew whose password comes from a
+// binding started postgres with NO password: the official image exits
+// immediately, EnsureCrewServices fails, and the whole start now hard-fails —
+// so a scheduled routine that used to run (just without sidecars) would break
+// outright. It also gave the sidecar a different env, and therefore a different
+// spec hash, from the one the chat path produces.
+func TestCrewRuntimeConfigResolvesEnvRefsFromCrewAndWorkspaceBindings(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	mustExec(t, db, `INSERT INTO crews (id, workspace_id, name, slug, services_json)
+		VALUES ('crew-bind', ?, 'pg', 'pg', ?)`, wsID,
+		`[{"name":"postgres","image":"postgres:16-alpine","env_refs":["POSTGRES_PASSWORD","SHARED_TOKEN"]}]`)
+
+	// The crew-scoped binding: credential named "pg-main", delivered under the
+	// slot POSTGRES_PASSWORD.
+	crewSecret := mustEncrypt(t, "from-crew-binding")
+	mustExec(t, db, `INSERT INTO credentials (id, workspace_id, name, type, status, encrypted_value, created_by)
+		VALUES ('cred-pg', ?, 'pg-main', 'SECRET', 'ACTIVE', ?, ?)`, wsID, crewSecret, userID)
+	mustExec(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, crew_id, slot)
+		VALUES ('bind-crew', ?, 'cred-pg', 'CREW', 'crew-bind', 'POSTGRES_PASSWORD')`, wsID)
+
+	// A workspace-scoped binding, which every crew in the tenant inherits.
+	wsSecret := mustEncrypt(t, "from-workspace-binding")
+	mustExec(t, db, `INSERT INTO credentials (id, workspace_id, name, type, status, encrypted_value, created_by)
+		VALUES ('cred-shared', ?, 'shared-account', 'SECRET', 'ACTIVE', ?, ?)`, wsID, wsSecret, userID)
+	mustExec(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, slot)
+		VALUES ('bind-ws', ?, 'cred-shared', 'WORKSPACE', 'SHARED_TOKEN')`, wsID)
+
+	cfg, err := BuildCrewRuntimeConfig(context.Background(), db, "crew-bind", wsID)
+	if err != nil {
+		t.Fatalf("BuildCrewRuntimeConfig: %v", err)
+	}
+	if len(cfg.Services) != 1 {
+		t.Fatalf("Services = %d, want 1", len(cfg.Services))
+	}
+	env := cfg.Services[0].Env
+	if env["POSTGRES_PASSWORD"] != "from-crew-binding" {
+		t.Errorf("POSTGRES_PASSWORD = %q, want the crew-scoped binding's value — postgres refuses to "+
+			"start without one, so this is the difference between a working sidecar and a hard failure",
+			env["POSTGRES_PASSWORD"])
+	}
+	if env["SHARED_TOKEN"] != "from-workspace-binding" {
+		t.Errorf("SHARED_TOKEN = %q, want the workspace-scoped binding's value", env["SHARED_TOKEN"])
+	}
+}
+
+// The crew scope stops at the crew: an AGENT-scoped binding must NOT reach a
+// sidecar, because that is what made the same crew's postgres differ per agent
+// and churn on every change of trigger.
+func TestCrewRuntimeConfigIgnoresAgentScopedBindingsForSidecars(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	mustExec(t, db, `INSERT INTO crews (id, workspace_id, name, slug, services_json)
+		VALUES ('crew-agent-bind', ?, 'pg', 'pg', ?)`, wsID,
+		`[{"name":"postgres","image":"postgres:16-alpine","env_refs":["POSTGRES_PASSWORD"]}]`)
+	mustExec(t, db, `INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role)
+		VALUES ('agent-1', ?, 'crew-agent-bind', 'A', 'a', 'AGENT')`, wsID)
+
+	secret := mustEncrypt(t, "per-agent-value")
+	mustExec(t, db, `INSERT INTO credentials (id, workspace_id, name, type, status, encrypted_value, created_by)
+		VALUES ('cred-agent', ?, 'agent-only', 'SECRET', 'ACTIVE', ?, ?)`, wsID, secret, userID)
+	mustExec(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, agent_id, slot)
+		VALUES ('bind-agent', ?, 'cred-agent', 'AGENT', 'agent-1', 'POSTGRES_PASSWORD')`, wsID)
+
+	cfg, err := BuildCrewRuntimeConfig(context.Background(), db, "crew-agent-bind", wsID)
+	if err != nil {
+		t.Fatalf("BuildCrewRuntimeConfig: %v", err)
+	}
+	if got := cfg.Services[0].Env["POSTGRES_PASSWORD"]; got != "" {
+		t.Errorf("POSTGRES_PASSWORD = %q — an AGENT-scoped binding reached a crew-scoped sidecar, "+
+			"which is exactly the per-agent variation that churns the container", got)
+	}
+}
+
 // ---------- #1709: delete tears the sidecars down ----------
 
 // teardownContainer records the sidecar teardown calls a crew delete makes.

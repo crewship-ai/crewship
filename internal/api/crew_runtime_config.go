@@ -38,7 +38,6 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -202,20 +201,42 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 	// Decoding here puts them on the config every caller passes to
 	// crewstart.Starter.Start, which is what starts them.
 	//
-	// A malformed services_json is NOT fatal: the crew starts without its
-	// sidecars and the caller logs, matching what the chat path has always
-	// done. Hard-failing here would take a crew's whole runtime down over a
-	// stale column that only some of its work needs.
+	// A malformed services_json is NOT fatal, and this is where that has to be
+	// true rather than merely stated: the crew loses its sidecars and keeps
+	// everything else. The returned config is COMPLETE — image, env, mounts,
+	// caps, limits — and the error only reports what could not be added.
+	//
+	// It was a bare `return cfg, err` for one commit, and that was enough to
+	// reinstate #1717 through the back door: CompleteCrewConfig propagated the
+	// error, crewstart discarded the whole completion, and a crew with a stale
+	// services column started from the default runtime image. A stale column may
+	// cost a crew its databases; it must never cost it its toolchain.
 	if strings.TrimSpace(servicesJSON.String) != "" {
-		svcs, sErr := crewstart.DecodeServices(servicesJSON.String, crewServiceEnvLookup(ctx, db, crewID))
+		// A failed credential read leaves the crew WITHOUT sidecars rather than
+		// with sidecars missing their secrets: postgres started without its
+		// password exits on boot, and half a secret in a container's
+		// environment is worse than none because the container comes up and
+		// then misbehaves.
+		envLookup, lookupErr := crewServiceEnvLookup(ctx, db, crewID)
+		if lookupErr != nil {
+			return cfg, fmt.Errorf("%w: crew %s: env_refs: %w", ErrCrewServicesUnresolved, crewID, lookupErr)
+		}
+		svcs, sErr := crewstart.DecodeServices(servicesJSON.String, envLookup)
 		if sErr != nil {
-			return cfg, fmt.Errorf("decode services_json for crew %s: %w", crewID, sErr)
+			return cfg, fmt.Errorf("%w: crew %s: %w", ErrCrewServicesUnresolved, crewID, sErr)
 		}
 		cfg.Services = svcs
 	}
 
 	return cfg, nil
 }
+
+// ErrCrewServicesUnresolved reports that a crew's runtime config was resolved
+// EXCEPT for its sidecar services — the services_json column could not be
+// decoded. It is a partial success, not a failure: callers get a usable config
+// alongside it and are expected to start the crew without its sidecars, which
+// is what the chat path has always done with the same column.
+var ErrCrewServicesUnresolved = errors.New("crew sidecar services unresolved")
 
 // CrewConfigCompleter is the DB-backed crewstart.Completer: it answers "what
 // does this crew's container actually look like?" for the callers that hold
@@ -250,59 +271,48 @@ func (c *CrewConfigCompleter) CompleteCrewConfig(ctx context.Context, cfg provid
 		if errors.Is(err, sql.ErrNoRows) {
 			return cfg, nil
 		}
-		return cfg, err
+		// RESOLVED, not cfg: buildCrewRuntimeConfig returns a usable config
+		// alongside a partial-failure error (ErrCrewServicesUnresolved), and
+		// handing back the caller's bare {ID, Slug} instead would throw away a
+		// crew's image, mounts and limits over an undecodable services column.
+		// crewstart merges what it is given and logs the error either way.
+		return resolved, err
 	}
 	return resolved, nil
 }
 
 // crewServiceEnvLookup resolves a sidecar's `env_refs` entries to plaintext
-// credential values, scoped to the CREW.
+// credential values from the crew's whole delivery set — bindings (scope CREW
+// and WORKSPACE) and the legacy credential_crews link, per
+// credential_delivery_crew.go.
 //
-// Crew-scoped is the correct scope and it is also the only one that is stable:
-// a sidecar's environment feeds the docker provider's spec hash, so resolving
-// refs against whichever agent happened to trigger the start would give the
-// same crew a different postgres container per agent, and recreate it (dropping
-// connections) every time the trigger changed. credential_crews is the link a
-// crew-wide secret is expressed through, and the arm the agent-scoped delivery
-// query reads for exactly these credentials.
+// It read credential_crews ALONE for one commit, which is not the same thing as
+// "crew scope": credential_bindings is the supported model, so a crew whose
+// POSTGRES_PASSWORD comes from a CREW-scoped binding got no password at all,
+// postgres exited on boot, and — because a failed sidecar now fails the start —
+// a scheduled routine that used to run went from "no sidecars" to "does not
+// run".
 //
-// Auto-managed sidecar credentials do not come through here at all — they are
+// Crew scope is also the only stable one: a sidecar's environment feeds the
+// docker provider's spec hash, so resolving refs against whichever agent
+// happened to trigger the start would give the same crew a different postgres
+// container per agent, and recreate it (dropping connections) every time the
+// trigger changed.
+//
+// Auto-managed sidecar credentials do not come through here at all - they are
 // generated at manifest-apply time and stored as literal env in services_json
 // (internal/manifest/auto_managed.go), which is why a `services:` block works
 // out of the box with no vault lookup.
 //
-// Errors are swallowed into "resolves to nothing": a ref that cannot be read is
-// dropped from the sidecar's env, the same treatment a PENDING credential gets.
-func crewServiceEnvLookup(ctx context.Context, db *sql.DB, crewID string) func(string) string {
-	values := map[string]string{}
-	if db == nil || crewID == "" {
-		return func(string) string { return "" }
-	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT c.name, c.encrypted_value
-		FROM credential_crews cc
-		JOIN credentials c ON c.id = cc.credential_id
-		JOIN crews cr ON cr.id = cc.crew_id
-		WHERE cc.crew_id = ?
-		  AND c.deleted_at IS NULL
-		  AND c.status = 'ACTIVE'
-		  AND c.workspace_id = cr.workspace_id`, crewID)
+// A read failure is returned, not swallowed: the caller folds it into
+// ErrCrewServicesUnresolved, so the crew starts with its image and its limits
+// and without the sidecars whose secrets could not be read.
+func crewServiceEnvLookup(ctx context.Context, db *sql.DB, crewID string) (func(string) string, error) {
+	values, err := loadCrewDeliveredEnv(ctx, db, crewID)
 	if err != nil {
-		return func(string) string { return "" }
+		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name, enc string
-		if err := rows.Scan(&name, &enc); err != nil {
-			continue
-		}
-		plain, err := encryption.Decrypt(enc)
-		if err != nil || isPendingSentinel(plain) {
-			continue
-		}
-		values[name] = plain
-	}
-	return func(envVar string) string { return values[envVar] }
+	return func(envVar string) string { return values[envVar] }, nil
 }
 
 // EnsureProvisioned blocks until the crew's devcontainer image is built and
