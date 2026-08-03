@@ -402,9 +402,26 @@ func (s *ChannelStore) ListEnabled(ctx context.Context, workspaceID string) ([]C
 	}
 	out := all[:0]
 	for _, c := range all {
-		if c.Enabled {
-			out = append(out, c)
+		if !c.Enabled {
+			continue
 		}
+		// Personal channels are never in this list (#1735). The one
+		// consumer is the legacy #850 fan-out, which is also the one
+		// delivery path that consults no preference, no admin
+		// allowlist, no priority floor and no rate gate — so it is
+		// exactly the path that must not reach a channel somebody made
+		// for themselves. Scope arrived in #1412 and this lister was
+		// never taught about it.
+		//
+		// The test is "is it personal", not "is it workspace": a row
+		// carrying some future or unrecognised scope stays in the
+		// fan-out it has always been in, rather than being silently
+		// dropped from delivery by a value nobody has taught this
+		// function about yet.
+		if c.Scope == ScopeUser {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
