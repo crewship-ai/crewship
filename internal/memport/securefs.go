@@ -3,7 +3,7 @@ package memport
 import (
 	"io/fs"
 	"os"
-	"path/filepath"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/safepath"
@@ -27,6 +27,15 @@ func SecureDirFS(root string) fs.FS { return secureDir{root: root} }
 
 type secureDir struct{ root string }
 
+// resolve turns an fs-relative name into a host path built from
+// individually validated components.
+//
+// safepath.JoinUnder (rather than JoinRel on the joined string) is
+// deliberate: it runs ValidateComponent on every segment, so the value
+// that reaches a syscall is one whose every part was checked, not one
+// whose combined text passed a check. Same reasoning as
+// EnsureDirNoFollow — the guarantee belongs on the value at the point
+// of use.
 func (d secureDir) resolve(name string) (string, error) {
 	if name == "." {
 		return d.root, nil
@@ -34,7 +43,7 @@ func (d secureDir) resolve(name string) (string, error) {
 	if !fs.ValidPath(name) {
 		return "", &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
-	return safepath.JoinRel(d.root, filepath.FromSlash(name))
+	return safepath.JoinUnder(d.root, strings.Split(name, "/")...)
 }
 
 // Open satisfies fs.FS. It refuses a symlinked final component; callers
