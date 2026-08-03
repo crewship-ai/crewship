@@ -499,6 +499,13 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 					return "", err
 				}
 				for _, c := range listed.Items {
+					// Only a RUNNING container can be exec'd into. A
+					// stopped one matched the name and then failed the
+					// tar with "container is not running", which told the
+					// operator nothing about what to do (#1741).
+					if c.State != "running" {
+						continue
+					}
 					for _, n := range c.Names {
 						if strings.HasSuffix(strings.TrimPrefix(n, "/"), suffix) {
 							return c.ID, nil

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -105,5 +106,53 @@ func TestApplyViaReportsPlacementFailureAsNotWritten(t *testing.T) {
 func TestApplyViaRequiresAPlacer(t *testing.T) {
 	if _, err := ApplyVia(context.Background(), nil, []Doc{{RelPath: "AGENT.md"}}, memory.WriteConfig{}); err == nil {
 		t.Fatal("ApplyVia() with no placer returned nil error")
+	}
+}
+
+type actionableErr struct{ msg string }
+
+func (e actionableErr) Error() string           { return "internal: " + e.msg }
+func (e actionableErr) OperatorMessage() string { return e.msg }
+
+type actionablePlacer struct{ msg string }
+
+func (p actionablePlacer) Place(context.Context, string, []string) error {
+	return actionableErr{msg: p.msg}
+}
+
+// When the placer knows what the operator should DO, that has to reach
+// them. Leaving it in the server log — which is where it first landed —
+// tells the person who can fix it nothing.
+func TestApplyViaSurfacesAnActionablePlacementFailure(t *testing.T) {
+	p := actionablePlacer{msg: `crew "engineering" has no running container — start it and import again`}
+	res, err := ApplyVia(context.Background(), p,
+		[]Doc{{Tier: memory.TierAgent, Scope: ScopeAgent, RelPath: "AGENT.md", Body: []byte("x")}},
+		memory.WriteConfig{})
+	if err != nil {
+		t.Fatalf("ApplyVia() hard error = %v", err)
+	}
+	if len(res.Failed) != 1 {
+		t.Fatalf("Failed = %+v", res.Failed)
+	}
+	if res.Failed[0].Reason != p.msg {
+		t.Errorf("Reason = %q, want the placer's operator message", res.Failed[0].Reason)
+	}
+	if res.Failed[0].Cause == nil {
+		t.Error("the cause must still reach the log")
+	}
+}
+
+// A transport error carries container ids and host paths, so it keeps
+// the generic text.
+func TestApplyViaKeepsOpaqueFailuresOpaque(t *testing.T) {
+	p := &recordingPlacer{err: errors.New("Error response from daemon: container abc123 is not running")}
+	res, err := ApplyVia(context.Background(), p,
+		[]Doc{{Tier: memory.TierAgent, Scope: ScopeAgent, RelPath: "AGENT.md", Body: []byte("x")}},
+		memory.WriteConfig{})
+	if err != nil {
+		t.Fatalf("ApplyVia() hard error = %v", err)
+	}
+	if strings.Contains(res.Failed[0].Reason, "abc123") {
+		t.Errorf("a daemon error leaked to the operator: %q", res.Failed[0].Reason)
 	}
 }

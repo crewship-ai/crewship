@@ -55,10 +55,29 @@ func (p crewContainerPlacer) Place(ctx context.Context, stagingDir string, rels 
 		return err
 	}
 	return p.ops.CopyToPath(ctx, p.containerID, backup.ExtractSpec{
-		Dest:          p.dest,
-		User:          "1001:1001",
+		Dest: p.dest,
+		// 1002:1002 — the identity the SIDECAR uses, because the
+		// sidecar is the canonical writer of an agent's memory and its
+		// files carry its ownership. Observed live on dev3:
+		//
+		//   -rw-r--r--  1002 1002  AGENT.md     <- sidecar-written
+		//   drwxrwsr-x  1001 1002  .            <- setgid dir
+		//
+		// buildChownInitCmd does `chmod g+rw` on the files it finds AT
+		// CONTAINER START, but a file the sidecar creates later gets
+		// 0644 from its umask — so group 1002 can write the DIRECTORY
+		// and not that file. 1001:1001 and 1001:1002 both failed on it
+		// with "Cannot open: Permission denied"; the owner can.
+		User:          "1002:1002",
 		PreserveModes: true,
-		PreserveTimes: true,
+		// NOT preserved. Restore keeps mtimes because it is rebuilding a
+		// snapshot; an import is writing these documents NOW, and the
+		// mtime of a file in somebody else's export says nothing about
+		// this agent's memory. Keeping them also fails outright: utime
+		// on an entry owned by another uid is EPERM for the extracting
+		// identity, and tar exits non-zero having written the bytes.
+		//   tar: daily: Cannot utime: Operation not permitted
+		PreserveTimes: false,
 	}, bytes.NewReader(archive))
 }
 
@@ -109,11 +128,19 @@ func tarStagedDocs(stagingDir string, rels []string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read staged %s: %w", rel, err)
 		}
+		st, err := os.Stat(src)
+		if err != nil {
+			return nil, fmt.Errorf("stat staged %s: %w", rel, err)
+		}
 		if err := tw.WriteHeader(&tar.Header{
 			Name:     rel,
 			Typeflag: tar.TypeReg,
-			Mode:     0o664,
-			Size:     int64(len(body)),
+			// Group-writable so the NEXT writer — whichever identity it
+			// is — can replace it. The 0644 the sidecar leaves behind is
+			// what made this file unwritable by anyone else.
+			Mode:    0o664,
+			ModTime: st.ModTime(),
+			Size:    int64(len(body)),
 		}); err != nil {
 			return nil, fmt.Errorf("tar header %s: %w", rel, err)
 		}
@@ -164,7 +191,28 @@ func (p hostPlacer) Place(_ context.Context, stagingDir string, rels []string) e
 	return nil
 }
 
+// unavailablePlacer is what a stopped crew gets. It exists so the
+// failure names the thing the operator can act on — the crew is not
+// running — instead of the symptom two layers down.
+type unavailablePlacer struct{ crewSlug string }
+
+func (p unavailablePlacer) Place(context.Context, string, []string) error { return crewStoppedError(p) }
+
+// crewStoppedError names the crew and the fix. It carries no container
+// id and no host path, which is what lets it reach the operator instead
+// of stopping at the log.
+type crewStoppedError unavailablePlacer
+
+func (e crewStoppedError) Error() string { return e.OperatorMessage() }
+func (e crewStoppedError) OperatorMessage() string {
+	return fmt.Sprintf("crew %q has no running container — start it (send one of its agents a message, or run `crewship crew restart-agents %s`) and import again",
+		e.crewSlug, e.crewSlug)
+}
+
+var _ memport.OperatorError = crewStoppedError{}
+
 var (
+	_ memport.Placer = unavailablePlacer{}
 	_ memport.Placer = crewContainerPlacer{}
 	_ memport.Placer = hostPlacer{}
 )
