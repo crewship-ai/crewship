@@ -235,12 +235,102 @@ brew install colima docker
 colima start
 ```
 
+Colima, Rancher Desktop, Docker Desktop and `podman machine` all run the
+daemon inside a **VM that only sees the host directories it was configured
+to share** — Colima shares `$HOME` by default and nothing else. Crewship
+keeps every host path it hands the daemon under its data dir
+(`~/.crewship` by default, inside that share) precisely so a stock install
+works without touching the VM's mount list. If you move the data dir with
+`--data-dir` / `CREWSHIP_DATA_DIR`, put it somewhere the VM shares — see
+"A bind mount fails for a file that exists" below.
+
 On Linux, `curl -fsSL https://get.docker.com | sh`, then
 `sudo systemctl enable --now docker` and add yourself to the `docker`
 group (`sudo usermod -aG docker $USER`, log out and back in). Or
 install `podman`. On Windows, install Docker Desktop with the WSL 2
 backend. Crewship picks whatever socket it finds — no further config
 needed.
+
+</Accordion>
+
+<Accordion title='A bind mount fails for a file that exists ("bind source path does not exist")'>
+
+```
+ensure crew runtime failed … container create:
+  invalid mount config for type "bind":
+  bind source path does not exist: /opt/homebrew/.../crewship-sidecar
+```
+
+The file is on your disk and the daemon still says it is missing. That is
+not a missing file — it is a **VM share-set** problem. Colima, Rancher
+Desktop, Docker Desktop and `podman machine` run the daemon inside a VM,
+and a bind source is resolved *inside that VM*. A path the VM does not
+share does not exist as far as the daemon is concerned.
+
+Crewship names this for you: the error says which runtime, which path, and
+the command that shares it — e.g.
+
+```
+the colima daemon cannot see the host path /opt/homebrew/... It exists on
+this machine, so this is not a missing file: colima runs the daemon inside
+a VM that only shares the host directories it was configured with …
+  • share the path with the VM: colima stop && colima start --mount /opt/homebrew:w
+  • or move what is being bound under a directory the VM already shares …
+```
+
+The same check runs at **startup**, so a runtime that cannot see the
+mandatory binds says so in the server log before any crew is woken.
+
+Two things worth knowing:
+
+- **`crewship-sidecar` and `entrypoint.sh` are staged automatically.** They
+  are resolved next to the `crewship` binary (`/opt/homebrew/...` for
+  Homebrew, `/usr/local/bin` for `install.sh`) — outside every default VM
+  share set. Crewship copies them into `<data-dir>/output/.runtime/` at
+  startup and binds the copies, so the only host subtree the daemon has to
+  see is the one it already needed for `/workspace`, `/output` and `/crew`.
+  Nothing to configure.
+- **The remaining case is a data dir outside the share set.** If you point
+  `--data-dir` / `CREWSHIP_DATA_DIR` at, say, `/tmp` on macOS (which is
+  `/private/tmp`, and is *not* the VM's own `/tmp`) or a path on an external
+  volume, add that directory to the VM's mounts or move the data dir back
+  under `$HOME`.
+
+</Accordion>
+
+<Accordion title="Switching container runtimes leaves the old daemon's crew containers running">
+
+Starting Colima, launching Rancher Desktop or repointing `DOCKER_HOST`
+moves Crewship to a different daemon — it does **not** stop what is running
+on the old one. Those containers keep their credentials and stay
+bind-mounted to the same host `/crew`, `/workspace` and `/output`
+directories the new containers use, so an agent inside one can go on
+writing the crew memory the live crew reads back.
+
+At startup Crewship now enumerates every other Docker-API daemon reachable
+on the host, finds crew containers belonging to **this** instance (matched
+on the instance's container prefix), and stops them, logging what it
+stopped and where:
+
+```
+WARN a crew container from this instance is still RUNNING on a container
+     runtime Crewship is no longer using … runtime=orbstack
+     container=crewship-1-team-engineering-cmnp… in_use_runtime=colima
+     inspect_it_with="DOCKER_HOST=unix:///…/.orbstack/run/docker.sock docker inspect …"
+WARN stopped a crew container stranded on another container runtime; it is
+     stopped, NOT removed, so its filesystem and volumes are still there to inspect
+```
+
+They are **stopped, never removed** — the container, its logs and its
+volumes stay for a post-mortem. To keep one running while you investigate:
+
+```bash
+CREWSHIP_STRANDED_CREWS=report crewship start
+```
+
+which reports the same information and prints the `docker stop` command
+instead of running it. The container keeps write access to live crew memory
+until you do.
 
 </Accordion>
 
