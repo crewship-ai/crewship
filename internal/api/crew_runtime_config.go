@@ -19,19 +19,26 @@ package api
 //  2. buildCrewRuntimeConfig — assemble the provider.CrewConfig from the crew's
 //     DB row so the container is created from the PROVISIONED image.
 //
-// Keep buildCrewRuntimeConfig in sync with internal/chatbridge/bridge.go
-// (~531-592); a future refactor should unify the two into one shared resolver.
+// buildCrewRuntimeConfig is now also the DB-backed crewstart.Completer
+// (CrewConfigCompleter below), i.e. the answer every caller that holds only a
+// crew id gets for "what does this crew's container look like?". The chat path
+// keeps its own resolver because it runs off the agent-resolve IPC response and
+// has no DB handle; the two agree field for field, and what they produce is
+// merged rather than chosen between (internal/crewstart.mergeConfig).
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -56,23 +63,18 @@ func crewNeedsProvision(devcontainerCfgJSON, miseJSON string) bool {
 	return len(cfg.Features) > 0 || cfg.PostCreateCommand != nil
 }
 
-// buildCrewRuntimeConfig loads a crew's runtime configuration from the DB and
-// assembles the provider.CrewConfig the container provider needs to start the
-// crew container from its PROVISIONED image — same image, env, mounts, caps and
-// resource limits a chat-driven run would use.
-//
-// Note: sidecar Services (services_json) are intentionally NOT resolved here —
-// they require credential-vault lookups the chat resolver owns. Crews that
-// declare sidecars get them started on the chat path; the dispatch path reuses
-// the already-running container. Callers should log if services_json is set and
-// the container is being cold-created. (Tracked for the resolver-unification
-// follow-up.)
 // BuildCrewRuntimeConfig resolves a crew's full PROVISIONED container config
-// (cached image, mounts, caps, env, resource limits) by crew id — exported so
-// the pipeline script-step runner (wired in cmd/crewship, which can import this
-// package without the internal/pipeline → internal/api import cycle) can
-// EnsureCrewRuntime from the provisioned image rather than the bare base. A
-// cold crew launched from base lacks the interpreters a script step needs.
+// (cached image, mounts, caps, env, resource limits, declared sidecar services)
+// by crew id — exported so the pipeline script-step runner (wired in
+// cmd/crewship, which can import this package without the internal/pipeline →
+// internal/api import cycle) can start a crew from the provisioned image rather
+// than the bare base. A cold crew launched from base lacks the interpreters a
+// script step needs.
+//
+// workspaceID scopes the lookup; pass "" to resolve by the (globally unique)
+// crew id alone, which is what CrewConfigCompleter does — the container config
+// it hands to crewstart carries a crew id and nothing else to scope by, and the
+// caller has already decided this crew may be started.
 func BuildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID string) (provider.CrewConfig, error) {
 	return buildCrewRuntimeConfig(ctx, db, crewID, workspaceID)
 }
@@ -86,19 +88,20 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		runtimeImage, cachedImage  sql.NullString
 		cachedRequirements         sql.NullString
 		devcontainerCfg            sql.NullString
+		servicesJSON               sql.NullString
 	)
 	err := db.QueryRowContext(ctx, `
 		SELECT slug, network_mode, allowed_domains,
 		       container_memory_mb, container_cpus, container_ttl_hours,
 		       runtime_image, cached_image, cached_requirements,
-		       devcontainer_config
+		       devcontainer_config, services_json
 		FROM crews
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		crewID, workspaceID,
+		WHERE id = ? AND (? = '' OR workspace_id = ?) AND deleted_at IS NULL`,
+		crewID, workspaceID, workspaceID,
 	).Scan(&slug, &networkMode, &allowedDomain,
 		&memoryMB, &cpus, &ttlHours,
 		&runtimeImage, &cachedImage, &cachedRequirements,
-		&devcontainerCfg)
+		&devcontainerCfg, &servicesJSON)
 	if err != nil {
 		return provider.CrewConfig{}, fmt.Errorf("load crew runtime config: %w", err)
 	}
@@ -192,7 +195,114 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		cfg.PostStartCommands = append(cfg.PostStartCommands, reqs.PostStartCommands...)
 	}
 
+	// The crew's declared sidecars (#1708). This used to be resolved only by
+	// the chat resolver, which is why a crew with `services: [redis]` ran
+	// database-less on every headless path — the dispatch path assembled a
+	// config with an empty Services and the sidecars were never asked for.
+	// Decoding here puts them on the config every caller passes to
+	// crewstart.Starter.Start, which is what starts them.
+	//
+	// A malformed services_json is NOT fatal: the crew starts without its
+	// sidecars and the caller logs, matching what the chat path has always
+	// done. Hard-failing here would take a crew's whole runtime down over a
+	// stale column that only some of its work needs.
+	if strings.TrimSpace(servicesJSON.String) != "" {
+		svcs, sErr := crewstart.DecodeServices(servicesJSON.String, crewServiceEnvLookup(ctx, db, crewID))
+		if sErr != nil {
+			return cfg, fmt.Errorf("decode services_json for crew %s: %w", crewID, sErr)
+		}
+		cfg.Services = svcs
+	}
+
 	return cfg, nil
+}
+
+// CrewConfigCompleter is the DB-backed crewstart.Completer: it answers "what
+// does this crew's container actually look like?" for the callers that hold
+// only a crew id — the web terminal, the container-start and agent-start
+// routes, the orchestrator's crew warmers.
+//
+// Those callers passed provider.CrewConfig{ID, Slug} and nothing else, so the
+// docker provider fell back to the global default runtime image and the crew
+// came up as bare debian with none of its provisioned toolchain (#1717), and
+// with none of its declared sidecars (#1708).
+type CrewConfigCompleter struct {
+	db *sql.DB
+}
+
+// NewCrewConfigCompleter returns a completer reading from db. A nil db yields a
+// completer that adds nothing (dev / no-DB), never an error.
+func NewCrewConfigCompleter(db *sql.DB) *CrewConfigCompleter {
+	return &CrewConfigCompleter{db: db}
+}
+
+// CompleteCrewConfig implements crewstart.Completer.
+//
+// A crew id with no row is NOT an error: the scheduler starts a synthetic
+// "scheduler-<workspace>" crew that has never existed in the crews table, and
+// that path must keep working exactly as it does today.
+func (c *CrewConfigCompleter) CompleteCrewConfig(ctx context.Context, cfg provider.CrewConfig) (provider.CrewConfig, error) {
+	if c == nil || c.db == nil || cfg.ID == "" {
+		return cfg, nil
+	}
+	resolved, err := buildCrewRuntimeConfig(ctx, c.db, cfg.ID, "")
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return cfg, nil
+		}
+		return cfg, err
+	}
+	return resolved, nil
+}
+
+// crewServiceEnvLookup resolves a sidecar's `env_refs` entries to plaintext
+// credential values, scoped to the CREW.
+//
+// Crew-scoped is the correct scope and it is also the only one that is stable:
+// a sidecar's environment feeds the docker provider's spec hash, so resolving
+// refs against whichever agent happened to trigger the start would give the
+// same crew a different postgres container per agent, and recreate it (dropping
+// connections) every time the trigger changed. credential_crews is the link a
+// crew-wide secret is expressed through, and the arm the agent-scoped delivery
+// query reads for exactly these credentials.
+//
+// Auto-managed sidecar credentials do not come through here at all — they are
+// generated at manifest-apply time and stored as literal env in services_json
+// (internal/manifest/auto_managed.go), which is why a `services:` block works
+// out of the box with no vault lookup.
+//
+// Errors are swallowed into "resolves to nothing": a ref that cannot be read is
+// dropped from the sidecar's env, the same treatment a PENDING credential gets.
+func crewServiceEnvLookup(ctx context.Context, db *sql.DB, crewID string) func(string) string {
+	values := map[string]string{}
+	if db == nil || crewID == "" {
+		return func(string) string { return "" }
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT c.name, c.encrypted_value
+		FROM credential_crews cc
+		JOIN credentials c ON c.id = cc.credential_id
+		JOIN crews cr ON cr.id = cc.crew_id
+		WHERE cc.crew_id = ?
+		  AND c.deleted_at IS NULL
+		  AND c.status = 'ACTIVE'
+		  AND c.workspace_id = cr.workspace_id`, crewID)
+	if err != nil {
+		return func(string) string { return "" }
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name, enc string
+		if err := rows.Scan(&name, &enc); err != nil {
+			continue
+		}
+		plain, err := encryption.Decrypt(enc)
+		if err != nil || isPendingSentinel(plain) {
+			continue
+		}
+		values[name] = plain
+	}
+	return func(envVar string) string { return values[envVar] }
 }
 
 // EnsureProvisioned blocks until the crew's devcontainer image is built and

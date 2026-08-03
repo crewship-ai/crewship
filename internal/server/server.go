@@ -341,6 +341,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetCrewTTLResolver(func(ctx context.Context) map[string]int {
 			return loadCrewTTLHours(ctx, db, logger)
 		})
+		// #1708/#1717: the same crews table is also the authority on which
+		// image a crew runs and which sidecars it declares. Without this the
+		// orchestrator's own starts (mission dispatch's minimal {id, slug}
+		// config) fall back to the default runtime image and no sidecars.
+		orch.SetCrewCompleter(goapi.NewCrewConfigCompleter(db))
 	}
 
 	s.registerRoutes()

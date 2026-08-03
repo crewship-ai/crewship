@@ -309,7 +309,7 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		}
 		cfg = resolved
 	}
-	containerID, err := r.container.EnsureCrewRuntime(ctx, cfg)
+	containerID, cfg, err := r.startCrew(ctx, cfg, req.WorkspaceID)
 	if err != nil {
 		return ScriptRunResult{}, fmt.Errorf("script runner: ensure container: %w", err)
 	}

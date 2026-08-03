@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -461,14 +462,20 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 			crewID = "scheduler-" + ag.Workspace
 			crewSlug = "scheduler"
 		}
-		cID, err := s.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-			ID:          crewID,
-			Slug:        crewSlug,
-			MemoryMB:    s.cfg.DefaultMemoryMB,
-			CPUs:        s.cfg.DefaultCPUs,
-			Image:       info.RuntimeImage,
-			CachedImage: info.CachedImage,
-		})
+		// Same assembly the chat path uses (chatbridge.ChatInfo.CrewRuntimeConfig)
+		// — including the crew's declared sidecars, which a scheduled run used to
+		// start without, so a nightly routine on a crew with `services: [redis]`
+		// ran against nothing (#1708).
+		cfg, cfgErr := info.CrewRuntimeConfig(s.cfg.DefaultMemoryMB, s.cfg.DefaultCPUs)
+		if cfgErr != nil {
+			s.logger.Warn("scheduled: crew services unresolved, starting without them",
+				"agent", ag.Slug, "crew_id", crewID, "error", cfgErr)
+		}
+		// An agent with no crew gets a synthetic per-workspace one; it has no
+		// crews row, no image and no services, which the starter tolerates.
+		cfg.ID = crewID
+		cfg.Slug = crewSlug
+		cID, err := crewstart.New(s.container, nil, s.logger).Start(ctx, cfg)
 		if err != nil {
 			s.logger.Error("scheduled: container failed", "agent", ag.Slug, "error", err)
 			releaseReservation()

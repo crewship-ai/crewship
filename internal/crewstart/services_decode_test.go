@@ -1,11 +1,9 @@
-package chatbridge
+package crewstart
 
 import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // ---------- decodeServicesForRuntime ----------
@@ -13,7 +11,7 @@ import (
 func TestDecodeServicesForRuntimeEmptyBody(t *testing.T) {
 	t.Parallel()
 	for _, body := range []string{"", "   \n\t  "} {
-		got, err := decodeServicesForRuntime(body, nil)
+		got, err := DecodeServices(body, nil)
 		if err != nil {
 			t.Errorf("body %q: unexpected error: %v", body, err)
 		}
@@ -25,7 +23,7 @@ func TestDecodeServicesForRuntimeEmptyBody(t *testing.T) {
 
 func TestDecodeServicesForRuntimeBadJSON(t *testing.T) {
 	t.Parallel()
-	_, err := decodeServicesForRuntime("{not json", nil)
+	_, err := DecodeServices("{not json", nil)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON")
 	}
@@ -71,7 +69,7 @@ func TestDecodeServicesForRuntimeSchemaGuards(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := decodeServicesForRuntime(tc.body, nil)
+			_, err := DecodeServices(tc.body, nil)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -106,7 +104,7 @@ func TestDecodeServicesForRuntimeFullService(t *testing.T) {
 		}
 		return "" // MISSING_REF → dropped
 	}
-	svcs, err := decodeServicesForRuntime(body, lookup)
+	svcs, err := DecodeServices(body, lookup)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,7 +156,7 @@ func TestDecodeServicesForRuntimeFullService(t *testing.T) {
 func TestDecodeServicesForRuntimeNilLookupDropsEnvRefs(t *testing.T) {
 	t.Parallel()
 	body := `[{"name":"db","image":"postgres:16","env_refs":["TOKEN"]}]`
-	svcs, err := decodeServicesForRuntime(body, nil)
+	svcs, err := DecodeServices(body, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +173,7 @@ func TestDecodeServicesForRuntimeHealthcheckDurationDefaults(t *testing.T) {
 	// Empty + unparseable durations must land on the documented defaults
 	// (5s interval, 3s timeout, 0 start period).
 	body := `[{"name":"db","image":"img","healthcheck":{"test":["CMD","true"],"interval":"not-a-duration"}}]`
-	svcs, err := decodeServicesForRuntime(body, nil)
+	svcs, err := DecodeServices(body, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -193,7 +191,7 @@ func TestDecodeServicesForRuntimeHealthcheckDurationDefaults(t *testing.T) {
 
 func TestDecodeServicesForRuntimeNoHealthcheck(t *testing.T) {
 	t.Parallel()
-	svcs, err := decodeServicesForRuntime(`[{"name":"redis","image":"redis:7"}]`, nil)
+	svcs, err := DecodeServices(`[{"name":"redis","image":"redis:7"}]`, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,32 +219,5 @@ func TestParseDuration(t *testing.T) {
 		if got := parseDuration(tc.in, def); got != tc.want {
 			t.Errorf("parseDuration(%q) = %v, want %v", tc.in, got, tc.want)
 		}
-	}
-}
-
-// ---------- buildServiceEnvLookup ----------
-
-func TestBuildServiceEnvLookup(t *testing.T) {
-	t.Parallel()
-	lookup := buildServiceEnvLookup([]orchestrator.Credential{
-		{EnvVarName: "API_KEY", PlainValue: "k1"},
-		{EnvVarName: "PENDING_CRED", PlainValue: ""}, // status=PENDING → empty value
-	})
-	if got := lookup("API_KEY"); got != "k1" {
-		t.Errorf("lookup(API_KEY) = %q, want k1", got)
-	}
-	if got := lookup("PENDING_CRED"); got != "" {
-		t.Errorf("lookup(PENDING_CRED) = %q, want empty", got)
-	}
-	if got := lookup("UNKNOWN"); got != "" {
-		t.Errorf("lookup(UNKNOWN) = %q, want empty", got)
-	}
-}
-
-func TestBuildServiceEnvLookupEmptyCreds(t *testing.T) {
-	t.Parallel()
-	lookup := buildServiceEnvLookup(nil)
-	if got := lookup("ANYTHING"); got != "" {
-		t.Errorf("lookup on empty creds = %q, want empty", got)
 	}
 }

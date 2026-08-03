@@ -14,8 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/gorilla/websocket"
@@ -283,10 +285,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil || status.State != "running" {
 		h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
 		h.writeInfo(ws, "Starting container...")
-		_, err := h.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
-			ID:   init.CrewID,
-			Slug: actualSlug,
-		})
+		// {id, slug} was the whole config this passed, which is why the
+		// terminal — the surface an operator opens specifically to look at a
+		// crew's environment — came up in the bare default image with none of
+		// the crew's provisioned toolchain, and without the crew's declared
+		// sidecars (#1717/#1708). The starter resolves both from the crews row.
+		_, err := crewstart.New(h.container, api.NewCrewConfigCompleter(h.db), h.logger).
+			Start(r.Context(), provider.CrewConfig{
+				ID:   init.CrewID,
+				Slug: actualSlug,
+			})
 		if err != nil {
 			h.logger.Error("terminal: failed to start container", "error", err)
 			h.writeError(ws, "failed to start container: "+err.Error())

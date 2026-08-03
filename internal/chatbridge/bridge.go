@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/admission"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -608,71 +609,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if containerID == "" && b.container != nil {
 		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
-		// Merge feature-level ContainerEnv (from CachedRequirements) with
-		// root-level ContainerEnv. Root wins on conflict so user intent in
-		// devcontainer.json overrides feature defaults.
-		mergedEnv := make(map[string]string)
-		if info.CachedRequirements != nil {
-			for k, v := range info.CachedRequirements.ContainerEnv {
-				mergedEnv[k] = v
-			}
-		}
-		for k, v := range info.ContainerEnv {
-			mergedEnv[k] = v
-		}
-		cc := provider.CrewConfig{
-			ID:             info.CrewID,
-			Slug:           info.CrewSlug,
-			MemoryMB:       memoryMB,
-			CPUs:           cpuVal,
-			Image:          info.RuntimeImage,
-			CachedImage:    info.CachedImage,
-			NetworkMode:    info.NetworkMode,
-			AllowedDomains: info.AllowedDomains,
-			TTLHours:       info.TTLHours,
-			ContainerEnv:   mergedEnv,
-		}
-		if info.CachedRequirements != nil {
-			cc.LoginPath = info.CachedRequirements.LoginPath
-			cc.Privileged = info.CachedRequirements.Privileged
-			cc.Init = info.CachedRequirements.Init
-			cc.CapAdd = append(cc.CapAdd, info.CachedRequirements.CapAdd...)
-			cc.SecurityOpt = append(cc.SecurityOpt, info.CachedRequirements.SecurityOpt...)
-			for _, m := range info.CachedRequirements.Mounts {
-				// Expand devcontainer.json variables (e.g. ${devcontainerId})
-				// before passing the source/target to Docker — Docker rejects
-				// volume names containing "$" with a cryptic error otherwise.
-				cc.ExtraMounts = append(cc.ExtraMounts, provider.CrewMount{
-					Source: devcontainer.ExpandVars(m.Source, info.CrewID),
-					Target: devcontainer.ExpandVars(m.Target, info.CrewID),
-					Type:   m.Type,
-				})
-			}
-			cc.PostStartCommands = append(cc.PostStartCommands, info.CachedRequirements.PostStartCommands...)
-		}
-		// Root-level postStartCommand runs after feature hooks so user intent
-		// (e.g. "start my app-specific DB") wins over feature defaults.
-		cc.PostStartCommands = append(cc.PostStartCommands, info.RootPostStart...)
-
-		// Sidecar services declared in the crew's services_json get
-		// translated into provider.CrewService entries with env_refs
-		// resolved against the workspace credential vault. The
-		// docker provider starts them on the same network as the
-		// agent before EnsureCrewRuntime returns so the agent's
-		// first DB call hits a ready endpoint.
-		if info.ServicesJSON != "" {
-			svcs, err := decodeServicesForRuntime(info.ServicesJSON, info.ServiceEnvLookup)
-			if err != nil {
-				// services_json was validated on write, but a future
-				// schema bump or DB tamper could still produce a
-				// body we can't decode. Surface as a status, not a
-				// hard failure — the agent can still run, just
-				// without its sidecars.
-				b.logger.Warn("decode services_json", "crew_slug", info.CrewSlug, "error", err)
-				streamFn(ws.ChatEvent{Type: "status", Content: "Sidecar services skipped (config invalid)"})
-			} else {
-				cc.Services = svcs
-			}
+		// One assembly, shared with the scheduler, the webhook handler and the
+		// pipeline's agent step (crew_config.go). Sidecar services declared in
+		// the crew's services_json are part of it, with env_refs resolved; the
+		// provider starts them on the agent's network before the crew is
+		// reported ready, so the agent's first DB call hits a live endpoint.
+		cc, cfgErr := info.CrewRuntimeConfig(b.cfg.DefaultMemoryMB, b.cfg.DefaultCPUs)
+		if cfgErr != nil {
+			// services_json was validated on write, but a future schema bump or
+			// DB tamper could still produce a body we can't decode. Surface as a
+			// status, not a hard failure — the agent can still run, just without
+			// its sidecars.
+			b.logger.Warn("decode services_json", "crew_slug", info.CrewSlug, "error", cfgErr)
+			streamFn(ws.ChatEvent{Type: "status", Content: "Sidecar services skipped (config invalid)"})
 		}
 
 		// Ask the provider what it will drop for this crew and say so, before
@@ -709,8 +658,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// "Starting container..." on screen for up to thirty minutes (#1675).
 		cc.ProvisionSink = capacityHoldSink(streamFn)
 
-		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
+		// The runtime container and the crew's sidecars come up as one step:
+		// the sidecars start after the runtime (the crew bridge network has to
+		// exist first) and before the crew is reported ready.
+		cID, err := b.crewStarter().StartNotify(ctx, cc, func(n crewstart.Notice) {
+			// Only when the provider's own capability report didn't already
+			// name Services — telling the user the same thing twice reads as
+			// two separate faults.
+			if n.Kind == crewstart.NoticeSidecarsUnsupported && reportedServices {
+				return
+			}
+			streamFn(ws.ChatEvent{Type: "status", Content: n.Message})
+		})
 		if err != nil {
+			if errors.Is(err, crewstart.ErrSidecarStart) {
+				streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error()})
+				return fmt.Errorf("ensure crew services: %w", err)
+			}
 			// Classify the cause into a closed set so the user gets an
 			// actionable message + machine-readable code instead of the opaque
 			// "failed to start agent container". The raw error still flows to
@@ -719,31 +683,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			b.logger.Warn("ensure crew runtime failed", "crew_slug", info.CrewSlug, "code", code, "error", err)
 			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: map[string]any{"code": code}})
 			return fmt.Errorf("ensure team runtime: %w", err)
-		}
-		// Start sidecars after the agent runtime is ready so the
-		// crew bridge network exists. Providers that don't
-		// implement SidecarProvider silently skip — log a
-		// one-time warning so the operator knows their services:
-		// declarations are dormant.
-		if len(cc.Services) > 0 {
-			if sp, ok := b.container.(provider.SidecarProvider); ok {
-				ids, err := sp.EnsureCrewServices(ctx, cc)
-				if err != nil {
-					streamFn(ws.ChatEvent{Type: "error", Content: "failed to start sidecar services: " + err.Error()})
-					return fmt.Errorf("ensure crew services: %w", err)
-				}
-				b.logger.Info("sidecar services ready", "crew_slug", info.CrewSlug, "count", len(ids))
-			} else {
-				b.logger.Warn("container provider does not support sidecars; services skipped",
-					"crew_slug", info.CrewSlug, "service_count", len(cc.Services))
-				// Only when the provider's own report didn't already name
-				// Services — telling the user the same thing twice reads as
-				// two separate faults.
-				if !reportedServices {
-					streamFn(ws.ChatEvent{Type: "status",
-						Content: "Sidecar services declared but provider doesn't support them yet"})
-				}
-			}
 		}
 		containerID = cID
 		b.containerMu.Lock()
@@ -1210,4 +1149,13 @@ func capacityHoldSink(streamFn func(ws.ChatEvent)) func(devcontainer.ProvisionEv
 		}
 		streamFn(ws.ChatEvent{Type: "status", Content: b.String()})
 	}
+}
+
+// crewStarter is the bridge's handle on the crew-start contract
+// (internal/crewstart). Chat resolves the crew's whole config itself off the
+// agent-resolve response, so it needs no completer — but it goes through the
+// same Start as every other path, which is what keeps "start a crew" meaning
+// one thing.
+func (b *Bridge) crewStarter() *crewstart.Starter {
+	return crewstart.New(b.container, nil, b.logger)
 }

@@ -157,6 +157,15 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The slug is read BEFORE the row is soft-deleted: it is how the container
+	// runtime names everything that belongs to this crew, and the teardown below
+	// cannot find any of it afterwards.
+	var crewSlug string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT slug FROM crews WHERE id = ? AND workspace_id = ?", crewID, workspaceID).Scan(&crewSlug); err != nil {
+		h.logger.Warn("resolve crew slug for delete", "crew_id", crewID, "error", err)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Cascade: hard-delete orphan-prone children before soft-deleting the crew.
@@ -190,6 +199,8 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "soft delete crew", err)
 		return
 	}
+
+	h.removeCrewSidecars(r.Context(), crewID, crewSlug)
 
 	auditFromRequest(r, h.db, "crew.delete", "CREW", crewID, nil)
 

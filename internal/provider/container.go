@@ -310,6 +310,23 @@ type SidecarProvider interface {
 	RemoveCrewServices(ctx context.Context, crewSlug string) error
 }
 
+// ServiceVolumeRemover is the second half of a sidecar teardown: the named
+// volumes the sidecars mounted (a postgres data directory, a redis dump).
+//
+// It is a separate interface from SidecarProvider rather than a fourth method
+// on it for two reasons. Removing a crew's DATA is a strictly bigger decision
+// than removing its containers, so a provider is allowed to implement one and
+// not the other. And SidecarProvider is discovered by type assertion at every
+// call site: adding a method to it would silently demote every existing
+// implementation (including test fakes) to "not a SidecarProvider" — the
+// assertion would just start returning false, with nothing failing to compile.
+//
+// Callers remove volumes AFTER RemoveCrewServices; docker refuses to remove a
+// volume that a container still references.
+type ServiceVolumeRemover interface {
+	RemoveCrewServiceVolumes(ctx context.Context, crewSlug string) error
+}
+
 // CrewContainerLookup is an optional interface that container providers
 // can implement to expose a non-mutating "does a container for this crew
 // already exist?" lookup. Used by Server.Start for boot-time rehydration:

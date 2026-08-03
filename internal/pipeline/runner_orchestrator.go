@@ -137,16 +137,7 @@ func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceI
 	if r.container == nil || crewID == "" {
 		return nil
 	}
-	cfg := provider.CrewConfig{ID: crewID}
-	if r.crewRuntime != nil {
-		if c, err := r.crewRuntime(ctx, crewID, workspaceID); err == nil {
-			cfg = c
-		} else {
-			r.logger.Debug("prewarm: crew runtime config unavailable, using minimal config",
-				"crew_id", crewID, "error", err)
-		}
-	}
-	containerID, err := r.container.EnsureCrewRuntime(ctx, cfg)
+	containerID, cfg, err := r.startCrew(ctx, provider.CrewConfig{ID: crewID}, workspaceID)
 	if err != nil {
 		return err
 	}
@@ -203,21 +194,17 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	// a cold provision is seconds. Emitted as its own run-keyed journal entry
 	// after a successful ensure.
 	containerAcquireStart := time.Now()
-	containerID, err := r.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-		ID:          info.CrewID,
-		Slug:        info.CrewSlug,
-		Image:       info.RuntimeImage,
-		CachedImage: info.CachedImage,
-		// Size the crew container from the crew's configured limits,
-		// the same source the AgentRunRequest below uses. Without this
-		// a cold pipeline run that *creates* the container would pin it
-		// to the Docker fallback (8 GiB / 2 CPU) while the chat path
-		// (bridge.go) would have sized it to the crew's config. When
-		// these are zero the docker provider applies its own safe
-		// default, so unconfigured crews are unaffected.
-		MemoryMB: info.MemoryMB,
-		CPUs:     info.CPUs,
-	})
+	// The container config comes from the resolved agent (ChatInfo), the same
+	// assembly the chat path uses — including the crew's configured limits, so
+	// a cold pipeline run that CREATES the container doesn't pin it to the
+	// Docker fallback (8 GiB / 2 CPU) that a hand-rolled config left it with —
+	// and including the crew's declared sidecars (#1708).
+	stepCfg, cfgErr := info.CrewRuntimeConfig(0, 0)
+	if cfgErr != nil {
+		r.logger.Warn("pipeline orchestrator runner: crew services unresolved, starting without them",
+			"crew_id", info.CrewID, "error", cfgErr)
+	}
+	containerID, _, err := r.startCrew(ctx, stepCfg, req.WorkspaceID)
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("ensure container: %w", err)
 	}

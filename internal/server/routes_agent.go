@@ -82,7 +82,10 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	if cpus <= 0 {
 		cpus = s.cfg.Container.DefaultCPUs
 	}
-	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
+	// Resource limits come from the request (an agent run may size its own
+	// container); the crew's provisioned image and declared sidecars are filled
+	// in by the starter, which is what this route never looked up (#1717/#1708).
+	containerID, err := s.startCrew(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
 		MemoryMB: memoryMB,
