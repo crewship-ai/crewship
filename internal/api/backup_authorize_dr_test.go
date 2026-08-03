@@ -100,7 +100,7 @@ func TestAllowRestore_ForkedWorkspaceResumeIsAllowed(t *testing.T) {
 
 	// Without provenance it must still be refused — the relaxation is the
 	// row, not the situation.
-	allowed, reason, err := allowRestore(ctx, db, bundlePath, "ws_fork_dr")
+	allowed, reason, err := allowRestore(ctx, db, bundlePath, "ws_fork_dr", true)
 	if err != nil {
 		t.Fatalf("allowRestore: %v", err)
 	}
@@ -111,18 +111,36 @@ func TestAllowRestore_ForkedWorkspaceResumeIsAllowed(t *testing.T) {
 		t.Errorf("unexpected deny reason: %q", reason)
 	}
 
-	// With provenance naming this exact bundle, allow.
+	// With provenance naming this exact bundle, a FILES-ONLY restore is
+	// allowed.
 	if _, err := db.Exec(
 		`INSERT INTO backup_restore_origins (workspace_id, bundle_sha256, restored_at) VALUES (?, ?, ?)`,
 		"ws_fork_dr", sha, "2026-08-03T00:00:00.000000000Z"); err != nil {
 		t.Fatal(err)
 	}
-	allowed, reason, err = allowRestore(ctx, db, bundlePath, "ws_fork_dr")
+	allowed, reason, err = allowRestore(ctx, db, bundlePath, "ws_fork_dr", true)
 	if err != nil {
 		t.Fatalf("allowRestore: %v", err)
 	}
 	if !allowed {
 		t.Fatalf("a workspace forked from THIS bundle must be allowed to finish its restore; denied with %q", reason)
+	}
+
+	// The same row must NOT authorise anything else. This is the hole:
+	// an un-flagged re-run has no rewrite flag, so it takes the ordinary
+	// docker phase, whose crew identities come from the manifest — on
+	// this instance, the SOURCE crews. Authorising it here hands their
+	// live workspace and agent memory to an older backup, with the row
+	// counts looking untroubled because the DB half is INSERT OR IGNORE.
+	allowed, reason, err = allowRestore(ctx, db, bundlePath, "ws_fork_dr", false)
+	if err != nil {
+		t.Fatalf("allowRestore: %v", err)
+	}
+	if allowed {
+		t.Fatalf("provenance authorised a NON files-only restore; that call overwrites the source crews' live data with this bundle")
+	}
+	if !strings.Contains(reason, "not bound to your current workspace") {
+		t.Errorf("unexpected deny reason for the un-flagged re-run: %q", reason)
 	}
 }
 
@@ -149,7 +167,7 @@ func TestAllowRestore_ProvenanceForADifferentBundleStillDenies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	allowed, reason, err := allowRestore(ctx, db, bundlePath, "ws_fork_dr")
+	allowed, reason, err := allowRestore(ctx, db, bundlePath, "ws_fork_dr", true)
 	if err != nil {
 		t.Fatalf("allowRestore: %v", err)
 	}

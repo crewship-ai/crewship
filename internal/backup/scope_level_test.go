@@ -126,8 +126,8 @@ func TestCollectCrew_ScopeLevels(t *testing.T) {
 			if capture.Slug != "research" {
 				t.Errorf("capture slug = %q, want research", capture.Slug)
 			}
-			if capture.WorkspaceEntries+capture.CrewEntries+capture.OutputEntries+
-				capture.HomeEntries+capture.ToolsEntries+capture.VarLibEntries != 0 {
+			if capture.WorkspaceFiles+capture.CrewFiles+capture.OutputFiles+
+				capture.HomeFiles+capture.ToolsFiles+capture.VarLibFiles != 0 {
 				t.Errorf("empty tars must produce a zero capture, got %+v", capture)
 			}
 			gotSorted := append([]string(nil), ops.sources...)

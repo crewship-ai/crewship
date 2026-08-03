@@ -60,10 +60,12 @@ import (
 // three are hard-coded across the provider (buildChownInitCmd,
 // prepMemoryDirs) — repeated here rather than imported because
 // internal/backup must not depend on internal/provider/docker.
+// sidecarGID is defined in restorer.go — the production constant is the
+// one worth asserting against, since a test carrying its own copy would
+// keep passing if the runtime's changed.
 const (
-	agentUID   = 1001
-	agentGID   = 1001
-	sidecarGID = 1002
+	agentUID = 1001
+	agentGID = 1001
 )
 
 // liveCrew is a real container wearing the crew mount shape, plus the
@@ -510,11 +512,17 @@ func collectToPayload(ctx context.Context, t *testing.T, ops DockerOps, crew Cre
 	if err != nil {
 		t.Fatalf("CollectCrew: %v", err)
 	}
-	t.Logf("captured: workspace=%d crew=%d output=%d home=%d tools=%d",
-		capture.WorkspaceEntries, capture.CrewEntries, capture.OutputEntries,
-		capture.HomeEntries, capture.ToolsEntries)
-	if capture.CrewEntries == 0 {
+	t.Logf("captured: workspace=%d crew=%d crew-memory=%d output=%d home=%d tools=%d",
+		capture.WorkspaceFiles, capture.CrewFiles, capture.CrewMemoryFiles,
+		capture.OutputFiles, capture.HomeFiles, capture.ToolsFiles)
+	if capture.CrewFiles == 0 {
 		t.Errorf("collector captured NOTHING from %s — the crew memory tree is not in the bundle (#1713)", ContainerCrewPath)
+	}
+	// CrewFiles counts init.sh too, so it is not evidence of memory.
+	// Against a fixture that seeds a real memory tree, the memory count
+	// is what proves the section carries what the manifest will claim.
+	if capture.CrewMemoryFiles == 0 {
+		t.Errorf("collector counted no files inside a .memory directory, so memory_included would be false for a crew whose memory tree was just seeded")
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("close payload: %v", err)
@@ -746,6 +754,239 @@ func TestLive_RestoreIntoFreshVolumes(t *testing.T) {
 // cannot write, and assert that NOTHING landed — not the workspace, not
 // the memory, which under the old section loop were both already on disk
 // by the time the tools section failed.
+// TestLive_RestoreSurvivesRootOwnedEntriesInsideAgentVolume is #1715's
+// real shape, which the root-only preflight could not see.
+//
+// A named volume is agent-owned at its ROOT and contains root-owned
+// entries left by a root postCreate step. `touch` in the root succeeds,
+// so the preflight passed every section, and the apply loop wrote
+// workspace, then crew-memory, then output — and only failed on home,
+// fourth, where tar tried to open a root-owned file for writing as uid
+// 1001. The operator was left holding a half-restored crew: exactly the
+// state the atomicity comment says can no longer happen.
+//
+// The fix is not to make the write succeed. A cap-dropped container has
+// no CAP_CHOWN and tar cannot replace an entry its identity cannot open
+// — --unlink-first, the obvious candidate, is rejected outright when
+// combined with --overwrite and on its own dies on the first non-empty
+// directory it tries to unlink. Both were observed here rather than
+// reasoned about.
+//
+// What has to hold is the guarantee: the restore is REFUSED, before
+// anything is written, naming the path to fix. Both shapes — a
+// root-owned file the section replaces, and a root-owned directory the
+// section writes into — must behave that way.
+func TestLive_RestoreSurvivesRootOwnedEntriesInsideAgentVolume(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	cli := newLiveClient(t)
+	ops := &MobyDockerOps{Client: cli}
+
+	src := startLiveCrew(ctx, t, cli, "rootentsrc", true)
+	src.seedMemory(ctx, t, []string{"alex"})
+	src.mustSh(ctx, t, "1001:1001", `mkdir -p /home/agent/.config && printf 'home probe\n' > /home/agent/.config/probe.txt`)
+	srcCrew := CrewTarget{ID: "live-rootent", Slug: "engineering", ContainerID: src.id}
+	payload, _ := collectToPayload(ctx, t, ops, srcCrew, ScopeLevelStandard)
+
+	dst := startLiveCrew(ctx, t, cli, "rootentdst", true)
+
+	assertRefusedWithNothingWritten := func(t *testing.T, target *liveCrew, wantNamed string) {
+		t.Helper()
+		err := RestoreCrew(ctx, ops, target.id, srcCrew.Slug, payload)
+		if err == nil {
+			t.Fatalf("restore reported success over a path the agent cannot write")
+		}
+		if !errors.Is(err, ErrRestorePreflight) {
+			t.Fatalf("failed, but not as a preflight refusal — so it may have written first: %v", err)
+		}
+		if !strings.Contains(err.Error(), wantNamed) {
+			t.Errorf("refusal must name the offending path %q so it can be fixed; got %v", wantNamed, err)
+		}
+		t.Logf("refused as expected: %v", err)
+		var landed []string
+		for _, p := range []string{
+			"/workspace/probe.txt",
+			"/crew/shared/.memory/CREW.md",
+			"/crew/agents/alex/.memory/AGENT.md",
+			"/output/probe.txt",
+		} {
+			if target.stat(ctx, t, p).exists {
+				landed = append(landed, p)
+			}
+		}
+		if len(landed) > 0 {
+			t.Fatalf("sections that precede the failing one landed anyway — the preflight still does not see this case: %s",
+				strings.Join(landed, ", "))
+		}
+	}
+
+	t.Run("root-owned FILE inside an agent-owned volume", func(t *testing.T) {
+		// Exactly what a root postCreate leaves behind: the volume root
+		// and its directories belong to the agent, one file inside does
+		// not. The init container has CAP_CHOWN; the crew container does
+		// not, which is why this state is not self-healing.
+		runThrowaway(ctx, t, cli, dst.image, "0:0",
+			[]string{"sh", "-c", `mkdir -p /mnt/home/.config &&` +
+				// The DIRECTORY belongs to the agent — only the file
+				// inside does not. That is what a root postCreate
+				// leaves, and it is the case --unlink-first makes
+				// survivable: unlinking needs write on the parent.
+				` chown 1001:1001 /mnt/home/.config && chmod 755 /mnt/home/.config &&` +
+				` printf 'stale\n' > /mnt/home/.config/probe.txt &&` +
+				` chown 0:0 /mnt/home/.config/probe.txt && chmod 644 /mnt/home/.config/probe.txt`},
+			[]mount.Mount{{Type: mount.TypeVolume, Source: dst.homeVolume, Target: "/mnt/home"}})
+		before := dst.stat(ctx, t, "/home/agent/.config/probe.txt")
+		if before.uid != "0" {
+			t.Fatalf("fixture did not land a root-owned file: %s", before)
+		}
+		// The bundle carries /home/agent/.config/probe.txt, so this is a
+		// file the section WILL open for writing.
+		assertRefusedWithNothingWritten(t, dst, "/home/agent/.config/probe.txt")
+	})
+
+	t.Run("root-owned DIRECTORY is refused before anything is written", func(t *testing.T) {
+		dst2 := startLiveCrew(ctx, t, cli, "rootdirdst", true)
+		runThrowaway(ctx, t, cli, dst2.image, "0:0",
+			[]string{"sh", "-c", `mkdir -p /mnt/home/.config && chown 0:0 /mnt/home/.config && chmod 755 /mnt/home/.config`},
+			[]mount.Mount{{Type: mount.TypeVolume, Source: dst2.homeVolume, Target: "/mnt/home"}})
+
+		assertRefusedWithNothingWritten(t, dst2, "/home/agent/.config")
+	})
+
+	// Writability is not the only thing tar needs. The crew section
+	// restores with PreserveModes and PreserveTimes, and utime()/chmod()
+	// are OWNER rights — so a .memory directory the agent can write but
+	// does not own passes a writability probe and then dies mid-apply
+	// with "Cannot utime: Operation not permitted", after the workspace
+	// section has already landed. Found live, exactly that way.
+	t.Run("a memory dir the agent can write but does not own is refused", func(t *testing.T) {
+		const dstID = "notownerdst"
+		dst4 := startLiveCrew(ctx, t, cli, dstID, true)
+		crewRoot := "/mnt/root/output/crews/" + dstID
+		// alex IS in the bundle, so this is a directory the crew section
+		// writes into. Owned by the sidecar, group-writable by the agent.
+		runThrowaway(ctx, t, cli, dst4.image, "0:0",
+			[]string{"sh", "-c", "mkdir -p " + crewRoot + "/agents/alex/.memory" +
+				" && chown -R 1001:1001 " + crewRoot + "/agents" +
+				" && chown 1002:1001 " + crewRoot + "/agents/alex/.memory" +
+				" && chmod 0775 " + crewRoot + "/agents/alex/.memory"},
+			[]mount.Mount{{Type: mount.TypeVolume, Source: "crewship-live-root-" + dstID, Target: "/mnt/root"}})
+
+		err := RestoreCrew(ctx, ops, dst4.id, srcCrew.Slug, payload)
+		if err == nil {
+			t.Fatalf("restore into a memory dir the agent does not own reported success")
+		}
+		if !errors.Is(err, ErrRestorePreflight) {
+			t.Fatalf("must be refused in the preflight — otherwise tar fails on utime after earlier sections have landed: %v", err)
+		}
+		if dst4.stat(ctx, t, "/workspace/probe.txt").exists {
+			t.Fatalf("the workspace section landed before the crew section failed — the mid-apply failure this exists to prevent")
+		}
+		t.Logf("refused as expected: %v", err)
+	})
+
+	// The other half of "exact, not broad": an unwritable path the
+	// bundle never touches must NOT block the restore. A real
+	// /home/agent is full of root-owned paths from feature installs, and
+	// refusing over one of those would trade a half-written restore for
+	// a restore that never runs.
+	t.Run("an unrelated root-owned path does not block the restore", func(t *testing.T) {
+		dst3 := startLiveCrew(ctx, t, cli, "unrelateddst", true)
+		runThrowaway(ctx, t, cli, dst3.image, "0:0",
+			[]string{"sh", "-c", `mkdir -p /mnt/home/.cache/somefeature && chown -R 0:0 /mnt/home/.cache && chmod -R 755 /mnt/home/.cache && printf 'x\n' > /mnt/home/.cache/somefeature/blob && chmod 644 /mnt/home/.cache/somefeature/blob`},
+			[]mount.Mount{{Type: mount.TypeVolume, Source: dst3.homeVolume, Target: "/mnt/home"}})
+
+		if err := RestoreCrew(ctx, ops, dst3.id, srcCrew.Slug, payload); err != nil {
+			t.Fatalf("a root-owned path the bundle never writes blocked the restore: %v", err)
+		}
+		got := dst3.stat(ctx, t, "/home/agent/.config/probe.txt")
+		if got.content != "home probe\n" {
+			t.Errorf("the restore did not land: %s", got)
+		}
+	})
+}
+
+// TestLive_SidecarOwnedMemoryDirDoesNotFailACompletedRestore is #5.
+//
+// reapplyMemoryPerms runs AFTER every section has been written. A
+// `.memory` directory that already exists in the target can be owned by
+// the memory sidecar (uid 1002) rather than by the agent — tar does not
+// chown a directory it merely extracts into — and chgrp by uid 1001 on a
+// directory it does not own is EPERM. With the passes under `set -e` and
+// no `|| true`, GNU find's non-zero exit aborted the script and
+// RestoreCrew reported failure on a crew that had been fully and
+// correctly overwritten. Re-running did not help: the same entry EPERMs
+// again.
+//
+// The contract now: the data landing is what decides success. A
+// permission shortfall is reported through ErrMemoryPermsDegraded —
+// loud, but not fatal. The operator is told what to fix, not told their
+// restore failed when it did not.
+func TestLive_SidecarOwnedMemoryDirDoesNotFailACompletedRestore(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	cli := newLiveClient(t)
+	ops := &MobyDockerOps{Client: cli}
+
+	src := startLiveCrew(ctx, t, cli, "sidecarsrc", true)
+	src.seedMemory(ctx, t, []string{"alex"})
+	srcCrew := CrewTarget{ID: "live-sidecar", Slug: "engineering", ContainerID: src.id}
+	payload, _ := collectToPayload(ctx, t, ops, srcCrew, ScopeLevelQuick)
+
+	const dstID = "sidecardst"
+	dst := startLiveCrew(ctx, t, cli, dstID, true)
+	// A .memory directory the sidecar owns outright. Only a privileged
+	// helper can create this state — which is exactly why the restore,
+	// running inside a CapDrop: ALL container, cannot chgrp its way out
+	// of it either. Reached through the root volume's known layout
+	// (output/crews/<id>) rather than a host path, because the bind
+	// sources are daemon-side.
+	//
+	// The precise shape matters, and it is deliberately a directory the
+	// BUNDLE DOES NOT TOUCH. The source crew seeded only `alex`, so
+	// `robin`'s memory tree exists on the target and appears in no
+	// section. That distinction is the whole split:
+	//
+	//   - a .memory directory the section WRITES INTO and the agent does
+	//     not own is caught by the preflight, with nothing written
+	//     (covered by TestLive_RestoreSurvivesRootOwnedEntriesInsideAgentVolume);
+	//   - one the section never touches cannot be caught there, because
+	//     refusing over it would block a restore that is going to
+	//     succeed — but the perms pass still walks all of /crew and
+	//     still cannot chgrp it.
+	//
+	// Owned by the sidecar (1002) with the agent's group, which is what
+	// a sidecar-created directory inherits under an agent-owned setgid
+	// parent: chgrp and chmod are owner rights, so both EPERM.
+	crewRoot := "/mnt/root/output/crews/" + dstID
+	runThrowaway(ctx, t, cli, dst.image, "0:0",
+		[]string{"sh", "-c", "mkdir -p " + crewRoot + "/agents/robin/.memory" +
+			" && chown -R 1001:1001 " + crewRoot + "/agents" +
+			" && chown 1002:1001 " + crewRoot + "/agents/robin/.memory" +
+			" && chmod 0775 " + crewRoot + "/agents/robin/.memory"},
+		[]mount.Mount{{Type: mount.TypeVolume, Source: "crewship-live-root-" + dstID, Target: "/mnt/root"}})
+
+	err := RestoreCrew(ctx, ops, dst.id, srcCrew.Slug, payload)
+
+	// Whatever the permission outcome, the DATA has to be there. That is
+	// the assertion separating "degraded" from "failed".
+	got := dst.stat(ctx, t, "/crew/agents/alex/.memory/AGENT.md")
+	if got.content != "agent alex identity\n" {
+		t.Fatalf("the crew memory did not land: %s (err=%v)", got, err)
+	}
+	if err == nil {
+		t.Logf("permissions were fully re-applied even over a sidecar-owned directory")
+		return
+	}
+	if !errors.Is(err, ErrMemoryPermsDegraded) {
+		t.Fatalf("a completed restore reported a HARD failure over permissions, so the caller will roll back data that is on disk: %v", err)
+	}
+	if !strings.Contains(err.Error(), "robin") {
+		t.Errorf("the degraded report must name the directory to fix; got %v", err)
+	}
+	t.Logf("reported as degraded, not failed: %v", err)
+}
+
 func TestLive_RestoreIsAtomicAcrossSections(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()

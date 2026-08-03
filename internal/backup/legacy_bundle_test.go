@@ -10,7 +10,158 @@ package backup
 // bundle outright throws away the workspace files and DB rows that ARE
 // real. Neither is acceptable, so the format version decides.
 
-import "testing"
+import (
+	"archive/tar"
+	"bytes"
+	"testing"
+	"time"
+)
+
+// TestRepackResult_SkeletonDirsAreNotMemory is #3: a crew that has never
+// written a memory note still has `crews/<id>/shared` and
+// `crews/<id>/agents` on disk, because the docker provider's
+// prepareCrewDirs creates them at container-creation time.
+//
+// Counting tar ENTRIES counts those directories, so `memory_included`
+// came back true for a bundle containing no memory — the exact claim
+// this whole change exists to end, arriving through an observed flag
+// instead of a predicted one. Observing the wrong thing is not better
+// than predicting; it is the same claim with a more convincing
+// provenance.
+func TestRepackResult_SkeletonDirsAreNotMemory(t *testing.T) {
+	// Exactly what CopyFrom("/crew") returns for a provisioned crew that
+	// has never been used: the wrapper dir and the two skeleton dirs.
+	src := tarOf(t,
+		dirEntry("crew/"),
+		dirEntry("crew/shared/"),
+		dirEntry("crew/agents/"),
+	)
+
+	var buf bytes.Buffer
+	w, err := NewTarZstWriter(&buf)
+	if err != nil {
+		t.Fatalf("writer: %v", err)
+	}
+	res, err := RepackTarWithExcludes(bytes.NewReader(src), w, "crew/eng", nil)
+	if err != nil {
+		t.Fatalf("repack: %v", err)
+	}
+	_ = w.Close()
+
+	if res.Entries == 0 {
+		t.Fatal("fixture produced no entries; the test would prove nothing")
+	}
+	if res.Files != 0 {
+		t.Errorf("Files = %d for a directory-only section; empty directories are not content", res.Files)
+	}
+	if res.MemoryFiles != 0 {
+		t.Errorf("MemoryFiles = %d for a crew that has never written a memory note", res.MemoryFiles)
+	}
+
+	summary := CrewSummary{Slug: "eng", MemoryIncluded: res.MemoryFiles > 0}
+	if summary.HasCrewMemory(FormatVersion) {
+		t.Error("memory_included is true for a bundle whose /crew section is the provider's skeleton and nothing else")
+	}
+}
+
+// TestRepackResult_CountsMemoryFilesOnlyInsideMemoryDirs pins the other
+// half: /crew legitimately carries content that is not memory, and that
+// content must not be counted as memory either.
+func TestRepackResult_CountsMemoryFilesOnlyInsideMemoryDirs(t *testing.T) {
+	src := tarOf(t,
+		dirEntry("crew/"),
+		dirEntry("crew/shared/"),
+		dirEntry("crew/shared/.memory/"),
+		fileEntry("crew/shared/.memory/CREW.md", "charter\n"),
+		fileEntry("crew/shared/.memory/topics/quarterly review/pins.md", "pinned\n"),
+		dirEntry("crew/agents/"),
+		dirEntry("crew/agents/alex/.memory/"),
+		fileEntry("crew/agents/alex/.memory/AGENT.md", "identity\n"),
+		// Crew-level content that is NOT memory.
+		fileEntry("crew/init.sh", "#!/bin/sh\n"),
+		// Deliberate near-misses: a component that merely contains the
+		// string, and a file whose NAME looks like it.
+		fileEntry("crew/shared/.memoryX/stray.md", "not memory\n"),
+		fileEntry("crew/shared/notes.memory.md", "not memory\n"),
+	)
+
+	var buf bytes.Buffer
+	w, err := NewTarZstWriter(&buf)
+	if err != nil {
+		t.Fatalf("writer: %v", err)
+	}
+	res, err := RepackTarWithExcludes(bytes.NewReader(src), w, "crew/eng", nil)
+	if err != nil {
+		t.Fatalf("repack: %v", err)
+	}
+	_ = w.Close()
+
+	if got, want := res.MemoryFiles, 3; got != want {
+		t.Errorf("MemoryFiles = %d, want %d (CREW.md, the spaced topic's pins.md, AGENT.md — and nothing else)", got, want)
+	}
+	if got, want := res.Files, 6; got != want {
+		t.Errorf("Files = %d, want %d (every non-directory entry)", got, want)
+	}
+	// The section has real content but its memory is what the flag is
+	// about; both facts have to be representable at once.
+	summary := CrewSummary{
+		Slug:              "eng",
+		MemoryIncluded:    res.MemoryFiles > 0,
+		CrewFilesIncluded: res.Files > 0,
+	}
+	if !summary.HasCrewMemory(FormatVersion) {
+		t.Error("a section with real memory files must report memory_included")
+	}
+	if !summary.HasFilesystemSections(FormatVersion) {
+		t.Error("a section with real files must get a docker phase")
+	}
+}
+
+// TestCrewSummary_SkeletonOnlyCrewNeedsNoContainer is the second-order
+// effect the entry count caused: HasFilesystemSections went true for a
+// skeleton-only crew, so a --files-only resume hard-failed with "crew
+// has filesystem data in the bundle but container is not provisioned"
+// for a crew that has none.
+func TestCrewSummary_SkeletonOnlyCrewNeedsNoContainer(t *testing.T) {
+	skeleton := CrewSummary{Slug: "eng"}
+	if skeleton.HasFilesystemSections(FormatVersion) {
+		t.Error("a crew whose bundle carries only provider-created directories must not demand a provisioned container")
+	}
+}
+
+// tarOf builds an uncompressed tar from the given entries, in order.
+func tarOf(t *testing.T, entries ...func(*tar.Writer)) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, e := range entries {
+		e(tw)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close fixture tar: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func dirEntry(name string) func(*tar.Writer) {
+	return func(tw *tar.Writer) {
+		_ = tw.WriteHeader(&tar.Header{
+			Name: name, Typeflag: tar.TypeDir, Mode: 0o2775,
+			ModTime: time.Unix(1785746753, 0), Uid: 1001, Gid: 1002,
+		})
+	}
+}
+
+func fileEntry(name, body string) func(*tar.Writer) {
+	return func(tw *tar.Writer) {
+		_ = tw.WriteHeader(&tar.Header{
+			Name: name, Typeflag: tar.TypeReg, Mode: 0o2664,
+			Size: int64(len(body)), ModTime: time.Unix(1785746753, 0),
+			Uid: 1001, Gid: 1002,
+		})
+		_, _ = tw.Write([]byte(body))
+	}
+}
 
 func TestCrewSummary_HasCrewMemory_IsFormatAware(t *testing.T) {
 	// The shape every pre-fix bundle has: memory_included asserted, and

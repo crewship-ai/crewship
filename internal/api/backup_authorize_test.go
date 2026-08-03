@@ -31,7 +31,7 @@ func newAuthorizeTestDB(t *testing.T) *sql.DB {
 // reading the bundle manifest (no I/O wasted on the empty case).
 func TestAllowRestore_EmptyInstanceIsDRPath(t *testing.T) {
 	db := newAuthorizeTestDB(t)
-	allowed, reason, err := allowRestore(context.Background(), db, "/nonexistent/path.tar.zst", "any-ws-id")
+	allowed, reason, err := allowRestore(context.Background(), db, "/nonexistent/path.tar.zst", "any-ws-id", false)
 	if err != nil {
 		t.Fatalf("allowRestore: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestAllowRestore_UnreadableBundleDenies(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO workspaces (id, slug, name) VALUES ('ws_real', 'real', 'Real')`); err != nil {
 		t.Fatal(err)
 	}
-	allowed, reason, err := allowRestore(context.Background(), db, "/nonexistent/path.tar.zst", "ws_real")
+	allowed, reason, err := allowRestore(context.Background(), db, "/nonexistent/path.tar.zst", "ws_real", false)
 	if err != nil {
 		t.Fatalf("allowRestore: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestAllowRestore_CountErrorPropagated(t *testing.T) {
 	}
 	defer db.Close()
 	// No workspaces table created → COUNT(*) errors.
-	allowed, _, err := allowRestore(context.Background(), db, "/x", "ws_id")
+	allowed, _, err := allowRestore(context.Background(), db, "/x", "ws_id", false)
 	if err == nil {
 		t.Error("missing workspaces table should propagate as error")
 	}

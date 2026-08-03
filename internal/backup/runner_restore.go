@@ -371,7 +371,46 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	//   - A rewritten restore (--as-workspace / --as-crew) WRITES it,
 	//     inside the same transaction as the rows it describes, so a
 	//     later resume has something to be authorised by.
+	// The provenance row is looked up on EVERY restore that names a
+	// caller workspace, not only on a --files-only one, because it
+	// answers two different questions and the second is the dangerous
+	// one:
+	//
+	//   FilesOnly     — "which local crews did this bundle's crews
+	//                    become?" Without a matching row the resume is
+	//                    refused; the flag alone authorises nothing.
+	//   NOT FilesOnly — "is the caller standing in a workspace that was
+	//                    FORKED from this bundle?" If so, an ordinary
+	//                    restore is the wrong operation and must not
+	//                    run: the crews it would address come from the
+	//                    manifest, which still carries the SOURCE crew's
+	//                    identity, so on a same-instance restore it
+	//                    overwrites the live crew's workspace and memory
+	//                    with the older backup while INSERT OR IGNORE
+	//                    makes the row counts look untroubled.
+	//
+	// That second case is exactly the command the CLI used to print
+	// ("re-run restore without the rewrite flag"), so it is the one an
+	// operator is most likely to type from memory or from an old
+	// runbook. It gets a refusal that names the mode that is safe.
 	var origin *RestoreOrigin
+	if opts.ResumeWorkspaceID != "" {
+		o, oerr := LookupRestoreOrigin(ctx, db, opts.ResumeWorkspaceID)
+		if oerr != nil {
+			return nil, oerr
+		}
+		origin = o
+	}
+	forkedFromThisBundle := origin != nil &&
+		manifest.Checksums.PayloadSHA256 != "" &&
+		origin.BundleSHA256 == manifest.Checksums.PayloadSHA256
+
+	if !opts.FilesOnly && forkedFromThisBundle && opts.AsWorkspace == "" && opts.AsCrew == "" {
+		return nil, fmt.Errorf("backup: workspace %s was created by restoring this bundle, so an ordinary restore here would address the crews the BUNDLE names — on this instance those are the source crews, whose workspace and agent memory it would overwrite with this older backup. "+
+			"Its rows are already present under new ids. To land container state into the crews this workspace actually has, use --files-only",
+			opts.ResumeWorkspaceID)
+	}
+
 	if opts.FilesOnly {
 		if opts.ResumeWorkspaceID == "" {
 			return nil, fmt.Errorf("backup: --files-only requires a target workspace")
@@ -379,14 +418,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if opts.AsWorkspace != "" || opts.AsCrew != "" || opts.Replace {
 			return nil, fmt.Errorf("backup: --files-only cannot be combined with --as-workspace, --as-crew or --replace; it lands container state into crews that already exist")
 		}
-		o, oerr := LookupRestoreOrigin(ctx, db, opts.ResumeWorkspaceID)
-		if oerr != nil {
-			return nil, oerr
-		}
-		if o == nil || o.BundleSHA256 != manifest.Checksums.PayloadSHA256 {
+		if !forkedFromThisBundle {
 			return nil, fmt.Errorf("backup: workspace %s was not created by restoring this bundle, so there is no crew mapping to land files through; run the rewrite restore first (`--as-workspace`/`--as-crew`), provision the crews, then re-run with --files-only", opts.ResumeWorkspaceID)
 		}
-		origin = o
 	}
 
 	// Stage DB rewrites before any writes so both --as-* flags and the
@@ -618,7 +652,22 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// --as-crew resume the two differ, and swapping them silently
 			// restores nothing.
 			if err := RestoreCrew(ctx, opts.DockerOps, containerID, c.Slug, extracted); err != nil {
-				return fmt.Errorf("backup: restore crew %s: %w", targetSlug, err)
+				// Degraded memory permissions are not a failed restore:
+				// every section landed, and re-running cannot help
+				// because the entry that blocked the chgrp blocks it
+				// again. Failing here would roll back a DB transaction
+				// over data already written to the container — the
+				// worst of both. Surface it where the operator will see
+				// it and carry on counting this crew as restored.
+				if errors.Is(err, ErrMemoryPermsDegraded) {
+					slog.Warn("backup restore: crew data landed but its memory permissions are degraded",
+						"crew", targetSlug, "error", err)
+					if opts.Logger != nil {
+						opts.Logger(fmt.Sprintf("crew %s restored, but its memory tree permissions could not be fully re-applied — the memory sidecar may not be able to write it: %v", targetSlug, err))
+					}
+				} else {
+					return fmt.Errorf("backup: restore crew %s: %w", targetSlug, err)
+				}
 			}
 			crewsRestored++
 			if opts.FilesOnly && opts.Logger != nil {

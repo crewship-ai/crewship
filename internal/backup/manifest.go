@@ -183,7 +183,21 @@ type CrewSummary struct {
 	// that held no memory at all (#1713). Never read it without
 	// consulting the format version — CrewSummary.HasCrewMemory does
 	// that for you.
+	// It is set from the count of regular files inside a `.memory`
+	// directory — not from "the /crew section produced tar entries".
+	// The docker provider creates crews/<id>/shared and
+	// crews/<id>/agents at container-creation time, so an entry count
+	// reads >= 2 for a crew that has never written a memory note, and
+	// the flag would be back to asserting something nobody checked.
 	MemoryIncluded bool `json:"memory_included" yaml:"memory_included"`
+	// CrewFilesIncluded reports whether the /crew section carries ANY
+	// regular file — memory or otherwise (init.sh, crew-level content).
+	// Separate from MemoryIncluded because the two answer different
+	// questions: this one gates whether the restore has a /crew section
+	// worth landing, that one answers the operator asking whether their
+	// agents' memory is in the bundle. Absent on bundles older than
+	// FormatVersion 3.
+	CrewFilesIncluded bool `json:"crew_files_included,omitempty" yaml:"crew_files_included,omitempty"`
 	// OutputIncluded reports the /output section, which the "memory"
 	// section name historically referred to. Absent on bundles older
 	// than FormatVersion 3.
@@ -217,7 +231,12 @@ func (c CrewSummary) HasCrewMemory(formatVersion int) bool {
 func (c CrewSummary) HasFilesystemSections(formatVersion int) bool {
 	return c.WorkspaceIncluded || c.SystemIncluded ||
 		len(c.VolumesIncluded) > 0 ||
-		c.OutputIncluded || c.HasCrewMemory(formatVersion) ||
+		c.OutputIncluded ||
+		// CrewFilesIncluded, not HasCrewMemory: /crew can carry content
+		// that is not memory (init.sh), and that content still needs a
+		// container to land in. Gating on the memory flag alone would
+		// skip the section for a crew whose /crew holds real files.
+		c.CrewFilesIncluded || c.HasCrewMemory(formatVersion) ||
 		// Pre-v3 bundles set MemoryIncluded for the /output section.
 		(formatVersion < FormatVersionCrewMemory && c.MemoryIncluded)
 }

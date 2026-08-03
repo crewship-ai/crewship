@@ -96,6 +96,8 @@ Inside `payload.age`, bundles carry three distinct notions of "memory" — don't
 
 From `format_version` 3 onward every per-crew inclusion flag in the manifest is derived from what the collector observed itself writing, not from what it expected to write. A section that captured nothing reports `false`, which is also what stops the restore preflight from demanding a provisioned container for a crew that has no data.
 
+`memory_included` counts **files inside a `.memory` directory**, not tar entries. The distinction matters because the container runtime creates `crews/<id>/shared` and `crews/<id>/agents` when a crew container is created, so counting entries would report memory for every provisioned crew whether or not an agent had ever written a note. `crew_files_included` is the separate flag for "the `/crew` section carries something" — `init.sh` and other crew-level content — and is what decides whether the section is restored at all.
+
 ## Create a workspace backup
 
 ```bash
@@ -187,11 +189,46 @@ crewship backup restore bundle.tar.zst -w ws_new123 --files-only
 
 `--files-only` restores the per-crew filesystem sections (workspace, memory tree, named volumes, `/var/lib`) and changes no database rows. It is authorised by provenance, not by the flag: step 1 records which bundle the new workspace was forked from — matched on the bundle's payload digest — and step 3 is permitted only for a workspace that record covers. A bundle that was never restored into your current workspace is refused exactly as it was before.
 
+That provenance authorises **only** `--files-only`. Running the plain restore against a forked workspace is refused, and deliberately so: without a rewrite flag it takes the ordinary docker phase, whose crew identities come from the manifest — on a same-instance restore those are the *source* crews, and it would overwrite their live workspace and agent memory with the older backup while `INSERT OR IGNORE` kept the row counts looking untroubled.
+
 <Note>
 Step 3 is what earlier versions described as "re-run restore without the rewrite flag". That never worked and could not: the forked workspace's id and slug match neither of the bundle's, so the tenant guard rejected it every time. `--files-only` is the step that replaces it. It also addresses the crews the fork created rather than the crews the bundle names — the manifest still carries the source crew's slug, so on a same-instance restore the older advice would have written a sibling's backup over the source crew's live data.
 </Note>
 
 Restoring under the ORIGINAL identity (same workspace, or a genuinely empty instance) is unaffected: the docker phase runs in the same call and there is no step 3.
+
+### The target crew must be running
+
+Every section is written through `tar` inside the container now (see
+[Bundle layout](#bundle-layout)), so a restore needs the crew container
+**running**, not merely created. A stopped crew is refused in the
+preflight, before anything is written, and the message names the fix:
+
+```
+cannot reach /workspace to restore into it — the crew container must be RUNNING
+(exec is how every section is written now). Start it with `crewship crew provision engineering`
+```
+
+`crew provision` is the right command for this: it reconciles an existing
+stopped container back to running rather than rebuilding it.
+
+The preflight also refuses when a path the bundle writes to cannot be
+written by the agent — a directory or file left owned by root or by the
+memory sidecar. That is a refusal with **nothing written**, which is the
+point: the same restore used to fail partway through, after earlier
+sections had already landed. Hand the named path to the agent
+(`chown -R 1001:1001 <path>`) and re-run. Paths the bundle never touches
+are ignored, so unrelated root-owned files under `/home/agent` do not
+block anything.
+
+<Note>
+One thing is reported without failing the restore: if the crew memory
+tree's group and setgid bits cannot be fully re-applied afterwards — a
+`.memory` directory owned by the memory sidecar, say — the restore
+**succeeds** and warns, naming the directory. The data is on disk; only
+the sharing contract is degraded, and failing at that point would roll
+back the database while leaving the container's files in place.
+</Note>
 
 ### Dry run
 

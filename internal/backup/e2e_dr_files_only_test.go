@@ -47,6 +47,10 @@ import (
 // addressing.
 type recordingOps struct {
 	written []string // "<containerID>:<dest>"
+	// memoryPermResidual, when set, is what the post-restore permission
+	// sweep reports as still wrong — the shape of a .memory directory
+	// the agent could not chgrp.
+	memoryPermResidual string
 }
 
 func (o *recordingOps) Pause(context.Context, string) error   { return nil }
@@ -87,7 +91,15 @@ func (o *recordingOps) ContainerExists(context.Context, string) (bool, error) { 
 func (o *recordingOps) Exec(context.Context, string, []string) (int, []byte, error) {
 	return 0, nil, nil
 }
-func (o *recordingOps) ExecAs(context.Context, string, string, []string) (int, []byte, error) {
+
+// ExecAs answers the preflight probes cleanly, and optionally reports a
+// residual for the post-restore memory-permission sweep — which is how a
+// crew whose data landed but whose .memory group could not be re-applied
+// looks from the runner's side.
+func (o *recordingOps) ExecAs(_ context.Context, _, _ string, cmd []string) (int, []byte, error) {
+	if o.memoryPermResidual != "" && len(cmd) > 0 && strings.Contains(strings.Join(cmd, " "), "chgrp 1002") {
+		return 0, []byte(o.memoryPermResidual), nil
+	}
 	return 0, nil, nil
 }
 
@@ -515,5 +527,172 @@ func TestE2E_DryRun_ReportsNothingRestored(t *testing.T) {
 	}
 	if len(ops.written) != 0 {
 		t.Errorf("dry run wrote container state: %v", ops.written)
+	}
+}
+
+// TestE2E_ForkedWorkspace_UnflaggedRerunDoesNotOverwriteSource is the
+// overwrite the whole --files-only design exists to prevent, arriving
+// through the one door nothing was watching.
+//
+// The operator follows the drill: `restore B --as-workspace acme-dr`,
+// which writes the provenance row. Then they run `restore B -w ws_new`
+// WITHOUT --files-only — the exact command the previous CLI text told
+// them to run for years. With no rewrite flag and no FilesOnly,
+// skipDocker is false and crewTargetFor falls through to the MANIFEST's
+// crew identity, which on a same-instance restore is the SOURCE crew's
+// container. RestoreCrew then extracts the bundle's /workspace and /crew
+// over the source crew's live code and agent memory, replacing them with
+// the older backup. The DB half is INSERT OR IGNORE, so the row counts
+// look untroubled while live data is gone.
+//
+// Why the existing sibling-overwrite test did not catch it: that test
+// asserts exactly the right thing — "the resume must not write into the
+// SOURCE crew's container" — but only ever calls RestoreBackup with
+// FilesOnly: true. Every path it exercises is the mode that was built.
+// The dangerous call is the mode the operator was previously TOLD to
+// use, and no test pointed at it. Testing the feature you added is not
+// the same as testing the command your users already have in their
+// runbooks.
+func TestE2E_ForkedWorkspace_UnflaggedRerunDoesNotOverwriteSource(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedDB(t)
+	sourceWorkspaceID := seedWorkspace(t, db)
+	containerFor := func(id, slug string) string { return "crewship-team-" + slug + "-" + id }
+
+	const passphrase = "unflagged-rerun-guard"
+	created, err := backup.CreateBackup(ctx, db, backup.CreateOptions{
+		Scope:             backup.ScopeWorkspace,
+		WorkspaceID:       sourceWorkspaceID,
+		OutputDir:         t.TempDir(),
+		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:        passphrase,
+		CrewContainerName: containerFor,
+		DockerOps:         &recordingOps{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+	sourceContainers := map[string]bool{}
+	for _, c := range created.Manifest.Contents.Crews {
+		sourceContainers[containerFor(c.ID, c.Slug)] = true
+	}
+
+	fork, err := backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+		Path:         created.Path,
+		Passphrase:   passphrase,
+		AsWorkspace:  "acme-dr",
+		Actor:        backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		DockerOps:    &recordingOps{},
+		ContainerFor: containerFor,
+	})
+	if err != nil {
+		t.Fatalf("rewrite restore: %v", err)
+	}
+
+	// The dangerous call: same bundle, the forked workspace in context,
+	// no --files-only. This is what the old guidance printed.
+	ops := &recordingOps{}
+	_, err = backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+		Path:              created.Path,
+		Passphrase:        passphrase,
+		ResumeWorkspaceID: fork.RestoredWorkspaceID,
+		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		DockerOps:         ops,
+		ContainerFor:      containerFor,
+	})
+
+	// The assertion that matters most is the second one: even if a future
+	// change decides to allow this call, it must never reach the source
+	// crew's container.
+	for _, w := range ops.written {
+		container := strings.SplitN(w, ":", 2)[0]
+		if sourceContainers[container] {
+			t.Errorf("an un-flagged re-run wrote into %s — the SOURCE crew's live container. Its workspace and agent memory have just been replaced by an older backup", container)
+		}
+	}
+	if err == nil {
+		t.Fatalf("an un-flagged re-run against a forked workspace was allowed; it must point the operator at --files-only")
+	}
+	if !strings.Contains(err.Error(), "--files-only") {
+		t.Errorf("refusal must name the mode that is safe here; got %v", err)
+	}
+	if len(ops.written) != 0 {
+		t.Errorf("refused re-run still wrote container state: %v", ops.written)
+	}
+}
+
+// TestE2E_DegradedMemoryPermsDoNotFailARestoreThatLanded is where the
+// decision about ErrMemoryPermsDegraded actually lives.
+//
+// reapplyMemoryPerms runs after every section is written, so a
+// permission shortfall there arrives when the data is already on disk.
+// Failing the restore at that point does not undo anything on the
+// container — it only rolls back the DB transaction, leaving rows that
+// describe less than the filesystem holds, and re-running cannot help
+// because the entry that blocked the chgrp blocks it again.
+//
+// RestoreCrew wraps the sentinel and hands the decision up; this is the
+// test of the decision. It is deliberately at the RUNNER level, because
+// a test that called RestoreCrew directly would assert the wrapping and
+// not the choice — which is exactly how the first version of this let a
+// mutation of the branch survive.
+func TestE2E_DegradedMemoryPermsDoNotFailARestoreThatLanded(t *testing.T) {
+	ctx := context.Background()
+	source := openMigratedDB(t)
+	sourceWorkspaceID := seedWorkspace(t, source)
+	containerFor := func(id, slug string) string { return "crewship-team-" + slug + "-" + id }
+
+	const passphrase = "degraded-perms-not-fatal"
+	created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:             backup.ScopeWorkspace,
+		WorkspaceID:       sourceWorkspaceID,
+		OutputDir:         t.TempDir(),
+		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:        passphrase,
+		CrewContainerName: containerFor,
+		DockerOps:         &recordingOps{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	target := openMigratedDB(t)
+	ops := &recordingOps{
+		// A .memory directory the sweep still reports as wrong after
+		// every tolerant pass has run.
+		memoryPermResidual: "/crew/agents/robin/.memory",
+	}
+	var logs []string
+	res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+		Path:         created.Path,
+		Passphrase:   passphrase,
+		Actor:        backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		DockerOps:    ops,
+		ContainerFor: containerFor,
+		Logger:       func(m string) { logs = append(logs, m) },
+	})
+	if err != nil {
+		t.Fatalf("a restore whose data landed was failed over permissions: %v", err)
+	}
+	if res.RowsInserted == 0 {
+		t.Error("the DB transaction was rolled back, so the rows now describe less than the container holds")
+	}
+	if res.CrewsRestored == 0 {
+		t.Error("crews whose data landed must be counted, degraded permissions or not")
+	}
+	if len(ops.written) == 0 {
+		t.Fatal("nothing was written; the fixture is not exercising the case")
+	}
+
+	// Not fatal is not the same as not reported. The operator has to be
+	// told, and told which directory.
+	var told bool
+	for _, l := range logs {
+		if strings.Contains(l, "memory tree permissions") && strings.Contains(l, "robin") {
+			told = true
+		}
+	}
+	if !told {
+		t.Errorf("degraded permissions were swallowed; the operator is never told which directory the sidecar cannot write. logs: %v", logs)
 	}
 }

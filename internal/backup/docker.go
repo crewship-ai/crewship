@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -222,6 +223,20 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, 
 	// filesystem driver's uid remapping. Tar fails open with
 	// "Permission denied" when root tries to overwrite an
 	// agent-owned file under those conditions.
+	// Not --unlink-first, and the reason is worth recording because it
+	// looks like the obvious fix for a root-owned file the agent cannot
+	// open for writing. GNU tar refuses to combine it with --overwrite
+	// ("'--unlink-first' cannot be used with '--overwrite'", exit 2
+	// before a byte is extracted), and on its own it tries to unlink
+	// DIRECTORY entries too, which fails on the first non-empty one:
+	// "tar: .config: Cannot unlink: Directory not empty". Both were
+	// observed live rather than reasoned about. The only version that
+	// works is --recursive-unlink, which deletes directories along with
+	// their contents and would destroy whatever the restore excludes.
+	//
+	// So an entry the exec identity cannot replace is not made
+	// replaceable here; it is caught by RestoreCrew's preflight, before
+	// anything is written, and named to the operator.
 	cmd := []string{"tar", "-x", "--overwrite", "--no-same-owner"}
 	if spec.PreserveModes {
 		cmd = append(cmd, "--same-permissions")
@@ -483,16 +498,49 @@ func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (RepackResult, e
 	return RepackTarWithExcludes(src, dst, prefix, volumeExclusions)
 }
 
-// RepackResult reports what a repack produced. Entries counts every tar
-// header written (files, dirs and links alike) so a section holding only
-// directories still reads as present; Bytes counts regular-file bodies.
+// RepackResult reports what a repack produced.
 //
-// Entries exists because the manifest used to assert what a bundle held
+// It exists because the manifest used to assert what a bundle held
 // instead of observing it (#1713). A bundle that lies about its contents
 // is worse than one that is missing them: the operator stops looking.
+//
+// The three counts are not interchangeable, and picking the wrong one
+// reintroduces the lie in a new shape:
+//
+//   - Entries counts every tar header, directories included. Useful for
+//     "did this section produce anything at all"; useless as evidence of
+//     content, because the docker provider's prepareCrewDirs creates
+//     crews/<id>/shared and crews/<id>/agents at container-creation
+//     time. A crew that has never written a single memory note still
+//     yields Entries >= 2.
+//   - Files counts non-directory entries — real content the restore has
+//     something to put back.
+//   - MemoryFiles counts regular files that live inside a `.memory`
+//     directory. Only meaningful for the /crew section, and it is what
+//     `memory_included` is set from: the flag's name promises the
+//     agent's memory is in the bundle, and nothing weaker than "there
+//     are files in a .memory directory" makes that true.
 type RepackResult struct {
-	Entries int
-	Bytes   int64
+	Entries     int
+	Files       int
+	MemoryFiles int
+	Bytes       int64
+}
+
+// isInsideMemoryDir reports whether a section-relative path lies inside a
+// `.memory` directory — `agents/alex/.memory/AGENT.md` and
+// `shared/.memory/topics/x/pins.md` both do, `init.sh` does not.
+//
+// Matching on a path COMPONENT rather than a substring: a file named
+// `notes.memory.md` is not memory, and a directory called `.memoryX`
+// is not the memory tree.
+func isInsideMemoryDir(p string) bool {
+	for _, seg := range strings.Split(path.Dir(p), "/") {
+		if seg == ".memory" {
+			return true
+		}
+	}
+	return false
 }
 
 // RepackTarWithExcludes is RepackTar with an explicit exclusion list,
@@ -568,6 +616,16 @@ func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excl
 				return res, fmt.Errorf("backup: repack header %q: %w", newName, err)
 			}
 			res.Entries++
+			// Symlinks and hardlinks are content; directories are not.
+			// A tree of empty directories has nothing for a restore to
+			// put back, and counting them is what let a crew's
+			// provider-created skeleton read as "memory included".
+			if hdr.Typeflag != tar.TypeDir {
+				res.Files++
+				if isInsideMemoryDir(trimmed) {
+					res.MemoryFiles++
+				}
+			}
 			continue
 		}
 		// Regular files carry Uid/Gid too. Before #1714 they did not, and
@@ -581,6 +639,10 @@ func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excl
 			return res, err
 		}
 		res.Entries++
+		res.Files++
+		if isInsideMemoryDir(trimmed) {
+			res.MemoryFiles++
+		}
 		res.Bytes += hdr.Size
 	}
 	return res, nil

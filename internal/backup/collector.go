@@ -70,25 +70,37 @@ const (
 // The manifest is built from this rather than from "the crew had a
 // container ID", which is what let #1713 stay invisible: a predicted
 // flag cannot notice that the path it predicted was wrong.
+// The counts are FILES, not tar entries. Counting entries counts
+// directories, and the docker provider creates crews/<id>/shared and
+// crews/<id>/agents at container-creation time — so an entry count made
+// every provisioned crew look like it had memory whether or not an agent
+// had ever written a word. Observing the wrong thing is not better than
+// predicting: it is the same claim with a more convincing provenance.
+//
+// CrewMemoryFiles is narrower still, and is what `memory_included` is
+// set from: regular files inside a `.memory` directory. /crew also holds
+// init.sh and other crew-level content, which is worth restoring but is
+// not what an operator is asking about when they read that flag.
 type CrewCapture struct {
 	Slug string
 
-	WorkspaceEntries int
-	CrewEntries      int
-	OutputEntries    int
-	HomeEntries      int
-	ToolsEntries     int
-	VarLibEntries    int
+	WorkspaceFiles  int
+	CrewFiles       int
+	CrewMemoryFiles int
+	OutputFiles     int
+	HomeFiles       int
+	ToolsFiles      int
+	VarLibFiles     int
 }
 
 // Volumes returns the named-volume section labels that actually carry
 // entries, in the order the restorer expects them.
 func (c CrewCapture) Volumes() []string {
 	var out []string
-	if c.HomeEntries > 0 {
+	if c.HomeFiles > 0 {
 		out = append(out, "home")
 	}
-	if c.ToolsEntries > 0 {
+	if c.ToolsFiles > 0 {
 		out = append(out, "tools")
 	}
 	return out
@@ -127,7 +139,8 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 		type pair struct {
 			src, prefix string
 			excludes    []string
-			count       *int
+			files       *int
+			memoryFiles *int // only the /crew section sets this
 		}
 		// Quick: just the things that describe the agent's active
 		// engagement. workspace = code under edit (vendored deps,
@@ -137,9 +150,9 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 		// trees (tiny, no exclusions to apply); /output = the agent's
 		// declared outputs.
 		pairs := []pair{
-			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil, &capture.WorkspaceEntries},
-			{ContainerCrewPath, fmt.Sprintf("crew/%s", crew.Slug), nil, &capture.CrewEntries},
-			{ContainerOutputPath, fmt.Sprintf("memory/%s", crew.Slug), nil, &capture.OutputEntries},
+			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil, &capture.WorkspaceFiles, nil},
+			{ContainerCrewPath, fmt.Sprintf("crew/%s", crew.Slug), nil, &capture.CrewFiles, &capture.CrewMemoryFiles},
+			{ContainerOutputPath, fmt.Sprintf("memory/%s", crew.Slug), nil, &capture.OutputFiles, nil},
 		}
 		// Standard adds the named volumes (home dotfiles + installed
 		// tools). volumeExclusions trims regenerable caches (mise,
@@ -148,23 +161,26 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 		// (~/.config/<tool>/, ~/.aws, ~/.ssh, ~/.docker, ~/.gitconfig).
 		if level == ScopeLevelStandard || level == ScopeLevelFull {
 			pairs = append(pairs,
-				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions, &capture.HomeEntries},
-				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions, &capture.ToolsEntries},
+				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions, &capture.HomeFiles, nil},
+				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions, &capture.ToolsFiles, nil},
 			)
 		}
 		// Full adds /var/lib so any service the agent installed
 		// (redis, postgresql, mysql, mongo) round-trips its data dir.
 		if level == ScopeLevelFull {
 			pairs = append(pairs,
-				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions, &capture.VarLibEntries},
+				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions, &capture.VarLibFiles, nil},
 			)
 		}
 		for _, p := range pairs {
-			n, err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes)
+			res, err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes)
 			if err != nil {
 				return fmt.Errorf("backup: collect %s:%s: %w", crew.Slug, p.src, err)
 			}
-			*p.count = n
+			*p.files = res.Files
+			if p.memoryFiles != nil {
+				*p.memoryFiles = res.MemoryFiles
+			}
 		}
 		return nil
 	})
@@ -181,25 +197,25 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 // is the section-specific exclusion list applied at repack time so
 // regeneratable content (/home/agent caches, /var/lib/dpkg state)
 // never lands in the bundle.
-// Returns the number of tar entries written into dst for this section —
-// zero when the path was missing or empty. That count, not a guess from
-// the crew's metadata, is what the manifest reports.
-func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, containerID, srcPath, prefix string, excludes []string) (int, error) {
+// Returns what was written into dst for this section — all-zero when the
+// path was missing or empty. Those counts, not a guess from the crew's
+// metadata, are what the manifest reports.
+func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, containerID, srcPath, prefix string, excludes []string) (RepackResult, error) {
 	rc, err := ops.CopyFrom(ctx, containerID, srcPath)
 	if err != nil {
 		// Treat "No such container:path" as skippable; anything else is
 		// a hard error.
 		if isNotFoundErr(err) {
-			return 0, nil
+			return RepackResult{}, nil
 		}
-		return 0, err
+		return RepackResult{}, err
 	}
 	defer func() { _ = rc.Close() }()
 	res, err := RepackTarWithExcludes(rc, dst, prefix, excludes)
 	if err != nil {
-		return 0, err
+		return RepackResult{}, err
 	}
-	return res.Entries, nil
+	return res, nil
 }
 
 // isNotFoundErr returns true if err comes from docker complaining

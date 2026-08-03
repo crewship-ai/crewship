@@ -331,9 +331,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 			// stopped resolving, a mount that stopped being mounted.
 			// The manifest will say so honestly either way; this is the
 			// breadcrumb for whoever has to work out why.
-			if capture.CrewEntries == 0 {
-				slog.Warn("backup: crew has a running container but no memory tree was captured",
-					"crew", crew.Slug, "path", ContainerCrewPath, "workspace_id", target.ID)
+			if capture.CrewMemoryFiles == 0 {
+				slog.Warn("backup: crew has a running container but no memory files were captured",
+					"crew", crew.Slug, "path", ContainerCrewPath,
+					"crew_files", capture.CrewFiles, "workspace_id", target.ID)
 			}
 		}
 	}
@@ -561,11 +562,12 @@ func buildContents(t *WorkspaceTarget, level ScopeLevel, captures map[string]Cre
 			ConfigHash:                 c.ConfigHash,
 			DevcontainerConfigIncluded: c.DevcontainerConfig != "",
 			MiseConfigIncluded:         c.MiseConfig != "",
-			WorkspaceIncluded:          capture.WorkspaceEntries > 0,
-			MemoryIncluded:             capture.CrewEntries > 0,
-			OutputIncluded:             capture.OutputEntries > 0,
+			WorkspaceIncluded:          capture.WorkspaceFiles > 0,
+			MemoryIncluded:             capture.CrewMemoryFiles > 0,
+			CrewFilesIncluded:          capture.CrewFiles > 0,
+			OutputIncluded:             capture.OutputFiles > 0,
 			VolumesIncluded:            capture.Volumes(),
-			SystemIncluded:             capture.VarLibEntries > 0,
+			SystemIncluded:             capture.VarLibFiles > 0,
 			AgentCount:                 c.AgentCount,
 		}
 		contents.Crews = append(contents.Crews, summary)

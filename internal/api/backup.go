@@ -393,7 +393,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	// comment, internal/api/backup.go:348). This re-introduces the
 	// check in a way that allows DR while blocking cross-tenant
 	// abuse.
-	allowed, denyReason, err := allowRestore(ctx, h.db, req.Path, workspaceID)
+	allowed, denyReason, err := allowRestore(ctx, h.db, req.Path, workspaceID, req.FilesOnly)
 	if err != nil {
 		h.logger.Warn("backup restore authorization probe failed", "error", err, "path", req.Path)
 		replyError(w, http.StatusInternalServerError, "authorize restore: "+err.Error())
@@ -524,9 +524,22 @@ func clampedToTier(result *backup.RestoreResult) int {
 //  3. The instance has zero workspaces (canonical "first restore
 //     on a fresh instance" — typical after `crewship start` with
 //     no bootstrap completed).
-//  4. The caller's workspace was itself created by a rewritten
-//     restore (--as-workspace / --as-crew) of THIS bundle, matched
-//     on the payload digest recorded in backup_restore_origins.
+//  4. The caller is running a FILES-ONLY restore into a workspace that
+//     was itself created by a rewritten restore (--as-workspace /
+//     --as-crew) of THIS bundle, matched on the payload digest
+//     recorded in backup_restore_origins.
+//
+// The files-only condition on path 4 is load-bearing, and leaving it
+// out was a hole rather than a simplification. Without it the path
+// authorised ANY restore of the bundle a workspace was forked from —
+// including the un-flagged re-run the CLI used to print. That call has
+// no rewrite flag, so it takes the ordinary docker phase, whose crew
+// identities come from the MANIFEST; on a same-instance restore those
+// are the source crews, and it extracts the bundle's /workspace and
+// /crew straight over their live code and agent memory. INSERT OR
+// IGNORE keeps the row counts looking untroubled while the data goes.
+// The provenance row exists to make one specific operation possible;
+// it must not widen the guard for every other one.
 //
 // Path 4 is #1716. Without it, the second step of the documented
 // disaster-recovery flow — provision the forked crews, then land their
@@ -545,7 +558,7 @@ func clampedToTier(result *backup.RestoreResult) int {
 //
 // Returns (true, "", nil) on allow, (false, reason, nil) on deny,
 // or (_, _, err) on probe failure.
-func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID string) (bool, string, error) {
+func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID string, filesOnly bool) (bool, string, error) {
 	// Path 3: empty instance → DR escape hatch.
 	var wsCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
@@ -593,17 +606,25 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return false, "", fmt.Errorf("lookup caller workspace slug: %w", err)
 		}
-		// Path 4: this workspace was forked from this exact bundle.
-		// Compared on the payload digest, not the path — a path can be
-		// re-pointed at a different file between the two restores, and
-		// what has to match is the bytes that were unpacked here.
-		origin, oerr := backup.LookupRestoreOrigin(ctx, db, callerWorkspaceID)
-		if oerr != nil {
-			return false, "", fmt.Errorf("lookup restore origin: %w", oerr)
-		}
-		if origin != nil && m.Checksums.PayloadSHA256 != "" &&
-			origin.BundleSHA256 == m.Checksums.PayloadSHA256 {
-			return true, "", nil
+		// Path 4: a FILES-ONLY restore into a workspace forked from this
+		// exact bundle. Compared on the payload digest, not the path — a
+		// path can be re-pointed at a different file between the two
+		// restores, and what has to match is the bytes that were
+		// unpacked here.
+		//
+		// Gated on filesOnly: see the doc comment. Any other mode
+		// reaching this branch would be authorised to run the ordinary
+		// docker phase against the crews the manifest names, which on
+		// this instance are the source crews.
+		if filesOnly {
+			origin, oerr := backup.LookupRestoreOrigin(ctx, db, callerWorkspaceID)
+			if oerr != nil {
+				return false, "", fmt.Errorf("lookup restore origin: %w", oerr)
+			}
+			if origin != nil && m.Checksums.PayloadSHA256 != "" &&
+				origin.BundleSHA256 == m.Checksums.PayloadSHA256 {
+				return true, "", nil
+			}
 		}
 	}
 	// Generic deny — deliberately does NOT echo bundleID / bundleSlug

@@ -508,18 +508,18 @@ func TestBuildContents_PresetMatrix(t *testing.T) {
 	}{
 		{
 			level:   ScopeLevelQuick,
-			capture: CrewCapture{Slug: "live", WorkspaceEntries: 3, CrewEntries: 2, OutputEntries: 1},
+			capture: CrewCapture{Slug: "live", WorkspaceFiles: 3, CrewFiles: 2, CrewMemoryFiles: 2, OutputFiles: 1},
 		},
 		{
 			level: ScopeLevelStandard,
-			capture: CrewCapture{Slug: "live", WorkspaceEntries: 3, CrewEntries: 2, OutputEntries: 1,
-				HomeEntries: 4, ToolsEntries: 5},
+			capture: CrewCapture{Slug: "live", WorkspaceFiles: 3, CrewFiles: 2, CrewMemoryFiles: 2, OutputFiles: 1,
+				HomeFiles: 4, ToolsFiles: 5},
 			wantVolumes: true,
 		},
 		{
 			level: ScopeLevelFull,
-			capture: CrewCapture{Slug: "live", WorkspaceEntries: 3, CrewEntries: 2, OutputEntries: 1,
-				HomeEntries: 4, ToolsEntries: 5, VarLibEntries: 6},
+			capture: CrewCapture{Slug: "live", WorkspaceFiles: 3, CrewFiles: 2, CrewMemoryFiles: 2, OutputFiles: 1,
+				HomeFiles: 4, ToolsFiles: 5, VarLibFiles: 6},
 			wantVolumes: true,
 			wantSystem:  true,
 		},
@@ -569,6 +569,42 @@ func TestBuildContents_PresetMatrix(t *testing.T) {
 		if live.WorkspaceIncluded || live.MemoryIncluded || live.OutputIncluded ||
 			len(live.VolumesIncluded) != 0 || live.SystemIncluded {
 			t.Errorf("empty capture must claim no sections: %+v", live)
+		}
+	})
+
+	// /crew carries content that is not memory — init.sh, crew-level
+	// files — and a crew can have those while having never written a
+	// memory note. The two facts are separate, and collapsing them is
+	// how memory_included goes back to claiming something nobody
+	// checked: the provider creates crews/<id>/shared and
+	// crews/<id>/agents at container-creation time, so "the /crew
+	// section has entries" is true for every provisioned crew alive.
+	t.Run("crew files without memory files do not claim memory", func(t *testing.T) {
+		c := buildContents(target, ScopeLevelQuick, map[string]CrewCapture{
+			"live": {Slug: "live", CrewFiles: 1, CrewMemoryFiles: 0},
+		})
+		live := c.Crews[0]
+		if live.MemoryIncluded {
+			t.Error("memory_included is true for a crew whose /crew section holds no file inside a .memory directory")
+		}
+		if !live.CrewFilesIncluded {
+			t.Error("the /crew section has real content and must still be restored")
+		}
+		if !live.HasFilesystemSections(FormatVersion) {
+			t.Error("a crew with real /crew content needs a docker phase")
+		}
+		if live.HasCrewMemory(FormatVersion) {
+			t.Error("HasCrewMemory must agree with memory_included")
+		}
+	})
+
+	t.Run("memory files claim memory", func(t *testing.T) {
+		c := buildContents(target, ScopeLevelQuick, map[string]CrewCapture{
+			"live": {Slug: "live", CrewFiles: 4, CrewMemoryFiles: 3},
+		})
+		live := c.Crews[0]
+		if !live.MemoryIncluded || !live.HasCrewMemory(FormatVersion) {
+			t.Errorf("a capture with memory files must claim memory: %+v", live)
 		}
 	})
 }

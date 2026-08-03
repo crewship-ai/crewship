@@ -85,7 +85,9 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 `scope_level` is omitted when the bundle has no explicit level recorded in its manifest.
 
 <Warning>
-  `contents.crews[].memory_included` means "the crew and per-agent memory trees under `/crew` are in this bundle" **only from `format_version` 3**. At v1 and v2 the flag was set unconditionally for any crew that had a container, and the section behind it held `/output`, not memory. Read it together with `format_version`, or use the CLI, which already does. From v3 every per-crew inclusion flag is derived from what the collector observed writing: `memory_included` (`/crew`), `output_included` (`/output`), `workspace_included`, `volumes_included`, `system_included`.
+  `contents.crews[].memory_included` means "the crew and per-agent memory trees under `/crew` are in this bundle" **only from `format_version` 3**. At v1 and v2 the flag was set unconditionally for any crew that had a container, and the section behind it held `/output`, not memory. Read it together with `format_version`, or use the CLI, which already does. From v3 every per-crew inclusion flag is derived from what the collector observed writing: `memory_included` (files inside a `.memory` directory), `crew_files_included` (any file in the `/crew` section, memory or not), `output_included` (`/output`), `workspace_included`, `volumes_included`, `system_included`.
+
+  `memory_included` counts FILES, not tar entries, and only those inside a `.memory` directory. The runtime creates `crews/<id>/shared` and `crews/<id>/agents` at container creation, so an entry count would report memory for every provisioned crew regardless of whether an agent ever wrote one.
 </Warning>
 
 <Note>
@@ -329,7 +331,7 @@ Restore a bundle into the current workspace.
 | `identity` | AGE X25519 secret key (`AGE-SECRET-KEY-1…`) for bundles sealed with `--recipient`. Parsed with `age.ParseX25519Identity`; invalid values return 400. |
 | `as_workspace` | Land the workspace under a new slug. Docker phase is skipped; finish with `files_only` (below). |
 | `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped; finish with `files_only`. |
-| `files_only` | Land ONLY per-crew container state into crews that already exist; no database rows are written. Permitted only when the caller's workspace was created by restoring **this** bundle — matched on the payload digest recorded in `backup_restore_origins` at rename time. Rejected with 403 otherwise, and 400 if combined with `as_workspace` / `as_crew` / `replace`. |
+| `files_only` | Land ONLY per-crew container state into crews that already exist; no database rows are written. Permitted only when the caller's workspace was created by restoring **this** bundle — matched on the payload digest recorded in `backup_restore_origins` at rename time. Rejected with 403 otherwise, and 400 if combined with `as_workspace` / `as_crew` / `replace`. That provenance authorises **only** this mode: a restore of the same bundle into the same workspace WITHOUT `files_only` is refused, because it would address the crews the manifest names — the source crews on a same-instance restore — and overwrite their live data. |
 | `replace` | When `true`, wipe existing target rows matching the bundle's workspace (by id OR slug) before INSERT. Disaster-recovery path: after a `nuke` the fresh-bootstrap workspace has a new CUID but the same slug — `replace` clears the conflicting target so the bundle lands with its original IDs. |
 | `dry_run` | Decrypt + replay the DB transaction, then **roll back**. No workspace / crew / agent writes are applied. |
 
