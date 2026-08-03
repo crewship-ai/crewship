@@ -393,6 +393,11 @@ crew still starts. The drop is logged, and chat shows *"Sidecar services
 declared but this container provider doesn't support them yet"* rather than
 letting the crew believe it has a database.
 
+A sidecar that fails to start (image pull, port clash, failing healthcheck)
+fails the crew start everywhere **except the web terminal**, which opens the
+shell anyway and says so — that is the surface you use to diagnose the failure,
+and the crew's own container is up by then.
+
 <Warning>
 **`crewship crew delete` now destroys the crew's sidecars and their named
 volumes.** The containers are force-removed and `crewship-svc-{crew}-vol-*` —
