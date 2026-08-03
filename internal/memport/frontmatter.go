@@ -16,6 +16,7 @@ import (
 // heuristic; a foreign bundle simply will not have the key.
 type frontmatter struct {
 	Type         string   `yaml:"type,omitempty"`
+	Scope        string   `yaml:"scope,omitempty"`
 	Title        string   `yaml:"title,omitempty"`
 	Tags         []string `yaml:"tags,omitempty"`
 	CrewshipPath string   `yaml:"crewship_path,omitempty"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -32,6 +33,7 @@ type Manifest struct {
 type ManifestEntry struct {
 	Path    string   `yaml:"path"`
 	Tier    string   `yaml:"tier"`
+	Scope   string   `yaml:"scope,omitempty"`
 	Title   string   `yaml:"title,omitempty"`
 	Tags    []string `yaml:"tags,omitempty"`
 	Sources []string `yaml:"sources,omitempty"`
@@ -65,6 +67,7 @@ func ExportOKF(dir string, docs []Doc) error {
 		}
 		out, err := renderFrontmatter(frontmatter{
 			Type:  string(d.Tier),
+			Scope: string(d.Scope),
 			Title: d.Title,
 			Tags:  d.Tags,
 			// Recording the origin path is what makes re-import exact
@@ -80,6 +83,7 @@ func ExportOKF(dir string, docs []Doc) error {
 		man.Documents = append(man.Documents, ManifestEntry{
 			Path:    d.RelPath,
 			Tier:    string(d.Tier),
+			Scope:   string(d.Scope),
 			Title:   d.Title,
 			Tags:    d.Tags,
 			Sources: d.Sources,
@@ -117,18 +121,20 @@ type Rejection struct {
 type ApplyResult struct {
 	Written  []string
 	Rejected []Rejection
+	Failed   []Failure
 }
 
-// defaultImportCap bounds a document whose path matches no canonical
-// rule — the consolidator's per-crew <slug>/topics/ tree is the real
-// example, and refusing those outright would break round-tripping a
-// live crew's memory.
+// Failure is one document that could not be written for a reason that
+// is not write policy: a refused path, or the filesystem saying no.
 //
-// The value is the widest ceiling any recognised memory file has
-// (daily logs). An unrecognised path gets the most generous rule we
-// apply to anything, never no rule at all: unbounded is how an import
-// becomes a way to put a megabyte into a prompt.
-const defaultImportCap = 30000
+// It is per-document and non-fatal by design. Aborting the loop would
+// leave the documents already replaced in place while telling the
+// caller the whole import failed — the operator would believe nothing
+// happened while half their memory was new.
+type Failure struct {
+	RelPath string
+	Reason  string
+}
 
 // Apply writes docs into the .memory directory rooted at root.
 //
@@ -137,41 +143,64 @@ const defaultImportCap = 30000
 // an importer that wrote files directly would be a second door into the
 // memory tree with none of those guarantees.
 //
-// cfg carries the caller's policy (scrubber, verifier). Its MaxBytes is
-// an OVERRIDE: left at zero, each document is capped by
-// memory.CapForPath, so an import lands under the same ceilings the
-// agent's own writes live under. Setting it applies one tighter cap to
-// everything, which is what the tests and a deliberate `--max-bytes`
-// use.
+// # Confinement
 //
-// Paths are validated up front, all of them, before the first byte is
-// written: a traversal in document seventeen must not leave sixteen
-// documents applied.
+// safepath.JoinRel confines the path TEXT, and that is not sufficient on
+// its own: the agent owns its .memory directory, so it can replace a
+// subdirectory with a symlink and every path stays lexically inside the
+// root while the bytes land in another crew's tree. So each target also
+// has its parents created one segment at a time (EnsureDirNoFollow) and
+// is re-checked against the canonicalised root (AssertInsideRoot) — the
+// same pair the dispatcher runs before its own writes.
+//
+// # What may be written
+//
+// checkImportPath is a closed allowlist, matching every other write door
+// in the product. cfg.MaxBytes overrides the per-path ceiling when the
+// caller wants one tighter cap for everything.
 func Apply(ctx context.Context, root string, docs []Doc, cfg memory.WriteConfig) (ApplyResult, error) {
 	if root == "" {
 		return ApplyResult{}, fmt.Errorf("memport: import needs a target directory")
 	}
-	targets := make([]string, len(docs))
-	for i, d := range docs {
-		t, err := safepath.JoinRel(root, filepath.FromSlash(d.RelPath))
-		if err != nil {
-			return ApplyResult{}, fmt.Errorf("memport: refusing %q: %w", d.RelPath, err)
-		}
-		if t == filepath.Clean(root) {
-			return ApplyResult{}, fmt.Errorf("memport: refusing %q: resolves to the memory root itself", d.RelPath)
-		}
-		targets[i] = t
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return ApplyResult{}, fmt.Errorf("memport: prepare memory root: %w", err)
 	}
 
 	var res ApplyResult
-	for i, d := range docs {
+	for _, d := range docs {
+		maxBytes, refusal := checkImportPath(d.RelPath)
+		if refusal != "" {
+			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: string(refusal)})
+			continue
+		}
+		target, err := safepath.JoinRel(root, filepath.FromSlash(d.RelPath))
+		if err != nil || target == filepath.Clean(root) {
+			res.Failed = append(res.Failed, Failure{
+				RelPath: d.RelPath,
+				Reason:  "refused: path does not stay inside the target memory directory",
+			})
+			continue
+		}
+		if err := memory.EnsureDirNoFollow(root, filepath.Dir(target)); err != nil {
+			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: confinementReason(err)})
+			continue
+		}
+		if err := memory.AssertInsideRoot(root, target); err != nil {
+			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: confinementReason(err)})
+			continue
+		}
+
 		docCfg := cfg
 		if docCfg.MaxBytes == 0 {
-			docCfg.MaxBytes = capForImport(d.RelPath)
+			docCfg.MaxBytes = maxBytes
 		}
-		wr, err := memory.WriteFile(ctx, targets[i], d.Body, docCfg)
+		wr, err := memory.WriteFile(ctx, target, d.Body, docCfg)
 		if err != nil {
-			return res, fmt.Errorf("memport: write %s: %w", d.RelPath, err)
+			// WriteFile's error text carries the absolute host path. The
+			// caller is told WHICH document failed, not where the server
+			// keeps it.
+			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: "write failed on the server"})
+			continue
 		}
 		if wr.Rejected {
 			res.Rejected = append(res.Rejected, Rejection{
@@ -186,16 +215,15 @@ func Apply(ctx context.Context, root string, docs []Doc, cfg memory.WriteConfig)
 	return res, nil
 }
 
-// capForImport resolves the ceiling one document is written under.
-//
-// memory.CapForPath answers for the canonical files and distinguishes
-// "recognised, deliberately uncapped" (lessons/learned) from "no rule
-// here" — only the second gets the fallback. Collapsing the two would
-// quietly put a cap on a file the memory engine chose to leave open.
-func capForImport(rel string) int {
-	c, known := memory.CapForPath(rel)
-	if !known {
-		return defaultImportCap
+// confinementReason renders a containment failure without echoing the
+// server's absolute paths back to the caller. What the operator needs is
+// "this was refused for where it points", not the storage layout.
+func confinementReason(err error) string {
+	if err == nil {
+		return ""
 	}
-	return c
+	if strings.Contains(err.Error(), "symlink") {
+		return "refused: a symlink inside the memory directory redirects this path"
+	}
+	return "refused: path does not stay inside the target memory directory"
 }

@@ -105,8 +105,8 @@ The layout is detected from the directory's shape; `--format` overrides the gues
 
 | Format | Recognised by |
 |---|---|
-| `crewship` | canonical tier files at the root (`AGENT.md`, `CREW.md`, …) |
-| `okf` | markdown carrying YAML frontmatter |
+| `okf` | an `okf.yaml` manifest — a bundle we wrote — or any markdown carrying YAML frontmatter |
+| `crewship` | canonical tier files at the root of a live `.memory` tree (`AGENT.md`, `CREW.md`, …) |
 | `nanoclaw` | a `groups/` directory whose children hold `CLAUDE.md` |
 | `openclaw` | `SOUL.md` / `IDENTITY.md` / `MEMORY.md` / `USER.md` at the root |
 
@@ -125,6 +125,8 @@ An unrecognised tree is refused rather than guessed at.
 | NanoClaw `groups/<group>/CLAUDE.md` and its `*.md` siblings | `AGENT.md` |
 | Embeddings, session transcripts, task logs | **not imported** |
 
+A live `.memory` tree is read as plain markdown and passed through byte for byte — a note that opens with a `---` thematic break keeps it. Only bundles (which carry the manifest) are parsed for frontmatter.
+
 When several source files collapse into one canonical file, each gets a `## <source>` heading so you can still tell them apart afterwards.
 
 ### Choices the import will not make for you
@@ -135,13 +137,21 @@ When several source files collapse into one canonical file, each gets a `## <sou
 
 ### Policy on the way in
 
-Imported documents go through the same writer an agent's own memory writes use:
+Imported documents go through the same writer an agent's own memory writes use, and the same guards:
 
-- **Per-file size ceilings** — the same ones agents live under (`AGENT.md` 4 KB, `pins.md` 8 KB, daily logs 30 KB). Paths with no specific rule get the widest ceiling, never none.
+- **A closed allowlist of paths.** `AGENT.md`, `CREW.md`, `PERSONA.md`, `pins.md`, `daily/<name>.md`, `peers/<name>.md`, and the crew's `<slug>/topics/pins.md`. Anything else is refused and named — the same answer every other write surface in the product gives. A path must arrive in canonical form, so what you saw in the plan is what lands on disk.
+- **Consolidator-owned files are refused.** `lessons.md`, `learned.md` and `learned-<topic>.md` carry a YAML schema and their own locking; replacing one with freeform markdown would destroy the store and break every later lesson write. They export (so your bundle is complete) and they do not import.
+- **Symlinks do not redirect a write.** Parent directories are created one segment at a time and the final target is re-checked against the canonicalised root, so a link planted inside `.memory` cannot send an imported document into another crew's tree.
+- **Per-file size ceilings** — the same ones agents live under (`AGENT.md` 4 KB, `pins.md` 8 KB, daily logs 30 KB).
 - **Secret scanning in block mode** — a document carrying a live credential is refused and named, not silently redacted. If a token was in your notes, you want to know.
+- **Prompt-injection scanning** — the same scan every memory write runs. Foreign memory is the least trustworthy input this feature has; a payload that got through would be blanked at load time while sitting in the search index.
 - **Atomic replace + version record** — an import is visible in `crewship memory versions` like any other write.
 
-Rejections are reported per document and the command exits non-zero, so a partially-applied import cannot read as a clean one.
+Refusals and rejections are reported per document and the command exits non-zero. A document that fails does not stop the ones after it: the operator is told exactly which landed and which did not, because a half-applied import reported as a clean failure is how memory silently diverges from what you think it holds.
+
+### Reading is confined too
+
+Export never follows a symlink out of the tree it was asked for. The directory being read is one the agent itself owns, so a `.md` pointed elsewhere would otherwise return another crew's memory inside a bundle scoped to one agent. Links are skipped and listed under **NOT exported** rather than failing the whole export — a planted link should not become a denial of service against the operator.
 
 ## API
 
@@ -157,3 +167,5 @@ The server reads and writes only its own memory tree. Recognising a foreign layo
 - **Import replaces, it does not merge.** A document that already exists is overwritten. Export first if you want the old copy.
 - **No transcripts or embeddings.** Conversation history and vector indexes are derived data; Crewship rebuilds its own.
 - **One group per import.** Run it again for the next one.
+- **Consolidator-owned files export but do not import.** See the allowlist above.
+- **An import is not transactional.** Each document is replaced atomically on its own; there is no rollback across the set. The response names every document that landed.

@@ -230,7 +230,7 @@ crewship memory import --from ./nanoclaw --group telegram_dev-team --crew eng --
 | `--with-crew` | `false` | Also write crew-shared documents. Every agent in the crew reads them. |
 | `--apply` | `false` | Actually write. Without it the command prints the plan and exits. |
 
-Imported documents pass through the same per-file size ceilings and secret scanning as an agent's own writes; rejections are listed per document and the command exits non-zero. Full mapping table and limits: [Memory Portability](/guides/memory-portability).
+Imported documents pass through the same guards an agent's own writes do: a closed allowlist of paths, per-file size ceilings, secret and prompt-injection scanning, and symlink-safe confinement. Refusals are listed per document and the command exits non-zero; a failed document does not stop the rest. Full mapping table and limits: [Memory Portability](/guides/memory-portability).
 
 ## Scope and Path Resolution
 

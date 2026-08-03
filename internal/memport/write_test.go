@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -35,7 +36,17 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("ExportOKF() error = %v", err)
 	}
 
-	back, err := ReadSource(os.DirFS(dir), FormatCrewship, Options{})
+	// Re-read the way the CLI does: detect the format rather than
+	// assuming one. A bundle is OKF — it carries headers a live tree
+	// does not — and Detect is what has to know that.
+	format, err := Detect(os.DirFS(dir))
+	if err != nil {
+		t.Fatalf("Detect() on our own bundle: %v", err)
+	}
+	if format != FormatOKF {
+		t.Fatalf("Detect() = %q, want %q for an exported bundle", format, FormatOKF)
+	}
+	back, err := ReadSource(os.DirFS(dir), format, Options{})
 	if err != nil {
 		t.Fatalf("re-read error = %v", err)
 	}
@@ -149,16 +160,26 @@ func TestApplyReportsRejections(t *testing.T) {
 }
 
 // A crafted RelPath must not escape the target .memory directory. The
-// source of an import is a tarball a stranger produced.
+// payload is operator-supplied and, upstream of that, comes from a
+// directory somebody else produced.
+//
+// A refusal is per-document, not a hard error: one bad entry in a
+// hundred must not decide the fate of the other ninety-nine.
 func TestApplyRefusesEscape(t *testing.T) {
-	root := t.TempDir()
 	for _, bad := range []string{"../escape.md", "daily/../../escape.md", "/etc/passwd"} {
 		t.Run(bad, func(t *testing.T) {
-			_, err := Apply(context.Background(), root,
+			root := t.TempDir()
+			res, err := Apply(context.Background(), root,
 				[]Doc{{Tier: memory.TierAgent, RelPath: bad, Body: []byte("x")}},
 				memory.WriteConfig{})
-			if err == nil {
+			if err != nil {
+				t.Fatalf("Apply() hard error = %v, want a per-document refusal", err)
+			}
+			if len(res.Written) != 0 {
 				t.Fatalf("Apply() accepted %q", bad)
+			}
+			if len(res.Failed) != 1 {
+				t.Fatalf("Failed = %+v, want the refusal reported", res.Failed)
 			}
 			if _, serr := os.Stat(filepath.Join(filepath.Dir(root), "escape.md")); serr == nil {
 				t.Fatal("write landed outside the target directory")
@@ -195,34 +216,6 @@ func TestApplyEnforcesCanonicalCaps(t *testing.T) {
 	}
 }
 
-// Paths with no specific rule — the consolidator's per-crew
-// <slug>/topics/ tree is the real example — still round-trip, but under
-// the widest ceiling any memory file has rather than none at all.
-func TestApplyCapsUnrecognisedPaths(t *testing.T) {
-	root := t.TempDir()
-	rel := "alpha-crew/topics/learned-deploys.md"
-
-	small, err := Apply(context.Background(), root,
-		[]Doc{{Tier: memory.TierLearned, RelPath: rel, Body: []byte("a note\n")}},
-		memory.WriteConfig{})
-	if err != nil {
-		t.Fatalf("Apply() error = %v", err)
-	}
-	if len(small.Written) != 1 {
-		t.Fatalf("Written = %v, want the topics file to round-trip", small.Written)
-	}
-
-	big, err := Apply(context.Background(), root,
-		[]Doc{{Tier: memory.TierLearned, RelPath: rel, Body: []byte(strings.Repeat("x", defaultImportCap+1))}},
-		memory.WriteConfig{})
-	if err != nil {
-		t.Fatalf("Apply() error = %v", err)
-	}
-	if len(big.Rejected) != 1 || big.Rejected[0].Kind != "cap" {
-		t.Fatalf("Rejected = %+v, want a cap rejection on an unbounded path", big.Rejected)
-	}
-}
-
 // An explicit cap from the caller still wins — that is how the CLI's
 // escape hatch and these tests pin a smaller ceiling.
 func TestApplyExplicitCapOverridesCanonical(t *testing.T) {
@@ -235,5 +228,146 @@ func TestApplyExplicitCapOverridesCanonical(t *testing.T) {
 	}
 	if len(res.Rejected) != 1 {
 		t.Fatalf("Rejected = %+v, want the caller's tighter cap to apply", res.Rejected)
+	}
+}
+
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+}
+
+// Lexical confinement is not confinement. An agent owns its own
+// .memory, so it can replace a subdirectory with a link to somewhere
+// else — another crew's shared tree, say — and every path stays
+// textually inside the root while the bytes land outside it.
+func TestApplyRefusesSymlinkedParent(t *testing.T) {
+	root := t.TempDir()
+	elsewhere := t.TempDir()
+	symlinkOrSkip(t, elsewhere, filepath.Join(root, "daily"))
+
+	res, err := Apply(context.Background(), root,
+		[]Doc{{Tier: memory.TierAgent, RelPath: "daily/2026-08-01.md", Body: []byte("stolen")}},
+		memory.WriteConfig{})
+	if err == nil && len(res.Failed) == 0 {
+		t.Fatal("Apply wrote through a symlinked parent directory")
+	}
+	if _, serr := os.Stat(filepath.Join(elsewhere, "2026-08-01.md")); serr == nil {
+		t.Fatal("content landed outside the memory root")
+	}
+}
+
+// The same swap one level down: the file itself is the link.
+func TestApplyRefusesSymlinkedLeaf(t *testing.T) {
+	root := t.TempDir()
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.md")
+	if err := os.WriteFile(victim, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, victim, filepath.Join(root, "AGENT.md"))
+
+	res, err := Apply(context.Background(), root,
+		[]Doc{{Tier: memory.TierAgent, RelPath: "AGENT.md", Body: []byte("overwrite")}},
+		memory.WriteConfig{})
+	if err == nil && len(res.Failed) == 0 {
+		t.Fatal("Apply wrote through a symlinked leaf")
+	}
+	got, rerr := os.ReadFile(victim)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "original" {
+		t.Fatalf("symlink target was overwritten: %q", got)
+	}
+}
+
+// Every other write door into memory refuses a path it does not
+// recognise. An importer that accepts anything is a way to put files
+// into the tree — .quarantine entries, nested daily forgeries — that no
+// other surface in the product would have taken.
+func TestApplyRefusesUnknownPaths(t *testing.T) {
+	for _, bad := range []string{
+		"daily/2026-08-01/notes.md", // nested forgery the sidecar rejects
+		".quarantine/abc123.md",     // deliberately isolated content
+		"secrets.md",
+		"topics/../AGENT.md",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			root := t.TempDir()
+			res, err := Apply(context.Background(), root,
+				[]Doc{{Tier: memory.TierAgent, RelPath: bad, Body: []byte("x")}},
+				memory.WriteConfig{})
+			if err == nil && len(res.Failed) == 0 && len(res.Written) > 0 {
+				t.Fatalf("Apply accepted unrecognised path %q", bad)
+			}
+		})
+	}
+}
+
+// The consolidator owns lessons/learned files: they carry a YAML schema
+// and their own locking. Replacing one with freeform markdown from an
+// import destroys the store and every later WriteLesson fails on parse.
+func TestApplyRefusesConsolidatorOwnedFiles(t *testing.T) {
+	for _, owned := range []string{"lessons.md", "learned.md", "eng/topics/learned-ops.md"} {
+		t.Run(owned, func(t *testing.T) {
+			root := t.TempDir()
+			res, err := Apply(context.Background(), root,
+				[]Doc{{Tier: memory.TierLearned, RelPath: owned, Body: []byte("freeform\n")}},
+				memory.WriteConfig{})
+			if err == nil && len(res.Failed) == 0 && len(res.Written) > 0 {
+				t.Fatalf("Apply overwrote consolidator-owned %q", owned)
+			}
+			if _, serr := os.Stat(filepath.Join(root, filepath.FromSlash(owned))); serr == nil {
+				t.Errorf("%s was written", owned)
+			}
+		})
+	}
+}
+
+// The crew's pinned notes live under <slug>/topics/pins.md and must
+// round-trip; they are the one nested path the importer accepts.
+func TestApplyAcceptsCrewTopicsPins(t *testing.T) {
+	root := t.TempDir()
+	res, err := Apply(context.Background(), root,
+		[]Doc{{Tier: memory.TierPins, RelPath: "engineering/topics/pins.md", Body: []byte("- never force-push\n")}},
+		memory.WriteConfig{})
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if len(res.Written) != 1 {
+		t.Fatalf("Written = %v (failed: %+v), want the crew pins file", res.Written, res.Failed)
+	}
+}
+
+// A write that fails partway must not be reported as "nothing
+// happened": the documents already replaced are gone, and the operator
+// needs to know which.
+func TestApplyReportsPerDocumentFailureWithoutAborting(t *testing.T) {
+	root := t.TempDir()
+	// Make PERSONA.md a directory so its write fails while its
+	// neighbours succeed.
+	if err := os.MkdirAll(filepath.Join(root, "PERSONA.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	docs := []Doc{
+		{Tier: memory.TierAgent, RelPath: "AGENT.md", Body: []byte("first\n")},
+		{Tier: memory.TierAgent, RelPath: "PERSONA.md", Body: []byte("second\n")},
+		{Tier: memory.TierAgent, RelPath: "pins.md", Body: []byte("third\n")},
+	}
+	res, err := Apply(context.Background(), root, docs, memory.WriteConfig{})
+	if err != nil {
+		t.Fatalf("Apply() returned a hard error instead of per-document failures: %v", err)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].RelPath != "PERSONA.md" {
+		t.Fatalf("Failed = %+v, want PERSONA.md", res.Failed)
+	}
+	// The documents after the failure still ran.
+	if len(res.Written) != 2 {
+		t.Errorf("Written = %v, want AGENT.md and pins.md", res.Written)
 	}
 }

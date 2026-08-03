@@ -19,14 +19,23 @@ var crewshipTierFiles = []string{"AGENT.md", "CREW.md", "PERSONA.md", "pins.md",
 
 // Detect identifies which layout fsys holds.
 //
-// The checks run most-specific first. Crewship is tested before OKF
-// because our own export carries frontmatter too — a bundle we wrote is
-// still ours, and round-tripping it through the OKF reader would lose
-// the tier mapping the filenames already encode.
+// The checks run most-specific first: our own bundle (identified by its
+// manifest), then a live Crewship tree, then the two foreign layouts,
+// then any markdown carrying frontmatter.
 func Detect(fsys fs.FS) (Format, error) {
 	names, err := walkFiles(fsys)
 	if err != nil {
 		return "", err
+	}
+
+	// Our own bundle first, on its manifest. A bundle carries the same
+	// canonical filenames a live tree does, but its files have YAML
+	// headers — reading it as a live tree would pass the header through
+	// as body text. The manifest is what tells the two apart.
+	for _, n := range names {
+		if n == manifestName {
+			return FormatOKF, nil
+		}
 	}
 
 	for _, n := range names {

@@ -51,6 +51,23 @@ const (
 	FormatOpenClaw Format = "openclaw"
 )
 
+// Scope says WHICH memory directory a document belongs to. It is not
+// the same question as Tier.
+//
+// Tier labels the kind of content for the version record; scope decides
+// the destination directory. They disagree in practice: a crew's pinned
+// notes carry tier "pins" and live in the crew-shared tree, while an
+// agent's own pins.md carries the same tier and lives in the agent's.
+// Routing on tier alone sent crew content into one agent's private
+// directory, where the prompt builder that reads the crew tree never
+// sees it again.
+type Scope string
+
+const (
+	ScopeAgent Scope = "agent"
+	ScopeCrew  Scope = "crew"
+)
+
 // Doc is one memory document in the neutral middle representation.
 //
 // RelPath is Crewship-canonical and always forward-slashed: "AGENT.md",
@@ -58,6 +75,7 @@ const (
 // .memory directory, never absolute — the caller decides which .memory.
 type Doc struct {
 	Tier    memory.Tier
+	Scope   Scope
 	RelPath string
 	Title   string
 	Tags    []string
@@ -94,4 +112,8 @@ type Options struct {
 	OperatorSlug string
 	// Group picks one NanoClaw group when the source holds several.
 	Group string
+	// DefaultScope is the scope for documents whose source does not
+	// record one — a live Crewship tree read straight off disk, where
+	// the caller knows which directory it opened. Empty means agent.
+	DefaultScope Scope
 }

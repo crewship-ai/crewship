@@ -73,10 +73,15 @@ Examples:
 			Documents []struct {
 				Path  string   `json:"path"`
 				Tier  string   `json:"tier"`
+				Scope string   `json:"scope"`
 				Title string   `json:"title"`
 				Tags  []string `json:"tags"`
 				Body  string   `json:"body"`
 			} `json:"documents"`
+			Skipped []struct {
+				Source string `json:"source"`
+				Reason string `json:"reason"`
+			} `json:"skipped"`
 		}
 		if err := cli.ReadJSON(resp, &payload); err != nil {
 			return err
@@ -89,6 +94,7 @@ Examples:
 		for _, d := range payload.Documents {
 			docs = append(docs, memport.Doc{
 				Tier:    memory.Tier(d.Tier),
+				Scope:   memport.Scope(d.Scope),
 				RelPath: d.Path,
 				Title:   d.Title,
 				Tags:    d.Tags,
@@ -101,6 +107,15 @@ Examples:
 		fmt.Fprintf(os.Stdout, "exported %d documents to %s\n", len(docs), out)
 		for _, d := range docs {
 			fmt.Fprintf(os.Stdout, "  %s\n", d.RelPath)
+		}
+		// Anything the server could not read is named. A bundle that is
+		// quietly missing a file is worse than one that fails: the
+		// operator keeps it believing it is complete.
+		if len(payload.Skipped) > 0 {
+			fmt.Fprintf(os.Stdout, "\nNOT exported (%d):\n", len(payload.Skipped))
+			for _, sk := range payload.Skipped {
+				fmt.Fprintf(os.Stdout, "  %-32s %s\n", sk.Source, sk.Reason)
+			}
 		}
 		return nil
 	},
@@ -260,6 +275,10 @@ func postImportBatch(client *cli.Client, crewID, agentSlug string, docs []mempor
 			Path string `json:"path"`
 			Kind string `json:"kind"`
 		} `json:"rejected"`
+		Failed []struct {
+			Path   string `json:"path"`
+			Reason string `json:"reason"`
+		} `json:"failed"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return 0, err
@@ -274,7 +293,13 @@ func postImportBatch(client *cli.Client, crewID, agentSlug string, docs []mempor
 			fmt.Fprintf(os.Stdout, "    %s (%s)\n", rj.Path, rj.Kind)
 		}
 	}
-	return len(out.Rejected), nil
+	if len(out.Failed) > 0 {
+		fmt.Fprintf(os.Stdout, "  %d REFUSED:\n", len(out.Failed))
+		for _, f := range out.Failed {
+			fmt.Fprintf(os.Stdout, "    %s — %s\n", f.Path, f.Reason)
+		}
+	}
+	return len(out.Rejected) + len(out.Failed), nil
 }
 
 // routeByTarget splits a plan by where each document actually lives on
@@ -292,21 +317,26 @@ func postImportBatch(client *cli.Client, crewID, agentSlug string, docs []mempor
 // documents are reported, never silently dropped.
 func routeByTarget(plan memport.Plan, agentSlug string, withCrew bool) (agentDocs, crewDocs []memport.Doc, blocked []memport.Skip) {
 	for _, d := range plan.Docs {
-		isCrewTier := d.Tier == memory.TierCrew || d.Tier == memory.TierWorkspace
+		// Scope, not tier. A crew's pinned notes carry tier "pins" and
+		// belong to the crew tree; an agent's own pins.md carries the
+		// same tier and belongs to the agent's. Routing on tier put crew
+		// content into one agent's private directory, where the prompt
+		// builder that reads the crew tree never sees it again.
+		isCrewScoped := d.Scope == memport.ScopeCrew
 		switch {
-		case isCrewTier && agentSlug == "":
+		case isCrewScoped && agentSlug == "":
 			crewDocs = append(crewDocs, d)
-		case isCrewTier && withCrew:
+		case isCrewScoped && withCrew:
 			crewDocs = append(crewDocs, d)
-		case isCrewTier:
+		case isCrewScoped:
 			blocked = append(blocked, memport.Skip{
 				Source: d.RelPath,
-				Reason: "crew-shared tier — every agent in the crew reads it; re-run with --with-crew to include it",
+				Reason: "crew-shared — every agent in the crew reads it; re-run with --with-crew to include it",
 			})
 		case agentSlug == "":
 			blocked = append(blocked, memport.Skip{
 				Source: d.RelPath,
-				Reason: "agent-private tier — name a target with --agent to import it",
+				Reason: "agent-private — name a target with --agent to import it",
 			})
 		default:
 			agentDocs = append(agentDocs, d)

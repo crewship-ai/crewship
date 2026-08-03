@@ -22,8 +22,8 @@ func docsFor(t *testing.T, got []memport.Doc) []string {
 // request cannot carry both.
 func TestRouteByTarget_AgentTargetHoldsBackCrewTier(t *testing.T) {
 	plan := memport.Plan{Docs: []memport.Doc{
-		{Tier: memory.TierAgent, RelPath: "AGENT.md"},
-		{Tier: memory.TierCrew, RelPath: "CREW.md"},
+		{Tier: memory.TierAgent, Scope: memport.ScopeAgent, RelPath: "AGENT.md"},
+		{Tier: memory.TierCrew, Scope: memport.ScopeCrew, RelPath: "CREW.md"},
 	}}
 
 	agentDocs, crewDocs, blocked := routeByTarget(plan, "alex", false)
@@ -47,8 +47,8 @@ func TestRouteByTarget_AgentTargetHoldsBackCrewTier(t *testing.T) {
 
 func TestRouteByTarget_WithCrewOptIn(t *testing.T) {
 	plan := memport.Plan{Docs: []memport.Doc{
-		{Tier: memory.TierAgent, RelPath: "AGENT.md"},
-		{Tier: memory.TierCrew, RelPath: "CREW.md"},
+		{Tier: memory.TierAgent, Scope: memport.ScopeAgent, RelPath: "AGENT.md"},
+		{Tier: memory.TierCrew, Scope: memport.ScopeCrew, RelPath: "CREW.md"},
 	}}
 
 	agentDocs, crewDocs, blocked := routeByTarget(plan, "alex", true)
@@ -69,8 +69,8 @@ func TestRouteByTarget_WithCrewOptIn(t *testing.T) {
 // directory no agent reads.
 func TestRouteByTarget_CrewTargetHoldsBackAgentTier(t *testing.T) {
 	plan := memport.Plan{Docs: []memport.Doc{
-		{Tier: memory.TierAgent, RelPath: "AGENT.md"},
-		{Tier: memory.TierCrew, RelPath: "CREW.md"},
+		{Tier: memory.TierAgent, Scope: memport.ScopeAgent, RelPath: "AGENT.md"},
+		{Tier: memory.TierCrew, Scope: memport.ScopeCrew, RelPath: "CREW.md"},
 	}}
 
 	agentDocs, crewDocs, blocked := routeByTarget(plan, "", false)
@@ -86,12 +86,12 @@ func TestRouteByTarget_CrewTargetHoldsBackAgentTier(t *testing.T) {
 	}
 }
 
-// Pins and learned notes are crew-shared surfaces too; they must follow
-// the same rule as CREW.md rather than leaking into an agent directory.
-func TestRouteByTarget_TreatsEveryCrewTierAlike(t *testing.T) {
+// A crew's pinned notes carry tier "pins" and are still crew-shared.
+// Routing on tier alone sent them into one agent's private directory.
+func TestRouteByTarget_TreatsEveryCrewScopedDocAlike(t *testing.T) {
 	plan := memport.Plan{Docs: []memport.Doc{
-		{Tier: memory.TierCrew, RelPath: "CREW.md"},
-		{Tier: memory.TierWorkspace, RelPath: "CREW.md"},
+		{Tier: memory.TierCrew, Scope: memport.ScopeCrew, RelPath: "CREW.md"},
+		{Tier: memory.TierPins, Scope: memport.ScopeCrew, RelPath: "eng/topics/pins.md"},
 	}}
 	agentDocs, crewDocs, blocked := routeByTarget(plan, "alex", false)
 	if len(agentDocs) != 0 {
@@ -102,5 +102,26 @@ func TestRouteByTarget_TreatsEveryCrewTierAlike(t *testing.T) {
 	}
 	if len(blocked) != 2 {
 		t.Errorf("blocked = %+v, want both held back", blocked)
+	}
+}
+
+// The round trip a crew export must survive: pins exported from the
+// crew tier come back with crew scope and go home, instead of being
+// refused as agent-private or silently filed inside one agent.
+func TestRouteByTarget_CrewPinsRoundTripHome(t *testing.T) {
+	plan := memport.Plan{Docs: []memport.Doc{
+		{Tier: memory.TierPins, Scope: memport.ScopeCrew, RelPath: "engineering/topics/pins.md"},
+	}}
+
+	agentDocs, crewDocs, blocked := routeByTarget(plan, "", false)
+
+	if len(agentDocs) != 0 {
+		t.Errorf("agent docs = %v, want none", docsFor(t, agentDocs))
+	}
+	if len(blocked) != 0 {
+		t.Errorf("blocked = %+v, want the crew's own pins to be accepted", blocked)
+	}
+	if got := docsFor(t, crewDocs); len(got) != 1 || got[0] != "engineering/topics/pins.md" {
+		t.Errorf("crew docs = %v, want the pins file", got)
 	}
 }

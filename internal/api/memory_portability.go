@@ -48,6 +48,7 @@ func NewMemoryPortabilityHandler(db *sql.DB, logger *slog.Logger, outputBasePath
 type memoryDocPayload struct {
 	Path    string   `json:"path"`
 	Tier    string   `json:"tier"`
+	Scope   string   `json:"scope,omitempty"`
 	Title   string   `json:"title,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Sources []string `json:"sources,omitempty"`
@@ -162,7 +163,15 @@ func (h *MemoryPortabilityHandler) Export(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	plan, err := memport.ReadSource(os.DirFS(dir), memport.FormatCrewship, memport.Options{})
+	// SecureDirFS, not os.DirFS: the tree being read is one the agent
+	// owns, so a symlinked .md would otherwise return another crew's
+	// memory inside a response scoped to this one.
+	scope := memport.ScopeCrew
+	if r.URL.Query().Get("agent_slug") != "" {
+		scope = memport.ScopeAgent
+	}
+	plan, err := memport.ReadSource(memport.SecureDirFS(dir), memport.FormatCrewship,
+		memport.Options{DefaultScope: scope})
 	if err != nil {
 		h.logger.Error("memory portability: read", "err", err)
 		replyError(w, http.StatusInternalServerError, "could not read memory")
@@ -174,6 +183,7 @@ func (h *MemoryPortabilityHandler) Export(w http.ResponseWriter, r *http.Request
 		docs = append(docs, memoryDocPayload{
 			Path:  d.RelPath,
 			Tier:  string(d.Tier),
+			Scope: string(d.Scope),
 			Title: d.Title,
 			Tags:  d.Tags,
 			Body:  string(d.Body),
@@ -218,14 +228,29 @@ func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request
 	}
 
 	docs := make([]memport.Doc, 0, len(body.Documents))
+	injected := make([]map[string]any, 0)
 	for _, d := range body.Documents {
 		tier := memory.Tier(d.Tier)
 		if !memory.ValidTier(tier) {
 			replyError(w, http.StatusBadRequest, "unknown tier "+d.Tier+" on "+d.Path)
 			return
 		}
+		// The same prompt-injection scan every other memory write runs
+		// (audit A10.1, memory/tools.go handleWrite). Foreign memory is
+		// the least trustworthy input this feature has; letting it land
+		// unscanned means the load-time scan blanks the whole tier at
+		// the next run while the payload sits in the FTS index.
+		if hit := memory.ScanContent(d.Body); hit != nil {
+			injected = append(injected, map[string]any{
+				"path":    d.Path,
+				"kind":    "prompt_injection",
+				"pattern": hit.Category,
+			})
+			continue
+		}
 		docs = append(docs, memport.Doc{
 			Tier:    tier,
+			Scope:   memport.Scope(d.Scope),
 			RelPath: d.Path,
 			Title:   d.Title,
 			Tags:    d.Tags,
@@ -247,12 +272,17 @@ func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request
 
 	res, err := memport.Apply(r.Context(), dir, docs, cfg)
 	if err != nil {
-		// A refused path is the caller's fault, not ours.
-		replyError(w, http.StatusBadRequest, err.Error())
+		// Apply only returns an error for something wrong with the
+		// TARGET (no root, cannot prepare it) — per-document problems
+		// come back in the result. So this is ours, not the caller's,
+		// and the message must not carry the host path.
+		h.logger.Error("memory portability: apply", "err", err)
+		replyError(w, http.StatusInternalServerError, "could not write to this memory directory")
 		return
 	}
 
-	rejected := make([]map[string]any, 0, len(res.Rejected))
+	rejected := make([]map[string]any, 0, len(res.Rejected)+len(injected))
+	rejected = append(rejected, injected...)
 	for _, rj := range res.Rejected {
 		rejected = append(rejected, map[string]any{
 			"path":   rj.RelPath,
@@ -260,9 +290,18 @@ func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request
 			"detail": rj.Detail,
 		})
 	}
+	failed := make([]map[string]any, 0, len(res.Failed))
+	for _, f := range res.Failed {
+		failed = append(failed, map[string]any{"path": f.RelPath, "reason": f.Reason})
+	}
+	// 200 even with failures: some documents were written and the
+	// caller has to be told WHICH. A status code cannot say "three of
+	// five", and reporting a blanket failure would leave the operator
+	// believing memory is untouched when it is not.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"written":  res.Written,
 		"rejected": rejected,
+		"failed":   failed,
 	})
 }
 

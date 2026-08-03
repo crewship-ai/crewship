@@ -1,6 +1,7 @@
 package memport
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -225,5 +226,119 @@ func TestReadOKFRoundTrip(t *testing.T) {
 	}
 	if len(agent.Tags) != 1 || agent.Tags[0] != "ops" {
 		t.Errorf("Tags = %v, want [ops]", agent.Tags)
+	}
+}
+
+// A LIVE memory tree is plain markdown. An agent that opens AGENT.md
+// with a thematic break must not have that block eaten as YAML — and
+// must never have the whole file dropped because the block did not
+// parse. Exports that silently omit an agent's main memory file are
+// worse than exports that fail.
+func TestReadCrewshipDoesNotEatMarkdownRules(t *testing.T) {
+	body := "---\nDeploy key rotates monthly.\n---\nRest of memory.\n"
+	fsys := fstest.MapFS{
+		"AGENT.md": &fstest.MapFile{Data: []byte(body)},
+	}
+	plan, err := ReadSource(fsys, FormatCrewship, Options{})
+	if err != nil {
+		t.Fatalf("ReadSource() error = %v", err)
+	}
+	if len(plan.Docs) != 1 {
+		t.Fatalf("Docs = %v, skipped = %+v; want AGENT.md preserved", relPaths(plan), plan.Skipped)
+	}
+	if got := string(plan.Docs[0].Body); got != body {
+		t.Errorf("body was rewritten:\n want %q\n  got %q", body, got)
+	}
+}
+
+// The consolidator writes learned-<topic>.md, not learned.md. The audit
+// watcher already knows that; the exporter must agree or the crew's
+// consolidated rules leave with the wrong tier stamped on them.
+func TestTierForCrewshipPathMatchesTheAuditWatcher(t *testing.T) {
+	tests := []struct {
+		rel  string
+		want memory.Tier
+	}{
+		{"AGENT.md", memory.TierAgent},
+		{"CREW.md", memory.TierCrew},
+		{"pins.md", memory.TierPins},
+		{"lessons.md", memory.TierLearned},
+		{"learned.md", memory.TierLearned},
+		{"eng/topics/learned-ops.md", memory.TierLearned},
+		{"eng/topics/pins.md", memory.TierPins},
+		{"daily/2026-08-01.md", memory.TierAgent},
+	}
+	for _, tt := range tests {
+		if got := tierForCrewshipPath(tt.rel); got != tt.want {
+			t.Errorf("tierForCrewshipPath(%q) = %q, want %q", tt.rel, got, tt.want)
+		}
+	}
+}
+
+// A file the reader classifies as "never imported" must not be able to
+// abort the import by being unreadable — a dead symlink or a socket
+// under sessions/ is ordinary on a real machine.
+func TestReadOpenClawSurvivesUnreadableDerivedData(t *testing.T) {
+	fsys := failingFS{
+		MapFS: fstest.MapFS{
+			"MEMORY.md":                &fstest.MapFile{Data: []byte("knowledge")},
+			"sessions/abc/turns.jsonl": &fstest.MapFile{Data: []byte("{}")},
+			"vectors/index.bin":        &fstest.MapFile{Data: []byte("\x00")},
+		},
+		failPrefixes: []string{"sessions/", "vectors/"},
+	}
+	plan, err := ReadSource(fsys, FormatOpenClaw, Options{})
+	if err != nil {
+		t.Fatalf("ReadSource() error = %v; an unreadable skipped file must not abort the import", err)
+	}
+	if _, ok := findDoc(plan, "AGENT.md"); !ok {
+		t.Errorf("AGENT.md missing; got %v", relPaths(plan))
+	}
+}
+
+func findDoc(plan Plan, rel string) (Doc, bool) {
+	for _, d := range plan.Docs {
+		if d.RelPath == rel {
+			return d, true
+		}
+	}
+	return Doc{}, false
+}
+
+// failingFS refuses to open anything under failPrefixes, standing in for
+// a dead symlink, a socket, or a permission-denied transcript.
+type failingFS struct {
+	fstest.MapFS
+	failPrefixes []string
+}
+
+func (f failingFS) Open(name string) (fs.File, error) {
+	for _, p := range f.failPrefixes {
+		if strings.HasPrefix(name, p) {
+			return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
+		}
+	}
+	return f.MapFS.Open(name)
+}
+
+// Scope, not tier, decides which directory a document belongs to. A
+// crew's pins are crew-scoped even though their tier is "pins", and an
+// agent's own pins are not.
+func TestReadNanoClawAssignsScope(t *testing.T) {
+	fsys := fstest.MapFS{
+		"groups/global/CLAUDE.md":   &fstest.MapFile{Data: []byte("shared")},
+		"groups/telegram/CLAUDE.md": &fstest.MapFile{Data: []byte("mine")},
+	}
+	plan, err := ReadSource(fsys, FormatNanoClaw, Options{})
+	if err != nil {
+		t.Fatalf("ReadSource() error = %v", err)
+	}
+	crew, _ := findDoc(plan, "CREW.md")
+	if crew.Scope != ScopeCrew {
+		t.Errorf("CREW.md scope = %q, want %q", crew.Scope, ScopeCrew)
+	}
+	agent, _ := findDoc(plan, "AGENT.md")
+	if agent.Scope != ScopeAgent {
+		t.Errorf("AGENT.md scope = %q, want %q", agent.Scope, ScopeAgent)
 	}
 }

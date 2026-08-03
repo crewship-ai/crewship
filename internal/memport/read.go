@@ -23,7 +23,7 @@ func ReadSource(fsys fs.FS, f Format, opts Options) (Plan, error) {
 	b := newBuilder()
 	switch f {
 	case FormatCrewship:
-		err = readCrewship(fsys, names, b)
+		err = readCrewship(fsys, names, b, opts)
 	case FormatOKF:
 		err = readOKF(fsys, names, b)
 	case FormatNanoClaw:
@@ -45,15 +45,13 @@ var dateFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 	for _, n := range names {
-		body, err := fs.ReadFile(fsys, n)
-		if err != nil {
-			return fmt.Errorf("memport: read %s: %w", n, err)
-		}
 		dir, base := path.Dir(n), path.Base(n)
 
-		// Derived data. Named explicitly rather than by "anything we
-		// don't recognise" so a genuinely unknown file still shows up
-		// as an unhandled skip an operator can look at.
+		// Classify BEFORE reading. A transcript under sessions/ may be a
+		// dead symlink, a socket, or simply unreadable; reading it first
+		// let one file the importer was never going to use abort the
+		// whole import — and slurped a multi-gigabyte vector index into
+		// memory just to discard it.
 		if top := topDir(n); top == "vectors" || top == "sessions" {
 			b.skip(n, "derived data — embeddings and transcripts are rebuilt locally, never imported")
 			continue
@@ -62,23 +60,33 @@ func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
+		if dir != "." && dir != "memory" {
+			b.skip(n, "outside the OpenClaw memory layout")
+			continue
+		}
+
+		body, err := fs.ReadFile(fsys, n)
+		if err != nil {
+			b.skip(n, "unreadable: "+err.Error())
+			continue
+		}
 
 		if dir == "." {
 			switch base {
 			case "SOUL.md", "IDENTITY.md":
-				b.merge("PERSONA.md", memory.TierAgent, n, body)
+				b.merge("PERSONA.md", memory.TierAgent, ScopeAgent, n, body)
 			case "MEMORY.md":
-				b.merge("AGENT.md", memory.TierAgent, n, body)
+				b.merge("AGENT.md", memory.TierAgent, ScopeAgent, n, body)
 			case "AGENTS.md":
-				b.merge("CREW.md", memory.TierCrew, n, body)
+				b.merge("CREW.md", memory.TierCrew, ScopeCrew, n, body)
 			case "USER.md":
 				if opts.OperatorSlug == "" {
 					b.skip(n, "operator-facing card needs a target person; re-run with the operator slug")
 					continue
 				}
-				b.merge("peers/"+opts.OperatorSlug+".md", memory.TierAgent, n, body)
+				b.merge("peers/"+opts.OperatorSlug+".md", memory.TierAgent, ScopeAgent, n, body)
 			default:
-				b.merge("AGENT.md", memory.TierAgent, n, body)
+				b.merge("AGENT.md", memory.TierAgent, ScopeAgent, n, body)
 			}
 			continue
 		}
@@ -86,16 +94,14 @@ func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 		if dir == "memory" {
 			stem := strings.TrimSuffix(base, path.Ext(base))
 			if dateFileRe.MatchString(stem) {
-				b.merge("daily/"+stem+".md", memory.TierAgent, n, body)
+				b.merge("daily/"+stem+".md", memory.TierAgent, ScopeAgent, n, body)
 				continue
 			}
 			// Topic notes are long-term knowledge with no tier of
 			// their own; they become sections of AGENT.md.
-			b.merge("AGENT.md", memory.TierAgent, n, body)
+			b.merge("AGENT.md", memory.TierAgent, ScopeAgent, n, body)
 			continue
 		}
-
-		b.skip(n, "outside the OpenClaw memory layout")
 	}
 	return nil
 }
@@ -137,9 +143,9 @@ func readNanoClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 		case "global":
 			// Global memory is what every group shares — that is our
 			// crew-shared tier, not an agent's private one.
-			b.merge("CREW.md", memory.TierCrew, n, body)
+			b.merge("CREW.md", memory.TierCrew, ScopeCrew, n, body)
 		case group:
-			b.merge("AGENT.md", memory.TierAgent, n, body)
+			b.merge("AGENT.md", memory.TierAgent, ScopeAgent, n, body)
 		default:
 			b.skip(n, "belongs to group "+g+", which this import did not select")
 		}
@@ -205,8 +211,12 @@ func readOKF(fsys fs.FS, names []string, b *builder) error {
 		}
 		fm, body, err := parseFrontmatter(raw)
 		if err != nil {
-			b.skip(n, "frontmatter did not parse: "+err.Error())
-			continue
+			// A header we cannot read is a reason to distrust the
+			// metadata, not a reason to lose the document: the body is
+			// somebody's memory. Keep it, tell the operator, and let the
+			// path rules place it.
+			b.skip(n, "frontmatter did not parse, importing the body without its metadata: "+err.Error())
+			fm = frontmatter{}
 		}
 
 		rel := fm.CrewshipPath
@@ -214,7 +224,7 @@ func readOKF(fsys fs.FS, names []string, b *builder) error {
 		if rel == "" {
 			rel = canonicalFileForTier(tier)
 		}
-		b.merge(rel, tier, n, body)
+		b.merge(rel, tier, scopeFromOKF(fm, rel, tier), n, body)
 		b.annotate(rel, fm.Title, fm.Tags)
 	}
 	return nil
@@ -256,30 +266,29 @@ func canonicalFileForTier(t memory.Tier) string {
 
 // --- Crewship ---------------------------------------------------------
 
-func readCrewship(fsys fs.FS, names []string, b *builder) error {
+func readCrewship(fsys fs.FS, names []string, b *builder, opts Options) error {
 	for _, n := range names {
 		if !strings.EqualFold(path.Ext(n), ".md") {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		raw, err := fs.ReadFile(fsys, n)
+		body, err := fs.ReadFile(fsys, n)
 		if err != nil {
-			return fmt.Errorf("memport: read %s: %w", n, err)
-		}
-		// Our own export carries frontmatter; a live .memory tree does
-		// not. Both must read back to the same document.
-		fm, body, err := parseFrontmatter(raw)
-		if err != nil {
-			b.skip(n, "frontmatter did not parse: "+err.Error())
+			b.skip(n, "unreadable: "+err.Error())
 			continue
 		}
+		// A live .memory tree is plain markdown and is passed through
+		// byte for byte. It is NOT parsed for frontmatter: an agent's
+		// note may legitimately open with a `---` thematic break, and
+		// treating that as a YAML header either deletes the block or —
+		// when it does not parse as YAML — dropped the whole file from
+		// the export while the CLI reported success.
+		//
+		// Our own bundles are read by the OKF reader instead; Detect
+		// routes them there on the okf.yaml manifest.
 		rel := n
-		if fm.CrewshipPath != "" {
-			rel = fm.CrewshipPath
-		}
 		tier := tierForCrewshipPath(rel)
-		b.merge(rel, tier, n, body)
-		b.annotate(rel, fm.Title, fm.Tags)
+		b.merge(rel, tier, scopeForCrewshipPath(rel, opts.DefaultScope), n, body)
 	}
 	return nil
 }
@@ -294,6 +303,11 @@ func tierForCrewshipPath(rel string) memory.Tier {
 	case strings.EqualFold(base, "pins.md"):
 		return memory.TierPins
 	case strings.EqualFold(base, "lessons.md"), strings.EqualFold(base, "learned.md"):
+		return memory.TierLearned
+	case strings.HasPrefix(base, "learned-") && strings.HasSuffix(base, ".md"):
+		// The consolidator's real filenames. audit_watcher.go maps the
+		// same prefix; recognising only the bare "learned.md" stamped
+		// tier "agent" on every crew rule file that left in an export.
 		return memory.TierLearned
 	default:
 		return memory.TierAgent
@@ -316,10 +330,10 @@ func newBuilder() *builder {
 	return &builder{docs: map[string]*Doc{}, fragments: map[string][][]byte{}}
 }
 
-func (b *builder) merge(rel string, tier memory.Tier, source string, body []byte) {
+func (b *builder) merge(rel string, tier memory.Tier, scope Scope, source string, body []byte) {
 	d, ok := b.docs[rel]
 	if !ok {
-		d = &Doc{Tier: tier, RelPath: rel}
+		d = &Doc{Tier: tier, Scope: scope, RelPath: rel}
 		b.docs[rel] = d
 		b.order = append(b.order, rel)
 	}
@@ -387,4 +401,36 @@ func topDir(p string) string {
 		return p[:i]
 	}
 	return ""
+}
+
+// scopeForCrewshipPath places a document read off a live tree. The
+// caller supplies the scope of the directory it opened; the per-crew
+// <slug>/topics/ subtree is crew-shared wherever it is found, which is
+// what makes a crew export round-trip back into the crew.
+func scopeForCrewshipPath(rel string, dflt Scope) Scope {
+	if strings.Contains(rel, "/topics/") {
+		return ScopeCrew
+	}
+	if strings.EqualFold(path.Base(rel), "CREW.md") {
+		return ScopeCrew
+	}
+	if dflt == "" {
+		return ScopeAgent
+	}
+	return dflt
+}
+
+// scopeFromOKF recovers the destination recorded in a bundle we wrote,
+// falling back to the path/tier rules for a foreign one.
+func scopeFromOKF(fm frontmatter, rel string, tier memory.Tier) Scope {
+	switch Scope(strings.ToLower(strings.TrimSpace(fm.Scope))) {
+	case ScopeCrew:
+		return ScopeCrew
+	case ScopeAgent:
+		return ScopeAgent
+	}
+	if tier == memory.TierCrew || tier == memory.TierWorkspace {
+		return ScopeCrew
+	}
+	return scopeForCrewshipPath(rel, ScopeAgent)
 }
