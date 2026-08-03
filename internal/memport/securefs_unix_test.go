@@ -1,18 +1,16 @@
+//go:build !windows
+
 package memport
 
 import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
-func linkOrSkip(t *testing.T, target, link string) {
+func linkOrFail(t *testing.T, target, link string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation needs privileges on Windows")
-	}
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
@@ -32,7 +30,7 @@ func TestSecureDirFS_DoesNotFollowFileSymlinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "AGENT.md"), []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	linkOrSkip(t, outside, filepath.Join(root, "notes.md"))
+	linkOrFail(t, outside, filepath.Join(root, "notes.md"))
 
 	// Baseline: the standard FS does leak it, which is why this type exists.
 	if b, err := fs.ReadFile(os.DirFS(root), "notes.md"); err == nil && string(b) == "another crew's memory" {
@@ -60,7 +58,7 @@ func TestSecureDirFS_DoesNotWalkSymlinkedDirs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(elsewhere, "secret.md"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	linkOrSkip(t, elsewhere, filepath.Join(root, "daily"))
+	linkOrFail(t, elsewhere, filepath.Join(root, "daily"))
 	if err := os.WriteFile(filepath.Join(root, "AGENT.md"), []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +92,7 @@ func TestSecureDirFS_ExportStillReturnsTheRealFiles(t *testing.T) {
 	}
 	mustWrite("AGENT.md", "knowledge\n")
 	mustWrite("daily/2026-08-01.md", "today\n")
-	linkOrSkip(t, "/etc/passwd", filepath.Join(root, "pins.md"))
+	linkOrFail(t, "/etc/passwd", filepath.Join(root, "pins.md"))
 
 	plan, err := ReadSource(SecureDirFS(root), FormatCrewship, Options{})
 	if err != nil {
