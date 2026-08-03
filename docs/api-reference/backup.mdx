@@ -74,7 +74,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
   "path": "/home/admin/.crewship/backups/crewship-workspace-acme-2026-04-15T12-05-01Z.tar.zst",
   "size_bytes": 13421772,
   "payload_sha256": "b5f7…",
-  "format_version": 2,
+  "format_version": 3,
   "scope": "workspace",
   "scope_level": "standard",
   "created_at": "2026-04-15T12:05:01Z",
@@ -84,8 +84,12 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 
 `scope_level` is omitted when the bundle has no explicit level recorded in its manifest.
 
+<Warning>
+  `contents.crews[].memory_included` means "the crew and per-agent memory trees under `/crew` are in this bundle" **only from `format_version` 3**. At v1 and v2 the flag was set unconditionally for any crew that had a container, and the section behind it held `/output`, not memory. Read it together with `format_version`, or use the CLI, which already does. From v3 every per-crew inclusion flag is derived from what the collector observed writing: `memory_included` (`/crew`), `output_included` (`/output`), `workspace_included`, `volumes_included`, `system_included`.
+</Warning>
+
 <Note>
-  New bundles are written at `format_version` **2** (`backup.FormatVersion`, bumped v1→v2 on 2026-05-25 when `--replace` mode and the FK-walked 50+-table dump landed). Restore enforces an N-2 compatibility window: this binary reads `format_version` in `[MinSupportedFormatVersion, FormatVersion]` = `[1, 2]`. A bundle newer than the reader returns `ErrFormatTooNew` (400); older than the window returns `ErrFormatTooOld` (400).
+  New bundles are written at `format_version` **3** (`backup.FormatVersion`, bumped v2→v3 on 2026-08-03 when the payload gained the `crew/<slug>` section carrying the crew and per-agent memory trees). Restore enforces an N-2 compatibility window: this binary reads `format_version` in `[MinSupportedFormatVersion, FormatVersion]` = `[1, 3]`. A bundle newer than the reader returns `ErrFormatTooNew` (400); older than the window returns `ErrFormatTooOld` (400).
 </Note>
 
 ### Errors
@@ -117,7 +121,7 @@ List bundles from `~/.crewship/backups` filtered to the caller's workspace (bund
       "scope_level": "standard",
       "encrypted": true,
       "created_at": "2026-04-15T12:05:01Z",
-      "format_version": 2
+      "format_version": 3
     }
   ]
 }
@@ -248,7 +252,7 @@ Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not 
 {
   "valid": true,
   "size_bytes": 13421772,
-  "manifest": { "format_version": 2, "scope": "workspace", "…": "…" },
+  "manifest": { "format_version": 3, "scope": "workspace", "…": "…" },
   "error": ""
 }
 ```
@@ -313,6 +317,7 @@ Restore a bundle into the current workspace.
   "as_workspace": "",
   "as_crew": "",
   "replace": false,
+  "files_only": false,
   "dry_run": false
 }
 ```
@@ -322,8 +327,9 @@ Restore a bundle into the current workspace.
 | `path` | Required. Subject to the same path-safety checks as `inspect`. |
 | `passphrase` | Required for passphrase-encrypted bundles. Empty for `--no-encrypt` or recipient-encrypted bundles. |
 | `identity` | AGE X25519 secret key (`AGE-SECRET-KEY-1…`) for bundles sealed with `--recipient`. Parsed with `age.ParseX25519Identity`; invalid values return 400. |
-| `as_workspace` | Land the workspace under a new slug. Docker phase is skipped. |
-| `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped. |
+| `as_workspace` | Land the workspace under a new slug. Docker phase is skipped; finish with `files_only` (below). |
+| `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped; finish with `files_only`. |
+| `files_only` | Land ONLY per-crew container state into crews that already exist; no database rows are written. Permitted only when the caller's workspace was created by restoring **this** bundle — matched on the payload digest recorded in `backup_restore_origins` at rename time. Rejected with 403 otherwise, and 400 if combined with `as_workspace` / `as_crew` / `replace`. |
 | `replace` | When `true`, wipe existing target rows matching the bundle's workspace (by id OR slug) before INSERT. Disaster-recovery path: after a `nuke` the fresh-bootstrap workspace has a new CUID but the same slug — `replace` clears the conflicting target so the bundle lands with its original IDs. |
 | `dry_run` | Decrypt + replay the DB transaction, then **roll back**. No workspace / crew / agent writes are applied. |
 
@@ -331,12 +337,13 @@ Restore a bundle into the current workspace.
 
 ```json
 {
-  "manifest": { "format_version": 2, "scope": "workspace", "…": "…" },
+  "manifest": { "format_version": 3, "scope": "workspace", "…": "…" },
   "restored_ws": "acme",
   "restored_workspace_id": "ws_abc123",
   "crews_count": 4,
   "rows_inserted": 312,
   "docker_phase_skipped": false,
+  "dropped_crew_filesystems": [],
   "security_level_clamped": 1,
   "security_level_clamps": [
     { "credential_id": "cred_abc123", "name": "deploy-key", "from": "0", "to": 4 }
@@ -344,7 +351,9 @@ Restore a bundle into the current workspace.
 }
 ```
 
-`docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed; call `POST /api/v1/crews/{crewId}/provision` afterwards.
+`docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed. `dropped_crew_filesystems` names the crews that lost it. Finish the restore by provisioning each of them (`POST /api/v1/crews/{crewId}/provision`) and then calling this endpoint again with `files_only: true` and the new workspace in context.
+
+Re-calling WITHOUT `files_only` after a rename does not work and is not the recovery: the forked workspace matches neither the bundle's id nor its slug, so the tenant guard returns 403 — and its rows are already present under new ids anyway.
 
 `security_level_clamped` counts the restored credentials whose `security_level` was not one of the defined tiers (L1–L4) and were therefore written at the strictest tier instead — every other writer of that column validates it, so restore does too. `security_level_clamps` is a bounded sample naming the affected credentials and the value the bundle carried; the full list of what happened is also written to the journal as `credential.security_level.clamped`. On a `dry_run` both fields report what *would* be clamped. Re-set each affected credential with `PATCH /api/v1/credentials/{id}` (`security_level`) or `crewship credential update <name> --security-level N`.
 

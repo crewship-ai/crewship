@@ -349,7 +349,13 @@ type fileFacts struct {
 	uid     string
 	gid     string
 	mode    string
-	exists  bool
+	// mtime matters because internal/memory's watcher snapshots the
+	// mtime of every .md under the memory root to decide what to
+	// reindex, and because a daily note's timestamp is part of what it
+	// says. A restore that stamps every file with "now" reports a tree
+	// that was all written the instant it was recovered.
+	mtime  string
+	exists bool
 }
 
 func (lc *liveCrew) stat(ctx context.Context, t *testing.T, p string) fileFacts {
@@ -358,7 +364,7 @@ func (lc *liveCrew) stat(ctx context.Context, t *testing.T, p string) fileFacts 
 	// the whole probe would report every directory as missing, which is
 	// a way to pass an ownership assertion by never making it.
 	out, code := lc.sh(ctx, t, "0:0", fmt.Sprintf(
-		`if [ -e %q ]; then stat -c '%%u %%g %%a' %q; echo '--'; [ -f %q ] && cat %q; else echo MISSING; fi; true`, p, p, p, p))
+		`if [ -e %q ]; then stat -c '%%u %%g %%a %%Y' %q; echo '--'; [ -f %q ] && cat %q; else echo MISSING; fi; true`, p, p, p, p))
 	if code != 0 {
 		return fileFacts{}
 	}
@@ -368,8 +374,8 @@ func (lc *liveCrew) stat(ctx context.Context, t *testing.T, p string) fileFacts 
 	parts := strings.SplitN(out, "--\n", 2)
 	fields := strings.Fields(parts[0])
 	f := fileFacts{exists: true}
-	if len(fields) >= 3 {
-		f.uid, f.gid, f.mode = fields[0], fields[1], fields[2]
+	if len(fields) >= 4 {
+		f.uid, f.gid, f.mode, f.mtime = fields[0], fields[1], fields[2], fields[3]
 	}
 	if len(parts) == 2 {
 		f.content = parts[1]
@@ -381,7 +387,7 @@ func (f fileFacts) String() string {
 	if !f.exists {
 		return "MISSING"
 	}
-	return fmt.Sprintf("uid=%s gid=%s mode=%s content=%q", f.uid, f.gid, f.mode, f.content)
+	return fmt.Sprintf("uid=%s gid=%s mode=%s mtime=%s content=%q", f.uid, f.gid, f.mode, f.mtime, f.content)
 }
 
 // seedMemory writes the memory tree at the addresses the runtime really
@@ -408,10 +414,18 @@ func (lc *liveCrew) seedMemory(ctx context.Context, t *testing.T, agentSlugs []s
 		add("/crew/agents/"+slug+"/.memory/pins.md", "pins for "+slug)
 		add("/crew/agents/"+slug+"/.memory/daily/2026-08-03.md", "daily note for "+slug)
 	}
+	// /crew/init.sh is the one file under /crew whose MODE is the whole
+	// point of it: the entrypoint runs it as `[ -x /crew/init.sh ] &&
+	// /crew/init.sh`, so a restore that drops the executable bit disables
+	// the crew's init hook and reports nothing. It is also the reason the
+	// crew section restores with --same-permissions rather than letting
+	// the destination umask decide.
+	add("/crew/init.sh", "#!/bin/sh")
 	// /workspace and /output are the two sections that already round-trip,
 	// kept in the fixture so a regression there is caught by the same run.
 	add("/workspace/probe.txt", "workspace probe")
 	add("/output/probe.txt", "output probe")
+	b.WriteString("chmod 755 /crew/init.sh\n")
 	lc.mustSh(ctx, t, "1001:1001", b.String())
 
 	// The runtime's memory-dir prep: group 1002, setgid, group-writable.
@@ -525,13 +539,18 @@ func TestLive_CrewMemoryRoundTrip(t *testing.T) {
 
 	crew := CrewTarget{ID: "live-crew", Slug: "engineering", ContainerID: lc.id}
 	payload, raw := collectToPayload(ctx, t, ops, crew, ScopeLevelStandard)
-	// The memory tree is agent-owned with the sidecar group; the bundle
-	// has to say so, independently of what the restore then does with it.
-	assertBundleRecordsOwnership(t, raw, "crew/"+crew.Slug+"/", agentUID, sidecarGID)
+	// The .memory subtrees are agent-owned with the SIDECAR group; the
+	// rest of /crew is agent-owned with the agent's own group. The bundle
+	// has to record both correctly, independently of what the restore
+	// then does with them — asserting one gid across the whole section
+	// would be asserting something untrue.
+	assertBundleRecordsOwnership(t, raw, "crew/"+crew.Slug+"/shared/.memory/", agentUID, sidecarGID)
+	assertBundleRecordsOwnership(t, raw, "crew/"+crew.Slug+"/agents/alex/.memory/", agentUID, sidecarGID)
+	assertBundleRecordsOwnership(t, raw, "crew/"+crew.Slug+"/init.sh", agentUID, agentGID)
 	assertBundleRecordsOwnership(t, raw, "workspace/"+crew.Slug+"/", agentUID, agentGID)
 
 	// Destroy the tree the way a real loss does: remove it entirely.
-	lc.mustSh(ctx, t, "1001:1001", `rm -rf /crew/shared/.memory /crew/agents /workspace/probe.txt /output/probe.txt`)
+	lc.mustSh(ctx, t, "1001:1001", `rm -rf /crew/shared/.memory /crew/agents /crew/init.sh /workspace/probe.txt /output/probe.txt`)
 	for p := range want {
 		if lc.stat(ctx, t, p).exists {
 			t.Fatalf("destroy step left %s behind", p)
@@ -559,6 +578,10 @@ func TestLive_CrewMemoryRoundTrip(t *testing.T) {
 		}
 		if got.mode != before[p].mode {
 			failures = append(failures, fmt.Sprintf("%s: mode %s, want %s", p, got.mode, before[p].mode))
+		}
+		if got.mtime != before[p].mtime {
+			failures = append(failures, fmt.Sprintf("%s: mtime %s, want %s (restored files claim to have been written at recovery time)",
+				p, got.mtime, before[p].mtime))
 		}
 	}
 

@@ -131,7 +131,11 @@ func LookupRestoreOrigin(ctx context.Context, db dbQueryer, workspaceID string) 
 			return nil, fmt.Errorf("backup: decode restore origin crew map for workspace %s: %w", workspaceID, err)
 		}
 	}
-	if t, perr := time.Parse(time.RFC3339Nano, restoreAt); perr == nil {
+	// This is the READ side. restored_at is WRITTEN through tsformat.Format
+	// in RecordRestoreOrigin, so the stored value is fixed-width and string
+	// order is time order; nothing compares or orders this column in SQL,
+	// and the fixed-width form parses back unchanged.
+	if t, perr := time.Parse(time.RFC3339Nano, restoreAt); perr == nil { // tsformat:allow: read side of a tsformat.Format-written column, never SQL-compared
 		o.RestoredAt = t
 	}
 	return &o, nil
