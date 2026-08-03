@@ -11,7 +11,9 @@ import (
 	"sort"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/memport"
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // crewContainerPlacer puts imported memory where the container user can
@@ -94,7 +96,16 @@ func tarStagedDocs(stagingDir string, rels []string) ([]byte, error) {
 	}
 
 	for _, rel := range rels {
-		body, err := os.ReadFile(filepath.Join(stagingDir, filepath.FromSlash(rel)))
+		// Confined again here rather than trusted. Apply validated these
+		// paths, but a placer that re-derives them from a caller-supplied
+		// slice should not depend on a guarantee made three calls away —
+		// the same reasoning the memory package applies at its own
+		// syscalls.
+		src, err := safepath.JoinRel(stagingDir, filepath.FromSlash(rel))
+		if err != nil {
+			return nil, fmt.Errorf("staged path %s: %w", rel, err)
+		}
+		body, err := os.ReadFile(src)
 		if err != nil {
 			return nil, fmt.Errorf("read staged %s: %w", rel, err)
 		}
@@ -124,10 +135,22 @@ func tarStagedDocs(stagingDir string, rels []string) ([]byte, error) {
 type hostPlacer struct{ root string }
 
 func (p hostPlacer) Place(_ context.Context, stagingDir string, rels []string) error {
+	// The destination root may not exist yet — an agent that has never
+	// written memory has no tree. Create it before the per-document
+	// walk, which refuses to create anything it cannot verify.
+	if err := os.MkdirAll(p.root, 0o755); err != nil {
+		return err
+	}
 	for _, rel := range rels {
-		src := filepath.Join(stagingDir, filepath.FromSlash(rel))
-		dst := filepath.Join(p.root, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		src, err := safepath.JoinRel(stagingDir, filepath.FromSlash(rel))
+		if err != nil {
+			return fmt.Errorf("staged path %s: %w", rel, err)
+		}
+		dst, err := safepath.JoinRel(p.root, filepath.FromSlash(rel))
+		if err != nil {
+			return fmt.Errorf("destination path %s: %w", rel, err)
+		}
+		if err := memory.EnsureDirNoFollow(p.root, filepath.Dir(dst)); err != nil {
 			return err
 		}
 		body, err := os.ReadFile(src)
