@@ -362,6 +362,49 @@ A service that **publishes a port to the host** cannot use `auto_credentials`
 bridge, the external attack surface deserves an operator-chosen credential.
 </Warning>
 
+### When sidecars start — and when they are removed
+
+Sidecars come up with the crew's container, whatever woke it: a chat
+message, `crewship issue start`, a scheduled agent, an inbound webhook, a
+routine's agent or script step, the web terminal, or the dashboard's start
+button. All of those go through the same crew-start contract
+(`internal/crewstart`), so a crew that declares `services:` gets them on every
+path.
+
+<Note>
+Before v1.x this was true of the **chat path only** — a crew whose first
+activity was `issue start`, a schedule or a webhook came up with no sidecars at
+all and no error anywhere, so `redis:6379` simply did not resolve inside the
+container (#1708). If you drove Crewship headlessly and concluded `services:`
+did not work, this is why. Verify with `crewship crew services <crew>`: it
+reads the live container runtime, not your manifest.
+</Note>
+
+Starting them is idempotent — a sidecar that is already up is reattached to,
+not recreated — as long as its spec has not changed. The spec includes the
+service's environment, which is why `env_refs` resolve against the **crew's**
+credentials (the `credential_crews` link a workspace secret gets when it is
+attached to a crew) rather than against whichever agent happened to trigger the
+start: a per-agent value would give the same crew a different Postgres per
+agent and restart it whenever the trigger changed.
+
+On a container provider without sidecar support (Apple Containers today) the
+crew still starts. The drop is logged, and chat shows *"Sidecar services
+declared but this container provider doesn't support them yet"* rather than
+letting the crew believe it has a database.
+
+<Warning>
+**`crewship crew delete` now destroys the crew's sidecars and their named
+volumes.** The containers are force-removed and `crewship-svc-{crew}-vol-*` —
+including a Postgres data directory — is deleted with them. Previously both
+were left running forever (#1709), which leaked disk and a live,
+still-authenticated database per deleted crew; the flip side is that deleting a
+crew is now the same decision as dropping its datastores. Back up first
+(`crewship backup create`) if the data matters. The crew's own runtime
+container is not removed — it has an idle TTL and a reaper; sidecars have
+neither, which is why they are handled here.
+</Warning>
+
 ### Inventory: what's actually running
 
 The manifest above is what you *declared*. What's actually running can

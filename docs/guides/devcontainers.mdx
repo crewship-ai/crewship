@@ -359,7 +359,20 @@ The entire pipeline is in `internal/devcontainer/provisioner.go:Provision`:
 
 ## Running agents on the cached image
 
-When a message arrives for a crew, `chatbridge.Bridge` calls `container.EnsureCrewRuntime(ctx, team, ...)` in `internal/provider/docker/docker.go`:
+Every path that starts a crew — chat, `crewship issue start`, a scheduled
+agent, a webhook, a routine's agent or script step, the **web terminal**, the
+dashboard's start button — resolves the crew's runtime config through the same
+crew-start contract (`internal/crewstart`) and therefore boots the cached
+image. The terminal is worth calling out: it is the surface an operator opens
+specifically to inspect a crew's environment, and it used to pass only the
+crew's id and slug, so it started `debian:bookworm-slim` with none of the
+crew's provisioned toolchain — `gh`, `node` and the agent CLI all missing —
+while `crewship crew provision` reported success (#1717). If you are debugging
+a crew through the terminal on an older build, check
+`docker inspect <container> --format '{{.Config.Image}}'` before trusting what
+the shell tells you about the toolchain.
+
+Underneath, `container.EnsureCrewRuntime(ctx, team, ...)` in `internal/provider/docker/docker.go`:
 
 1. Resolve which image to boot:
    - If `team.CachedImage != ""` → use the cached image.
