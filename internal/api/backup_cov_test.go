@@ -154,7 +154,7 @@ func TestAllowRestore_SlugMatchAllowsPostNukeDR(t *testing.T) {
 	// seedTestWorkspace creates the caller's row with slug "test").
 	path := covBk2WriteBundle(t, dir, "ws-old-cuid-before-nuke")
 
-	allowed, reason, err := allowRestore(context.Background(), h.db, path, wsID)
+	allowed, reason, err := allowRestore(context.Background(), h.db, path, wsID, false)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -166,7 +166,7 @@ func TestAllowRestore_SlugMatchAllowsPostNukeDR(t *testing.T) {
 func TestAllowRestore_IDMatchAllows(t *testing.T) {
 	h, _, wsID, dir := covBk2Rig(t)
 	path := covBk2WriteBundle(t, dir, wsID)
-	allowed, reason, err := allowRestore(context.Background(), h.db, path, wsID)
+	allowed, reason, err := allowRestore(context.Background(), h.db, path, wsID, false)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -198,7 +198,7 @@ func TestAllowRestore_NoWorkspaceAnchorDefers(t *testing.T) {
 		t.Fatalf("WriteBundle: %v", err)
 	}
 
-	allowed, reason, aerr := allowRestore(context.Background(), h.db, path, wsID)
+	allowed, reason, aerr := allowRestore(context.Background(), h.db, path, wsID, false)
 	if aerr != nil {
 		t.Fatalf("err = %v", aerr)
 	}
@@ -215,7 +215,7 @@ func TestAllowRestore_MismatchDeniesGenerically(t *testing.T) {
 		t.Fatalf("update slug: %v", err)
 	}
 	path := covBk2WriteBundle(t, dir, "ws-foreign")
-	allowed, reason, err := allowRestore(context.Background(), h.db, path, wsID)
+	allowed, reason, err := allowRestore(context.Background(), h.db, path, wsID, false)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

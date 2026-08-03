@@ -241,13 +241,17 @@ func (o *covBak2Ops) Unpause(context.Context, string) error { return nil }
 func (o *covBak2Ops) CopyFrom(context.Context, string, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
-func (o *covBak2Ops) CopyTo(context.Context, string, string, io.Reader) error       { return nil }
-func (o *covBak2Ops) CopyToVolume(context.Context, string, string, io.Reader) error { return nil }
-func (o *covBak2Ops) CopyToSystem(context.Context, string, string, io.Reader) error { return nil }
+func (o *covBak2Ops) CopyTo(context.Context, string, string, io.Reader) error { return nil }
+func (o *covBak2Ops) CopyToPath(context.Context, string, backup.ExtractSpec, io.Reader) error {
+	return nil
+}
 func (o *covBak2Ops) ContainerExists(context.Context, string) (bool, error) {
 	return o.exists, o.existsErr
 }
 func (o *covBak2Ops) Exec(context.Context, string, []string) (int, []byte, error) {
+	return 0, nil, nil
+}
+func (o *covBak2Ops) ExecAs(context.Context, string, string, []string) (int, []byte, error) {
 	return 0, nil, nil
 }
 

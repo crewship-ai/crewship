@@ -326,6 +326,11 @@ type restoreRequest struct {
 	// the conflicting target so the bundle lands with original IDs.
 	Replace bool `json:"replace,omitempty"`
 	DryRun  bool `json:"dry_run,omitempty"`
+	// FilesOnly lands ONLY the per-crew container filesystem state, into
+	// the crews of the caller's current workspace. It is step 3 of the
+	// disaster-recovery flow, and it is authorised by the provenance row
+	// the rewriting restore wrote — never by the flag alone (#1716).
+	FilesOnly bool `json:"files_only,omitempty"`
 }
 
 // Restore handles POST /api/v1/admin/backups/restore.
@@ -388,7 +393,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	// comment, internal/api/backup.go:348). This re-introduces the
 	// check in a way that allows DR while blocking cross-tenant
 	// abuse.
-	allowed, denyReason, err := allowRestore(ctx, h.db, req.Path, workspaceID)
+	allowed, denyReason, err := allowRestore(ctx, h.db, req.Path, workspaceID, req.FilesOnly)
 	if err != nil {
 		h.logger.Warn("backup restore authorization probe failed", "error", err, "path", req.Path)
 		replyError(w, http.StatusInternalServerError, "authorize restore: "+err.Error())
@@ -413,17 +418,22 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := backup.RestoreBackup(ctx, h.db, backup.RestoreOptions{
-		Path:         req.Path,
-		Passphrase:   req.Passphrase,
-		Identities:   identities,
-		AsWorkspace:  req.AsWorkspace,
-		AsCrew:       req.AsCrew,
-		Replace:      req.Replace,
-		DryRun:       req.DryRun,
-		Actor:        backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
-		DockerOps:    ops,
-		ContainerFor: h.resolveCrewContainerName(),
-		BlobRoot:     h.memoryBlobRoot,
+		Path:              req.Path,
+		Passphrase:        req.Passphrase,
+		Identities:        identities,
+		AsWorkspace:       req.AsWorkspace,
+		AsCrew:            req.AsCrew,
+		Replace:           req.Replace,
+		DryRun:            req.DryRun,
+		FilesOnly:         req.FilesOnly,
+		ResumeWorkspaceID: workspaceID,
+		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
+		DockerOps:         ops,
+		ContainerFor:      h.resolveCrewContainerName(),
+		BlobRoot:          h.memoryBlobRoot,
+		Logger: func(msg string) {
+			h.logger.Info("backup restore", "message", msg, "path", req.Path, "workspace_id", workspaceID)
+		},
 	})
 	if err != nil {
 		h.logger.Warn("backup restore failed", "error", err, "path", req.Path, "user", user.ID)
@@ -470,14 +480,25 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"manifest":               result.Manifest,
-		"restored_ws":            result.RestoredWs,
-		"restored_workspace_id":  result.RestoredWorkspaceID,
-		"crews_count":            result.CrewsCount,
-		"rows_inserted":          result.RowsInserted,
-		"docker_phase_skipped":   result.DockerPhaseSkipped,
-		"security_level_clamped": result.SecurityLevelClamped,
-		"security_level_clamps":  result.SecurityLevelClamps,
+		"manifest":              result.Manifest,
+		"restored_ws":           result.RestoredWs,
+		"restored_workspace_id": result.RestoredWorkspaceID,
+		"crews_count":           result.CrewsCount,
+		// What the bundle describes (crews_count) and what actually
+		// landed (crews_restored) are different numbers, and reporting
+		// the first as if it were the second is how a restore that
+		// wrote nothing reads as a success.
+		"crews_restored":       result.CrewsRestored,
+		"rows_inserted":        result.RowsInserted,
+		"docker_phase_skipped": result.DockerPhaseSkipped,
+		// The only place that names WHICH crews lost their filesystem
+		// data. It was computed and then dropped on the floor here, so
+		// the CLI could print the generic warning and nothing else —
+		// leaving the operator to work out for themselves which crews
+		// still needed the resume (#1716).
+		"dropped_crew_filesystems": result.DroppedCrewFilesystems,
+		"security_level_clamped":   result.SecurityLevelClamped,
+		"security_level_clamps":    result.SecurityLevelClamps,
 	})
 }
 
@@ -503,10 +524,41 @@ func clampedToTier(result *backup.RestoreResult) int {
 //  3. The instance has zero workspaces (canonical "first restore
 //     on a fresh instance" — typical after `crewship start` with
 //     no bootstrap completed).
+//  4. The caller is running a FILES-ONLY restore into a workspace that
+//     was itself created by a rewritten restore (--as-workspace /
+//     --as-crew) of THIS bundle, matched on the payload digest
+//     recorded in backup_restore_origins.
+//
+// The files-only condition on path 4 is load-bearing, and leaving it
+// out was a hole rather than a simplification. Without it the path
+// authorised ANY restore of the bundle a workspace was forked from —
+// including the un-flagged re-run the CLI used to print. That call has
+// no rewrite flag, so it takes the ordinary docker phase, whose crew
+// identities come from the MANIFEST; on a same-instance restore those
+// are the source crews, and it extracts the bundle's /workspace and
+// /crew straight over their live code and agent memory. INSERT OR
+// IGNORE keeps the row counts looking untroubled while the data goes.
+// The provenance row exists to make one specific operation possible;
+// it must not widen the guard for every other one.
+//
+// Path 4 is #1716. Without it, the second step of the documented
+// disaster-recovery flow — provision the forked crews, then land their
+// container state — is refused unconditionally, because a workspace
+// created by `--as-workspace X` gets a fresh id and the slug X, so it
+// can match neither the bundle's id (path 1) nor its slug (path 2),
+// and path 3 stopped applying the moment that same restore inserted
+// its rows. The result was a DR path whose only remaining step was the
+// one the guard forbade.
+//
+// The relaxation is narrow on purpose. It does not trust a flag, a
+// slug, or the caller's assertion; it trusts a row this server wrote
+// itself, inside the restoring transaction, naming the payload digest.
+// A bundle that was never restored into the caller's workspace still
+// gets the same 403 it always did.
 //
 // Returns (true, "", nil) on allow, (false, reason, nil) on deny,
 // or (_, _, err) on probe failure.
-func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID string) (bool, string, error) {
+func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID string, filesOnly bool) (bool, string, error) {
 	// Path 3: empty instance → DR escape hatch.
 	var wsCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
@@ -553,6 +605,26 @@ func allowRestore(ctx context.Context, db *sql.DB, bundlePath, callerWorkspaceID
 		// falls through to deny normally.
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return false, "", fmt.Errorf("lookup caller workspace slug: %w", err)
+		}
+		// Path 4: a FILES-ONLY restore into a workspace forked from this
+		// exact bundle. Compared on the payload digest, not the path — a
+		// path can be re-pointed at a different file between the two
+		// restores, and what has to match is the bytes that were
+		// unpacked here.
+		//
+		// Gated on filesOnly: see the doc comment. Any other mode
+		// reaching this branch would be authorised to run the ordinary
+		// docker phase against the crews the manifest names, which on
+		// this instance are the source crews.
+		if filesOnly {
+			origin, oerr := backup.LookupRestoreOrigin(ctx, db, callerWorkspaceID)
+			if oerr != nil {
+				return false, "", fmt.Errorf("lookup restore origin: %w", oerr)
+			}
+			if origin != nil && m.Checksums.PayloadSHA256 != "" &&
+				origin.BundleSHA256 == m.Checksums.PayloadSHA256 {
+				return true, "", nil
+			}
 		}
 	}
 	// Generic deny — deliberately does NOT echo bundleID / bundleSlug

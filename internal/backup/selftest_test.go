@@ -23,9 +23,23 @@ type fakeDockerOps struct {
 	workspace map[string][]byte // filename → content (relative to /workspace)
 	paused    bool
 
+	// otherPaths makes container paths beyond /workspace resolvable:
+	// container path → filename → content. Default nil, so every other
+	// path reports NotFound and CollectCrew's silent-skip branch runs —
+	// which is what the self-test unit exercises. Collector tests that
+	// assert on the manifest's per-section flags must populate it,
+	// because since #1713 those flags report what was actually captured
+	// rather than what the crew's metadata implied.
+	otherPaths map[string]map[string][]byte
+
 	copyToErr   error
 	copyFromErr error
 	execErr     error
+
+	// execAsCode / execAsErr drive RestoreCrew's preflight probe.
+	execAsCode  int
+	execAsErr   error
+	execAsUsers []string
 
 	copyFromCalls int
 	execCalls     int
@@ -82,8 +96,27 @@ func (f *fakeDockerOps) CopyFrom(_ context.Context, _ string, srcPath string) (i
 		_ = tw.Close()
 		return io.NopCloser(&buf), nil
 	}
+	if files, ok := f.otherPaths[srcPath]; ok {
+		return io.NopCloser(bytes.NewReader(tarOfFiles(files))), nil
+	}
 	// Any other path: NotFound (triggers collector silent-skip).
 	return nil, fmt.Errorf("No such container:path: %s", srcPath)
+}
+
+// tarOfFiles serialises name→content as a Docker-style tar (entries
+// prefixed "./", matching workspaceTar).
+func tarOfFiles(files map[string][]byte) []byte {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	_ = tw.WriteHeader(&tar.Header{Name: "./", Mode: 0o755, Typeflag: tar.TypeDir, ModTime: time.Now()})
+	for name, content := range files {
+		_ = tw.WriteHeader(&tar.Header{
+			Name: "./" + name, Mode: 0o644, Size: int64(len(content)), ModTime: time.Now(),
+		})
+		_, _ = tw.Write(content)
+	}
+	_ = tw.Close()
+	return buf.Bytes()
 }
 
 // workspaceTar serialises the current workspace map as a tar archive. The
@@ -104,18 +137,13 @@ func (f *fakeDockerOps) workspaceTar() []byte {
 	return buf.Bytes()
 }
 
-// CopyToVolume mirrors CopyTo for the test fake — selftest only
-// touches /workspace, so volume-targeted traffic is silently consumed
-// (in production CopyToVolume execs `tar -x` inside the container,
-// which we don't model here).
-func (f *fakeDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
-	return f.CopyTo(ctx, containerID, dstPath, content)
-}
-
-// CopyToSystem is the uid-0 variant. The in-memory fake doesn't model
-// uid checks, so it routes to the same merge path.
-func (f *fakeDockerOps) CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error {
-	return f.CopyTo(ctx, containerID, dstPath, content)
+// CopyToPath mirrors CopyTo for the test fake — selftest only touches
+// /workspace, so traffic aimed anywhere else is silently consumed (in
+// production CopyToPath execs `tar -x` inside the container under
+// spec.User, which we don't model here: the fake has no uid or mode
+// semantics to apply the spec to).
+func (f *fakeDockerOps) CopyToPath(ctx context.Context, containerID string, spec ExtractSpec, content io.Reader) error {
+	return f.CopyTo(ctx, containerID, spec.Dest, content)
 }
 
 // CopyTo merges incoming tar entries into the workspace map.
@@ -184,6 +212,23 @@ func (f *fakeDockerOps) Exec(_ context.Context, _ string, cmd []string) (int, []
 		return 0, nil, nil
 	}
 	return -1, nil, fmt.Errorf("fakeDockerOps.Exec: unsupported cmd %v", cmd)
+}
+
+// ExecAs is the identity-scoped exec. RestoreCrew drives it twice — the
+// destination-writability preflight probe and the post-restore memory
+// permission pass — and the fake models no permission system, so both
+// succeed by default. Tests that are about a refused restore set
+// execAsCode (non-zero exit) or execAsErr (daemon-level failure).
+//
+// Deliberately NOT routed through Exec: Exec's allowlist exists to catch
+// the self-test growing new shell invocations, and restore's probes are
+// not that.
+func (f *fakeDockerOps) ExecAs(_ context.Context, _ string, user string, _ []string) (int, []byte, error) {
+	if f.execAsErr != nil {
+		return -1, nil, f.execAsErr
+	}
+	f.execAsUsers = append(f.execAsUsers, user)
+	return f.execAsCode, nil, nil
 }
 
 // -- tests ----------------------------------------------------------------

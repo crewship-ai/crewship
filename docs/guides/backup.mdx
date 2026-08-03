@@ -20,7 +20,7 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 - **Before any destructive admin write.** Before `crewship admin reset-password`, before a database migration on a binary upgrade, before a large schema-changing PR lands in prod — capture the current state first. The bundle is the one-command rollback if anything goes wrong.
 - **Disaster recovery / hot spare.** Schedule a nightly `crewship backup create --scope=workspace --passphrase-file …` cron and ship the bundle to a separate host. If the primary disk dies, restoring onto a fresh binary is one `crewship backup restore` away — no replication agent, no streaming WAL, no extra moving parts.
-- **Workspace migration to another host.** Moving a workspace from a dev VM to a prod host (or between two prod hosts) is exactly what bundles are for. Create on the source, scp the file, `crewship backup restore --as-workspace <new-slug>` on the destination, then provision crews. The `--as-workspace` rename avoids the "two `acme` workspaces colliding" hazard.
+- **Workspace migration to another host.** Moving a workspace from a dev VM to a prod host (or between two prod hosts) is exactly what bundles are for. Create on the source, scp the file, `crewship backup restore --as-workspace <new-slug>` on the destination, provision the crews, then `crewship backup restore … --files-only` to land their filesystem state. The `--as-workspace` rename avoids the "two `acme` workspaces colliding" hazard; the third step is not optional — without it the rows migrate and every crew's workspace files and memory tree stay behind.
 - **Legal hold or compliance archive.** Customer leaves; you need to keep their workspace state on cold storage for N years. One AGE-encrypted `.tar.zst` is a forever-readable artefact — no live database, no service required. `inspect` later proves the bundle's contents without decrypting.
 - **Forensic snapshot before incident response.** Suspected compromise of an admin account, or a "what was the state when X happened" investigation. `backup create` + immediate offsite copy preserves the audit trail before anyone (you, the attacker, the well-meaning oncall) starts changing things.
 
@@ -39,7 +39,8 @@ Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them 
 | **Advisory lock** | A row in the `backup_locks` table, primary-keyed on workspace ID. Taken before any DB dump or docker pause; released by `defer Release()` on the happy path. 1-hour TTL (`DefaultLockTTL`) so a crashed backup self-heals after the window. |
 | **`refuseIfBackupInProgress` guard** | A shared middleware wired into the assignments, peer-query, and webhook handlers. Reads the lock state and refuses *new* agent runs while a backup is in progress — closes the TOCTOU window between `ensureAgentsIdle` (initial check) and `docker pause` (the actual freeze). |
 | **Dry-run restore** | `--dry-run` on `crewship backup restore`. Decrypts, validates the manifest, replays the DB transaction, then rolls back. The only side effect is one `backup.restore.dry_run` audit row — distinct from `backup.restore` so auditors can tell "verified" apart from "actually restored". |
-| **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Refuses to run the docker phase (container names derive from the slug) and tells the operator to `crewship crew provision` afterwards. Avoids "two `acme` workspaces colliding" during DR drills. |
+| **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Skips the docker phase — the crews it just created have no containers yet — and names the crews whose files are therefore not landed. Finish with `crewship crew provision` then `crewship backup restore … --files-only`. Avoids "two `acme` workspaces colliding" during DR drills. |
+| **`--files-only` resume** | Step 3 of a renamed restore: lands per-crew container state (workspace, memory tree, named volumes, `/var/lib`) into crews that already exist, changing no database rows. Authorised by the `backup_restore_origins` row the rename wrote — the caller's workspace must be one this instance created by restoring **this** bundle, matched on payload digest. Resolves each bundle crew through that record, so it writes to the crew the rename created rather than the crew the manifest names. |
 | **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
 | **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
 | **Pre-migration snapshot** | An automatic safety net distinct from the manual bundle system. Whenever `crewship start` detects pending migrations, `database.SnapshotBeforeMigrate` writes a `VACUUM INTO` copy of the live SQLite database to `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` before any DDL runs. Last 10 snapshots are retained per database; opt out with `CREWSHIP_SKIP_MIGRATION_BACKUP=1`. **Not a substitute** for proper backups — it's the binary upgrade safety net, not a disaster-recovery primitive. |
@@ -83,10 +84,19 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 - **Default location:** `~/.crewship/backups/` on the server, mode `0700`.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
 
-Inside `payload.age`, workspace-scope bundles carry two distinct notions of "memory" — don't confuse them:
+Inside `payload.age`, bundles carry three distinct notions of "memory" — don't confuse them:
 
-- **Per-crew agent memory** (`memory/<slug>` section) — the running agent's own markdown under the container's `/output` mount. Collected by the docker phase per crew.
+- **Per-crew agent and crew-shared memory** (`crew/<slug>` section) — the real memory tree: `/crew/shared/.memory` and `/crew/agents/<agent-slug>/.memory` inside the crew container. This is what an agent accumulates and what is hardest to regenerate. Collected by the docker phase, at every scope level including `quick`.
+- **Per-crew declared output** (`memory/<slug>` section) — the container's `/output` mount. The section name is historical; it has never held agent memory.
 - **Workspace-tier memory-version blobs** (`memory-blobs/<sha[:2]>/<sha>` section) — the content-addressed audit trail behind `memory_versions` rows (consolidation output, HITL-approved proposals, pin snapshots). Collected once per workspace scope from `{MemoryRoot}/versions`, keyed by the sha256 the DB dump's `memory_versions` rows reference. Restore rewrites `payload_ref` to the target's blob root — see the **Memory-version blobs** row under [Key concepts](#key-concepts) above.
+
+<Warning>
+**Bundles at `format_version` 1 or 2 contain no agent or crew-shared memory**, and their manifest says `memory_included: true` anyway. Up to and including v2, the collector read `/output` and filed it under the `memory/` section, and the flag was set from "this crew had a container" rather than from anything that was actually captured. Everything else in such a bundle — workspace files, named volumes, DB rows, memory-version blobs — is real and restores normally, and the restore prints a warning naming the crews whose memory is not in there. Memory from before your first v3 backup cannot be recovered from an older bundle. Take a fresh backup after upgrading.
+</Warning>
+
+From `format_version` 3 onward every per-crew inclusion flag in the manifest is derived from what the collector observed itself writing, not from what it expected to write. A section that captured nothing reports `false`, which is also what stops the restore preflight from demanding a provisioned container for a crew that has no data.
+
+`memory_included` counts **files inside a `.memory` directory**, not tar entries. The distinction matters because the container runtime creates `crews/<id>/shared` and `crews/<id>/agents` when a crew container is created, so counting entries would report memory for every provisioned crew whether or not an agent had ever written a note. `crew_files_included` is the separate flag for "the `/crew` section carries something" — `init.sh` and other crew-level content — and is what decides whether the section is restored at all.
 
 ## Create a workspace backup
 
@@ -137,7 +147,7 @@ crewship backup list
 # crewship-workspace-acme-2026-04-15T12-05-01Z…   workspace  12.8 MiB yes        v1      2026-04-15T12:05:01Z
 
 crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-…tar.zst
-# { "format_version": 1, "scope": "workspace", "contents": { "workspace": { "slug": "acme", … } } }
+# { "format_version": 3, "scope": "workspace", "contents": { "workspace": { "slug": "acme", … } } }
 
 crewship backup verify ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 # ✓ VALID — /home/admin/.crewship/backups/… (12.8 MiB)
@@ -153,15 +163,72 @@ crewship backup restore ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 # ✓ Restore complete — workspace=acme crews=4 rows=312 id=ws_abc123
 ```
 
-The server rejects the restore if a workspace (or crew) with the same slug already exists. Override with `--as-workspace <new-slug>` or `--as-crew <new-slug>` to land the payload under a fresh identity:
+The server rejects the restore if a workspace (or crew) with the same slug already exists. Override with `--as-workspace <new-slug>` or `--as-crew <new-slug>` to land the payload under a fresh identity.
+
+### Restoring under a new identity takes three steps
+
+A rewritten restore forks the bundle's rows under a new workspace id and slug. It cannot land container state in the same call, because the crews it just created have no containers yet. So the flow is:
 
 ```bash
+# 1. Fork the bundle's rows under a new identity.
 crewship backup restore bundle.tar.zst --as-workspace acme-dr
-# ⚠ Docker phase skipped (--as-workspace/--as-crew supplied).
-#   Provision the new crews with `crewship crew provision`.
+# ⚠ Docker phase skipped (--as-workspace/--as-crew supplied) — crew files are NOT restored yet.
+#   Crews still missing their container state: engineering, research.
+#   Finish the restore with:
+#     crewship crew provision <crew> -w ws_new123
+#     crewship backup restore bundle.tar.zst -w ws_new123 --files-only
+
+# 2. Provision the forked crews so there is somewhere for the files to land.
+crewship crew provision engineering -w ws_new123
+crewship crew provision research -w ws_new123
+
+# 3. Land the container state.
+crewship backup restore bundle.tar.zst -w ws_new123 --files-only
+# ✓ Container state landed for 2 crew(s); no database rows were changed.
 ```
 
-When the bundle is landed under a new slug the docker phase is intentionally skipped — container names are derived from the slug, and renaming a live crew requires an explicit provision step.
+`--files-only` restores the per-crew filesystem sections (workspace, memory tree, named volumes, `/var/lib`) and changes no database rows. It is authorised by provenance, not by the flag: step 1 records which bundle the new workspace was forked from — matched on the bundle's payload digest — and step 3 is permitted only for a workspace that record covers. A bundle that was never restored into your current workspace is refused exactly as it was before.
+
+That provenance authorises **only** `--files-only`. Running the plain restore against a forked workspace is refused, and deliberately so: without a rewrite flag it takes the ordinary docker phase, whose crew identities come from the manifest — on a same-instance restore those are the *source* crews, and it would overwrite their live workspace and agent memory with the older backup while `INSERT OR IGNORE` kept the row counts looking untroubled.
+
+<Note>
+Step 3 is what earlier versions described as "re-run restore without the rewrite flag". That never worked and could not: the forked workspace's id and slug match neither of the bundle's, so the tenant guard rejected it every time. `--files-only` is the step that replaces it. It also addresses the crews the fork created rather than the crews the bundle names — the manifest still carries the source crew's slug, so on a same-instance restore the older advice would have written a sibling's backup over the source crew's live data.
+</Note>
+
+Restoring under the ORIGINAL identity (same workspace, or a genuinely empty instance) is unaffected: the docker phase runs in the same call and there is no step 3.
+
+### The target crew must be running
+
+Every section is written through `tar` inside the container now (see
+[Bundle layout](#bundle-layout)), so a restore needs the crew container
+**running**, not merely created. A stopped crew is refused in the
+preflight, before anything is written, and the message names the fix:
+
+```
+cannot reach /workspace to restore into it — the crew container must be RUNNING
+(exec is how every section is written now). Start it with `crewship crew provision engineering`
+```
+
+`crew provision` is the right command for this: it reconciles an existing
+stopped container back to running rather than rebuilding it.
+
+The preflight also refuses when a path the bundle writes to cannot be
+written by the agent — a directory or file left owned by root or by the
+memory sidecar. That is a refusal with **nothing written**, which is the
+point: the same restore used to fail partway through, after earlier
+sections had already landed. Hand the named path to the agent
+(`chown -R 1001:1001 <path>`) and re-run. Paths the bundle never touches
+are ignored, so unrelated root-owned files under `/home/agent` do not
+block anything.
+
+<Note>
+One thing is reported without failing the restore: if the crew memory
+tree's group and setgid bits cannot be fully re-applied afterwards — a
+`.memory` directory owned by the memory sidecar, say — the restore
+**succeeds** and warns, naming the directory. The data is on disk; only
+the sharing contract is degraded, and failing at that point would roll
+back the database while leaving the container's files in place.
+</Note>
 
 ### Dry run
 
@@ -278,13 +345,22 @@ scp ~/.crewship/backups/crewship-workspace-acme-*.tar.zst crewship-new:/tmp/
 crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst \
   --as-workspace=acme-migrated \
   --passphrase-file=backup.pw
-# ⚠ Docker phase skipped (--as-workspace supplied).
-#   Provision the new crews with `crewship crew provision`.
+# ⚠ Docker phase skipped (--as-workspace supplied) — crew files are NOT restored yet.
+#   Crews still missing their container state: engineering, research.
+#   Finish the restore with:
+#     crewship crew provision <crew> -w ws_new123
+#     crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst -w ws_new123 --files-only
 
 # Stand the crews up under the new slug — provision each crew by slug
 # (provision takes one crew per call):
-crewship crew provision <crew-slug>
-crewship crew provision <another-crew-slug>
+crewship crew provision <crew-slug> -w ws_new123
+crewship crew provision <another-crew-slug> -w ws_new123
+
+# THEN land their filesystem state. Skipping this step migrates the rows
+# and leaves every crew's workspace files and memory tree behind.
+crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst \
+  -w ws_new123 --files-only --passphrase-file=backup.pw
+# ✓ Container state landed for 2 crew(s); no database rows were changed.
 ```
 
 Once the new instance has parity (sanity-check via the UI), users get the new URL, and `acme` on the old host gets archived to cold storage before its workspace row is deleted.
@@ -555,7 +631,7 @@ A non-TTY second invocation will block waiting for stdin. Either pass `--passphr
 </Accordion>
 
 <Accordion title="Bundles include workspace bind-mount files">
-User code in `/workspace`, agent memory markdown, anything mounted into the agent container — all included in the bundle. Workspace-scope bundles also carry the content-addressed memory-version blob store (`{MemoryRoot}/versions`) behind `memory_versions` rows — see [Memory-version blobs](#key-concepts). AGE encryption is the only defence; treat a `.tar.zst` like any other backup of source code and credentials.
+User code in `/workspace`, the crew and per-agent memory trees under `/crew`, anything mounted into the agent container — all included in bundles at `format_version` 3 and above (see the memory warning under [Bundle layout](#bundle-layout) for what v1 and v2 bundles actually contain). Workspace-scope bundles also carry the content-addressed memory-version blob store (`{MemoryRoot}/versions`) behind `memory_versions` rows — see [Memory-version blobs](#key-concepts). AGE encryption is the only defence; treat a `.tar.zst` like any other backup of source code and credentials.
 </Accordion>
 
 <Accordion title="/secrets is the only directory NEVER included">
@@ -566,7 +642,7 @@ This is load-bearing — agents pull credentials from `/secrets` at runtime via 
 ## Security notes
 
 - The `/secrets` mount is **never** included in a bundle.
-- The workspace bind mount (user code), per-crew agent memory markdown, and the workspace-tier memory-version blob store (`memory_versions` content, workspace scope only) are all included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
+- The workspace bind mount (user code), the per-crew and crew-shared memory trees under `/crew` (v3 bundles and above), and the workspace-tier memory-version blob store (`memory_versions` content, workspace scope only) are all included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
 - Every `backup.*` event writes to `audit_log` with user, role, scope, sealed-payload SHA-256, and size. Dry-run restores write `backup.restore.dry_run` so auditors can tell rehearsals from real cutover.
 
 ## Automatic pre-migration snapshots
@@ -643,7 +719,7 @@ Tools like `sqlite3` open it directly for inspection.
 |---|---|---|
 | Encrypted at rest | No (chmod 0600 only) | Yes (AGE) |
 | Portable across hosts | Same machine only | Yes |
-| Includes workspace files | No (DB only) | Yes (DB + bind-mount + memory) |
+| Includes workspace files | No (DB only) | Yes (DB + bind mounts + named volumes + the `/crew` memory tree, v3 bundles and above) |
 | Captures container state | No | Yes (snapshots running containers) |
 | Cross-version restore | Snapshot binary only | Forward-compatible via `restoreBackfill` |
 | Triggered automatically | Yes, on pending migration | No (manual or scheduled) |

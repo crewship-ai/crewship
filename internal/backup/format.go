@@ -32,7 +32,22 @@ package backup
 // drops unknown tables — but the bump pins the boundary so admins
 // reading manifest.format_version can tell whether their bundle
 // supports the post-rewrite contract.
-const FormatVersion = 2
+// v2 → v3 (2026-08-03, #1713): the payload gains a `crew/<slug>/`
+// section carrying /crew — the agent and crew-shared memory trees,
+// which no earlier bundle contained at any scope level. Existing
+// sections are unchanged, so a v3 reader restores v1 and v2 bundles
+// exactly as before; what the bump buys is the ability to tell an
+// operator the truth about one. Up to v2, contents.crews[].memory_included
+// was set unconditionally and pointed at /output, so a pre-v3 bundle
+// asserting memory_included: true is asserting something that was never
+// checked. FormatVersionCrewMemory is the boundary every reader of that
+// flag must consult — see CrewSummary.HasCrewMemory.
+const FormatVersion = 3
+
+// FormatVersionCrewMemory is the first format version whose
+// memory_included flag means what it says: observed, and about the real
+// memory tree.
+const FormatVersionCrewMemory = 3
 
 // MinSupportedFormatVersion is the oldest bundle layout this binary can
 // still read. It implements the N-2 policy: MinSupportedFormatVersion =

@@ -105,9 +105,16 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_runs":          IntentInclude,
 
 	// === Operational state (DO NOT export) ==========================
-	"audit_logs":               IntentExcludeOperational,
-	"backup_locks":             IntentExcludeOperational,
-	"backup_catalog":           IntentExcludeOperational,
+	"audit_logs":     IntentExcludeOperational,
+	"backup_locks":   IntentExcludeOperational,
+	"backup_catalog": IntentExcludeOperational,
+	// backup_restore_origins records "this workspace was created by
+	// restoring that bundle" so the DR resume can be authorised on
+	// evidence (#1716). It is a fact about THIS instance's history: a
+	// bundle that carried it forward would assert to the next instance
+	// a lineage that instance never had, and allowRestore would then
+	// authorise a resume against it.
+	"backup_restore_origins":   IntentExcludeOperational,
 	"journal_entries_archived": IntentExcludeOperational,
 	"journal_embeddings":       IntentExcludeOperational,
 	"agent_runs_archive":       IntentExcludeOperational,

@@ -140,18 +140,43 @@ identity.
 ```bash
 crewship backup restore ~/.crewship/backups/bundle.tar.zst
 crewship backup restore bundle.tar.zst --as-workspace acme-dr
+crewship backup restore bundle.tar.zst -w ws_new123 --files-only
 crewship backup restore bundle.tar.zst --dry-run
 crewship backup restore bundle.tar.zst --use-keyring
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--as-workspace` | `string` | | Restore the workspace under a new slug. Docker phase is skipped. |
-| `--as-crew` | `string` | | Restore the crew under a new slug (`--scope=crew` only). |
+| `--as-workspace` | `string` | | Restore the workspace under a new slug. Docker phase is skipped; finish with `--files-only` (below). |
+| `--as-crew` | `string` | | Restore the crew under a new slug (`--scope=crew` only). Docker phase is skipped; finish with `--files-only`. |
+| `--files-only` | `bool` | `false` | Land ONLY per-crew container state (workspace, memory tree, named volumes, `/var/lib`) into crews that already exist. Changes no database rows. Permitted only for a workspace this instance created by restoring **this** bundle — see below. Mutually exclusive with `--as-workspace` / `--as-crew` / `--replace`. |
 | `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
 | `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
 | `--replace` | `bool` | `false` | Disaster-recovery path: wipe existing target rows matching the bundle's workspace (by id **or** slug) **before** restore, so the bundle lands with its original IDs after a `nuke` or fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with `--as-workspace` / `--as-crew`. |
 | `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |
+
+### Finishing a renamed restore
+
+`--as-workspace` / `--as-crew` fork the bundle's rows under a new
+identity and cannot land container state in the same call — the crews
+they create have no containers yet. Three steps:
+
+```bash
+crewship backup restore bundle.tar.zst --as-workspace acme-dr
+crewship crew provision <crew> -w ws_new123
+crewship backup restore bundle.tar.zst -w ws_new123 --files-only
+```
+
+`--files-only` is authorised by provenance, not by the flag: step 1
+records which bundle the new workspace came from (matched on the
+bundle's payload digest), and step 3 is permitted only for a workspace
+that record covers. A bundle never restored into your current workspace
+is refused with the same 403 as before.
+
+It also writes to the crews step 1 created, not the crews the bundle
+names — the manifest still carries the source crew's slug, so on a
+same-instance restore the distinction is what keeps a sibling's backup
+from being written over the source crew's live data.
 
 <Warning>
   The server refuses a restore if a workspace (or crew) with the same slug

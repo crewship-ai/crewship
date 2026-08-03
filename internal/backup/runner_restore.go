@@ -24,14 +24,37 @@ import (
 
 // RestoreOptions collects the parameters for RestoreBackup.
 type RestoreOptions struct {
-	Path         string
-	Passphrase   string
-	Identities   []age.Identity
-	AsWorkspace  string // optional slug override for workspace scope
-	AsCrew       string // optional slug override for crew scope
-	Actor        Actor
-	DockerOps    DockerOps
-	ContainerFor func(id, slug string) string // map crew (id, slug) -> container ID
+	Path        string
+	Passphrase  string
+	Identities  []age.Identity
+	AsWorkspace string // optional slug override for workspace scope
+	AsCrew      string // optional slug override for crew scope
+	// FilesOnly restores ONLY the per-crew container filesystem state,
+	// into the crews of the workspace named by ResumeWorkspaceID. The DB
+	// dump is not applied.
+	//
+	// It exists because disaster recovery genuinely takes three steps and
+	// only ever had two that worked (#1716). A --as-workspace / --as-crew
+	// restore forks the bundle's rows under a new identity but cannot
+	// land container state — the crews it just created have no containers
+	// yet. The operator provisions them, and then needs a way to say
+	// "now land the files into what I just provisioned". Re-running the
+	// full restore cannot do that: it would re-insert the bundle's rows
+	// under their ORIGINAL ids, into a workspace that already holds
+	// remapped copies of all of them.
+	//
+	// Authorised by provenance, not by a flag: the resume is permitted
+	// only for a workspace that backup_restore_origins records as having
+	// been forked from THIS bundle (matched on payload digest). See
+	// origins.go.
+	FilesOnly bool
+	// ResumeWorkspaceID is the caller's current workspace, used to look
+	// up the provenance that authorises a FilesOnly restore and to
+	// resolve the bundle's crew slugs onto this instance's crew rows.
+	ResumeWorkspaceID string
+	Actor             Actor
+	DockerOps         DockerOps
+	ContainerFor      func(id, slug string) string // map crew (id, slug) -> container ID
 	// DryRun, when true, runs every validation (checksum, schema-skew,
 	// decrypt, payload walk) but commits no DB writes and performs no
 	// docker CopyTo. RestoreResult reports what WOULD have happened.
@@ -79,8 +102,15 @@ type RestoreResult struct {
 	RestoredWs          string
 	RestoredWorkspaceID string // new CUID when --as-workspace remapped IDs
 	CrewsCount          int
-	RowsInserted        int
-	DockerPhaseSkipped  bool
+	// CrewsRestored counts crews whose CONTAINER STATE actually landed,
+	// which is not the same number as CrewsCount — that one reports what
+	// the bundle describes. A restore can walk every crew and write to
+	// none of them (no container resolved, no provenance covering it),
+	// and reporting the bundle's count for that is how a no-op reads as
+	// a success.
+	CrewsRestored      int
+	RowsInserted       int
+	DockerPhaseSkipped bool
 	// DroppedCrewFilesystems carries the slugs of crews whose bundle
 	// section included filesystem data (workspace / memory / system
 	// paths) that this restore did NOT land — typically because the
@@ -332,9 +362,82 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 
+	// Disaster-recovery provenance (#1716). Two directions:
+	//
+	//   - A FilesOnly resume READS it, to learn which local crews the
+	//     bundle's crews became. Without a row that matches this exact
+	//     bundle the resume is refused — the flag alone authorises
+	//     nothing.
+	//   - A rewritten restore (--as-workspace / --as-crew) WRITES it,
+	//     inside the same transaction as the rows it describes, so a
+	//     later resume has something to be authorised by.
+	// The provenance row is looked up on EVERY restore that names a
+	// caller workspace, not only on a --files-only one, because it
+	// answers two different questions and the second is the dangerous
+	// one:
+	//
+	//   FilesOnly     — "which local crews did this bundle's crews
+	//                    become?" Without a matching row the resume is
+	//                    refused; the flag alone authorises nothing.
+	//   NOT FilesOnly — "is the caller standing in a workspace that was
+	//                    FORKED from this bundle?" If so, an ordinary
+	//                    restore is the wrong operation and must not
+	//                    run: the crews it would address come from the
+	//                    manifest, which still carries the SOURCE crew's
+	//                    identity, so on a same-instance restore it
+	//                    overwrites the live crew's workspace and memory
+	//                    with the older backup while INSERT OR IGNORE
+	//                    makes the row counts look untroubled.
+	//
+	// That second case is exactly the command the CLI used to print
+	// ("re-run restore without the rewrite flag"), so it is the one an
+	// operator is most likely to type from memory or from an old
+	// runbook. It gets a refusal that names the mode that is safe.
+	var origin *RestoreOrigin
+	if opts.ResumeWorkspaceID != "" {
+		o, oerr := LookupRestoreOrigin(ctx, db, opts.ResumeWorkspaceID)
+		if oerr != nil {
+			return nil, oerr
+		}
+		origin = o
+	}
+	forkedFromThisBundle := origin != nil &&
+		manifest.Checksums.PayloadSHA256 != "" &&
+		origin.BundleSHA256 == manifest.Checksums.PayloadSHA256
+
+	if !opts.FilesOnly && forkedFromThisBundle && opts.AsWorkspace == "" && opts.AsCrew == "" {
+		return nil, fmt.Errorf("backup: workspace %s was created by restoring this bundle, so an ordinary restore here would address the crews the BUNDLE names — on this instance those are the source crews, whose workspace and agent memory it would overwrite with this older backup. "+
+			"Its rows are already present under new ids. To land container state into the crews this workspace actually has, use --files-only",
+			opts.ResumeWorkspaceID)
+	}
+
+	if opts.FilesOnly {
+		if opts.ResumeWorkspaceID == "" {
+			return nil, fmt.Errorf("backup: --files-only requires a target workspace")
+		}
+		if opts.AsWorkspace != "" || opts.AsCrew != "" || opts.Replace {
+			return nil, fmt.Errorf("backup: --files-only cannot be combined with --as-workspace, --as-crew or --replace; it lands container state into crews that already exist")
+		}
+		if !forkedFromThisBundle {
+			return nil, fmt.Errorf("backup: workspace %s was not created by restoring this bundle, so there is no crew mapping to land files through; run the rewrite restore first (`--as-workspace`/`--as-crew`), provision the crews, then re-run with --files-only", opts.ResumeWorkspaceID)
+		}
+	}
+
 	// Stage DB rewrites before any writes so both --as-* flags and the
-	// FK rows land consistently.
-	if extracted.DBDump != nil {
+	// FK rows land consistently. A FilesOnly resume applies no DB dump
+	// at all, so none of this runs for it.
+	// bundleCrewSlugs snapshots each crew row's ORIGINAL slug, by row
+	// position, before rewriteCrewSlug and RemapIDs mutate the dump in
+	// place. Pairing by position afterwards yields the bundle-slug ->
+	// created-crew map the DR resume needs; taking it after the rewrites
+	// would only ever recover the new identity, which is the half we
+	// already know.
+	var bundleCrewSlugs []string
+	if extracted.DBDump != nil && !opts.FilesOnly {
+		for _, r := range extracted.DBDump.Tables["crews"] {
+			slug, _ := r["slug"].(string)
+			bundleCrewSlugs = append(bundleCrewSlugs, slug)
+		}
 		if opts.AsWorkspace != "" {
 			rewriteWorkspaceSlug(extracted.DBDump, opts.AsWorkspace)
 		}
@@ -406,17 +509,74 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// new crews via `crewship crew provision` and then re-run restore
 	// without --as-* to land the container state.
 	skipDocker := opts.AsWorkspace != "" || opts.AsCrew != ""
+
+	// crewTargetFor maps a manifest crew entry onto the container this
+	// restore should write into.
+	//
+	// On a normal restore that is the crew's own recorded identity. On a
+	// FilesOnly resume it is NOT: the bundle's crews were re-created
+	// under fresh ids (and, under --as-crew, a fresh slug), so resolving
+	// from the manifest would address the SOURCE crew's container — on a
+	// same-instance DR that is the source crew's live data being
+	// overwritten by a sibling crew's backup. The provenance map
+	// recorded at fork time is the only thing that relates the two.
+	crewTargetFor := func(c CrewSummary) (id, slug string, ok bool) {
+		if !opts.FilesOnly {
+			return c.ID, c.Slug, true
+		}
+		if origin == nil {
+			return "", "", false
+		}
+		target, found := origin.CrewsByBundleSlug[c.Slug]
+		if !found || target.ID == "" {
+			return "", "", false
+		}
+		return target.ID, target.Slug, true
+	}
 	// Compute the dropped-filesystem set up front so it ends up on the
 	// RestoreResult even when dockerRestore is never called (dry-run)
 	// or short-circuits via skipDocker.
 	var droppedCrewFilesystems []string
 	if skipDocker {
 		for _, c := range manifest.Contents.Crews {
-			if c.WorkspaceIncluded || c.MemoryIncluded || c.SystemIncluded {
+			if c.HasFilesystemSections(manifest.FormatVersion) {
 				droppedCrewFilesystems = append(droppedCrewFilesystems, c.Slug)
 			}
 		}
 	}
+	// A bundle written before #1713 was fixed carries no crew memory
+	// tree, and reports memory_included: true anyway. Restoring one is
+	// legitimate — its workspace files, volumes and DB rows are all
+	// real — but the operator has to hear, once, that the memory is not
+	// coming back, because the bundle itself will keep claiming
+	// otherwise for as long as it exists.
+	if manifest.FormatVersion < FormatVersionCrewMemory {
+		var claimed []string
+		for _, c := range manifest.Contents.Crews {
+			if c.MemoryIncluded {
+				claimed = append(claimed, c.Slug)
+			}
+		}
+		if len(claimed) > 0 {
+			msg := fmt.Sprintf("bundle format v%d predates the crew-memory fix (#1713): it carries NO agent or crew-shared memory for %s, "+
+				"despite its manifest reporting memory_included. Everything else in the bundle restores normally; "+
+				"agent memory from before this bundle was taken cannot be recovered from it",
+				manifest.FormatVersion, strings.Join(claimed, ", "))
+			slog.Warn("backup restore: " + msg)
+			if opts.Logger != nil {
+				opts.Logger(msg)
+			}
+		}
+	}
+	// crewsRestored counts crews whose container state ACTUALLY landed,
+	// as distinct from the crews the bundle happens to describe. The
+	// difference is the whole of #1713 restated one layer up: a
+	// `--files-only` resume can walk its loop and write nothing —
+	// ContainerFor returning "" for every crew, or a provenance map that
+	// covers none of them — and, without this, would report the
+	// manifest's crew count and exit 0. An operator would read that as
+	// "my crews' files are back".
+	crewsRestored := 0
 	dockerRestore := func(_ context.Context) error {
 		if skipDocker {
 			// The Logger callback is best-effort (a nil Logger from an
@@ -431,7 +591,11 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				)
 			}
 			if opts.Logger != nil {
-				opts.Logger("docker phase skipped because --as-workspace / --as-crew was supplied; provision the new crews and re-run restore without the rewrite flag to land container state")
+				opts.Logger("docker phase skipped because --as-workspace / --as-crew was supplied. " +
+					"Provision the new crews (`crewship crew provision <crew> -w <workspace>`), then land their files with " +
+					"`crewship backup restore <bundle> -w <workspace> --files-only`. " +
+					"Re-running restore WITHOUT --files-only will not work and is not what to do: the bundle is not bound to the forked workspace, " +
+					"and its rows are already there under new ids")
 			}
 			return nil
 		}
@@ -450,33 +614,64 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// land, even though the DB rows + the one running crew's
 		// filesystem would all apply cleanly.
 		for _, c := range manifest.Contents.Crews {
-			if !c.WorkspaceIncluded && !c.MemoryIncluded && !c.SystemIncluded {
+			if !c.HasFilesystemSections(manifest.FormatVersion) {
 				continue
 			}
-			containerID := opts.ContainerFor(c.ID, c.Slug)
+			targetID, targetSlug, ok := crewTargetFor(c)
+			if !ok {
+				return fmt.Errorf("backup: --files-only: bundle crew %q has no crew on this instance recorded against it; the workspace's restore provenance does not cover it", c.Slug)
+			}
+			containerID := opts.ContainerFor(targetID, targetSlug)
 			if containerID == "" {
 				continue
 			}
 			exists, err := opts.DockerOps.ContainerExists(ctx, containerID)
 			if err != nil {
-				return fmt.Errorf("backup: preflight crew %s: %w", c.Slug, err)
+				return fmt.Errorf("backup: preflight crew %s: %w", targetSlug, err)
 			}
 			if !exists {
-				return fmt.Errorf("backup: crew %q has filesystem data in the bundle but container %q is not provisioned on this instance; run `crewship crew provision %s` then re-run restore", c.Slug, containerID, c.Slug)
+				return fmt.Errorf("backup: crew %q has filesystem data in the bundle but container %q is not provisioned on this instance; run `crewship crew provision %s` then re-run restore", targetSlug, containerID, targetSlug)
 			}
 		}
 		for _, c := range manifest.Contents.Crews {
-			if !c.WorkspaceIncluded && !c.MemoryIncluded && !c.SystemIncluded {
+			if !c.HasFilesystemSections(manifest.FormatVersion) {
 				// Bundle has nothing to land for this crew (DB rows
 				// already restored above). Skip silently.
 				continue
 			}
-			containerID := opts.ContainerFor(c.ID, c.Slug)
+			targetID, targetSlug, ok := crewTargetFor(c)
+			if !ok {
+				continue
+			}
+			containerID := opts.ContainerFor(targetID, targetSlug)
 			if containerID == "" {
 				continue
 			}
+			// c.Slug (the BUNDLE's slug) selects the section inside the
+			// payload; targetSlug names the crew being written to. On a
+			// --as-crew resume the two differ, and swapping them silently
+			// restores nothing.
 			if err := RestoreCrew(ctx, opts.DockerOps, containerID, c.Slug, extracted); err != nil {
-				return fmt.Errorf("backup: restore crew %s: %w", c.Slug, err)
+				// Degraded memory permissions are not a failed restore:
+				// every section landed, and re-running cannot help
+				// because the entry that blocked the chgrp blocks it
+				// again. Failing here would roll back a DB transaction
+				// over data already written to the container — the
+				// worst of both. Surface it where the operator will see
+				// it and carry on counting this crew as restored.
+				if errors.Is(err, ErrMemoryPermsDegraded) {
+					slog.Warn("backup restore: crew data landed but its memory permissions are degraded",
+						"crew", targetSlug, "error", err)
+					if opts.Logger != nil {
+						opts.Logger(fmt.Sprintf("crew %s restored, but its memory tree permissions could not be fully re-applied — the memory sidecar may not be able to write it: %v", targetSlug, err))
+					}
+				} else {
+					return fmt.Errorf("backup: restore crew %s: %w", targetSlug, err)
+				}
+			}
+			crewsRestored++
+			if opts.FilesOnly && opts.Logger != nil {
+				opts.Logger(fmt.Sprintf("landed container state for crew %s (from bundle crew %s)", targetSlug, c.Slug))
 			}
 		}
 		return nil
@@ -540,6 +735,50 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}, nil
 	}
 
+	// A FilesOnly resume applies no DB dump: the rows are already on this
+	// instance, under the ids the fork gave them. All that is left is the
+	// docker phase, addressed through the provenance map, plus the
+	// content-addressed memory blobs (idempotent, and keyed by sha rather
+	// than by any identity the fork changed).
+	if opts.FilesOnly {
+		// Landing container state is the ONLY thing this mode does, so a
+		// caller that cannot reach docker is asking for a no-op, not for
+		// a restore. Refuse rather than return success having written
+		// nothing.
+		if opts.DockerOps == nil || opts.ContainerFor == nil {
+			return nil, fmt.Errorf("backup: --files-only needs a container runtime; this instance has none configured, so there is nothing it could land")
+		}
+		if err := memoryBlobsRestore(ctx); err != nil {
+			return nil, err
+		}
+		if err := dockerRestore(ctx); err != nil {
+			return nil, err
+		}
+		if crewsRestored == 0 {
+			return nil, fmt.Errorf("backup: --files-only landed no crew filesystem state: the bundle's %d crew(s) either carry no filesystem sections or have no provisioned container on this instance — provision them with `crewship crew provision <crew> -w %s` and re-run",
+				len(manifest.Contents.Crews), opts.ResumeWorkspaceID)
+		}
+		// RestoredWs is a SLUG everywhere else — it is what the CLI
+		// prints as `workspace=`. Resolve it rather than echoing the id
+		// into a field the operator reads as a name; a best-effort
+		// lookup because a failure here must not fail a restore that has
+		// already landed.
+		restoredSlug := opts.ResumeWorkspaceID
+		var slug string
+		if err := db.QueryRowContext(ctx,
+			`SELECT slug FROM workspaces WHERE id = ?`, opts.ResumeWorkspaceID,
+		).Scan(&slug); err == nil && slug != "" {
+			restoredSlug = slug
+		}
+		return &RestoreResult{
+			Manifest:            manifest,
+			RestoredWs:          restoredSlug,
+			RestoredWorkspaceID: opts.ResumeWorkspaceID,
+			CrewsCount:          len(manifest.Contents.Crews),
+			CrewsRestored:       crewsRestored,
+		}, nil
+	}
+
 	var stats RestoreStats
 	if extracted.DBDump != nil {
 		// PreInsert composition: --replace wipe FIRST (if enabled),
@@ -598,6 +837,17 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil
 		})
 		hooks := &RestoreDumpHooks{
+			// Provenance for the DR resume (#1716), written only for a
+			// rewritten restore — that is the only case that creates a
+			// workspace whose identity the tenant guard cannot recognise
+			// later. Inside the tx, so a rolled back restore leaves no
+			// claim behind.
+			PostInsert: func(ctx context.Context, tx *sql.Tx) error {
+				if !skipDocker {
+					return nil
+				}
+				return recordForkOrigin(ctx, tx, opts, manifest, extracted.DBDump, bundleCrewSlugs)
+			},
 			PreCommit: func(ctx context.Context) error {
 				if err := memoryBlobsRestore(ctx); err != nil {
 					return err
@@ -673,10 +923,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 
 	return &RestoreResult{
-		Manifest:               manifest,
-		RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
-		RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
-		CrewsCount:             len(manifest.Contents.Crews),
+		Manifest:            manifest,
+		RestoredWs:          firstWorkspaceSlug(extracted.DBDump),
+		RestoredWorkspaceID: firstWorkspaceID(extracted.DBDump),
+		CrewsCount:          len(manifest.Contents.Crews),
+		// Set on the ordinary path too, not just the resume: reporting 0
+		// here while crews_count says 4 would be a fresh way of lying
+		// about what landed, in a field added to stop exactly that.
+		CrewsRestored:          crewsRestored,
 		RowsInserted:           stats.RowsInserted,
 		DockerPhaseSkipped:     skipDocker,
 		DroppedCrewFilesystems: droppedCrewFilesystems,
@@ -783,6 +1037,58 @@ func userRowReachable(ctx context.Context, db *sql.DB, dump *DBDump, userID stri
 }
 
 // rewriteCrewSlug does the equivalent for crew-scope restores.
+// recordForkOrigin writes the provenance row for a rewritten restore:
+// which bundle this workspace was forked from, and which local crew each
+// of the bundle's crews became.
+//
+// bundleCrewSlugs is the crews table's ORIGINAL slugs by row position,
+// snapshotted before the rewrites; the dump's crew rows now carry the
+// post-remap identities at the same positions. Pairing them is what lets
+// a later --files-only resume address the crew this restore created
+// rather than the one the bundle names — which, on a same-instance
+// restore, is the source crew whose live data would be overwritten.
+//
+// A length mismatch means something reordered or resized the crews table
+// between the snapshot and here; rather than guess at the pairing, record
+// no map. The resume then refuses with a clear message instead of
+// writing a crew's files into a different crew.
+func recordForkOrigin(ctx context.Context, tx *sql.Tx, opts RestoreOptions, manifest *Manifest, dump *DBDump, bundleCrewSlugs []string) error {
+	if dump == nil {
+		return nil
+	}
+	workspaceID := firstWorkspaceID(dump)
+	if workspaceID == "" {
+		return nil
+	}
+	crews := map[string]RestoreOriginCrew{}
+	rows := dump.Tables["crews"]
+	if len(rows) == len(bundleCrewSlugs) {
+		for i, r := range rows {
+			bundleSlug := bundleCrewSlugs[i]
+			if bundleSlug == "" {
+				continue
+			}
+			id, _ := r["id"].(string)
+			slug, _ := r["slug"].(string)
+			if id == "" {
+				continue
+			}
+			crews[bundleSlug] = RestoreOriginCrew{ID: id, Slug: slug}
+		}
+	} else {
+		slog.Warn("backup restore: crew row count changed during rewrite; recording origin without a crew map",
+			"snapshot", len(bundleCrewSlugs), "after", len(rows), "workspace_id", workspaceID)
+	}
+	return RecordRestoreOrigin(ctx, tx, RestoreOrigin{
+		WorkspaceID:       workspaceID,
+		BundleSHA256:      manifest.Checksums.PayloadSHA256,
+		BundlePath:        opts.Path,
+		CrewsByBundleSlug: crews,
+		RestoredAt:        time.Now().UTC(),
+		RestoredBy:        opts.Actor.UserID,
+	})
+}
+
 func rewriteCrewSlug(dump *DBDump, crewID, newSlug string) {
 	rows, ok := dump.Tables["crews"]
 	if !ok {

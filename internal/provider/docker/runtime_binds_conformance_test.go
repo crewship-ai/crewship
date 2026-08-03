@@ -236,8 +236,7 @@ func TestBindSourceReachability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare crew dirs: %v", err)
 	}
-	p.fixBindMountOwnership(ctx, image, dirs)
-	stageCrewVolumes(ctx, t, p, image, crew)
+	ensureCrewVolumesOwned(ctx, t, p, image, crew, dirs)
 
 	name := p.CrewContainerName(crew.ID, crew.Slug)
 	_, _ = p.client.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})

@@ -46,6 +46,14 @@ func (s *selftestSeqOps) CopyTo(ctx context.Context, id, dst string, content io.
 	return s.fakeDockerOps.CopyTo(ctx, id, dst, content)
 }
 
+// CopyToPath feeds the same sequence counter as CopyTo: since #1714 the
+// restore stage of the self-test extracts via CopyToPath, so a wrapper
+// that only counted CopyTo would let the "restore" call slip past every
+// sabotage below and the tests would pass for the wrong reason.
+func (s *selftestSeqOps) CopyToPath(ctx context.Context, id string, spec ExtractSpec, content io.Reader) error {
+	return s.CopyTo(ctx, id, spec.Dest, content)
+}
+
 func selftestOpts() SelfTestOpts {
 	return SelfTestOpts{
 		ContainerID: "ctr-1",

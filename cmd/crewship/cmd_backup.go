@@ -267,6 +267,10 @@ func init() {
 
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
+	backupRestoreCmd.Flags().Bool("files-only", false,
+		"Land ONLY crew container state (workspace, memory, volumes) into the crews this workspace already has, changing no database rows. "+
+			"Step 3 of disaster recovery: restore --as-workspace/--as-crew, provision the new crews, then this. "+
+			"Permitted only for a workspace that was created by restoring this same bundle.")
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupRestoreCmd.Flags().Bool("use-keyring", false, "Read the passphrase from the local backup keyring before prompting")
 	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without applying workspace/crew writes or docker changes (an audit row is still recorded)")
