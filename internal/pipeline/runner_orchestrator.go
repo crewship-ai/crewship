@@ -123,16 +123,17 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 }
 
 // PrewarmCrew warms the crew's container ahead of a run's first step (#836).
-// It resolves the crew's PROVISIONED container config by crew id — no agent
-// resolution needed, the runtime image is a crew-level property — and calls
-// EnsureCrewRuntime, the same idempotent primitive RunStep uses. Concurrent
+// It goes through the crew-start contract by crew id — no agent resolution
+// needed, the runtime image and the declared sidecars are both crew-level
+// properties — which is the same idempotent primitive RunStep uses. Concurrent
 // prewarms for one crew serialize on the provider's per-crew lock and collapse
 // to a single container start. No run row, LLM call, or cost event is produced;
 // this only provisions the runtime, off the critical path.
 //
-// crewRuntime is the same resolver a cold script step uses; when it's absent or
-// errors we fall back to a minimal {ID} config — EnsureCrewRuntime then reuses
-// a warm container (a cold create would use the base image, same as today).
+// A prewarm brings the crew's sidecars up too: the point of warming is that the
+// first step pays nothing, and a first step that finds no database has not been
+// warmed. When the crew's config cannot be resolved the starter logs and starts
+// from the minimal {ID} config, which reuses a warm container.
 func (r *OrchestratorRunner) PrewarmCrew(ctx context.Context, crewID, workspaceID string) error {
 	if r.container == nil || crewID == "" {
 		return nil
@@ -184,10 +185,11 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		return AgentStepResult{}, fmt.Errorf("resolve agent config: %w", err)
 	}
 
-	// 3. EnsureCrewRuntime — spawn the container if missing, reuse
-	//    if already running. This is the same primitive the chat
-	//    handler uses; pipelines don't get a separate container
-	//    pool, they share the crew's existing runtime.
+	// 3. Start the crew — spawn the container if missing, reuse if already
+	//    running, and bring the crew's declared sidecars up either way. This
+	//    is literally the same function the chat handler calls
+	//    (internal/crewstart); pipelines don't get a separate container pool,
+	//    they share the crew's existing runtime.
 	// Time the container acquire so `routine logs` can isolate the
 	// provision cost from the LLM/tool time in the step's total duration —
 	// the quantity the #902 prewarm shortens (#911). A warm hit is near-zero;
