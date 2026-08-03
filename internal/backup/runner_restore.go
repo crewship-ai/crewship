@@ -874,10 +874,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 
 	return &RestoreResult{
-		Manifest:               manifest,
-		RestoredWs:             firstWorkspaceSlug(extracted.DBDump),
-		RestoredWorkspaceID:    firstWorkspaceID(extracted.DBDump),
-		CrewsCount:             len(manifest.Contents.Crews),
+		Manifest:            manifest,
+		RestoredWs:          firstWorkspaceSlug(extracted.DBDump),
+		RestoredWorkspaceID: firstWorkspaceID(extracted.DBDump),
+		CrewsCount:          len(manifest.Contents.Crews),
+		// Set on the ordinary path too, not just the resume: reporting 0
+		// here while crews_count says 4 would be a fresh way of lying
+		// about what landed, in a field added to stop exactly that.
+		CrewsRestored:          crewsRestored,
 		RowsInserted:           stats.RowsInserted,
 		DockerPhaseSkipped:     skipDocker,
 		DroppedCrewFilesystems: droppedCrewFilesystems,

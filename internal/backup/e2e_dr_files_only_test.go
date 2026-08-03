@@ -153,6 +153,12 @@ func TestE2E_DisasterRecovery_FilesOnlyResume(t *testing.T) {
 	if !fork.DockerPhaseSkipped {
 		t.Fatalf("a --as-workspace restore must skip the docker phase; it did not")
 	}
+	// The fork landed no container state, and has to say so. Reporting
+	// the bundle's crew count here is precisely the claim that sends an
+	// operator away thinking the migration is done.
+	if fork.CrewsRestored != 0 {
+		t.Errorf("fork reports %d crews restored; it skipped the docker phase and restored none", fork.CrewsRestored)
+	}
 	if len(forkOps.written) != 0 {
 		t.Fatalf("rewrite restore wrote container state it should have skipped: %v", forkOps.written)
 	}
