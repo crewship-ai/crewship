@@ -271,6 +271,7 @@ var backupRestoreCmd = &cobra.Command{
 			RestoredWs             string         `json:"restored_ws"`
 			RestoredWorkspaceID    string         `json:"restored_workspace_id"`
 			CrewsCount             int            `json:"crews_count"`
+			CrewsRestored          int            `json:"crews_restored"`
 			RowsInserted           int            `json:"rows_inserted"`
 			DockerPhaseSkipped     bool           `json:"docker_phase_skipped"`
 			DroppedCrewFilesystems []string       `json:"dropped_crew_filesystems"`
@@ -325,8 +326,14 @@ var backupRestoreCmd = &cobra.Command{
 				target, args[0], target)
 			cli.PrintWarning(warning)
 		}
+		// CrewsRestored, not CrewsCount: the first is what landed, the
+		// second is what the bundle describes. Printing the bundle's
+		// number here would report a resume that wrote to nothing as a
+		// success — the same shape of claim the manifest used to make
+		// about memory it did not contain.
 		if !dryRun && filesOnly {
-			cli.PrintSuccess(fmt.Sprintf("Container state landed for %d crew(s); no database rows were changed.", out.CrewsCount))
+			cli.PrintSuccess(fmt.Sprintf("Container state landed for %d of %d crew(s) in the bundle; no database rows were changed.",
+				out.CrewsRestored, out.CrewsCount))
 		}
 		// Unlike the docker warning this one DOES matter on a dry run:
 		// "this bundle carries credentials at a tier that does not

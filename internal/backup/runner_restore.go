@@ -102,8 +102,15 @@ type RestoreResult struct {
 	RestoredWs          string
 	RestoredWorkspaceID string // new CUID when --as-workspace remapped IDs
 	CrewsCount          int
-	RowsInserted        int
-	DockerPhaseSkipped  bool
+	// CrewsRestored counts crews whose CONTAINER STATE actually landed,
+	// which is not the same number as CrewsCount — that one reports what
+	// the bundle describes. A restore can walk every crew and write to
+	// none of them (no container resolved, no provenance covering it),
+	// and reporting the bundle's count for that is how a no-op reads as
+	// a success.
+	CrewsRestored      int
+	RowsInserted       int
+	DockerPhaseSkipped bool
 	// DroppedCrewFilesystems carries the slugs of crews whose bundle
 	// section included filesystem data (workspace / memory / system
 	// paths) that this restore did NOT land — typically because the
@@ -527,6 +534,15 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 		}
 	}
+	// crewsRestored counts crews whose container state ACTUALLY landed,
+	// as distinct from the crews the bundle happens to describe. The
+	// difference is the whole of #1713 restated one layer up: a
+	// `--files-only` resume can walk its loop and write nothing —
+	// ContainerFor returning "" for every crew, or a provenance map that
+	// covers none of them — and, without this, would report the
+	// manifest's crew count and exit 0. An operator would read that as
+	// "my crews' files are back".
+	crewsRestored := 0
 	dockerRestore := func(_ context.Context) error {
 		if skipDocker {
 			// The Logger callback is best-effort (a nil Logger from an
@@ -604,6 +620,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			if err := RestoreCrew(ctx, opts.DockerOps, containerID, c.Slug, extracted); err != nil {
 				return fmt.Errorf("backup: restore crew %s: %w", targetSlug, err)
 			}
+			crewsRestored++
 			if opts.FilesOnly && opts.Logger != nil {
 				opts.Logger(fmt.Sprintf("landed container state for crew %s (from bundle crew %s)", targetSlug, c.Slug))
 			}
@@ -675,11 +692,22 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// content-addressed memory blobs (idempotent, and keyed by sha rather
 	// than by any identity the fork changed).
 	if opts.FilesOnly {
+		// Landing container state is the ONLY thing this mode does, so a
+		// caller that cannot reach docker is asking for a no-op, not for
+		// a restore. Refuse rather than return success having written
+		// nothing.
+		if opts.DockerOps == nil || opts.ContainerFor == nil {
+			return nil, fmt.Errorf("backup: --files-only needs a container runtime; this instance has none configured, so there is nothing it could land")
+		}
 		if err := memoryBlobsRestore(ctx); err != nil {
 			return nil, err
 		}
 		if err := dockerRestore(ctx); err != nil {
 			return nil, err
+		}
+		if crewsRestored == 0 {
+			return nil, fmt.Errorf("backup: --files-only landed no crew filesystem state: the bundle's %d crew(s) either carry no filesystem sections or have no provisioned container on this instance — provision them with `crewship crew provision <crew> -w %s` and re-run",
+				len(manifest.Contents.Crews), opts.ResumeWorkspaceID)
 		}
 		// RestoredWs is a SLUG everywhere else — it is what the CLI
 		// prints as `workspace=`. Resolve it rather than echoing the id
@@ -698,6 +726,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			RestoredWs:          restoredSlug,
 			RestoredWorkspaceID: opts.ResumeWorkspaceID,
 			CrewsCount:          len(manifest.Contents.Crews),
+			CrewsRestored:       crewsRestored,
 		}, nil
 	}
 

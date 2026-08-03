@@ -576,6 +576,13 @@ func TestRestoreCrew_RoutesSectionsByStrategy(t *testing.T) {
 		}
 		// The last exec is the post-restore chgrp/setgid pass, which only
 		// uid 1001 gid 1002 can perform in a cap-dropped container.
+		//
+		// Length-checked first: if a change stops calling ExecAs at all,
+		// indexing panics and the panic — not the assertion — is what
+		// the reader sees, which hides the thing that actually broke.
+		if len(ops.execAsUsers) == 0 {
+			t.Fatalf("no ExecAs calls recorded: the post-restore permission pass did not run at all")
+		}
 		last := ops.execAsUsers[len(ops.execAsUsers)-1]
 		if last != sidecarWriterUser {
 			t.Errorf("final ExecAs user = %q, want %q", last, sidecarWriterUser)

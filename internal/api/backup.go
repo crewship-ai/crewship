@@ -484,8 +484,13 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		"restored_ws":           result.RestoredWs,
 		"restored_workspace_id": result.RestoredWorkspaceID,
 		"crews_count":           result.CrewsCount,
-		"rows_inserted":         result.RowsInserted,
-		"docker_phase_skipped":  result.DockerPhaseSkipped,
+		// What the bundle describes (crews_count) and what actually
+		// landed (crews_restored) are different numbers, and reporting
+		// the first as if it were the second is how a restore that
+		// wrote nothing reads as a success.
+		"crews_restored":       result.CrewsRestored,
+		"rows_inserted":        result.RowsInserted,
+		"docker_phase_skipped": result.DockerPhaseSkipped,
 		// The only place that names WHICH crews lost their filesystem
 		// data. It was computed and then dropped on the floor here, so
 		// the CLI could print the generic warning and nothing else —

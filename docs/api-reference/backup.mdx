@@ -341,6 +341,7 @@ Restore a bundle into the current workspace.
   "restored_ws": "acme",
   "restored_workspace_id": "ws_abc123",
   "crews_count": 4,
+  "crews_restored": 4,
   "rows_inserted": 312,
   "docker_phase_skipped": false,
   "dropped_crew_filesystems": [],
@@ -354,6 +355,8 @@ Restore a bundle into the current workspace.
 `docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed. `dropped_crew_filesystems` names the crews that lost it. Finish the restore by provisioning each of them (`POST /api/v1/crews/{crewId}/provision`) and then calling this endpoint again with `files_only: true` and the new workspace in context.
 
 Re-calling WITHOUT `files_only` after a rename does not work and is not the recovery: the forked workspace matches neither the bundle's id nor its slug, so the tenant guard returns 403 — and its rows are already present under new ids anyway.
+
+`crews_count` is what the bundle describes; `crews_restored` is how many crews actually received container state. The two differ whenever a crew carries no filesystem sections or has no provisioned container on this instance. A `files_only` call that would land nothing is **rejected** rather than returning `200` with the bundle's count — an operation reporting success without having written anything is the failure mode this whole area exists to have stopped.
 
 `security_level_clamped` counts the restored credentials whose `security_level` was not one of the defined tiers (L1–L4) and were therefore written at the strictest tier instead — every other writer of that column validates it, so restore does too. `security_level_clamps` is a bounded sample naming the affected credentials and the value the bundle carried; the full list of what happened is also written to the journal as `credential.security_level.clamped`. On a `dry_run` both fields report what *would* be clamped. Re-set each affected credential with `PATCH /api/v1/credentials/{id}` (`security_level`) or `crewship credential update <name> --security-level N`.
 

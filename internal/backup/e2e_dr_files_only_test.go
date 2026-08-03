@@ -229,6 +229,13 @@ func TestE2E_DisasterRecovery_FilesOnlyResume(t *testing.T) {
 	if resume.RestoredWs != "acme-dr" {
 		t.Errorf("resume reported workspace %q, want the slug acme-dr", resume.RestoredWs)
 	}
+	// What landed, not what the bundle describes. The two happen to be
+	// equal here; asserting the landed count is what makes a future
+	// change that writes to nothing visible.
+	if resume.CrewsRestored != len(created.Manifest.Contents.Crews) {
+		t.Errorf("resume reports %d crews restored, want %d — it must count what landed, not what the bundle describes",
+			resume.CrewsRestored, len(created.Manifest.Contents.Crews))
+	}
 
 	// The resume must not have touched the database. Re-inserting the
 	// bundle's rows under their original ids, into an instance that
@@ -288,4 +295,93 @@ func TestE2E_DisasterRecovery_FilesOnlyRefusesUnrelatedWorkspace(t *testing.T) {
 	if len(ops.written) != 0 {
 		t.Errorf("refused resume still wrote container state: %v", ops.written)
 	}
+}
+
+// TestE2E_DisasterRecovery_FilesOnlyRefusesWhenNothingLands is the
+// no-op case, and it is the same failure mode as #1713 restated one
+// layer up: an operation that reports success without having verified it
+// did anything. A resume whose crews resolve to no container writes
+// nothing, and would otherwise exit 0 having printed the BUNDLE's crew
+// count — which an operator reads as "my crews' files are back".
+//
+// Authorisation is genuinely satisfied here; only the landing fails. That
+// is the point: the refusal has to come from what happened, not from the
+// permission check.
+func TestE2E_DisasterRecovery_FilesOnlyRefusesWhenNothingLands(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedDB(t)
+	sourceWorkspaceID := seedWorkspace(t, db)
+	containerFor := func(id, slug string) string { return "crewship-team-" + slug + "-" + id }
+
+	const passphrase = "dr-files-only-noop"
+	created, err := backup.CreateBackup(ctx, db, backup.CreateOptions{
+		Scope:             backup.ScopeWorkspace,
+		WorkspaceID:       sourceWorkspaceID,
+		OutputDir:         t.TempDir(),
+		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:        passphrase,
+		CrewContainerName: containerFor,
+		DockerOps:         &recordingOps{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	fork, err := backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+		Path:         created.Path,
+		Passphrase:   passphrase,
+		AsWorkspace:  "acme-dr",
+		Actor:        backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		DockerOps:    &recordingOps{},
+		ContainerFor: containerFor,
+	})
+	if err != nil {
+		t.Fatalf("rewrite restore: %v", err)
+	}
+
+	t.Run("no container resolves for any crew", func(t *testing.T) {
+		ops := &recordingOps{}
+		_, err := backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+			Path:              created.Path,
+			Passphrase:        passphrase,
+			FilesOnly:         true,
+			ResumeWorkspaceID: fork.RestoredWorkspaceID,
+			Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+			DockerOps:         ops,
+			// The crews were never provisioned, so nothing resolves.
+			ContainerFor: func(string, string) string { return "" },
+		})
+		if err == nil {
+			t.Fatalf("a resume that landed nothing reported success")
+		}
+		if !strings.Contains(err.Error(), "landed no crew filesystem state") {
+			t.Errorf("refusal should say nothing landed; got %v", err)
+		}
+		if !strings.Contains(err.Error(), "crew provision") {
+			t.Errorf("refusal should name the step that fixes it; got %v", err)
+		}
+		if len(ops.written) != 0 {
+			t.Errorf("nothing should have been written: %v", ops.written)
+		}
+	})
+
+	t.Run("no container runtime configured", func(t *testing.T) {
+		_, err := backup.RestoreBackup(ctx, db, backup.RestoreOptions{
+			Path:              created.Path,
+			Passphrase:        passphrase,
+			FilesOnly:         true,
+			ResumeWorkspaceID: fork.RestoredWorkspaceID,
+			Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+			// Landing container state is the only thing this mode does,
+			// so no runtime means the call is a no-op by construction.
+			DockerOps:    nil,
+			ContainerFor: nil,
+		})
+		if err == nil {
+			t.Fatalf("--files-only with no container runtime reported success")
+		}
+		if !strings.Contains(err.Error(), "needs a container runtime") {
+			t.Errorf("refusal should say why; got %v", err)
+		}
+	})
 }
