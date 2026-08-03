@@ -70,7 +70,14 @@ func (p crewContainerPlacer) Place(ctx context.Context, stagingDir string, rels 
 		// with "Cannot open: Permission denied"; the owner can.
 		User:          "1002:1002",
 		PreserveModes: true,
-		PreserveTimes: true,
+		// NOT preserved. Restore keeps mtimes because it is rebuilding a
+		// snapshot; an import is writing these documents NOW, and the
+		// mtime of a file in somebody else's export says nothing about
+		// this agent's memory. Keeping them also fails outright: utime
+		// on an entry owned by another uid is EPERM for the extracting
+		// identity, and tar exits non-zero having written the bytes.
+		//   tar: daily: Cannot utime: Operation not permitted
+		PreserveTimes: false,
 	}, bytes.NewReader(archive))
 }
 
@@ -131,9 +138,7 @@ func tarStagedDocs(stagingDir string, rels []string) ([]byte, error) {
 			// Group-writable so the NEXT writer — whichever identity it
 			// is — can replace it. The 0644 the sidecar leaves behind is
 			// what made this file unwritable by anyone else.
-			Mode: 0o664,
-			// A memory note's mtime is content, not metadata; the
-			// restore path records the same decision for this tree.
+			Mode:    0o664,
 			ModTime: st.ModTime(),
 			Size:    int64(len(body)),
 		}); err != nil {
