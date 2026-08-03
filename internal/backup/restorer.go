@@ -800,7 +800,12 @@ func probeWritable(ctx context.Context, ops DockerOps, containerID string, spec 
 				`touch %q 2>&1 && rm -f %q`, spec.Dest, probe, probe),
 	})
 	if err != nil {
-		return fmt.Errorf("cannot probe %s as %s (is the container running?): %w", spec.Dest, spec.User, err)
+		// Almost always a stopped container: exec needs a running one,
+		// and every restore section now goes through exec-tar. Say the
+		// fix rather than the symptom — "exec failed" sends the reader
+		// looking at docker rather than at the crew.
+		return fmt.Errorf("cannot reach %s to restore into it (exec failed — the crew container must be RUNNING; start it with `crewship crew start`): %w",
+			spec.Dest, err)
 	}
 	if code != 0 {
 		return fmt.Errorf("%s is not writable by %s: %s", spec.Dest, spec.User, strings.TrimSpace(string(out)))
@@ -821,14 +826,50 @@ func probeWritable(ctx context.Context, ops DockerOps, containerID string, spec 
 // re-flips exactly the subtrees that need it — the same two-step the
 // docker provider's init container performs at crew creation.
 //
-// Idempotent, and scoped to .memory directories by find, so a bundle
-// with no memory subtrees is a no-op rather than a broad chgrp.
+// Idempotent, and scoped to .memory subtrees by find, so a bundle with
+// no memory directories is a no-op rather than a broad chgrp.
+//
+// The two passes are deliberately not equally strict, mirroring
+// buildChownInitCmd and prepMemoryDirs:
+//
+//   - The DIRECTORIES are authoritative. Group 1002 plus the setgid bit
+//     on a .memory directory is the whole contract — it is what makes
+//     everything the agent creates there afterwards inherit the sidecar
+//     group. Those directories were just written by this restore under
+//     uid 1001, so nothing should stop us, and if something does the
+//     restore has to say so rather than leave crew-shared memory in a
+//     state that looks fine and silently stops sharing.
+//   - The CONTENTS are best-effort. A file already present in the target
+//     but absent from the bundle can be owned by the sidecar (uid 1002),
+//     where chgrp EPERMs — and benignly, because such a file is already
+//     in group 1002. prepMemoryDirs tolerates exactly this case for
+//     exactly this reason.
+//
+// find -exec … + rather than `for p in $(find …)`: a path containing a
+// space or a glob character would otherwise be split into pieces and the
+// chgrp would silently target the wrong thing, or nothing.
 func reapplyMemoryPerms(ctx context.Context, ops DockerOps, containerID string) error {
+	root := ContainerCrewPath
+	// Each line does exactly one thing, and `-path '*/.memory/*'` selects
+	// strictly INSIDE a .memory directory, so the two halves do not
+	// overlap. That matters beyond tidiness: an earlier version applied a
+	// strict pass and then a tolerant `chmod -R` over the same paths, and
+	// the tolerant pass silently repaired whatever the strict one got
+	// wrong — which made a mutation of the strict pass survive. A
+	// permission fix nothing can detect the absence of is how the
+	// original bug got here.
+	//
+	// The resulting modes (2775 on directories, 2664 on files) are what
+	// prepMemoryDirs' `chmod -R u+rwX,g+rwXs` produces on a live crew,
+	// setgid on files included. A restored tree that differs from a live
+	// one differs in a way nobody would notice until the sidecar stopped
+	// being able to write.
 	script := `set -e
-for p in $(find ` + ContainerCrewPath + ` -type d -name .memory 2>/dev/null); do
-  chgrp -R 1002 -- "$p" || exit 4
-  chmod -R u+rwX,g+rwXs -- "$p" || exit 5
-done`
+find ` + root + ` -type d -name .memory -exec chgrp 1002 {} +
+find ` + root + ` -type d -name .memory -exec chmod 2775 {} +
+find ` + root + ` -path '*/.memory/*' -exec chgrp 1002 {} + || true
+find ` + root + ` -path '*/.memory/*' -type d -exec chmod 2775 {} + || true
+find ` + root + ` -path '*/.memory/*' -type f -exec chmod ug+rw,g+s {} + || true`
 	code, out, err := ops.ExecAs(ctx, containerID, sidecarWriterUser, []string{"sh", "-c", script})
 	if err != nil {
 		return fmt.Errorf("re-apply memory permissions: %w", err)

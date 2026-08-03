@@ -405,6 +405,18 @@ func (lc *liveCrew) seedMemory(ctx context.Context, t *testing.T, agentSlugs []s
 		want[p] = line + "\n"
 		fmt.Fprintf(&b, "mkdir -p '%s' && printf '%%s\\n' '%s' > '%s'\n", filepath.Dir(p), line, p)
 	}
+	// A memory topic directory whose name contains a space. Topic
+	// directories are agent-written, so this is reachable content, and it
+	// has to survive both the tar round trip and the recursive chmod the
+	// restore runs afterwards.
+	//
+	// It does NOT exercise the `find -exec … +` form in
+	// reapplyMemoryPerms: that walk only ever names `.memory` directories
+	// themselves, whose parents are validated slug components. Mutating
+	// that form back to `for p in $(find …)` was tried and survived —
+	// the shape is defence-in-depth against a future caller, not a fix
+	// for a reachable bug, and is reported as such.
+	add("/crew/shared/.memory/topics/quarterly review/pins.md", "pinned: topic directories are agent-written")
 	add("/crew/shared/.memory/CREW.md", "crew charter: ship the backup fix")
 	add("/crew/shared/.memory/learned.md", "learned: never trust a manifest that asserts")
 	add("/crew/shared/.memory/topics/eng/pins.md", "pinned: /crew is the memory tree")
