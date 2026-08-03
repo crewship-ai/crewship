@@ -54,6 +54,48 @@ Each socket gets a **1.5-second ping timeout** (`socketPingTimeout`) to prevent 
   **Rancher Desktop** is supported in **dockerd (moby)** mode only. In containerd mode it still creates `~/.rd/docker.sock`, but that socket accepts a connection and immediately closes it — detection correctly moves on, and Crewship cannot use the instance. Switch the container engine to dockerd in Rancher Desktop's preferences.
 </Warning>
 
+#### VM-backed runtimes and host bind mounts
+
+Colima, Rancher Desktop, Docker Desktop and `podman machine` run the daemon
+inside a **VM that only sees the host directories it was configured to share**;
+OrbStack shares the whole filesystem. A crew container's bind sources are
+resolved *inside* that VM, so a path outside the share set does not exist as far
+as the daemon is concerned — and the daemon reports it as
+`bind source path does not exist`, for a file that is plainly on your disk.
+
+Two mechanisms keep this from being the operator's problem:
+
+- **The mandatory binds are staged into the data dir.** `crewship-sidecar` and
+  `entrypoint.sh` are resolved next to the `crewship` executable
+  (`/opt/homebrew/…` for Homebrew, `/usr/local/bin` for `install.sh`) — outside
+  every default share set. At startup the provider copies them to
+  `<OutputBasePath>/.runtime/` and bind-mounts the copies, so the daemon only
+  has to see the one host subtree it already needed for `/workspace`, `/output`
+  and `/crew`. The copy preserves the source's mtime, so the startup
+  stale-sidecar check keeps working.
+- **Anything still unreachable is named.** The provider probes the mandatory
+  binds at construction and, on any bind failure, rewrites the daemon's error
+  into one that says which runtime, which path, that the path *does* exist on
+  this host, and the exact command that adds it to the VM's share set.
+
+#### Which daemon builds the image
+
+Devcontainer provisioning builds with the `docker` CLI but creates and
+cache-checks through the provider's own socket. The build is pinned to the
+provider's endpoint (`DOCKER_HOST` set on the build subprocess, `DOCKER_CONTEXT`
+stripped), so the operator's `docker context` cannot send the image to a
+different daemon than the one the container is created on.
+
+#### Crew containers stranded by a runtime switch
+
+Changing runtime under a running instance does not stop the previous daemon's
+crew containers, and they stay bind-mounted to the same live host crew
+directories. At startup the provider enumerates every other reachable
+Docker-API daemon, finds crew containers carrying **this instance's** container
+prefix, logs them with both runtimes named, and stops them — stopped, not
+removed, so they remain inspectable. Set `CREWSHIP_STRANDED_CREWS=report` to
+report without stopping.
+
 #### Runtime Selection
 
 | Runtime | Config Value | Security Profile |

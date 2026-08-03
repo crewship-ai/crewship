@@ -585,7 +585,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		Name:             containerName,
 	})
 	if err != nil {
-		return "", fmt.Errorf("container create: %w", err)
+		// A bind source the daemon cannot see reads as "bind source path does
+		// not exist" for a file that is plainly there. explainBindFailure says
+		// which VM share is missing and how to add it (#1706).
+		return "", fmt.Errorf("container create: %w", p.explainBindFailure(err))
 	}
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
 

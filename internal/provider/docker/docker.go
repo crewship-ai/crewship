@@ -502,6 +502,11 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
 
+	// Repoint the mandatory sidecar/entrypoint binds at copies under the crew
+	// data dir, so the daemon only has to be able to see ONE host subtree
+	// instead of two (#1706). See runtime_binds.go.
+	cfg = stageRuntimeArtifacts(cfg, logger)
+
 	p := &Provider{
 		client:         cli,
 		cfg:            cfg,
@@ -545,6 +550,14 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	if self, err := os.Executable(); err == nil {
 		p.assertSidecarFreshAtStartup(self)
 	}
+
+	// Say at boot — not on the user's first prompt — when the daemon cannot
+	// reach a mandatory bind source (#1706).
+	p.preflightMandatoryBinds(ctx)
+
+	// A runtime switch leaves the previous daemon's crew containers running,
+	// still bind-mounted to the same live host crew directories (#1704).
+	p.reconcileStrandedCrews(ctx)
 
 	return p, nil
 }
