@@ -79,21 +79,35 @@ func (h *MemoryPortabilityHandler) resolveMemoryScope(w http.ResponseWriter, r *
 		replyError(w, http.StatusBadRequest, "crew_id is required")
 		return "", false
 	}
-	ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
-	if err != nil {
-		h.logger.Error("memory portability: crew lookup", "err", err)
-		replyError(w, http.StatusInternalServerError, "crew lookup failed")
-		return "", false
-	}
-	if !ok {
+	// The path is built from what the DATABASE says exists, never from
+	// the string the caller sent — the lookups below re-read the id and
+	// the slug and everything downstream uses those copies.
+	//
+	// safepath.JoinUnder already refuses a traversal component, so this
+	// is defence in depth rather than the only guard. It is worth having
+	// anyway: it makes the confinement a property of where the value
+	// came from instead of a property of a helper three calls away, and
+	// it is what lets a reader (and CodeQL, which cannot see through
+	// JoinUnder) tell at a glance that no request string reaches a
+	// filesystem call.
+	var safeCrewID string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewID, workspaceID).Scan(&safeCrewID)
+	if errors.Is(err, sql.ErrNoRows) {
 		// 404 rather than 403: a foreign crew id must not be
 		// distinguishable from a missing one.
 		replyError(w, http.StatusNotFound, "crew not found")
 		return "", false
 	}
+	if err != nil {
+		h.logger.Error("memory portability: crew lookup", "err", err)
+		replyError(w, http.StatusInternalServerError, "crew lookup failed")
+		return "", false
+	}
 
 	if agentSlug == "" {
-		dir, err := memory.HostCrewMemoryRoot(h.outputBasePath, crewID)
+		dir, err := memory.HostCrewMemoryRoot(h.outputBasePath, safeCrewID)
 		if err != nil {
 			h.logger.Error("memory portability: crew memory root", "err", err)
 			replyError(w, http.StatusInternalServerError, "could not resolve crew memory")
@@ -102,10 +116,10 @@ func (h *MemoryPortabilityHandler) resolveMemoryScope(w http.ResponseWriter, r *
 		return dir, true
 	}
 
-	var exists int
+	var safeSlug string
 	err = h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL`,
-		agentSlug, crewID).Scan(&exists)
+		`SELECT slug FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL`,
+		agentSlug, safeCrewID).Scan(&safeSlug)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "agent not found in this crew")
 		return "", false
@@ -115,7 +129,7 @@ func (h *MemoryPortabilityHandler) resolveMemoryScope(w http.ResponseWriter, r *
 		replyError(w, http.StatusInternalServerError, "agent lookup failed")
 		return "", false
 	}
-	dir, err := memory.HostAgentMemoryRoot(h.outputBasePath, crewID, agentSlug)
+	dir, err := memory.HostAgentMemoryRoot(h.outputBasePath, safeCrewID, safeSlug)
 	if err != nil {
 		h.logger.Error("memory portability: agent memory root", "err", err)
 		replyError(w, http.StatusInternalServerError, "could not resolve agent memory")
