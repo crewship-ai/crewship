@@ -257,6 +257,11 @@ func TestMemoryImport_RefusesConsolidatorOwnedFiles(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Import(rr, req)
 
+	// Status first: decoding an error body would leave both slices empty
+	// and report "want lessons.md refused" instead of the real cause.
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 with a per-document failure; body = %s", rr.Code, rr.Body.String())
+	}
 	var out struct {
 		Written []string         `json:"written"`
 		Failed  []map[string]any `json:"failed"`

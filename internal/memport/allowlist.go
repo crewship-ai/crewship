@@ -2,6 +2,7 @@ package memport
 
 import (
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -67,11 +68,10 @@ func checkImportPath(rel string) (cap int, refusal importRefusal) {
 	// the one nested shape the importer accepts, because it is the one
 	// nested shape the product itself writes and a crew export would
 	// otherwise not round-trip.
-	if base := path.Base(clean); base == "pins.md" && strings.HasSuffix(path.Dir(clean), "/topics") {
-		if segs := strings.Split(clean, "/"); len(segs) == 3 {
-			c, _ := memory.CapForPath("pins.md")
-			return c, ""
-		}
+	if segs := strings.Split(clean, "/"); len(segs) == 3 &&
+		segs[1] == "topics" && segs[2] == "pins.md" && crewSlugRe.MatchString(segs[0]) {
+		c, _ := memory.CapForPath("pins.md")
+		return c, ""
 	}
 
 	c, known := memory.CapForPath(clean)
@@ -84,6 +84,11 @@ func checkImportPath(rel string) (cap int, refusal importRefusal) {
 	}
 	return c, ""
 }
+
+// crewSlugRe bounds the first segment to something that can actually be
+// a crew slug. Without it "any directory called topics" was the rule,
+// which let an import invent directories inside the memory tree.
+var crewSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // isConsolidatorOwned matches the files consolidate.WriteLesson and the
 // learned-rules sweep maintain: lessons.md, learned.md and the

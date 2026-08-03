@@ -200,6 +200,9 @@ func (h *MemoryPortabilityHandler) Export(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// importMaxBodyBytes bounds one import request.
+const importMaxBodyBytes = 32 << 20
+
 type memoryImportRequest struct {
 	CrewID    string             `json:"crew_id"`
 	AgentSlug string             `json:"agent_slug"`
@@ -214,7 +217,16 @@ type memoryImportRequest struct {
 // has already left the machine where the decision is made.
 func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request) {
 	var body memoryImportRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, importMaxBodyBytes)).Decode(&body); err != nil {
+		// Distinguish "too big" from "malformed": an operator whose
+		// bundle exceeded the cap needs to know that is what happened,
+		// not go looking for a syntax error that is not there.
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			replyError(w, http.StatusRequestEntityTooLarge,
+				"import payload exceeds the size limit for one request; split it")
+			return
+		}
 		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

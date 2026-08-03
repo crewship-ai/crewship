@@ -11,6 +11,28 @@ import (
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
+// expectRefused pins the contract Apply promises for a document it will
+// not write: no hard error, nothing written, and the refusal REPORTED.
+//
+// The tests here used to join those with &&, which also passes when the
+// document vanishes with no report, or when Apply returns a hard error
+// and abandons the rest of the batch — two outcomes the design forbids.
+func expectRefused(t *testing.T, res ApplyResult, err error, what string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: Apply() hard error = %v, want a per-document refusal", what, err)
+	}
+	if len(res.Written) != 0 {
+		t.Fatalf("%s: written = %v, want none", what, res.Written)
+	}
+	if len(res.Failed) != 1 {
+		t.Fatalf("%s: failed = %+v, want exactly one reported refusal", what, res.Failed)
+	}
+	if res.Failed[0].Reason == "" {
+		t.Errorf("%s: refusal carries no reason", what)
+	}
+}
+
 // A live .memory tree exports to an OKF bundle and imports back to
 // byte-identical content. Round-trip is the property that makes the
 // bundle a backup an operator can actually rely on; without it the
@@ -246,9 +268,7 @@ func TestApplyRefusesUnknownPaths(t *testing.T) {
 			res, err := Apply(context.Background(), root,
 				[]Doc{{Tier: memory.TierAgent, RelPath: bad, Body: []byte("x")}},
 				memory.WriteConfig{})
-			if err == nil && len(res.Failed) == 0 && len(res.Written) > 0 {
-				t.Fatalf("Apply accepted unrecognised path %q", bad)
-			}
+			expectRefused(t, res, err, bad)
 		})
 	}
 }
@@ -263,9 +283,7 @@ func TestApplyRefusesConsolidatorOwnedFiles(t *testing.T) {
 			res, err := Apply(context.Background(), root,
 				[]Doc{{Tier: memory.TierLearned, RelPath: owned, Body: []byte("freeform\n")}},
 				memory.WriteConfig{})
-			if err == nil && len(res.Failed) == 0 && len(res.Written) > 0 {
-				t.Fatalf("Apply overwrote consolidator-owned %q", owned)
-			}
+			expectRefused(t, res, err, owned)
 			if _, serr := os.Stat(filepath.Join(root, filepath.FromSlash(owned))); serr == nil {
 				t.Errorf("%s was written", owned)
 			}

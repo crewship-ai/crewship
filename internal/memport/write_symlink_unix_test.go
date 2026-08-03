@@ -35,9 +35,7 @@ func TestApplyRefusesSymlinkedParent(t *testing.T) {
 	res, err := Apply(context.Background(), root,
 		[]Doc{{Tier: memory.TierAgent, RelPath: "daily/2026-08-01.md", Body: []byte("stolen")}},
 		memory.WriteConfig{})
-	if err == nil && len(res.Failed) == 0 {
-		t.Fatal("Apply wrote through a symlinked parent directory")
-	}
+	expectRefused(t, res, err, "symlinked parent")
 	if _, serr := os.Stat(filepath.Join(elsewhere, "2026-08-01.md")); serr == nil {
 		t.Fatal("content landed outside the memory root")
 	}
@@ -56,9 +54,7 @@ func TestApplyRefusesSymlinkedLeaf(t *testing.T) {
 	res, err := Apply(context.Background(), root,
 		[]Doc{{Tier: memory.TierAgent, RelPath: "AGENT.md", Body: []byte("overwrite")}},
 		memory.WriteConfig{})
-	if err == nil && len(res.Failed) == 0 {
-		t.Fatal("Apply wrote through a symlinked leaf")
-	}
+	expectRefused(t, res, err, "symlinked leaf")
 	got, rerr := os.ReadFile(victim)
 	if rerr != nil {
 		t.Fatal(rerr)

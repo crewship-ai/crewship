@@ -2,6 +2,7 @@ package memport
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"path"
 	"strings"
@@ -69,11 +70,7 @@ func Detect(fsys fs.FS) (Format, error) {
 		if !strings.EqualFold(path.Ext(n), ".md") {
 			continue
 		}
-		b, err := fs.ReadFile(fsys, n)
-		if err != nil {
-			continue
-		}
-		if _, _, ok := splitFrontmatter(b); ok {
+		if sniffHasFrontmatter(fsys, n) {
 			return FormatOKF, nil
 		}
 	}
@@ -111,4 +108,24 @@ func containsFold(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// sniffFrontmatterBytes bounds the detection read. A YAML header lives at
+// the very start of a file, so there is no reason for detection to load a
+// whole document — and every reason not to, when the directory is one
+// somebody else assembled.
+const sniffFrontmatterBytes = 8 << 10
+
+func sniffHasFrontmatter(fsys fs.FS, name string) bool {
+	f, err := fsys.Open(name)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, sniffFrontmatterBytes))
+	if err != nil {
+		return false
+	}
+	_, _, ok := splitFrontmatter(head)
+	return ok
 }

@@ -168,7 +168,15 @@ Examples:
 		if !st.IsDir() {
 			return fmt.Errorf("%s is not a directory", from)
 		}
-		fsys := os.DirFS(from)
+		// SecureDirFS, not os.DirFS. os.DirFS refuses ".." inside a name
+		// and still follows symlinks in the tree — and the source here is
+		// by this feature's own description the least trustworthy input
+		// it has: a bundle somebody else produced. A link named
+		// MEMORY.md pointing at ~/.ssh/id_rsa would be read, printed in
+		// the plan, and POSTed to the server. The server-side read is
+		// already guarded this way; the local one has the same exposure
+		// and now the same guard.
+		fsys := memport.SecureDirFS(from)
 
 		format := memport.Format(formatFlag)
 		if formatFlag == "" || formatFlag == "auto" {
@@ -252,6 +260,7 @@ func postImportBatch(client *cli.Client, crewID, agentSlug string, docs []mempor
 		payload = append(payload, map[string]any{
 			"path":    d.RelPath,
 			"tier":    string(d.Tier),
+			"scope":   string(d.Scope),
 			"title":   d.Title,
 			"tags":    d.Tags,
 			"sources": d.Sources,

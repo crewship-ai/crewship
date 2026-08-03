@@ -41,6 +41,50 @@ func ReadSource(fsys fs.FS, f Format, opts Options) (Plan, error) {
 
 var dateFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
+// maxSourceFileBytes bounds one source document. The largest ceiling any
+// memory file has is 30 KB (daily logs); this is generous next to that
+// and still refuses to load somebody's DVD image because it was named
+// AGENT.md. Oversized files are reported, never silently dropped.
+const maxSourceFileBytes = 1 << 20 // 1 MiB
+
+// readCapped reads one source file, refusing anything over the per-file
+// ceiling. Returns ok=false having already recorded the skip.
+func readCapped(fsys fs.FS, b *builder, name string) ([]byte, bool) {
+	if info, err := fs.Stat(fsys, name); err == nil && info.Size() > maxSourceFileBytes {
+		b.skip(name, fmt.Sprintf("larger than the %d-byte limit for one memory document", maxSourceFileBytes))
+		return nil, false
+	}
+	body, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		b.skip(name, "unreadable: "+err.Error())
+		return nil, false
+	}
+	if len(body) > maxSourceFileBytes {
+		b.skip(name, fmt.Sprintf("larger than the %d-byte limit for one memory document", maxSourceFileBytes))
+		return nil, false
+	}
+	return body, true
+}
+
+// validRelPath enforces the invariant Doc.RelPath documents: a relative,
+// forward-slashed path under a .memory directory. The OKF reader takes
+// this value from a bundle somebody else wrote, so it is exactly the
+// field that must not be trusted on the strength of its documentation.
+func validRelPath(rel string) bool {
+	if rel == "" || path.IsAbs(rel) || strings.Contains(rel, "\\") {
+		return false
+	}
+	if rel != path.Clean(rel) {
+		return false
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 // --- OpenClaw ---------------------------------------------------------
 
 func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
@@ -65,9 +109,8 @@ func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 			continue
 		}
 
-		body, err := fs.ReadFile(fsys, n)
-		if err != nil {
-			b.skip(n, "unreadable: "+err.Error())
+		body, ok := readCapped(fsys, b, n)
+		if !ok {
 			continue
 		}
 
@@ -134,9 +177,9 @@ func readNanoClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		body, err := fs.ReadFile(fsys, n)
-		if err != nil {
-			return fmt.Errorf("memport: read %s: %w", n, err)
+		body, ok := readCapped(fsys, b, n)
+		if !ok {
+			continue
 		}
 
 		switch g {
@@ -205,9 +248,9 @@ func readOKF(fsys fs.FS, names []string, b *builder) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		raw, err := fs.ReadFile(fsys, n)
-		if err != nil {
-			return fmt.Errorf("memport: read %s: %w", n, err)
+		raw, ok := readCapped(fsys, b, n)
+		if !ok {
+			continue
 		}
 		fm, body, err := parseFrontmatter(raw)
 		if err != nil {
@@ -272,9 +315,8 @@ func readCrewship(fsys fs.FS, names []string, b *builder, opts Options) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		body, err := fs.ReadFile(fsys, n)
-		if err != nil {
-			b.skip(n, "unreadable: "+err.Error())
+		body, ok := readCapped(fsys, b, n)
+		if !ok {
 			continue
 		}
 		// A live .memory tree is plain markdown and is passed through
@@ -331,6 +373,10 @@ func newBuilder() *builder {
 }
 
 func (b *builder) merge(rel string, tier memory.Tier, scope Scope, source string, body []byte) {
+	if !validRelPath(rel) {
+		b.skip(source, "would land at "+rel+", which is not a path inside a memory directory")
+		return
+	}
 	d, ok := b.docs[rel]
 	if !ok {
 		d = &Doc{Tier: tier, Scope: scope, RelPath: rel}

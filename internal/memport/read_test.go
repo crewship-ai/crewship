@@ -333,12 +333,78 @@ func TestReadNanoClawAssignsScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSource() error = %v", err)
 	}
-	crew, _ := findDoc(plan, "CREW.md")
+	crew, ok := findDoc(plan, "CREW.md")
+	if !ok {
+		t.Fatalf("CREW.md missing; got %v", relPaths(plan))
+	}
 	if crew.Scope != ScopeCrew {
 		t.Errorf("CREW.md scope = %q, want %q", crew.Scope, ScopeCrew)
 	}
-	agent, _ := findDoc(plan, "AGENT.md")
+	agent, ok := findDoc(plan, "AGENT.md")
+	if !ok {
+		t.Fatalf("AGENT.md missing; got %v", relPaths(plan))
+	}
 	if agent.Scope != ScopeAgent {
 		t.Errorf("AGENT.md scope = %q, want %q", agent.Scope, ScopeAgent)
+	}
+}
+
+// Doc.RelPath is documented as "a relative path under a .memory
+// directory, never absolute". Nothing enforced it, and the OKF reader
+// takes the value straight from a bundle somebody else wrote.
+func TestReadSourceRejectsHostilePaths(t *testing.T) {
+	for _, bad := range []string{"/etc/passwd", "../../escape.md", "a//b.md", "daily/../../x.md"} {
+		t.Run(bad, func(t *testing.T) {
+			fsys := fstest.MapFS{
+				"note.md": &fstest.MapFile{Data: []byte(
+					"---\ntype: agent\ncrewship_path: " + bad + "\n---\n\nbody\n")},
+			}
+			plan, err := ReadSource(fsys, FormatOKF, Options{})
+			if err != nil {
+				t.Fatalf("ReadSource() error = %v", err)
+			}
+			for _, d := range plan.Docs {
+				if d.RelPath == bad {
+					t.Fatalf("hostile crewship_path %q survived into a Doc", bad)
+				}
+			}
+			var reported bool
+			for _, s := range plan.Skipped {
+				if s.Source == "note.md" {
+					reported = true
+				}
+			}
+			if !reported {
+				t.Errorf("hostile path was neither used nor reported: %+v", plan.Skipped)
+			}
+		})
+	}
+}
+
+// A source tree is somebody else's directory. One enormous file must not
+// be loaded whole just to be turned into a memory document.
+func TestReadSourceSkipsOversizedFiles(t *testing.T) {
+	fsys := fstest.MapFS{
+		"AGENT.md": &fstest.MapFile{Data: []byte("small\n")},
+		"pins.md":  &fstest.MapFile{Data: make([]byte, maxSourceFileBytes+1)},
+	}
+	plan, err := ReadSource(fsys, FormatCrewship, Options{})
+	if err != nil {
+		t.Fatalf("ReadSource() error = %v", err)
+	}
+	if _, ok := findDoc(plan, "pins.md"); ok {
+		t.Error("an oversized source file was read into a document")
+	}
+	if _, ok := findDoc(plan, "AGENT.md"); !ok {
+		t.Error("the oversized file took its neighbours down with it")
+	}
+	var reported bool
+	for _, s := range plan.Skipped {
+		if s.Source == "pins.md" {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Errorf("the oversized file was dropped without a word: %+v", plan.Skipped)
 	}
 }

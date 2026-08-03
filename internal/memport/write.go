@@ -50,6 +50,14 @@ func ExportOKF(dir string, docs []Doc) error {
 	if dir == "" {
 		return fmt.Errorf("memport: export needs a destination directory")
 	}
+	// A destination that already holds files is refused. Writing over an
+	// older bundle leaves whatever the new export does not overwrite
+	// sitting beside it, indistinguishable from current — a document
+	// deleted from memory since the last export would still be in the
+	// directory, and the manifest would not mention it.
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
+		return fmt.Errorf("memport: %s is not empty; export to a new directory so a stale bundle cannot be mistaken for this one", dir)
+	}
 	man := Manifest{
 		Format:    "okf",
 		Version:   "0.1",

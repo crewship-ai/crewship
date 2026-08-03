@@ -12,7 +12,7 @@ Crewship stores agent memory as plain markdown on disk — `AGENT.md`, `CREW.md`
 
 This is deliberately not a backup. `crewship backup` produces an encrypted archive built for disaster recovery — correct for restoring an instance, useless for reading. A portability bundle is the opposite: no encryption, no database, just the files, with a YAML header on each one saying what it is.
 
-The format is [OKF](https://cloud.google.com/blog) (Open Knowledge Format) — a vendor-neutral spec for agent knowledge as markdown plus YAML frontmatter. Using a published spec rather than our own directory convention is the whole point: a bundle should outlive the tool that wrote it.
+The format is **OKF** (Open Knowledge Format, published by Google Cloud in June 2026) — a vendor-neutral spec for agent knowledge as markdown plus YAML frontmatter. Using a published spec rather than our own directory convention is the whole point: a bundle should outlive the tool that wrote it.
 
 ## When to use it
 

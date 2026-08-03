@@ -54,6 +54,9 @@ func (d secureDir) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
+	// Directories still need a plain open — O_NOFOLLOW would refuse a
+	// legitimately symlinked ROOT, and the walk only reaches a directory
+	// through ReadDir, which drops links before descending.
 	info, err := os.Lstat(p)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
@@ -61,7 +64,17 @@ func (d secureDir) Open(name string) (fs.File, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
-	f, err := os.Open(p)
+	if info.IsDir() {
+		f, err := os.Open(p)
+		if err != nil {
+			return nil, &fs.PathError{Op: "open", Path: name, Err: err}
+		}
+		return f, nil
+	}
+	// Files open with O_NOFOLLOW. Lstat-then-Open leaves a window in
+	// which the entry is swapped for a link and Open follows it; the
+	// refusal has to be part of the open syscall.
+	f, err := memory.OpenNoFollow(p)
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}

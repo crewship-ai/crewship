@@ -128,14 +128,43 @@ func EnsureDirNoFollow(root, dir string) error {
 		case err == nil:
 			continue
 		case os.IsNotExist(err):
-			if mkErr := os.Mkdir(cur, 0o755); mkErr != nil && !os.IsExist(mkErr) {
-				return fmt.Errorf("create memory directory %s: %w", seg, mkErr)
+			if mkErr := os.Mkdir(cur, 0o755); mkErr != nil {
+				if !os.IsExist(mkErr) {
+					return fmt.Errorf("create memory directory %s: %w", seg, mkErr)
+				}
+				// EEXIST means something appeared between the Lstat above
+				// and this Mkdir. Treating that as success would accept
+				// whatever won the race — including a symlink planted by
+				// the very process this walk exists to defend against. Look
+				// again.
+				info, statErr := os.Lstat(cur)
+				if statErr != nil {
+					return fmt.Errorf("stat memory directory %s: %w", seg, statErr)
+				}
+				if info.Mode()&os.ModeSymlink != 0 {
+					return fmt.Errorf("refusing symlinked memory directory: %s", seg)
+				}
+				if !info.IsDir() {
+					return fmt.Errorf("memory path component is not a directory: %s", seg)
+				}
 			}
 		default:
 			return fmt.Errorf("stat memory directory %s: %w", seg, err)
 		}
 	}
 	return nil
+}
+
+// OpenNoFollow opens a file read-only without following a symlink at the
+// final component. Callers that need a handle (an fs.File implementation,
+// a streaming read) use this; callers that just want the bytes use
+// ReadFileNoFollow.
+//
+// Lstat-then-Open is NOT equivalent: between the two syscalls the entry
+// can be swapped for a link, and Open would follow it. The refusal has
+// to be part of the open itself.
+func OpenNoFollow(path string) (*os.File, error) {
+	return openNoFollow(path)
 }
 
 // ReadFileNoFollow reads a regular file without following a symlink at
