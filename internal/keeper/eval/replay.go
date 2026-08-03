@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
@@ -75,13 +76,20 @@ func ReplayCandidate(ctx context.Context, c Candidate, corpus []CorpusRow, passe
 			return nil, err
 		}
 		row := Row{
+			ID:            cr.ID,
 			Label:         cr.Label,
 			Source:        cr.LabelSource,
 			IncumbentRisk: cr.IncumbentRisk,
+			PromptChars:   len(cr.Prompt),
 			Replays:       make([]Replay, 0, passes),
 		}
 		for p := 0; p < passes; p++ {
-			row.Replays = append(row.Replays, replayOnce(ctx, c, cr.Prompt, &temp))
+			rp := replayOnce(ctx, c, cr.Prompt, &temp)
+			// Through the same tier floor production applied before it recorded the
+			// row it is about to be compared against. Without this the harness
+			// scores a raw verdict against a post-policy one.
+			rp.Decision = applyRecordedPolicy(rp.Decision, cr.SecurityLevel)
+			row.Replays = append(row.Replays, rp)
 		}
 		rows = append(rows, row)
 	}
@@ -125,4 +133,37 @@ func replayOnce(ctx context.Context, c Candidate, prompt string, temp *float64) 
 
 	decision, risk, _, _ := gatekeeper.NormalizeRawResponse(resp.Content)
 	return Replay{Decision: Decision(decision), Risk: risk}
+}
+
+// applyRecordedPolicy puts a replayed verdict through the same tier floor
+// production applied before it wrote the row.
+//
+// keeper_requests.decision is the POST-floor decision: gatekeeper.go runs
+// ApplyTierPolicyFloor on every access and execute flow, so an L4 credential
+// turns the model's ALLOW into ESCALATE before anything is stored. replayOnce
+// returned the raw normalized verdict, so every row where policy changed the
+// answer scored as a disagreement — and the harness reported the tier system
+// doing its job as the model disagreeing with itself.
+//
+// It cost a wrong headline. Measured 2026-08-02, vs-INCUMBENT 0.625 was read as
+// "the judge contradicts itself in a third of runs", which nearly bought a
+// self-consistency feature to fix a problem that was not there: the
+// self-agreement split measured 1.000 in both prompt-size halves the next day.
+// The model is deterministic on replay. The 37.5% was policy.
+//
+// Deliberately NOT the whole gatekeeper: no hard gate, no intent-length refusal,
+// no evidence. Those depend on live state — a binding that may since have been
+// revoked, facts that have moved — and reconstructing them at replay time would
+// score the candidate against a world that no longer exists. The tier floor is
+// the one transform that is a pure function of the recorded verdict and the
+// credential's tier, which is why it is the one applied here.
+func applyRecordedPolicy(d Decision, securityLevel int) Decision {
+	if securityLevel <= 0 {
+		// No tier resolved — a legacy row, or a request with no credential behind
+		// it. Flooring on a guess would move a verdict on evidence nobody has.
+		return d
+	}
+	tier := keeper.SecurityLevel(securityLevel).Tier()
+	out, _, _ := keeper.ApplyTierPolicyFloor(tier, string(d), 0)
+	return Decision(out)
 }

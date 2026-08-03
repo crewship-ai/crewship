@@ -83,6 +83,10 @@ func newEvalDB(t *testing.T) *sql.DB {
 			resolved_action TEXT,
 			resolved_by_user_id TEXT
 		);
+		CREATE TABLE credentials (
+			id TEXT PRIMARY KEY,
+			security_level INTEGER NOT NULL DEFAULT 1
+		);
 		CREATE TABLE keeper_request_events (
 			id TEXT PRIMARY KEY,
 			request_id TEXT NOT NULL,
