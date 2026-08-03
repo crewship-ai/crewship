@@ -669,7 +669,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		Decision:       decision,
 		Reason:         reason,
 		RiskScore:      risk,
-		Prompt:         truncateForAudit(prompt),
+		Prompt:         truncatePromptForAudit(prompt),
 		RawLLMResponse: truncateForAudit(raw),
 		InfraFailure:   unparseable,
 	}, nil
@@ -705,6 +705,23 @@ func tierPolicyBlock(level keeper.SecurityLevel) string {
 }
 
 const maxAuditText = 2000
+
+// truncatePromptForAudit stores the prompt WHOLE.
+//
+// It was capped at maxAuditText like the response, and that broke two things at
+// once. The audit trail could not answer "what was the judge asked?" — the
+// record for a production-credential decision ended mid-sentence. And
+// `keeper eval` replays this column, so every number the harness produced
+// measured a model's behaviour on a mutilated prompt: a 9B local model and a
+// hosted frontier model returned the SAME 0.625 to three decimals, because both
+// fail closed once the decision criteria and the schema instruction are cut off
+// the end.
+//
+// A prompt is bounded by construction — the tier block, the criteria, the
+// evidence and a budgeted slice of conversation — so this is not unbounded
+// growth. PromptBudgetTokens is where a prompt's size is governed; an audit
+// column is not the place to do it silently.
+func truncatePromptForAudit(s string) string { return s }
 
 func truncateForAudit(s string) string {
 	if len(s) <= maxAuditText {

@@ -54,6 +54,13 @@ type Replay struct {
 // outcomes from a candidate (N passes, since replay runs at the production
 // temperature 0.1 and is non-deterministic).
 type Row struct {
+	// ID names the keeper_requests row, so a disagreement can be traced back to
+	// the request that produced it. Carried for --explain: three hypotheses about
+	// a 37.5% gap died to data on 2026-08-03, and the one thing that would have
+	// settled any of them in a minute was being able to see WHICH rows disagreed
+	// and in which direction.
+	ID string
+
 	// Label is what the candidate is scored against and Source says what that
 	// label is worth. A Row with Source unset scores into the model-labelled
 	// segment, which is the safe default: an un-annotated row must never be

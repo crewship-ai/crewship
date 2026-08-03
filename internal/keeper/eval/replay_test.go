@@ -181,3 +181,60 @@ func TestReplayCandidate_MirrorsProductionConstrainedDecoding(t *testing.T) {
 		t.Errorf("decision enum = %v, want the credential path's three verbs", enum)
 	}
 }
+
+// The harness compared two different things and called the gap instability.
+//
+// keeper_requests.decision is the decision production RECORDED — the judge's
+// verdict AFTER the tier floor. gatekeeper.go applies ApplyTierPolicyFloor to
+// every access and execute flow, so an L4 credential turns the model's ALLOW
+// into ESCALATE before the row is written. replayOnce returned the raw
+// normalized verdict and never applied that floor, so every row where policy
+// changed the answer scored as a disagreement.
+//
+// Measured 2026-08-02 on dev2: vs-INCUMBENT 0.625, which was read as "the judge
+// contradicts itself in a third of runs" and very nearly bought a self-
+// consistency feature to fix it. The self-agreement split, added the next day,
+// says the opposite — 1.000 in both halves, over 20 rows each. The model is
+// perfectly deterministic on replay. The 37.5% was the tier floor, measured as
+// noise.
+//
+// replayOnce's own comment already promised this: "normalizes the response ...
+// so a replayed decision is scored identically to how production would have
+// recorded it". It was half true, which is the worst kind.
+
+func TestApplyRecordedPolicy_L4AllowBecomesEscalateJustAsProductionRecordsIt(t *testing.T) {
+	got := applyRecordedPolicy(Allow, 4)
+	if got != Escalate {
+		t.Errorf("got %q, want ESCALATE — production stores the post-floor decision, "+
+			"so comparing a raw ALLOW against it counts policy as disagreement", got)
+	}
+}
+
+// The floor only ever tightens. A DENY must survive it, or the harness would
+// invent agreement where production refused.
+func TestApplyRecordedPolicy_NeverLoosensAVerdict(t *testing.T) {
+	for _, d := range []Decision{Deny, Escalate} {
+		if got := applyRecordedPolicy(d, 4); got != d {
+			t.Errorf("L4 %s became %s; a tier may only tighten", d, got)
+		}
+	}
+}
+
+// Below the human-approval tier an ALLOW is an ALLOW, and forcing escalation
+// there would make every low-tier row disagree instead.
+func TestApplyRecordedPolicy_LeavesLowerTiersAlone(t *testing.T) {
+	for _, lvl := range []int{1, 2} {
+		if got := applyRecordedPolicy(Allow, lvl); got != Allow {
+			t.Errorf("L%d ALLOW became %s", lvl, got)
+		}
+	}
+}
+
+// A row whose tier could not be resolved — no credential, a legacy row — must
+// pass through untouched rather than being floored on a guess. Inventing a tier
+// would move a verdict on evidence nobody has.
+func TestApplyRecordedPolicy_UnknownTierChangesNothing(t *testing.T) {
+	if got := applyRecordedPolicy(Allow, 0); got != Allow {
+		t.Errorf("got %q, want ALLOW unchanged when the tier is unknown", got)
+	}
+}

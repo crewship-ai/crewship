@@ -27,6 +27,7 @@ var (
 	flagKeeperEvalCandidates []string
 	flagKeeperEvalLimit      int
 	flagKeeperEvalPasses     int
+	flagKeeperEvalExplain    bool
 	flagKeeperEvalTolerance  float64
 )
 
@@ -103,6 +104,7 @@ Examples:
 			Candidates: flagKeeperEvalCandidates,
 			Limit:      flagKeeperEvalLimit,
 			Passes:     flagKeeperEvalPasses,
+			Explain:    flagKeeperEvalExplain,
 			Tolerance:  flagKeeperEvalTolerance,
 			Format:     cli.ResolveFormat(flagFormat, cliCfg),
 		}, os.Stdout, os.Stderr)
@@ -115,8 +117,12 @@ type keeperEvalOptions struct {
 	Candidates []string
 	Limit      int
 	Passes     int
-	Tolerance  float64
-	Format     string
+	// Explain prints recorded-vs-replayed per row. Off by default: on a large
+	// corpus it is pages of output, and it is a debugging tool rather than part
+	// of the verdict.
+	Explain   bool
+	Tolerance float64
+	Format    string
 }
 
 // newKeeperEvalProvider builds the llm.Provider a replay dials. It is a
@@ -218,6 +224,15 @@ func resolveKeeperEvalJudge(ctx context.Context, db *sql.DB, endpointFlag, incum
 // decisions were made against a different prompt build and a different config,
 // so using them as the baseline would attribute every prompt change since to the
 // candidate.
+// trimID shortens a cuid for a terminal column without losing the tail, which
+// is the part that differs between adjacent requests.
+func trimID(id string) string {
+	if len(id) <= 20 {
+		return id
+	}
+	return id[:8] + "…" + id[len(id)-8:]
+}
+
 func runKeeperEval(ctx context.Context, db *sql.DB, opts keeperEvalOptions, out, progress io.Writer) error {
 	if len(opts.Candidates) == 0 {
 		return fmt.Errorf("nothing to evaluate: pass at least one --candidate")
@@ -247,6 +262,32 @@ func runKeeperEval(ctx context.Context, db *sql.DB, opts keeperEvalOptions, out,
 		}, corpus, opts.Passes)
 		if rerr != nil {
 			return eval.LabeledVerdict{}, fmt.Errorf("replay %s: %w", label, rerr)
+		}
+		if opts.Explain {
+			// Per-row, recorded vs replayed. Added after three hypotheses about a
+			// 37.5% disagreement died to data in a row: the model contradicting
+			// itself (self-agreement measured 1.000), the tier floor (applied, the
+			// number did not move), and the intent-length minimum (one row of forty
+			// was under it). Two models as different as a 9B local one and a hosted
+			// frontier one then produced the SAME 0.625 to three decimals, which
+			// rules out the model — and none of that narrowed anything, because
+			// nothing could show which rows disagreed.
+			//
+			// A harness that reports a gap and cannot show you the gap invites
+			// exactly the guessing it exists to replace.
+			fmt.Fprintf(progress, "\n  %-24s %-9s %-9s %s\n", "REQUEST", "RECORDED", "REPLAYED", "")
+			for _, r := range rows {
+				if len(r.Replays) == 0 {
+					continue
+				}
+				got := r.Replays[0].Decision
+				mark := "  "
+				if got != r.Label {
+					mark = "≠ "
+				}
+				fmt.Fprintf(progress, "  %s%-22s %-9s %-9s\n", mark, trimID(r.ID), r.Label, got)
+			}
+			fmt.Fprintln(progress)
 		}
 		return eval.LabeledVerdict{Label: label, Verdict: eval.Score(rows)}, nil
 	}
@@ -290,6 +331,8 @@ func init() {
 		"Model to use as the baseline (default: the configured judge model)")
 	keeperEvalCmd.Flags().StringArrayVar(&flagKeeperEvalCandidates, "candidate", nil,
 		"Candidate model to score; repeat for each one")
+	keeperEvalCmd.Flags().BoolVar(&flagKeeperEvalExplain, "explain", false,
+		"print recorded vs replayed decision for every row, marking the disagreements")
 	keeperEvalCmd.Flags().IntVar(&flagKeeperEvalLimit, "limit", 0,
 		"Cap the corpus at N rows (human-labelled rows are kept first); 0 = all")
 	keeperEvalCmd.Flags().IntVar(&flagKeeperEvalPasses, "passes", eval.DefaultPasses,

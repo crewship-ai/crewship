@@ -104,6 +104,13 @@ type CorpusRow struct {
 	// hand back a 1–10 score. Risk error is therefore always measured against the
 	// incumbent and is a drift signal, never a correctness one.
 	IncumbentRisk int
+
+	// SecurityLevel is the credential's tier, or 0 when none could be resolved.
+	// Carried because keeper_requests.decision is the POST-tier-floor decision:
+	// without it a replay compares a raw model verdict against a recorded one
+	// that policy already modified, and reports the difference as the model
+	// disagreeing with itself. See applyRecordedPolicy.
+	SecurityLevel int
 }
 
 // corpusRequestTypes are the live-activity request types the harness scores.
@@ -234,7 +241,9 @@ func LoadCorpus(ctx context.Context, db *sql.DB, limit int) ([]CorpusRow, error)
 		       kr.requesting_agent_id, kr.credential_id,
 		       %s AS human_inbox_action,
 		       %s AS human_escalation_action,
-		       %s AS terminal_actor
+		       %s AS terminal_actor,
+		       COALESCE((SELECT c.security_level FROM credentials c
+		                  WHERE c.id = kr.credential_id), 0) AS security_level
 		FROM keeper_requests kr
 		WHERE kr.request_type IN (%s)
 		  AND kr.ollama_prompt IS NOT NULL AND kr.ollama_prompt != ''
@@ -262,9 +271,10 @@ func LoadCorpus(ctx context.Context, db *sql.DB, limit int) ([]CorpusRow, error)
 			agentID, credID               string
 			inboxAction, escAction        string
 			terminalActor                 string
+			securityLevel                 int
 			risk                          sql.NullInt64
 		)
-		if err := rows.Scan(&id, &reqType, &prompt, &decision, &risk, &agentID, &credID, &inboxAction, &escAction, &terminalActor); err != nil {
+		if err := rows.Scan(&id, &reqType, &prompt, &decision, &risk, &agentID, &credID, &inboxAction, &escAction, &terminalActor, &securityLevel); err != nil {
 			return nil, fmt.Errorf("scan keeper corpus row: %w", err)
 		}
 		incumbent := Decision(strings.ToUpper(decision))
@@ -274,6 +284,7 @@ func LoadCorpus(ctx context.Context, db *sql.DB, limit int) ([]CorpusRow, error)
 			Prompt:        prompt,
 			Incumbent:     incumbent,
 			IncumbentRisk: clampRisk(risk),
+			SecurityLevel: securityLevel,
 			Label:         incumbent,
 			LabelSource:   LabelIncumbent,
 			LabelOrigin:   OriginIncumbentDecision,
