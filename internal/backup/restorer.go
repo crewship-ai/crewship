@@ -682,10 +682,26 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 				if !ok || err != nil {
 					return r, ok, err
 				}
-				return filesOnlyTar(r), true, nil
+				return memoryFilesTar(r), true, nil
 			},
 			name: "crew-memory",
 			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser},
+		},
+		{
+			// The other half of the crew tree: an agent's own state —
+			// .claude.json, .mcp.json, .claude/ — which is 1001-owned at
+			// mode 0600 and restores under the agent exactly as it
+			// always did. Splitting it from .memory is what lets each
+			// half be written by the identity that owns it.
+			open: func() (io.ReadCloser, bool, error) {
+				r, ok, err := payload.OpenCrew(ctx, crewSlug)
+				if !ok || err != nil {
+					return r, ok, err
+				}
+				return agentStateTar(r), true, nil
+			},
+			name: "crew-agent-state",
+			spec: ExtractSpec{Dest: ContainerCrewPath, User: agentUser, PreserveModes: true, PreserveTimes: true},
 		},
 		{
 			open: func() (io.ReadCloser, bool, error) { return payload.OpenMemory(ctx, crewSlug) },

@@ -159,3 +159,73 @@ func TestSectionWriteDirsKeepsAncestorsOfDirectoryEntries(t *testing.T) {
 		}
 	}
 }
+
+// The crew archive spans two ownership domains and each half must go to
+// the identity that owns it (#1746).
+func TestCrewSectionSplitsByOwnershipDomain(t *testing.T) {
+	entries := []tar.Header{
+		{Name: "agents/alex/.claude.json", Typeflag: tar.TypeReg, Mode: 0o600},
+		{Name: "agents/alex/.memory/", Typeflag: tar.TypeDir, Mode: 0o2775},
+		{Name: "agents/alex/.memory/AGENT.md", Typeflag: tar.TypeReg, Mode: 0o644},
+		{Name: "agents/alex/.claude/settings.json", Typeflag: tar.TypeReg, Mode: 0o600},
+		{Name: "shared/.memory/CREW.md", Typeflag: tar.TypeReg, Mode: 0o664},
+	}
+	bodies := map[string]string{
+		"agents/alex/.claude.json":          "{}",
+		"agents/alex/.memory/AGENT.md":      "knowledge\n",
+		"agents/alex/.claude/settings.json": "{}",
+		"shared/.memory/CREW.md":            "shared\n",
+	}
+
+	mem, _ := readTar(t, memoryFilesTar(tarWith(t, entries, bodies)))
+	state, _ := readTar(t, agentStateTar(tarWith(t, entries, bodies)))
+
+	wantMem := map[string]bool{"agents/alex/.memory/AGENT.md": true, "shared/.memory/CREW.md": true}
+	for _, n := range mem {
+		if !wantMem[n] {
+			t.Errorf("memory half carries %q, which is not memory", n)
+		}
+		delete(wantMem, n)
+	}
+	if len(wantMem) != 0 {
+		t.Errorf("memory half is missing %v", wantMem)
+	}
+
+	for _, n := range state {
+		if isMemoryEntry(n) {
+			t.Errorf("agent-state half carries memory entry %q", n)
+		}
+	}
+	// Every FILE lands in exactly one half — nothing is lost and nothing
+	// is written twice by two identities. Directory entries under
+	// .memory are dropped on purpose: prepMemoryDirs creates them at
+	// agent start, and applying modes to them as 1002 is EPERM.
+	files := 0
+	for _, e := range entries {
+		if e.Typeflag != tar.TypeDir {
+			files++
+		}
+	}
+	if len(mem)+len(state) != files {
+		t.Errorf("split lost or duplicated files: memory=%v state=%v want %d files", mem, state, files)
+	}
+	for _, n := range mem {
+		if strings.HasSuffix(n, "/") {
+			t.Errorf("memory half carries directory entry %q", n)
+		}
+	}
+}
+
+func TestIsMemoryEntry(t *testing.T) {
+	for _, in := range []string{"agents/a/.memory/AGENT.md", "shared/.memory/CREW.md", ".memory/x", "a/.memory"} {
+		if !isMemoryEntry(in) {
+			t.Errorf("isMemoryEntry(%q) = false", in)
+		}
+	}
+	// A path that merely mentions the name is not a memory tree.
+	for _, in := range []string{"agents/a/.claude.json", "agents/a/memory/x", "agents/.memoryish/x"} {
+		if isMemoryEntry(in) {
+			t.Errorf("isMemoryEntry(%q) = true", in)
+		}
+	}
+}
