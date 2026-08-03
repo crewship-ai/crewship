@@ -246,6 +246,10 @@ var backupRestoreCmd = &cobra.Command{
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		replace, _ := cmd.Flags().GetBool("replace")
+		filesOnly, _ := cmd.Flags().GetBool("files-only")
+		if filesOnly && (asWorkspace != "" || asCrew != "" || replace) {
+			return fmt.Errorf("--files-only cannot be combined with --as-workspace, --as-crew or --replace: it lands container state into crews that already exist")
+		}
 		body := map[string]any{
 			"path":         args[0],
 			"passphrase":   passphrase,
@@ -253,6 +257,7 @@ var backupRestoreCmd = &cobra.Command{
 			"as_crew":      asCrew,
 			"replace":      replace,
 			"dry_run":      dryRun,
+			"files_only":   filesOnly,
 		}
 		client := newAPIClient()
 		resp, err := client.Post("/api/v1/admin/backups/restore", body)
@@ -263,13 +268,14 @@ var backupRestoreCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			RestoredWs           string         `json:"restored_ws"`
-			RestoredWorkspaceID  string         `json:"restored_workspace_id"`
-			CrewsCount           int            `json:"crews_count"`
-			RowsInserted         int            `json:"rows_inserted"`
-			DockerPhaseSkipped   bool           `json:"docker_phase_skipped"`
-			SecurityLevelClamped int            `json:"security_level_clamped"`
-			SecurityLevelClamps  []restoreClamp `json:"security_level_clamps"`
+			RestoredWs             string         `json:"restored_ws"`
+			RestoredWorkspaceID    string         `json:"restored_workspace_id"`
+			CrewsCount             int            `json:"crews_count"`
+			RowsInserted           int            `json:"rows_inserted"`
+			DockerPhaseSkipped     bool           `json:"docker_phase_skipped"`
+			DroppedCrewFilesystems []string       `json:"dropped_crew_filesystems"`
+			SecurityLevelClamped   int            `json:"security_level_clamped"`
+			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -295,8 +301,32 @@ var backupRestoreCmd = &cobra.Command{
 		// dry-run never touches docker, so surfacing "you still need
 		// to provision crews" would mislead the admin into thinking
 		// the DB mutated when it did not.
+		//
+		// The old text told the admin to "re-run restore without the
+		// rewrite flag", which the server rejects 100% of the time — the
+		// forked workspace can never match the bundle's id or slug
+		// (#1716). What lands the files is --files-only, authorised by
+		// the provenance this very restore just recorded. Naming the
+		// crews matters too: the server has always known which ones lost
+		// their filesystem data and never told anyone.
 		if !dryRun && out.DockerPhaseSkipped {
-			cli.PrintWarning("Docker phase skipped (--as-workspace/--as-crew supplied). Provision the new crews with `crewship crew provision` and re-run restore without the rewrite flag to land container state.")
+			target := out.RestoredWorkspaceID
+			if target == "" {
+				target = "<workspace>"
+			}
+			warning := "Docker phase skipped (--as-workspace/--as-crew supplied) — crew files are NOT restored yet."
+			if len(out.DroppedCrewFilesystems) > 0 {
+				warning += fmt.Sprintf("\n  Crews still missing their container state: %s.", strings.Join(out.DroppedCrewFilesystems, ", "))
+			}
+			warning += fmt.Sprintf(
+				"\n  Finish the restore with:\n"+
+					"    crewship crew provision <crew> -w %s\n"+
+					"    crewship backup restore %s -w %s --files-only",
+				target, args[0], target)
+			cli.PrintWarning(warning)
+		}
+		if !dryRun && filesOnly {
+			cli.PrintSuccess(fmt.Sprintf("Container state landed for %d crew(s); no database rows were changed.", out.CrewsCount))
 		}
 		// Unlike the docker warning this one DOES matter on a dry run:
 		// "this bundle carries credentials at a tier that does not

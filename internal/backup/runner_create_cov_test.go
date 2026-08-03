@@ -249,6 +249,16 @@ func TestCreateBackup_ContainerProbe(t *testing.T) {
 		wsID, _ := seedCovWorkspace(t, db, "probelive")
 		ops := newFakeDockerOps()
 		ops.workspace["main.py"] = []byte("print('hi')")
+		// The manifest's per-section flags are now observations, not
+		// assertions (#1713): a section is flagged only if entries
+		// actually landed in the bundle. So the container has to have
+		// content at the crew-memory and named-volume paths for this
+		// case to be about "a live container's sections get flagged".
+		ops.otherPaths = map[string]map[string][]byte{
+			ContainerCrewPath:  {"agent-x/.memory/daily.md": []byte("# today")},
+			ContainerHomePath:  {".bashrc": []byte("export PS1=x")},
+			ContainerToolsPath: {"bin/tool": []byte("#!/bin/sh")},
+		}
 		res, err := CreateBackup(ctx, db, CreateOptions{
 			Scope: ScopeWorkspace, WorkspaceID: wsID,
 			OutputDir:         t.TempDir(),
@@ -485,18 +495,38 @@ func TestBuildContents_PresetMatrix(t *testing.T) {
 			{ID: "c2", Slug: "ghost", Name: "Ghost"}, // never provisioned
 		},
 	}
+	// The manifest flags are now derived from what CollectCrew actually
+	// wrote (#1713), so each preset supplies the capture that preset
+	// would have produced for the provisioned crew. The unprovisioned
+	// "ghost" crew has no capture at all — CollectCrew returns a zero
+	// CrewCapture for a crew with no container.
 	cases := []struct {
 		level       ScopeLevel
+		capture     CrewCapture
 		wantVolumes bool
 		wantSystem  bool
 	}{
-		{ScopeLevelQuick, false, false},
-		{ScopeLevelStandard, true, false},
-		{ScopeLevelFull, true, true},
+		{
+			level:   ScopeLevelQuick,
+			capture: CrewCapture{Slug: "live", WorkspaceEntries: 3, CrewEntries: 2, OutputEntries: 1},
+		},
+		{
+			level: ScopeLevelStandard,
+			capture: CrewCapture{Slug: "live", WorkspaceEntries: 3, CrewEntries: 2, OutputEntries: 1,
+				HomeEntries: 4, ToolsEntries: 5},
+			wantVolumes: true,
+		},
+		{
+			level: ScopeLevelFull,
+			capture: CrewCapture{Slug: "live", WorkspaceEntries: 3, CrewEntries: 2, OutputEntries: 1,
+				HomeEntries: 4, ToolsEntries: 5, VarLibEntries: 6},
+			wantVolumes: true,
+			wantSystem:  true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.level), func(t *testing.T) {
-			c := buildContents(target, tc.level)
+			c := buildContents(target, tc.level, map[string]CrewCapture{"live": tc.capture})
 			if c.Workspace == nil || c.Workspace.ID != "ws1" || c.Workspace.Slug != "ws-slug" {
 				t.Fatalf("workspace summary = %+v", c.Workspace)
 			}
@@ -504,8 +534,8 @@ func TestBuildContents_PresetMatrix(t *testing.T) {
 				t.Fatalf("crews = %d", len(c.Crews))
 			}
 			live, ghost := c.Crews[0], c.Crews[1]
-			if !live.WorkspaceIncluded || !live.MemoryIncluded {
-				t.Errorf("live crew must include workspace+memory at every preset: %+v", live)
+			if !live.WorkspaceIncluded || !live.MemoryIncluded || !live.OutputIncluded {
+				t.Errorf("live crew must include workspace+memory+output at every preset: %+v", live)
 			}
 			if !live.DevcontainerConfigIncluded || !live.MiseConfigIncluded {
 				t.Errorf("config flags lost: %+v", live)
@@ -520,10 +550,25 @@ func TestBuildContents_PresetMatrix(t *testing.T) {
 			if live.SystemIncluded != tc.wantSystem {
 				t.Errorf("level %s system = %v, want %v", tc.level, live.SystemIncluded, tc.wantSystem)
 			}
-			// Ghost crew (no container) gets nothing regardless of preset.
-			if ghost.WorkspaceIncluded || ghost.MemoryIncluded || len(ghost.VolumesIncluded) != 0 || ghost.SystemIncluded {
+			// Ghost crew (no container, hence no capture) gets nothing
+			// regardless of preset.
+			if ghost.WorkspaceIncluded || ghost.MemoryIncluded || ghost.OutputIncluded ||
+				len(ghost.VolumesIncluded) != 0 || ghost.SystemIncluded {
 				t.Errorf("unprovisioned crew must carry no sections: %+v", ghost)
 			}
 		})
 	}
+
+	// A crew that HAS a container but whose sections came back empty
+	// must report nothing. This is the whole point of deriving the flags
+	// from the capture: before #1713 a container ID alone was enough to
+	// claim memory_included, and bundles carrying no memory said they did.
+	t.Run("provisioned but empty capture claims nothing", func(t *testing.T) {
+		c := buildContents(target, ScopeLevelFull, map[string]CrewCapture{"live": {Slug: "live"}})
+		live := c.Crews[0]
+		if live.WorkspaceIncluded || live.MemoryIncluded || live.OutputIncluded ||
+			len(live.VolumesIncluded) != 0 || live.SystemIncluded {
+			t.Errorf("empty capture must claim no sections: %+v", live)
+		}
+	})
 }

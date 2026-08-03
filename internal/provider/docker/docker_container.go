@@ -563,16 +563,17 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	// Ensure persistent named volumes for home directory and crew tools.
+	var crewVolumes []string
 	if team.Slug != "" {
-		if err := p.ensureVolume(ctx, p.homeVolumeName(team.ID, team.Slug)); err != nil {
-			return "", err
-		}
-		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.ID, team.Slug)); err != nil {
-			return "", err
+		for _, name := range []string{p.homeVolumeName(team.ID, team.Slug), p.toolsVolumeName(team.ID, team.Slug)} {
+			if err := p.ensureVolume(ctx, name); err != nil {
+				return "", err
+			}
+			crewVolumes = append(crewVolumes, name)
 		}
 	}
 
-	p.fixBindMountOwnership(ctx, runtimeImage, dirs)
+	p.fixBindMountOwnership(ctx, runtimeImage, dirs, crewVolumes)
 
 	containerCfg, hostConfig, err := p.buildCrewContainerConfig(ctx, team, containerName, runtimeImage, runtime, memoryMB, cpus, dirs)
 	if err != nil {
@@ -1036,8 +1037,30 @@ func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 // in-container path — Docker Desktop's file sharing surfaces uid mapping
 // inside the VM, where chown works. Best-effort: failures degrade to a 0777
 // chmod fallback rather than aborting the ensure.
-func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs) {
-	needsDockerChown := goruntime.GOOS == "windows"
+//
+// volumes are the crew's NAMED volumes (/home/agent, /opt/crew-tools).
+// They are handled here, and only here, because nothing else in the tree
+// can: a named volume takes its initial ownership from the image content
+// at its mount point, so a volume whose mount point the image does not
+// carry comes up root-owned 0755 — against a container that runs as 1001
+// with CapDrop: ALL, where not even root can chown it afterwards. The
+// agent then cannot write its own home or its own tools directory, and
+// #1715's restore failed on exactly that: `tar: probe.txt: Cannot open:
+// Permission denied` into a completely empty volume.
+//
+// The host-chown fast path above cannot cover them (a named volume has
+// no host path the server process can reach portably), so the presence
+// of volumes forces the init container even when the binds chowned
+// cleanly on the host. That costs one short-lived container per crew
+// container creation — not per start — which is noise next to the image
+// work already happening around it.
+//
+// The volume chown is deliberately NOT recursive. The volume ROOT's
+// ownership is what decides whether the agent can create entries in it;
+// the files inside were written by the agent already. A recursive chown
+// of a 1.6 GB /home/agent on every create would cost seconds for nothing.
+func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage string, dirs crewDirs, volumes []string) {
+	needsDockerChown := goruntime.GOOS == "windows" || len(volumes) > 0
 	if !needsDockerChown {
 		for _, dir := range dirs.all {
 			if err := os.Chown(dir, 1001, 1001); err != nil {
@@ -1047,11 +1070,17 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		}
 	}
 	if needsDockerChown {
-		chownCmd := buildChownInitCmd(dirs.all, dirs.crew)
+		volTargets := make([]string, 0, len(volumes))
 		var mounts []mount.Mount
 		for _, dir := range dirs.all {
 			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
 		}
+		for i, name := range volumes {
+			target := fmt.Sprintf("/mntvol/%d", i)
+			volTargets = append(volTargets, target)
+			mounts = append(mounts, mount.Mount{Type: mount.TypeVolume, Source: name, Target: target})
+		}
+		chownCmd := buildChownInitCmd(dirs.all, dirs.crew, volTargets)
 		initResp, initErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 			Config: &container.Config{
 				Image:      runtimeImage,
@@ -1546,7 +1575,13 @@ func shellQuote(s string) string {
 // shellQuote so the command does exactly what it did before for a normal path,
 // while no path component can inject shell syntax. See Issue #530 for the
 // .memory ownership rationale.
-func buildChownInitCmd(allDirs []string, crewPath string) string {
+// volumeTargets are the in-init-container mount points of the crew's
+// NAMED volumes. Their roots get a non-recursive chown + chmod 755 so the
+// agent can create entries in them — see fixBindMountOwnership for why
+// nothing else in the tree is able to do this, and why it is not -R. The
+// step is appended with `;` rather than `&&` so a failure on one volume
+// cannot skip the other, and cannot mask the bind chown's result.
+func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string) string {
 	mnt := func(p string) string { return shellQuote("/mnt" + p) }
 
 	chownCmd := "chown -R 1001:1001"
@@ -1556,6 +1591,9 @@ func buildChownInitCmd(allDirs []string, crewPath string) string {
 	chownCmd += ` && find ` + mnt(crewPath) + ` -name .memory -type d -exec chgrp -R 1002 {} +`
 	chownCmd += ` ; find ` + mnt(crewPath) + ` -name .memory -type d -exec chmod 2775 {} +`
 	chownCmd += ` ; find ` + mnt(crewPath) + ` -path '*/.memory/*' -type f -exec chmod g+rw {} +`
+	for _, target := range volumeTargets {
+		chownCmd += ` ; chown 1001:1001 ` + shellQuote(target) + ` ; chmod 755 ` + shellQuote(target)
+	}
 	return chownCmd
 }
 

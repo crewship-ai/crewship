@@ -360,6 +360,13 @@ func TestMobyDockerOps_CopyTo(t *testing.T) {
 	})
 }
 
+// volumeSpec / systemSpec reproduce the two extraction policies that
+// used to be baked into CopyToVolume and CopyToSystem, so the cases
+// below keep asserting the same exec identity and tar flags they did
+// before those methods collapsed into CopyToPath.
+func volumeSpec(dst string) ExtractSpec { return ExtractSpec{Dest: dst, User: "1001:1001"} }
+func systemSpec(dst string) ExtractSpec { return ExtractSpec{Dest: dst, User: "0:0"} }
+
 func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 	ctx := context.Background()
 
@@ -367,8 +374,8 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d := newFakeDaemon()
 		d.execReadStdin = true
 		ops := newMobyOps(t, d)
-		if err := ops.CopyToVolume(ctx, "c1", "/home/agent", strings.NewReader("inner-tar")); err != nil {
-			t.Fatalf("CopyToVolume: %v", err)
+		if err := ops.CopyToPath(ctx, "c1", volumeSpec("/home/agent"), strings.NewReader("inner-tar")); err != nil {
+			t.Fatalf("CopyToPath: %v", err)
 		}
 		d.mu.Lock()
 		defer d.mu.Unlock()
@@ -387,8 +394,8 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d := newFakeDaemon()
 		d.execReadStdin = true
 		ops := newMobyOps(t, d)
-		if err := ops.CopyToSystem(ctx, "c1", "/var/lib", strings.NewReader("root-tar")); err != nil {
-			t.Fatalf("CopyToSystem: %v", err)
+		if err := ops.CopyToPath(ctx, "c1", systemSpec("/var/lib"), strings.NewReader("root-tar")); err != nil {
+			t.Fatalf("CopyToPath: %v", err)
 		}
 		d.mu.Lock()
 		defer d.mu.Unlock()
@@ -400,7 +407,7 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d := newFakeDaemon()
 		d.execCreateStatus = http.StatusInternalServerError
 		ops := newMobyOps(t, d)
-		err := ops.CopyToVolume(ctx, "c1", "/home/agent", strings.NewReader("x"))
+		err := ops.CopyToPath(ctx, "c1", volumeSpec("/home/agent"), strings.NewReader("x"))
 		if err == nil || !strings.Contains(err.Error(), "exec-tar create c1:/home/agent") {
 			t.Fatalf("expected exec-tar create error, got %v", err)
 		}
@@ -409,7 +416,7 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d := newFakeDaemon()
 		d.execStartHijack = false
 		ops := newMobyOps(t, d)
-		err := ops.CopyToVolume(ctx, "c1", "/home/agent", strings.NewReader("x"))
+		err := ops.CopyToPath(ctx, "c1", volumeSpec("/home/agent"), strings.NewReader("x"))
 		if err == nil || !strings.Contains(err.Error(), "exec-tar attach c1:/home/agent") {
 			t.Fatalf("expected exec-tar attach error, got %v", err)
 		}
@@ -419,7 +426,7 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d.execReadStdin = true
 		ops := newMobyOps(t, d)
 		boom := errors.New("source stream torn")
-		err := ops.CopyToVolume(ctx, "c1", "/home/agent", io.MultiReader(strings.NewReader("partial"), errReaderCov{boom}))
+		err := ops.CopyToPath(ctx, "c1", volumeSpec("/home/agent"), io.MultiReader(strings.NewReader("partial"), errReaderCov{boom}))
 		if err == nil || !strings.Contains(err.Error(), "exec-tar stdin c1:/home/agent") {
 			t.Fatalf("expected exec-tar stdin error, got %v", err)
 		}
@@ -430,7 +437,7 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d.execExitCode = 2
 		d.execStdout = []byte("tar: Permission denied\n")
 		ops := newMobyOps(t, d)
-		err := ops.CopyToVolume(ctx, "c1", "/home/agent", strings.NewReader("x"))
+		err := ops.CopyToPath(ctx, "c1", volumeSpec("/home/agent"), strings.NewReader("x"))
 		if err == nil || !strings.Contains(err.Error(), "exited 2") || !strings.Contains(err.Error(), "Permission denied") {
 			t.Fatalf("expected exit-2 error with output, got %v", err)
 		}
@@ -440,7 +447,7 @@ func TestMobyDockerOps_CopyToVolumeAndSystem(t *testing.T) {
 		d.execReadStdin = true
 		d.execInspectStatus = http.StatusInternalServerError
 		ops := newMobyOps(t, d)
-		err := ops.CopyToVolume(ctx, "c1", "/home/agent", strings.NewReader("x"))
+		err := ops.CopyToPath(ctx, "c1", volumeSpec("/home/agent"), strings.NewReader("x"))
 		if err == nil || !strings.Contains(err.Error(), "exec-tar inspect c1:/home/agent") {
 			t.Fatalf("expected exec-tar inspect error, got %v", err)
 		}
@@ -525,11 +532,15 @@ func (p *pausableOps) Unpause(context.Context, string) error { p.unpauses++; ret
 func (p *pausableOps) CopyFrom(context.Context, string, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
-func (p *pausableOps) CopyTo(context.Context, string, string, io.Reader) error       { return nil }
-func (p *pausableOps) CopyToVolume(context.Context, string, string, io.Reader) error { return nil }
-func (p *pausableOps) CopyToSystem(context.Context, string, string, io.Reader) error { return nil }
-func (p *pausableOps) ContainerExists(context.Context, string) (bool, error)         { return true, nil }
+func (p *pausableOps) CopyTo(context.Context, string, string, io.Reader) error { return nil }
+func (p *pausableOps) CopyToPath(context.Context, string, ExtractSpec, io.Reader) error {
+	return nil
+}
+func (p *pausableOps) ContainerExists(context.Context, string) (bool, error) { return true, nil }
 func (p *pausableOps) Exec(context.Context, string, []string) (int, []byte, error) {
+	return 0, nil, nil
+}
+func (p *pausableOps) ExecAs(context.Context, string, string, []string) (int, []byte, error) {
 	return 0, nil, nil
 }
 
@@ -681,15 +692,15 @@ func TestRepackTar_StripsWrapperAndExcludes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writer: %v", err)
 	}
-	total, err := RepackTar(bytes.NewReader(src), dst, "volumes/alpha/home")
+	res, err := RepackTar(bytes.NewReader(src), dst, "volumes/alpha/home")
 	if err != nil {
 		t.Fatalf("RepackTar: %v", err)
 	}
 	if err := dst.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if total != int64(len("hello")) {
-		t.Errorf("total bytes = %d, want %d (only the non-excluded regular file)", total, len("hello"))
+	if res.Bytes != int64(len("hello")) {
+		t.Errorf("total bytes = %d, want %d (only the non-excluded regular file)", res.Bytes, len("hello"))
 	}
 	entries := readTarZst(t, sink.Bytes())
 	if got := entries["volumes/alpha/home/notes.txt"][1]; got != "hello" {

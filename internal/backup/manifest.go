@@ -173,7 +173,21 @@ type CrewSummary struct {
 	Features                   []FeaturePin `json:"features,omitempty" yaml:"features,omitempty"`
 	WorkspaceIncluded          bool         `json:"workspace_included" yaml:"workspace_included"`
 	VolumesIncluded            []string     `json:"volumes_included,omitempty" yaml:"volumes_included,omitempty"`
-	MemoryIncluded             bool         `json:"memory_included" yaml:"memory_included"`
+	// MemoryIncluded reports whether the bundle carries the crew's
+	// memory tree — /crew/shared/.memory and /crew/agents/<slug>/.memory.
+	//
+	// It did not mean that before FormatVersion 3. Up to and including
+	// FormatVersion 2 the collector took /output and filed it under the
+	// "memory" section, and this flag was set from "the crew had a
+	// container", so it read true on every bundle including the ones
+	// that held no memory at all (#1713). Never read it without
+	// consulting the format version — CrewSummary.HasCrewMemory does
+	// that for you.
+	MemoryIncluded bool `json:"memory_included" yaml:"memory_included"`
+	// OutputIncluded reports the /output section, which the "memory"
+	// section name historically referred to. Absent on bundles older
+	// than FormatVersion 3.
+	OutputIncluded bool `json:"output_included,omitempty" yaml:"output_included,omitempty"`
 	// SystemIncluded is set when the bundle carries the /var/lib
 	// section (any service data the agent populated at runtime —
 	// redis dump.rdb, postgresql data dir, etc.). Bundles produced
@@ -182,6 +196,30 @@ type CrewSummary struct {
 	SystemIncluded   bool  `json:"system_included,omitempty" yaml:"system_included,omitempty"`
 	AgentCount       int   `json:"agent_count" yaml:"agent_count"`
 	PayloadSizeBytes int64 `json:"payload_size_bytes,omitempty" yaml:"payload_size_bytes,omitempty"`
+}
+
+// HasCrewMemory answers the only question an operator actually asks of
+// memory_included: will restoring this bundle bring the crew's memory
+// back? For bundles at FormatVersion 3 and above the flag is set from
+// what the collector observed itself writing, so it answers directly.
+// Below that the flag was an assertion about a section that never held
+// memory, so the honest answer is no, regardless of what it says.
+func (c CrewSummary) HasCrewMemory(formatVersion int) bool {
+	if formatVersion < FormatVersionCrewMemory {
+		return false
+	}
+	return c.MemoryIncluded
+}
+
+// HasFilesystemSections reports whether the bundle carries ANY per-crew
+// container state for this crew — the condition the restore docker phase
+// gates on.
+func (c CrewSummary) HasFilesystemSections(formatVersion int) bool {
+	return c.WorkspaceIncluded || c.SystemIncluded ||
+		len(c.VolumesIncluded) > 0 ||
+		c.OutputIncluded || c.HasCrewMemory(formatVersion) ||
+		// Pre-v3 bundles set MemoryIncluded for the /output section.
+		(formatVersion < FormatVersionCrewMemory && c.MemoryIncluded)
 }
 
 // FeaturePin pins a devcontainer feature OCI reference to a digest so

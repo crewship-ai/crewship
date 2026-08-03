@@ -61,13 +61,38 @@ func (w *TarZstWriter) WriteFile(name string, mode int64, modTime time.Time, src
 // WriteStream writes an entry whose size is known ahead of time. The
 // caller supplies size so we can set the tar header correctly before
 // streaming. src must deliver exactly size bytes.
+//
+// Ownership defaults to 0:0. Callers repacking real container content
+// must use WriteStreamOwned instead — see #1714.
 func (w *TarZstWriter) WriteStream(name string, mode int64, modTime time.Time, size int64, src io.Reader) error {
+	return w.WriteStreamOwned(name, mode, modTime, size, 0, 0, "", "", src)
+}
+
+// WriteStreamOwned is WriteStream with the source entry's ownership
+// carried onto the header.
+//
+// Why it has to exist: WriteStream left Uid/Gid at their zero values, so
+// every regular file in every bundle recorded uid 0 gid 0 no matter who
+// owned it in the container — while RepackTarWithExcludes was, in the
+// same loop, correctly copying Uid/Gid onto directory and symlink
+// headers. The bundle therefore described a tree whose directories
+// belonged to the agent and whose files belonged to root, which is not a
+// state any container was ever in. Restores that trust the header
+// reproduced that impossible tree faithfully (#1714).
+//
+// Uname/Gname ride along because a cross-instance restore may want to
+// resolve by name when the numeric id means nothing on the target.
+func (w *TarZstWriter) WriteStreamOwned(name string, mode int64, modTime time.Time, size int64, uid, gid int, uname, gname string, src io.Reader) error {
 	hdr := &tar.Header{
 		Name:     name,
 		Mode:     mode,
 		Size:     size,
 		ModTime:  modTime,
 		Typeflag: tar.TypeReg,
+		Uid:      uid,
+		Gid:      gid,
+		Uname:    uname,
+		Gname:    gname,
 	}
 	if err := w.tw.WriteHeader(hdr); err != nil {
 		return fmt.Errorf("backup: tar header for %q: %w", name, err)

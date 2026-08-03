@@ -71,7 +71,10 @@ func TestSecDockerCmdBuildChownInitCmd(t *testing.T) {
 	// new shell syntax.
 	dirs := []string{"/out/x", "/out/x/.memory"}
 	crewPath := "/crew/abc; rm -rf /"
-	cmd := buildChownInitCmd(dirs, crewPath)
+	// Volume mount points are interpolated too, so they carry an
+	// injection payload of their own here.
+	volumeTargets := []string{"/home/agent`id`"}
+	cmd := buildChownInitCmd(dirs, crewPath, volumeTargets)
 
 	if !strings.Contains(cmd, "chown -R 1001:1001") {
 		t.Fatalf("buildChownInitCmd missing chown: %q", cmd)
@@ -94,6 +97,15 @@ func TestSecDockerCmdBuildChownInitCmd(t *testing.T) {
 		if !strings.Contains(cmd, shellQuote("/mnt"+d)) {
 			t.Fatalf("buildChownInitCmd dir %q not quoted in: %q", d, cmd)
 		}
+	}
+	// Volume mount points get the same treatment.
+	for _, v := range volumeTargets {
+		if !strings.Contains(cmd, shellQuote(v)) {
+			t.Fatalf("buildChownInitCmd volume target %q not quoted in: %q", v, cmd)
+		}
+	}
+	if strings.Contains(metacharsOutsideQuotes(cmd), "`") {
+		t.Fatalf("buildChownInitCmd lets a backtick reach shell syntax: %q", cmd)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -386,16 +387,26 @@ func TestStorageOrDefault(t *testing.T) {
 	}
 }
 
-// restoreRecOps records which copy strategy each section travelled
-// through, with optional per-method failures.
+// restoreRecOps records which extraction policy each section travelled
+// through, with optional per-destination failures. CopyToVolume and
+// CopyToSystem collapsed into CopyToPath, so what used to be "which
+// method was called" is now "which ExtractSpec.User the section was
+// extracted under" — the same distinction, recorded per call.
 type restoreRecOps struct {
-	copyToDst     []string
-	copyVolumeDst []string
-	copySystemDst []string
+	copyToDst []string
 
-	copyToErr     error
-	copyVolumeErr error
-	copySystemErr error
+	copyPathDst  []string
+	copyPathUser []string
+
+	// copyPathErr fails CopyToPath for the named destination.
+	copyPathErr map[string]error
+
+	// execAsCode / execAsErr drive the restore preflight probe and the
+	// post-restore memory-permission pass. Zero value = probe passes,
+	// which is what every test that is not about probe failure wants.
+	execAsCode  int
+	execAsErr   error
+	execAsUsers []string
 }
 
 func (r *restoreRecOps) Pause(context.Context, string) error   { return nil }
@@ -405,31 +416,25 @@ func (r *restoreRecOps) CopyFrom(context.Context, string, string) (io.ReadCloser
 }
 func (r *restoreRecOps) CopyTo(_ context.Context, _ string, dst string, content io.Reader) error {
 	_, _ = io.Copy(io.Discard, content)
-	if r.copyToErr != nil {
-		return r.copyToErr
-	}
 	r.copyToDst = append(r.copyToDst, dst)
 	return nil
 }
-func (r *restoreRecOps) CopyToVolume(_ context.Context, _ string, dst string, content io.Reader) error {
+func (r *restoreRecOps) CopyToPath(_ context.Context, _ string, spec ExtractSpec, content io.Reader) error {
 	_, _ = io.Copy(io.Discard, content)
-	if r.copyVolumeErr != nil {
-		return r.copyVolumeErr
+	if err := r.copyPathErr[spec.Dest]; err != nil {
+		return err
 	}
-	r.copyVolumeDst = append(r.copyVolumeDst, dst)
-	return nil
-}
-func (r *restoreRecOps) CopyToSystem(_ context.Context, _ string, dst string, content io.Reader) error {
-	_, _ = io.Copy(io.Discard, content)
-	if r.copySystemErr != nil {
-		return r.copySystemErr
-	}
-	r.copySystemDst = append(r.copySystemDst, dst)
+	r.copyPathDst = append(r.copyPathDst, spec.Dest)
+	r.copyPathUser = append(r.copyPathUser, spec.User)
 	return nil
 }
 func (r *restoreRecOps) ContainerExists(context.Context, string) (bool, error) { return true, nil }
-func (r *restoreRecOps) Exec(context.Context, string, []string) (int, []byte, error) {
-	return 0, nil, nil
+func (r *restoreRecOps) Exec(ctx context.Context, id string, cmd []string) (int, []byte, error) {
+	return r.ExecAs(ctx, id, rootUser, cmd)
+}
+func (r *restoreRecOps) ExecAs(_ context.Context, _ string, user string, _ []string) (int, []byte, error) {
+	r.execAsUsers = append(r.execAsUsers, user)
+	return r.execAsCode, nil, r.execAsErr
 }
 
 func fullSectionPayload(t *testing.T) *ExtractedPayload {
@@ -438,6 +443,7 @@ func fullSectionPayload(t *testing.T) *ExtractedPayload {
 		{name: "workspace/alpha/f", body: []byte("w")},
 		{name: "volumes/alpha/home/g", body: []byte("h")},
 		{name: "volumes/alpha/tools/i", body: []byte("t")},
+		{name: "crew/alpha/.memory/c", body: []byte("c")},
 		{name: "memory/alpha/m", body: []byte("m")},
 		{name: "system/alpha/var-lib/s", body: []byte("s")},
 	})
@@ -465,19 +471,24 @@ func TestRestoreCrew_RoutesSectionsByStrategy(t *testing.T) {
 		if err := RestoreCrew(ctx, ops, "c1", "alpha", p); err != nil {
 			t.Fatalf("RestoreCrew: %v", err)
 		}
-		// Root-parent destinations go through the archive API.
-		wantCopyTo := []string{ContainerWorkspacePath, ContainerMemoryPath}
-		if strings.Join(ops.copyToDst, ",") != strings.Join(wantCopyTo, ",") {
-			t.Errorf("CopyTo dsts = %v, want %v", ops.copyToDst, wantCopyTo)
+		// Every section now travels the exec-tar path; the archive API
+		// is no longer used by restore at all (#1714).
+		if len(ops.copyToDst) != 0 {
+			t.Errorf("CopyTo must not be used by restore, got %v", ops.copyToDst)
 		}
-		// Named volumes go through exec-tar as the agent user.
-		wantVol := []string{ContainerHomePath, ContainerToolsPath}
-		if strings.Join(ops.copyVolumeDst, ",") != strings.Join(wantVol, ",") {
-			t.Errorf("CopyToVolume dsts = %v, want %v", ops.copyVolumeDst, wantVol)
+		wantDst := []string{
+			ContainerWorkspacePath, ContainerCrewPath, ContainerOutputPath,
+			ContainerHomePath, ContainerToolsPath, ContainerVarLibPath,
 		}
-		// /var/lib goes through the uid-0 path.
-		if strings.Join(ops.copySystemDst, ",") != ContainerVarLibPath {
-			t.Errorf("CopyToSystem dsts = %v, want [%s]", ops.copySystemDst, ContainerVarLibPath)
+		if strings.Join(ops.copyPathDst, ",") != strings.Join(wantDst, ",") {
+			t.Errorf("CopyToPath dsts = %v, want %v", ops.copyPathDst, wantDst)
+		}
+		// The identity per section is the distinction the old
+		// CopyToVolume/CopyToSystem split carried: everything under the
+		// agent, /var/lib under uid 0.
+		wantUser := []string{agentUser, agentUser, agentUser, agentUser, agentUser, rootUser}
+		if strings.Join(ops.copyPathUser, ",") != strings.Join(wantUser, ",") {
+			t.Errorf("CopyToPath users = %v, want %v", ops.copyPathUser, wantUser)
 		}
 	})
 
@@ -494,23 +505,26 @@ func TestRestoreCrew_RoutesSectionsByStrategy(t *testing.T) {
 		if err := RestoreCrew(ctx, ops, "c1", "alpha", p); err != nil {
 			t.Fatalf("RestoreCrew: %v", err)
 		}
-		if len(ops.copyToDst)+len(ops.copyVolumeDst)+len(ops.copySystemDst) != 0 {
-			t.Errorf("no copies expected, got %v %v %v", ops.copyToDst, ops.copyVolumeDst, ops.copySystemDst)
+		if len(ops.copyToDst)+len(ops.copyPathDst) != 0 {
+			t.Errorf("no copies expected, got %v %v", ops.copyToDst, ops.copyPathDst)
 		}
 	})
 
 	t.Run("per-section failures aggregate", func(t *testing.T) {
 		p := fullSectionPayload(t)
-		ops := &restoreRecOps{
-			copyToErr:     io.ErrUnexpectedEOF,
-			copyVolumeErr: io.ErrClosedPipe,
-			copySystemErr: io.ErrShortWrite,
-		}
+		ops := &restoreRecOps{copyPathErr: map[string]error{
+			ContainerWorkspacePath: io.ErrUnexpectedEOF,
+			ContainerCrewPath:      io.ErrUnexpectedEOF,
+			ContainerOutputPath:    io.ErrUnexpectedEOF,
+			ContainerHomePath:      io.ErrClosedPipe,
+			ContainerToolsPath:     io.ErrClosedPipe,
+			ContainerVarLibPath:    io.ErrShortWrite,
+		}}
 		err := RestoreCrew(ctx, ops, "c1", "alpha", p)
 		if err == nil {
 			t.Fatal("expected aggregated error")
 		}
-		for _, section := range []string{"workspace", "home", "tools", "memory", "var-lib"} {
+		for _, section := range []string{"workspace", "crew-memory", "output", "home", "tools", "var-lib"} {
 			if !strings.Contains(err.Error(), section+":") {
 				t.Errorf("error %v missing section %q", err, section)
 			}
@@ -520,9 +534,12 @@ func TestRestoreCrew_RoutesSectionsByStrategy(t *testing.T) {
 		}
 	})
 
-	t.Run("open failure feeds the same aggregation", func(t *testing.T) {
+	t.Run("open failure is caught by preflight and writes nothing", func(t *testing.T) {
 		p := fullSectionPayload(t)
-		// Destroy only the home-volume temp file; other sections restore.
+		// Destroy only the home-volume temp file. Since #1715 the open
+		// happens in the preflight pass, so one unreadable section
+		// refuses the WHOLE restore rather than letting the others land
+		// and leaving the crew half-overwritten.
 		if err := os.Remove(p.volumePathsBySlug["alpha"]["home"]); err != nil {
 			t.Fatal(err)
 		}
@@ -531,9 +548,37 @@ func TestRestoreCrew_RoutesSectionsByStrategy(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "home:") {
 			t.Fatalf("err = %v", err)
 		}
-		// The remaining sections still landed.
-		if len(ops.copyToDst) != 2 || len(ops.copySystemDst) != 1 {
-			t.Errorf("other sections must still restore: %v %v", ops.copyToDst, ops.copySystemDst)
+		if !errors.Is(err, ErrRestorePreflight) {
+			t.Errorf("err = %v, want ErrRestorePreflight", err)
+		}
+		if len(ops.copyToDst)+len(ops.copyPathDst) != 0 {
+			t.Errorf("nothing must be written when preflight fails: %v %v", ops.copyToDst, ops.copyPathDst)
+		}
+	})
+
+	t.Run("unwritable destination refuses the restore before writing", func(t *testing.T) {
+		p := fullSectionPayload(t)
+		ops := &restoreRecOps{execAsCode: 1}
+		err := RestoreCrew(ctx, ops, "c1", "alpha", p)
+		if err == nil || !errors.Is(err, ErrRestorePreflight) {
+			t.Fatalf("err = %v, want ErrRestorePreflight", err)
+		}
+		if len(ops.copyPathDst) != 0 {
+			t.Errorf("nothing must be written when the probe fails: %v", ops.copyPathDst)
+		}
+	})
+
+	t.Run("crew memory perms are re-applied as the sidecar writer", func(t *testing.T) {
+		p := fullSectionPayload(t)
+		ops := &restoreRecOps{}
+		if err := RestoreCrew(ctx, ops, "c1", "alpha", p); err != nil {
+			t.Fatalf("RestoreCrew: %v", err)
+		}
+		// The last exec is the post-restore chgrp/setgid pass, which only
+		// uid 1001 gid 1002 can perform in a cap-dropped container.
+		last := ops.execAsUsers[len(ops.execAsUsers)-1]
+		if last != sidecarWriterUser {
+			t.Errorf("final ExecAs user = %q, want %q", last, sidecarWriterUser)
 		}
 	})
 }

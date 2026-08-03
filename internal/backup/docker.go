@@ -36,21 +36,27 @@ type DockerOps interface {
 	// must already exist — docker does not create parent directories.
 	CopyTo(ctx context.Context, containerID, dstPath string, content io.Reader) error
 
-	// CopyToVolume extracts a tar stream into a destination INSIDE the
-	// container by piping it through `tar -x` over an exec session. Used
-	// for destinations that Docker's CopyToContainer rejects with
-	// "container rootfs is marked read-only" or "Could not find the
-	// file <path>" — typically named-volume mountpoints (/home/agent,
-	// /opt/crew-tools) where Docker's archive-API checks the rootfs
-	// layer rather than the live mount table. tar must be on PATH
-	// inside the container; devcontainer base images ship it.
-	CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error
-
-	// CopyToSystem is the uid-0 variant of CopyToVolume for system
-	// paths whose contents are root-owned (e.g. /var/lib service
-	// data dirs). The agent-user tar fails open with "Cannot open:
-	// Permission denied" on every entry there.
-	CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error
+	// CopyToPath extracts a tar stream into a destination INSIDE the
+	// container by piping it through `tar -x` over an exec session,
+	// under the identity and metadata policy the spec names.
+	//
+	// It replaced the pair CopyToVolume / CopyToSystem, which differed
+	// only in the exec user. The reason it is now the ONLY extraction
+	// path — including for /workspace and /crew, which Docker's native
+	// CopyToContainer can reach — is #1714: CopyToContainer's
+	// CopyUIDGID flag does not mean "use the archive's ownership". It
+	// means "chown everything to the container's configured user", and
+	// when Config.User is unset that resolves to the daemon's remapped
+	// root. Ownership of restored data therefore depended on the daemon
+	// build and on a field the backup package cannot see, which is why
+	// the same restore produced 1001:1001 on one host and 0:0 on
+	// another. An exec-tar under an explicit user produces the same
+	// result on every runtime.
+	//
+	// tar must be on PATH inside the container; devcontainer base images
+	// ship it. The container must be RUNNING — see RestoreCrew's
+	// preflight, which says so before anything is written.
+	CopyToPath(ctx context.Context, containerID string, spec ExtractSpec, content io.Reader) error
 
 	// ContainerExists reports whether a container with the given ID or
 	// name is known to the daemon. Used by restore preflight so CopyTo
@@ -63,6 +69,39 @@ type DockerOps interface {
 	// restore. Not performance-critical; the implementation blocks on the
 	// command finishing.
 	Exec(ctx context.Context, containerID string, cmd []string) (exitCode int, output []byte, err error)
+
+	// ExecAs is Exec under an explicit user. Restore needs it twice: to
+	// probe destination writability as the identity that will do the
+	// writing (a root probe would say yes where the agent gets EACCES),
+	// and to re-apply the crew memory tree's group/setgid contract as
+	// uid 1001 gid 1002 — the only identity that can, since crew
+	// containers run CapDrop: ALL and even root there has no CAP_CHOWN.
+	ExecAs(ctx context.Context, containerID, user string, cmd []string) (exitCode int, output []byte, err error)
+}
+
+// ExtractSpec is the per-section extraction policy handed to CopyToPath.
+type ExtractSpec struct {
+	// Dest is the container-absolute directory the tar is extracted into.
+	Dest string
+
+	// User is the exec identity, in "uid:gid" form. Files land owned by
+	// it: tar runs with --no-same-owner because a cap-dropped container
+	// cannot chown to anyone, so the exec identity IS the resulting
+	// ownership. That is deliberate for disaster recovery — the source
+	// instance's numeric ids need not mean anything on the target.
+	User string
+
+	// PreserveModes restores each entry's exact mode instead of applying
+	// the destination's umask. Set for sections whose permission bits
+	// are load-bearing (the crew memory tree's setgid dirs); left off
+	// for the named volumes, where a mode change can EPERM on some
+	// filesystem drivers and nothing depends on the exact bits.
+	PreserveModes bool
+
+	// PreserveTimes restores mtimes. Off for the named volumes, where
+	// utime on the volume root returns EPERM; on for content whose
+	// timestamps carry meaning (memory daily notes, workspace files).
+	PreserveTimes bool
 }
 
 // MobyDockerOps is the production implementation backed by the moby
@@ -148,19 +187,12 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 // on dev3: a 477 MiB bundle hung tar with stdin blocked at ~1 MB
 // transferred. The goroutine here pumps output continuously so back
 // pressure flows correctly.
-func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
-	return m.copyToWithUser(ctx, containerID, dstPath, content, "1001:1001")
+func (m *MobyDockerOps) CopyToPath(ctx context.Context, containerID string, spec ExtractSpec, content io.Reader) error {
+	return m.copyToWithUser(ctx, containerID, spec, content)
 }
 
-// CopyToSystem is the root variant. Routes through the same exec-tar
-// machinery as CopyToVolume but as uid 0 so root-owned paths under
-// /var/lib (redis dump.rdb, postgresql data dir, mysql ibdata1)
-// extract without "Permission denied".
-func (m *MobyDockerOps) CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error {
-	return m.copyToWithUser(ctx, containerID, dstPath, content, "0:0")
-}
-
-func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath string, content io.Reader, user string) error {
+func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID string, spec ExtractSpec, content io.Reader) error {
+	dstPath, user := spec.Dest, spec.User
 	// Tar flags rationale (verified against dev3 GNU tar 1.34 inside
 	// devcontainer base image):
 	//   --overwrite         replace existing files outright. Critical
@@ -174,11 +206,15 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 	//                       (uid 1001) we can't chown to other uids
 	//                       and don't want to preserve archive uids
 	//                       across restored crew identities anyway
-	//   --no-same-permissions   trust destination's defaults; avoids
-	//                           EPERM on filesystems that refuse mode
-	//                           changes
-	//   --touch             don't restore mtimes (utime would fail on
-	//                       volume root with EPERM)
+	//   --same-permissions / --no-same-permissions and --touch are now
+	//                       per-section (ExtractSpec). The volumes keep
+	//                       the old defaults: modes off, because a mode
+	//                       change can EPERM on some drivers, and mtimes
+	//                       off, because utime on the volume root does.
+	//                       The crew memory tree opts INTO both — its
+	//                       setgid directory bits are the contract that
+	//                       keeps crew-shared memory working, and a
+	//                       memory note's mtime is content.
 	//
 	// Runs as the AGENT user (1001:1001) rather than root because the
 	// volume's existing files were created by agent and root inside
@@ -186,13 +222,18 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 	// filesystem driver's uid remapping. Tar fails open with
 	// "Permission denied" when root tries to overwrite an
 	// agent-owned file under those conditions.
+	cmd := []string{"tar", "-x", "--overwrite", "--no-same-owner"}
+	if spec.PreserveModes {
+		cmd = append(cmd, "--same-permissions")
+	} else {
+		cmd = append(cmd, "--no-same-permissions")
+	}
+	if !spec.PreserveTimes {
+		cmd = append(cmd, "--touch")
+	}
+	cmd = append(cmd, "-f", "-", "-C", dstPath)
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
-		Cmd: []string{
-			"tar", "-x",
-			"--overwrite",
-			"--no-same-owner", "--no-same-permissions", "--touch",
-			"-f", "-", "-C", dstPath,
-		},
+		Cmd:          cmd,
 		User:         user,
 		AttachStdin:  true,
 		AttachStdout: true,
@@ -266,9 +307,14 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 // semantics of exec_test patterns elsewhere in the codebase (see
 // internal/devcontainer/installer.go:execInContainerFull).
 func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []string) (int, []byte, error) {
+	return m.ExecAs(ctx, containerID, "0:0", cmd)
+}
+
+// ExecAs implements DockerOps.
+func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cmd []string) (int, []byte, error) {
 	exec, err := m.Client.ExecCreate(ctx, containerID, client.ExecCreateOptions{
 		Cmd:          cmd,
-		User:         "0:0",
+		User:         user,
 		AttachStdout: true,
 		AttachStderr: true,
 	})
@@ -432,21 +478,33 @@ func shouldExclude(p string, patterns []string) bool {
 // dramatic (1.6 GB → ~50 MB on dev3) and the excluded content can be
 // re-fetched by the agent's normal startup.
 //
-// Returns the total bytes written to dst.
-func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
+// Returns what was written to dst — see RepackResult.
+func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (RepackResult, error) {
 	return RepackTarWithExcludes(src, dst, prefix, volumeExclusions)
+}
+
+// RepackResult reports what a repack produced. Entries counts every tar
+// header written (files, dirs and links alike) so a section holding only
+// directories still reads as present; Bytes counts regular-file bodies.
+//
+// Entries exists because the manifest used to assert what a bundle held
+// instead of observing it (#1713). A bundle that lies about its contents
+// is worse than one that is missing them: the operator stops looking.
+type RepackResult struct {
+	Entries int
+	Bytes   int64
 }
 
 // RepackTarWithExcludes is RepackTar with an explicit exclusion list,
 // so /var/lib (where dpkg/apt state should be skipped, NOT
 // node_modules) and /workspace (the opposite) can both be repacked
 // through one code path.
-func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excludes []string) (int64, error) {
+func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excludes []string) (RepackResult, error) {
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 	tr := tar.NewReader(src)
-	var total int64
+	var res RepackResult
 	var wrapper string // empty until the first top-level dir is seen
 	for {
 		hdr, err := tr.Next()
@@ -454,7 +512,7 @@ func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excl
 			break
 		}
 		if err != nil {
-			return total, fmt.Errorf("backup: repack tar: %w", err)
+			return res, fmt.Errorf("backup: repack tar: %w", err)
 		}
 		trimmed := strings.TrimPrefix(strings.TrimPrefix(hdr.Name, "./"), "/")
 
@@ -504,15 +562,26 @@ func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excl
 				Linkname: newLinkname,
 				Uid:      hdr.Uid,
 				Gid:      hdr.Gid,
+				Uname:    hdr.Uname,
+				Gname:    hdr.Gname,
 			}); err != nil {
-				return total, fmt.Errorf("backup: repack header %q: %w", newName, err)
+				return res, fmt.Errorf("backup: repack header %q: %w", newName, err)
 			}
+			res.Entries++
 			continue
 		}
-		if err := dst.WriteStream(newName, hdr.Mode, hdr.ModTime, hdr.Size, tr); err != nil {
-			return total, err
+		// Regular files carry Uid/Gid too. Before #1714 they did not, and
+		// the zero value is uid 0 — so every file in a bundle claimed to
+		// belong to root while the directories around it correctly
+		// claimed uid 1001. Whether a given restore path honours the
+		// header is a separate question (see ExtractSpec); a bundle that
+		// records the wrong owner cannot be restored correctly by any of
+		// them.
+		if err := dst.WriteStreamOwned(newName, hdr.Mode, hdr.ModTime, hdr.Size, hdr.Uid, hdr.Gid, hdr.Uname, hdr.Gname, tr); err != nil {
+			return res, err
 		}
-		total += hdr.Size
+		res.Entries++
+		res.Bytes += hdr.Size
 	}
-	return total, nil
+	return res, nil
 }

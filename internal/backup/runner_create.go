@@ -316,12 +316,24 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if !level.Valid() {
 		level = DefaultScopeLevel
 	}
+	captures := map[string]CrewCapture{}
 	for _, crew := range target.CrewTargets {
 		if opts.DockerOps != nil && crew.ContainerID != "" {
-			if err := CollectCrew(ctx, opts.DockerOps, payloadWriter, crew, level); err != nil {
+			capture, err := CollectCrew(ctx, opts.DockerOps, payloadWriter, crew, level)
+			if err != nil {
 				_ = payloadWriter.Close()
 				_ = payloadFile.Close()
 				return nil, err
+			}
+			captures[crew.Slug] = capture
+			// A crew whose container exists but whose memory tree came
+			// back empty is the shape of #1713 recurring — a path that
+			// stopped resolving, a mount that stopped being mounted.
+			// The manifest will say so honestly either way; this is the
+			// breadcrumb for whoever has to work out why.
+			if capture.CrewEntries == 0 {
+				slog.Warn("backup: crew has a running container but no memory tree was captured",
+					"crew", crew.Slug, "path", ContainerCrewPath, "workspace_id", target.ID)
 			}
 		}
 	}
@@ -424,7 +436,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if len(migrations) == 0 {
 		migrations = AppliedMigrationVersions(ctx, db)
 	}
-	contents := buildContents(target, level)
+	contents := buildContents(target, level, captures)
 	if memoryBlobsResult != nil {
 		contents.MemoryBlobsIncluded = memoryBlobsResult.Included
 		contents.MemoryBlobsMissing = len(memoryBlobsResult.Missing)
@@ -511,15 +523,25 @@ func compatibleTargetsFor(s Scope) []Target {
 	}
 }
 
-// buildContents assembles the manifest's Contents summary. The
-// per-section flags now reflect the chosen preset so the restore
-// preflight (and the UI) can tell which sections to expect.
+// buildContents assembles the manifest's Contents summary from what
+// CollectCrew reported writing, keyed by crew slug.
 //
-// For every preset, a missing container ID still zeroes everything
-// out — the crew was never provisioned, so there is no on-disk data
-// to capture regardless of preset.
-func buildContents(t *WorkspaceTarget, level ScopeLevel) Contents {
-	standard := level == ScopeLevelStandard || level == ScopeLevelFull
+// It used to predict instead: every per-section flag was set from
+// `c.ContainerID != ""`, so the manifest described the bundle the
+// collector was supposed to have produced rather than the one it did.
+// That is how #1713 stayed invisible for as long as it did — the
+// collector was reading /output and calling it memory, and the manifest
+// dutifully reported memory_included: true on every bundle. A predicted
+// flag cannot notice a wrong path; an observed one cannot miss it.
+//
+// The prediction was also load-bearing in the other direction: the
+// restore docker phase gates on these flags, so a false positive turns
+// into a hard "crew has filesystem data but is not provisioned" failure
+// for a crew that has no data at all.
+//
+// Crews with no capture entry (no container, or docker ops absent) get
+// zeroes, which is what a crew with nothing on disk should report.
+func buildContents(t *WorkspaceTarget, level ScopeLevel, captures map[string]CrewCapture) Contents {
 	contents := Contents{
 		Workspace: &WorkspaceSummary{
 			ID:   t.ID,
@@ -528,7 +550,7 @@ func buildContents(t *WorkspaceTarget, level ScopeLevel) Contents {
 		},
 	}
 	for _, c := range t.CrewTargets {
-		hasContainer := c.ContainerID != ""
+		capture := captures[c.Slug]
 		summary := CrewSummary{
 			ID:                         c.ID,
 			Slug:                       c.Slug,
@@ -539,18 +561,12 @@ func buildContents(t *WorkspaceTarget, level ScopeLevel) Contents {
 			ConfigHash:                 c.ConfigHash,
 			DevcontainerConfigIncluded: c.DevcontainerConfig != "",
 			MiseConfigIncluded:         c.MiseConfig != "",
-			// Workspace and memory ride every preset (Quick / Standard
-			// / Full); they are the smallest sections and are what
-			// every operator expects to see survive a backup.
-			WorkspaceIncluded: hasContainer,
-			MemoryIncluded:    hasContainer,
-			AgentCount:        c.AgentCount,
-		}
-		if standard && hasContainer {
-			summary.VolumesIncluded = []string{"home", "tools"}
-		}
-		if level == ScopeLevelFull && hasContainer {
-			summary.SystemIncluded = true
+			WorkspaceIncluded:          capture.WorkspaceEntries > 0,
+			MemoryIncluded:             capture.CrewEntries > 0,
+			OutputIncluded:             capture.OutputEntries > 0,
+			VolumesIncluded:            capture.Volumes(),
+			SystemIncluded:             capture.VarLibEntries > 0,
+			AgentCount:                 c.AgentCount,
 		}
 		contents.Crews = append(contents.Crews, summary)
 	}

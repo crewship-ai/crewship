@@ -706,6 +706,14 @@ type RestoreDumpHooks struct {
 	// target workspace's rows first so the bundle can land with
 	// original IDs intact.
 	PreInsert func(ctx context.Context, tx *sql.Tx) error
+	// PostInsert runs INSIDE the tx, AFTER the per-table INSERT pass
+	// and BEFORE the FK integrity check. Used to write rows that
+	// reference what the restore just inserted — the DR provenance row
+	// (#1716) FKs into workspaces(id), so it cannot be written before
+	// that workspace row exists, and it must be inside the same tx so a
+	// rolled back restore cannot leave behind a claim that a workspace
+	// came from a bundle whose rows never landed.
+	PostInsert func(ctx context.Context, tx *sql.Tx) error
 	// PreCommit runs INSIDE the tx, AFTER all INSERTs and the FK
 	// integrity check, BEFORE Commit. Used by the docker phase: a
 	// CopyTo failure rolls the DB back rather than leaving a
@@ -875,6 +883,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// rows describing it. PRAGMA foreign_key_check returns one row per
 	// violation regardless of defer_foreign_keys, so it's the right
 	// probe to run inside the open tx.
+	if hooks.PostInsert != nil {
+		if err := hooks.PostInsert(ctx, tx); err != nil {
+			return stats, fmt.Errorf("backup: post-insert hook: %w", err)
+		}
+	}
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
 		return stats, err
 	}

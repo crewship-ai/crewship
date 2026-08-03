@@ -39,13 +39,13 @@ func (c *captureDockerOps) CopyFrom(ctx context.Context, _ string, srcPath strin
 func (c *captureDockerOps) CopyTo(ctx context.Context, _ string, _ string, _ io.Reader) error {
 	return nil
 }
-func (c *captureDockerOps) CopyToVolume(ctx context.Context, _ string, _ string, _ io.Reader) error {
-	return nil
-}
-func (c *captureDockerOps) CopyToSystem(ctx context.Context, _ string, _ string, _ io.Reader) error {
+func (c *captureDockerOps) CopyToPath(ctx context.Context, _ string, _ ExtractSpec, _ io.Reader) error {
 	return nil
 }
 func (c *captureDockerOps) Exec(ctx context.Context, _ string, _ []string) (int, []byte, error) {
+	return 0, nil, nil
+}
+func (c *captureDockerOps) ExecAs(ctx context.Context, _ string, _ string, _ []string) (int, []byte, error) {
 	return 0, nil, nil
 }
 
@@ -62,11 +62,12 @@ func TestCollectCrew_ScopeLevels(t *testing.T) {
 		wantSrcs []string
 	}{
 		{
-			name:  "quick: workspace + memory only",
+			name:  "quick: workspace + crew memory + output only",
 			level: ScopeLevelQuick,
 			wantSrcs: []string{
 				ContainerWorkspacePath,
-				ContainerMemoryPath,
+				ContainerCrewPath,
+				ContainerOutputPath,
 			},
 		},
 		{
@@ -74,7 +75,8 @@ func TestCollectCrew_ScopeLevels(t *testing.T) {
 			level: ScopeLevelStandard,
 			wantSrcs: []string{
 				ContainerWorkspacePath,
-				ContainerMemoryPath,
+				ContainerCrewPath,
+				ContainerOutputPath,
 				ContainerHomePath,
 				ContainerToolsPath,
 			},
@@ -84,7 +86,8 @@ func TestCollectCrew_ScopeLevels(t *testing.T) {
 			level: ScopeLevelFull,
 			wantSrcs: []string{
 				ContainerWorkspacePath,
-				ContainerMemoryPath,
+				ContainerCrewPath,
+				ContainerOutputPath,
 				ContainerHomePath,
 				ContainerToolsPath,
 				ContainerVarLibPath,
@@ -95,7 +98,8 @@ func TestCollectCrew_ScopeLevels(t *testing.T) {
 			level: "",
 			wantSrcs: []string{
 				ContainerWorkspacePath,
-				ContainerMemoryPath,
+				ContainerCrewPath,
+				ContainerOutputPath,
 				ContainerHomePath,
 				ContainerToolsPath,
 			},
@@ -110,11 +114,21 @@ func TestCollectCrew_ScopeLevels(t *testing.T) {
 				t.Fatalf("writer: %v", err)
 			}
 			defer tw.Close()
-			err = CollectCrew(context.Background(), ops, tw,
+			capture, err := CollectCrew(context.Background(), ops, tw,
 				CrewTarget{ID: "c1", Slug: "research", ContainerID: "c1-container"},
 				tc.level)
 			if err != nil {
 				t.Fatalf("collect: %v", err)
+			}
+			// Every source returned an empty tar, so the capture must
+			// report zero entries everywhere — the manifest is derived
+			// from what actually landed, not from which paths were asked.
+			if capture.Slug != "research" {
+				t.Errorf("capture slug = %q, want research", capture.Slug)
+			}
+			if capture.WorkspaceEntries+capture.CrewEntries+capture.OutputEntries+
+				capture.HomeEntries+capture.ToolsEntries+capture.VarLibEntries != 0 {
+				t.Errorf("empty tars must produce a zero capture, got %+v", capture)
 			}
 			gotSorted := append([]string(nil), ops.sources...)
 			wantSorted := append([]string(nil), tc.wantSrcs...)

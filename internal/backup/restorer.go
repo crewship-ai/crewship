@@ -3,6 +3,7 @@ package backup
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -19,7 +20,8 @@ import (
 //
 // Names without a known section prefix default to STRICT so an
 // unrecognised future section cannot be used to smuggle escaping
-// links by mistake.
+// links by mistake — which is what keeps the crew/ section (the memory
+// tree, added for #1713) strict without needing a case of its own.
 func symlinkSectionIsStrict(name string) bool {
 	switch {
 	case strings.HasPrefix(name, "workspace/"),
@@ -66,7 +68,13 @@ type ExtractedPayload struct {
 	// per-section path maps. nil-or-missing = section absent.
 	workspacePathBySlug map[string]string
 	volumePathsBySlug   map[string]map[string]string // crew → volume name → path
-	memoryPathBySlug    map[string]string
+	// crewPathBySlug holds the /crew section — the real agent and
+	// crew-shared memory tree (#1713). memoryPathBySlug, despite the
+	// name, is the /output section; the names are kept as-is because
+	// they are the on-disk bundle section names and renaming them would
+	// silently orphan the sections in every existing bundle.
+	crewPathBySlug   map[string]string
+	memoryPathBySlug map[string]string
 	// systemPathsBySlug holds /var/lib (and any future rootfs sections
 	// added under "system/") keyed by sub-section name. Separate from
 	// volumePathsBySlug so a future migration that drops a real named
@@ -108,6 +116,7 @@ func (p *ExtractedPayload) Close() error {
 	p.tempDir = ""
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
+	p.crewPathBySlug = nil
 	p.memoryPathBySlug = nil
 	p.systemPathsBySlug = nil
 	p.memoryBlobsPath = ""
@@ -150,6 +159,30 @@ func (p *ExtractedPayload) OpenVolume(ctx context.Context, slug, vol string) (io
 	f, err := p.storageOrDefault().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open volume section %s/%s: %w", slug, vol, err)
+	}
+	return f, true, nil
+}
+
+// HasCrew reports whether the bundle carried the /crew section — the
+// agent and crew-shared memory tree — for the given slug. False for
+// every bundle produced before #1713 was fixed, which is the signal
+// callers use to tell the operator that a restore from it will not
+// bring memory back.
+func (p *ExtractedPayload) HasCrew(slug string) bool {
+	_, ok := p.crewPathBySlug[slug]
+	return ok
+}
+
+// OpenCrew returns a reader for the /crew tar of the given crew slug.
+// Returns (nil, false, nil) for bundles that predate the section.
+func (p *ExtractedPayload) OpenCrew(ctx context.Context, slug string) (io.ReadCloser, bool, error) {
+	path, ok := p.crewPathBySlug[slug]
+	if !ok {
+		return nil, false, nil
+	}
+	f, err := p.storageOrDefault().Open(ctx, path)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open crew section %s: %w", slug, err)
 	}
 	return f, true, nil
 }
@@ -235,6 +268,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		tempDir:             tempDir,
 		workspacePathBySlug: map[string]string{},
 		volumePathsBySlug:   map[string]map[string]string{},
+		crewPathBySlug:      map[string]string{},
 		memoryPathBySlug:    map[string]string{},
 		systemPathsBySlug:   map[string]map[string]string{},
 	}
@@ -377,6 +411,11 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				return nil, err
 			}
 
+		case strings.HasPrefix(name, "crew/"):
+			if err := repackIntoSink(tr, hdr, name, "crew/", sinkFor); err != nil {
+				return nil, err
+			}
+
 		case strings.HasPrefix(name, "memory/"):
 			if err := repackIntoSink(tr, hdr, name, "memory/", sinkFor); err != nil {
 				return nil, err
@@ -426,6 +465,8 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		switch parts[0] {
 		case "workspace":
 			out.workspacePathBySlug[parts[1]] = name
+		case "crew":
+			out.crewPathBySlug[parts[1]] = name
 		case "memory":
 			out.memoryPathBySlug[parts[1]] = name
 		case "volumes":
@@ -499,6 +540,13 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		}
 		key = "volumes/" + slug + "/" + vol
 		strip = slug + "/" + vol + "/"
+	case "crew/":
+		slug, _, ok := splitFirst(rest)
+		if !ok {
+			return nil
+		}
+		key = "crew/" + slug
+		strip = slug + "/"
 	case "memory/":
 		slug, _, ok := splitFirst(rest)
 		if !ok {
@@ -563,47 +611,65 @@ func splitFirst(s string) (head, tail string, ok bool) {
 	return s, "", false
 }
 
-// RestoreCrew streams the per-crew sections of an ExtractedPayload
-// into a freshly-provisioned container. The container MUST already
-// exist with the canonical mount paths available; callers are
-// responsible for invoking the devcontainer provisioner before this.
-func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlug string, payload *ExtractedPayload) error {
-	if payload == nil {
-		return fmt.Errorf("backup: RestoreCrew: nil payload")
-	}
-	// Each section is restored by streaming a tar into the container.
-	// Two restore strategies live in the inner switch below. Workspace
-	// + memory go through the SDK's CopyTo with parent==/. The named
-	// volumes and the system /var/lib path go through CopyToVolume /
-	// CopyToSystem (exec + tar -x) because Docker's archive API
-	// rejects writes whose dst is a named-volume mountpoint inside a
-	// read-only rootfs path.
-	type section struct {
-		open   func() (io.ReadCloser, bool, error)
-		dest   string // container absolute path of the section root
-		name   string // human label for error messages
-		asRoot bool   // exec the tar as uid 0 instead of the agent user
-	}
-	sections := []section{
+// agentUser / sidecarWriterUser / rootUser are the exec identities the
+// restore runs under.
+//
+// sidecarWriterUser is uid 1001 with PRIMARY group 1002 — the same
+// identity the orchestrator's prepMemoryDirs uses, and the only one that
+// can re-establish the memory tree's group ownership. Crew containers run
+// CapDrop: ALL, so nothing inside them has CAP_CHOWN; what POSIX still
+// permits is an owner changing a file's group to a group it is itself a
+// member of, which is exactly this.
+const (
+	agentUser         = "1001:1001"
+	sidecarWriterUser = "1001:1002"
+	rootUser          = "0:0"
+)
+
+// restoreSection is one destination inside the container, its source in
+// the bundle, and the policy for landing it.
+type restoreSection struct {
+	open func() (io.ReadCloser, bool, error)
+	spec ExtractSpec
+	name string
+}
+
+// crewRestoreSections is the section table, shared by the preflight and
+// the apply pass so the two can never drift — a preflight that checks a
+// different set of destinations than the writer writes is worse than no
+// preflight.
+func crewRestoreSections(ctx context.Context, crewSlug string, payload *ExtractedPayload) []restoreSection {
+	return []restoreSection{
 		{
 			open: func() (io.ReadCloser, bool, error) { return payload.OpenWorkspace(ctx, crewSlug) },
-			dest: ContainerWorkspacePath,
 			name: "workspace",
+			spec: ExtractSpec{Dest: ContainerWorkspacePath, User: agentUser, PreserveTimes: true},
 		},
 		{
-			open: func() (io.ReadCloser, bool, error) { return payload.OpenVolume(ctx, crewSlug, "home") },
-			dest: ContainerHomePath,
-			name: "home",
-		},
-		{
-			open: func() (io.ReadCloser, bool, error) { return payload.OpenVolume(ctx, crewSlug, "tools") },
-			dest: ContainerToolsPath,
-			name: "tools",
+			// The crew memory tree. PreserveModes is not cosmetic here:
+			// the .memory directories are setgid 2775 so that everything
+			// the agent creates later inherits group 1002 and stays
+			// readable by the memory sidecar. A restore that drops the
+			// bit leaves memory that works today and silently stops
+			// being shared tomorrow.
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenCrew(ctx, crewSlug) },
+			name: "crew-memory",
+			spec: ExtractSpec{Dest: ContainerCrewPath, User: agentUser, PreserveModes: true, PreserveTimes: true},
 		},
 		{
 			open: func() (io.ReadCloser, bool, error) { return payload.OpenMemory(ctx, crewSlug) },
-			dest: ContainerMemoryPath,
-			name: "memory",
+			name: "output",
+			spec: ExtractSpec{Dest: ContainerOutputPath, User: agentUser, PreserveTimes: true},
+		},
+		{
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenVolume(ctx, crewSlug, "home") },
+			name: "home",
+			spec: ExtractSpec{Dest: ContainerHomePath, User: agentUser},
+		},
+		{
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenVolume(ctx, crewSlug, "tools") },
+			name: "tools",
+			spec: ExtractSpec{Dest: ContainerToolsPath, User: agentUser},
 		},
 		{
 			// /var/lib carries service data dirs (redis, postgresql, ...)
@@ -613,68 +679,92 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			// this is a silent skip — full backwards compatibility.
 			//
 			// Must extract as uid 0: every parent dir under /var/lib is
-			// root-owned, the agent user (1001) has no write bit, and
-			// inner files (mysql/ibdata1, postgres data) are root-owned
-			// reads from the bundle perspective. CopyToSystem handles the
-			// uid switch via a separate exec session.
-			open:   func() (io.ReadCloser, bool, error) { return payload.OpenSystem(ctx, crewSlug, "var-lib") },
-			dest:   ContainerVarLibPath,
-			name:   "var-lib",
-			asRoot: true,
+			// root-owned and the agent user has no write bit there. Root
+			// needs no capability for this — it owns the directories.
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenSystem(ctx, crewSlug, "var-lib") },
+			name: "var-lib",
+			spec: ExtractSpec{Dest: ContainerVarLibPath, User: rootUser},
 		},
 	}
-	// Per-section errors are collected so a hiccup on one section
-	// (e.g. a leftover root-owned file blocking unlink in /home/agent)
-	// doesn't prevent the others from being restored. The aggregated
-	// error is returned at the end so the operator sees ALL the
-	// failures, not just the first one.
-	var sectionErrs []string
+}
+
+// ErrRestorePreflight is returned when a restore is refused before any
+// bytes are written. Callers can distinguish it from a mid-flight
+// failure: after ErrRestorePreflight the target is untouched.
+var ErrRestorePreflight = errors.New("backup: restore preflight failed")
+
+// RestoreCrew streams the per-crew sections of an ExtractedPayload
+// into a freshly-provisioned container. The container MUST already
+// exist AND BE RUNNING with the canonical mount paths available;
+// callers are responsible for invoking the devcontainer provisioner
+// before this.
+//
+// # Atomicity
+//
+// #1715's complaint was not the HTTP 500 it produced — it was that the
+// 500 arrived after the workspace and memory sections were already on
+// disk, so a failed restore left a crew half-overwritten with no way to
+// tell which half. The section loop below is now preceded by a preflight
+// that probes EVERY destination this call will write, as the identity
+// that will write it, and refuses the whole restore if any one of them
+// is not writable. The common failure — a target whose named volumes are
+// still root-owned — is therefore caught with nothing written.
+//
+// This is preflight-atomic, not transactional: a failure after the
+// preflight passes (device full, daemon restart mid-stream) can still
+// leave a partially written crew. Restore is idempotent, so the recovery
+// for that case is to re-run it. Rolling back instead would mean staging
+// a full copy of every section inside the container, which for a
+// multi-GB workspace costs more disk than the crew has and would itself
+// fail in the case it exists to protect.
+func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlug string, payload *ExtractedPayload) error {
+	if payload == nil {
+		return fmt.Errorf("backup: RestoreCrew: nil payload")
+	}
+	sections := crewRestoreSections(ctx, crewSlug, payload)
+
+	// Preflight. Every section that the bundle actually carries gets its
+	// destination probed for existence and writability under the exact
+	// exec identity the apply pass will use. Nothing is written yet.
+	var preflightErrs []string
+	present := map[string]bool{}
 	for _, s := range sections {
 		r, ok, err := s.open()
 		if err != nil {
-			// Aggregate Open* failures into the same partial-restore
-			// path as CopyTo failures below — a corrupt temp section
-			// for the home volume should not block restoring the
-			// workspace + memory the operator probably cares about
-			// more.
+			preflightErrs = append(preflightErrs, fmt.Sprintf("%s: %v", s.name, err))
+			continue
+		}
+		if !ok {
+			continue
+		}
+		_ = r.Close()
+		present[s.name] = true
+		if err := probeWritable(ctx, ops, containerID, s.spec); err != nil {
+			preflightErrs = append(preflightErrs, fmt.Sprintf("%s: %v", s.name, err))
+		}
+	}
+	if len(preflightErrs) > 0 {
+		return fmt.Errorf("%w for crew %s (nothing was written): %s",
+			ErrRestorePreflight, crewSlug, strings.Join(preflightErrs, "; "))
+	}
+
+	// Apply. Per-section errors are still aggregated so the operator sees
+	// every failure rather than only the first, but reaching here means
+	// each destination was writable moments ago.
+	var sectionErrs []string
+	for _, s := range sections {
+		if !present[s.name] {
+			continue
+		}
+		r, ok, err := s.open()
+		if err != nil {
 			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
 			continue
 		}
 		if !ok {
 			continue
 		}
-		parent := path.Dir(s.dest)
-		// Two restore strategies, picked by where the section lands:
-		//
-		//   parent == "/" (e.g. /workspace, /output): Docker's archive
-		//     API works fine because the dst itself is a bind-mounted
-		//     writable target, not a read-only rootfs path. Use the
-		//     SDK's CopyTo directly — it's faster and doesn't require
-		//     `tar` to be installed in the container.
-		//
-		//   parent != "/" (e.g. /home/agent, /opt/crew-tools): these
-		//     are typically NAMED VOLUMES whose mountpoint sits inside
-		//     a read-only rootfs path (/home, /opt). Docker's archive
-		//     API rejects ANY CopyTo into them with "rootfs is marked
-		//     read-only" (when dst=parent) or "Could not find the file"
-		//     (when dst=mountpoint, because the API checks the rootfs
-		//     view rather than the live mount table). Pipe the tar
-		//     into `tar -x -C <dst>` over an exec session instead —
-		//     that runs INSIDE the container, sees the live mounts,
-		//     and lands files on the volume properly.
-		if parent == "/" {
-			err := ops.CopyTo(ctx, containerID, s.dest, r)
-			_ = r.Close()
-			if err != nil {
-				sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
-			}
-			continue
-		}
-		if s.asRoot {
-			err = ops.CopyToSystem(ctx, containerID, s.dest, r)
-		} else {
-			err = ops.CopyToVolume(ctx, containerID, s.dest, r)
-		}
+		err = ops.CopyToPath(ctx, containerID, s.spec, r)
 		_ = r.Close()
 		if err != nil {
 			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
@@ -682,6 +772,69 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 	}
 	if len(sectionErrs) > 0 {
 		return fmt.Errorf("backup: restore crew %s — partial: %s", crewSlug, strings.Join(sectionErrs, "; "))
+	}
+
+	if present["crew-memory"] {
+		if err := reapplyMemoryPerms(ctx, ops, containerID); err != nil {
+			return fmt.Errorf("backup: restore crew %s: %w", crewSlug, err)
+		}
+	}
+	return nil
+}
+
+// probeWritable checks that spec.Dest exists and is writable by
+// spec.User, without writing anything the restore would not have
+// written anyway. The probe file is created and removed inside the
+// destination, which is the only way to answer the question the kernel
+// will actually be asked: `test -w` reports the DAC bits, and a
+// root-owned 0755 directory is reported writable to a root probe while
+// the agent tar that follows gets EACCES on its first entry.
+//
+// It also doubles as the "is the container running" check — a stopped
+// container cannot exec, and every restore path now needs exec.
+func probeWritable(ctx context.Context, ops DockerOps, containerID string, spec ExtractSpec) error {
+	probe := path.Join(spec.Dest, ".crewship-restore-probe")
+	code, out, err := ops.ExecAs(ctx, containerID, spec.User, []string{
+		"sh", "-c", fmt.Sprintf(
+			`[ -d %q ] || { echo "destination does not exist"; exit 3; }; `+
+				`touch %q 2>&1 && rm -f %q`, spec.Dest, probe, probe),
+	})
+	if err != nil {
+		return fmt.Errorf("cannot probe %s as %s (is the container running?): %w", spec.Dest, spec.User, err)
+	}
+	if code != 0 {
+		return fmt.Errorf("%s is not writable by %s: %s", spec.Dest, spec.User, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// reapplyMemoryPerms re-establishes the crew memory tree's group and
+// setgid contract after a restore, using the same mechanism and the same
+// identity the orchestrator uses when it prepares those directories.
+//
+// Why the tar cannot carry this on its own: the archive records group
+// 1002, but extraction runs --no-same-owner because a CapDrop: ALL
+// container has no CAP_CHOWN, so every restored entry lands in the exec
+// identity's group. Running the extraction itself as 1001:1002 would put
+// the WHOLE of /crew in group 1002, not just the .memory subtrees. So
+// the tar lands the content under the agent's own group, and this pass
+// re-flips exactly the subtrees that need it — the same two-step the
+// docker provider's init container performs at crew creation.
+//
+// Idempotent, and scoped to .memory directories by find, so a bundle
+// with no memory subtrees is a no-op rather than a broad chgrp.
+func reapplyMemoryPerms(ctx context.Context, ops DockerOps, containerID string) error {
+	script := `set -e
+for p in $(find ` + ContainerCrewPath + ` -type d -name .memory 2>/dev/null); do
+  chgrp -R 1002 -- "$p" || exit 4
+  chmod -R u+rwX,g+rwXs -- "$p" || exit 5
+done`
+	code, out, err := ops.ExecAs(ctx, containerID, sidecarWriterUser, []string{"sh", "-c", script})
+	if err != nil {
+		return fmt.Errorf("re-apply memory permissions: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("re-apply memory permissions exited %d: %s", code, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

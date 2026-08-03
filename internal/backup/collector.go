@@ -49,50 +49,97 @@ type WorkspaceTarget struct {
 // service the agent stood up is starting from zero. Pure rebuilds-
 // from-image content (/var/lib/dpkg, /var/lib/apt, /var/lib/systemd)
 // is filtered out at repack time so the bundle stays small.
+// ContainerCrewPath is the one that was missing, and its absence is
+// #1713. It is the host bind holding /crew/shared/.memory and
+// /crew/agents/<slug>/.memory — the accumulated crew and per-agent
+// memory, which is the least reproducible thing a crew owns. Before
+// this constant existed the collector took /output and labelled it
+// "memory"; /output is a different, essentially-empty mount, so every
+// bundle ever produced carried a memory section with no memory in it
+// while the manifest asserted memory_included: true.
 const (
 	ContainerWorkspacePath = "/workspace"
 	ContainerHomePath      = "/home/agent"
 	ContainerToolsPath     = "/opt/crew-tools"
-	ContainerMemoryPath    = "/output"
+	ContainerCrewPath      = "/crew"
+	ContainerOutputPath    = "/output"
 	ContainerVarLibPath    = "/var/lib"
 )
 
+// CrewCapture records what CollectCrew actually wrote, per section.
+// The manifest is built from this rather than from "the crew had a
+// container ID", which is what let #1713 stay invisible: a predicted
+// flag cannot notice that the path it predicted was wrong.
+type CrewCapture struct {
+	Slug string
+
+	WorkspaceEntries int
+	CrewEntries      int
+	OutputEntries    int
+	HomeEntries      int
+	ToolsEntries     int
+	VarLibEntries    int
+}
+
+// Volumes returns the named-volume section labels that actually carry
+// entries, in the order the restorer expects them.
+func (c CrewCapture) Volumes() []string {
+	var out []string
+	if c.HomeEntries > 0 {
+		out = append(out, "home")
+	}
+	if c.ToolsEntries > 0 {
+		out = append(out, "tools")
+	}
+	return out
+}
+
 // CollectCrew pauses the crew container, streams its workspace bind,
-// named volumes and memory directory into dst (prefixed by the crew's
-// slug), and unpauses. Inside dst the layout looks like:
+// crew memory bind, named volumes and output directory into dst
+// (prefixed by the crew's slug), and unpauses. Inside dst the layout
+// looks like:
 //
-//	workspace/<slug>/…   (bind mount contents)
+//	workspace/<slug>/…   (/workspace bind contents)
+//	crew/<slug>/…        (/crew bind contents — the real memory tree)
+//	memory/<slug>/…      (/output bind contents)
 //	volumes/<slug>/home/…
 //	volumes/<slug>/tools/…
-//	memory/<slug>/…
 //	system/<slug>/var-lib/…
 //
-// level selects which subset is included (Quick keeps just workspace +
-// memory; Standard adds the named volumes; Full adds /var/lib).
-func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget, level ScopeLevel) error {
+// level selects which subset is included (Quick keeps workspace, crew
+// memory and output; Standard adds the named volumes; Full adds
+// /var/lib).
+//
+// The returned CrewCapture reports what was actually written. Callers
+// build the manifest from it — see CrewCapture's doc comment.
+func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget, level ScopeLevel) (CrewCapture, error) {
+	capture := CrewCapture{Slug: crew.Slug}
 	if crew.ContainerID == "" {
 		// Container was never created or was removed. The crew's DB rows
 		// still restore; callers see a bundle without per-crew volume
 		// data which is the right fallback.
-		return nil
+		return capture, nil
 	}
 	if !level.Valid() {
 		level = DefaultScopeLevel
 	}
-	return WithPaused(ctx, ops, crew.ContainerID, func() error {
+	err := WithPaused(ctx, ops, crew.ContainerID, func() error {
 		type pair struct {
 			src, prefix string
 			excludes    []string
+			count       *int
 		}
 		// Quick: just the things that describe the agent's active
 		// engagement. workspace = code under edit (vendored deps,
 		// node_modules, build outputs all belong to the user — no
 		// exclusions, otherwise an offline / committed-deps project
-		// silently loses content), memory = the agent's persisted
-		// thoughts (tiny, no exclusions to apply).
+		// silently loses content); /crew = the agent and crew memory
+		// trees (tiny, no exclusions to apply); /output = the agent's
+		// declared outputs.
 		pairs := []pair{
-			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil},
-			{ContainerMemoryPath, fmt.Sprintf("memory/%s", crew.Slug), nil},
+			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil, &capture.WorkspaceEntries},
+			{ContainerCrewPath, fmt.Sprintf("crew/%s", crew.Slug), nil, &capture.CrewEntries},
+			{ContainerOutputPath, fmt.Sprintf("memory/%s", crew.Slug), nil, &capture.OutputEntries},
 		}
 		// Standard adds the named volumes (home dotfiles + installed
 		// tools). volumeExclusions trims regenerable caches (mise,
@@ -101,24 +148,30 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 		// (~/.config/<tool>/, ~/.aws, ~/.ssh, ~/.docker, ~/.gitconfig).
 		if level == ScopeLevelStandard || level == ScopeLevelFull {
 			pairs = append(pairs,
-				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions},
-				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions},
+				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions, &capture.HomeEntries},
+				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions, &capture.ToolsEntries},
 			)
 		}
 		// Full adds /var/lib so any service the agent installed
 		// (redis, postgresql, mysql, mongo) round-trips its data dir.
 		if level == ScopeLevelFull {
 			pairs = append(pairs,
-				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions},
+				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions, &capture.VarLibEntries},
 			)
 		}
 		for _, p := range pairs {
-			if err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes); err != nil {
+			n, err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes)
+			if err != nil {
 				return fmt.Errorf("backup: collect %s:%s: %w", crew.Slug, p.src, err)
 			}
+			*p.count = n
 		}
 		return nil
 	})
+	if err != nil {
+		return CrewCapture{Slug: crew.Slug}, err
+	}
+	return capture, nil
 }
 
 // copyContainerPath streams srcPath from the container as a tar and
@@ -128,21 +181,25 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 // is the section-specific exclusion list applied at repack time so
 // regeneratable content (/home/agent caches, /var/lib/dpkg state)
 // never lands in the bundle.
-func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, containerID, srcPath, prefix string, excludes []string) error {
+// Returns the number of tar entries written into dst for this section —
+// zero when the path was missing or empty. That count, not a guess from
+// the crew's metadata, is what the manifest reports.
+func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, containerID, srcPath, prefix string, excludes []string) (int, error) {
 	rc, err := ops.CopyFrom(ctx, containerID, srcPath)
 	if err != nil {
 		// Treat "No such container:path" as skippable; anything else is
 		// a hard error.
 		if isNotFoundErr(err) {
-			return nil
+			return 0, nil
 		}
-		return err
+		return 0, err
 	}
 	defer func() { _ = rc.Close() }()
-	if _, err := RepackTarWithExcludes(rc, dst, prefix, excludes); err != nil {
-		return err
+	res, err := RepackTarWithExcludes(rc, dst, prefix, excludes)
+	if err != nil {
+		return 0, err
 	}
-	return nil
+	return res.Entries, nil
 }
 
 // isNotFoundErr returns true if err comes from docker complaining
