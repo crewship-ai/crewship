@@ -55,8 +55,16 @@ func (p crewContainerPlacer) Place(ctx context.Context, stagingDir string, rels 
 		return err
 	}
 	return p.ops.CopyToPath(ctx, p.containerID, backup.ExtractSpec{
-		Dest:          p.dest,
-		User:          "1001:1001",
+		Dest: p.dest,
+		// 1001:1002 — the agent uid with the MEMORY group, not the
+		// agent's own group. The tree is built for exactly this
+		// (buildChownInitCmd: .memory is 1001:1002, mode 2775, files
+		// g+rw), and the sidecar that serves the agent's own memory
+		// writes runs as uid 1002. Extracting as 1001:1001 could not
+		// overwrite a file the sidecar had written:
+		//   tar: AGENT.md: Cannot open: Permission denied
+		// Group 1002 is the shared write channel the design intends.
+		User:          "1001:1002",
 		PreserveModes: true,
 		PreserveTimes: true,
 	}, bytes.NewReader(archive))
