@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/memport"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -36,10 +38,42 @@ type MemoryPortabilityHandler struct {
 	db             *sql.DB
 	logger         *slog.Logger
 	outputBasePath string
+	// dockerOps and findContainer are how an import reaches the crew
+	// container. The memory tree is owned by the container user, so a
+	// host-side write is refused however correct the bytes are (#1741).
+	// Both nil = host placement, which is correct on a deployment where
+	// this process owns the tree and is what the tests use.
+	dockerOps     backup.DockerOps
+	findContainer func(ctx context.Context, crewID, slug string) (string, error)
 }
 
 func NewMemoryPortabilityHandler(db *sql.DB, logger *slog.Logger, outputBasePath string) *MemoryPortabilityHandler {
 	return &MemoryPortabilityHandler{db: db, logger: logger, outputBasePath: outputBasePath}
+}
+
+// SetContainerWriter wires the container-side write path. Without it the
+// handler falls back to writing as this process, which only works where
+// it owns the memory tree.
+func (h *MemoryPortabilityHandler) SetContainerWriter(ops backup.DockerOps, find func(ctx context.Context, crewID, slug string) (string, error)) {
+	h.dockerOps, h.findContainer = ops, find
+}
+
+// placerFor chooses how the validated documents reach the memory tree.
+// A crew container is preferred because it is the identity that owns the
+// tree; the host path is the fallback for deployments without one.
+func (h *MemoryPortabilityHandler) placerFor(ctx context.Context, crewID, crewSlug, agentSlug, dir string) memport.Placer {
+	if h.dockerOps == nil || h.findContainer == nil {
+		return hostPlacer{root: dir}
+	}
+	containerID, err := h.findContainer(ctx, crewID, crewSlug)
+	if err != nil {
+		h.logger.Warn("memory portability: locating crew container", "err", err, "crew_id", crewID)
+		return hostPlacer{root: dir}
+	}
+	if containerID == "" {
+		return hostPlacer{root: dir}
+	}
+	return crewContainerPlacer{ops: h.dockerOps, containerID: containerID, dest: containerMemoryDest(agentSlug)}
 }
 
 // memoryDocPayload is one document on the wire. Body is plain markdown,
@@ -67,18 +101,25 @@ type memorySkipPayload struct {
 // Returns ("", false) having already written the response when the
 // scope is unusable, so callers just return.
 func (h *MemoryPortabilityHandler) resolveMemoryScope(w http.ResponseWriter, r *http.Request, crewID, agentSlug string) (string, bool) {
+	dir, _, _, ok := h.resolveMemoryScopeFull(w, r, crewID, agentSlug)
+	return dir, ok
+}
+
+// resolveMemoryScopeFull additionally returns the crew id and slug the
+// container lookup needs.
+func (h *MemoryPortabilityHandler) resolveMemoryScopeFull(w http.ResponseWriter, r *http.Request, crewID, agentSlug string) (dir, safeCrewIDOut, crewSlugOut string, ok bool) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
-		return "", false
+		return "", "", "", false
 	}
 	if h.outputBasePath == "" {
 		replyError(w, http.StatusServiceUnavailable, "storage base path not configured on this instance")
-		return "", false
+		return "", "", "", false
 	}
 	if crewID == "" {
 		replyError(w, http.StatusBadRequest, "crew_id is required")
-		return "", false
+		return "", "", "", false
 	}
 	// The path is built from what the DATABASE says exists, never from
 	// the string the caller sent — the lookups below re-read the id and
@@ -91,30 +132,30 @@ func (h *MemoryPortabilityHandler) resolveMemoryScope(w http.ResponseWriter, r *
 	// it is what lets a reader (and CodeQL, which cannot see through
 	// JoinUnder) tell at a glance that no request string reaches a
 	// filesystem call.
-	var safeCrewID string
+	var safeCrewID, crewSlug string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		crewID, workspaceID).Scan(&safeCrewID)
+		`SELECT id, slug FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewID, workspaceID).Scan(&safeCrewID, &crewSlug)
 	if errors.Is(err, sql.ErrNoRows) {
 		// 404 rather than 403: a foreign crew id must not be
 		// distinguishable from a missing one.
 		replyError(w, http.StatusNotFound, "crew not found")
-		return "", false
+		return "", "", "", false
 	}
 	if err != nil {
 		h.logger.Error("memory portability: crew lookup", "err", err)
 		replyError(w, http.StatusInternalServerError, "crew lookup failed")
-		return "", false
+		return "", "", "", false
 	}
 
 	if agentSlug == "" {
-		dir, err := memory.HostCrewMemoryRoot(h.outputBasePath, safeCrewID)
+		d, err := memory.HostCrewMemoryRoot(h.outputBasePath, safeCrewID)
 		if err != nil {
 			h.logger.Error("memory portability: crew memory root", "err", err)
 			replyError(w, http.StatusInternalServerError, "could not resolve crew memory")
-			return "", false
+			return "", "", "", false
 		}
-		return dir, true
+		return d, safeCrewID, crewSlug, true
 	}
 
 	var safeSlug string
@@ -123,20 +164,20 @@ func (h *MemoryPortabilityHandler) resolveMemoryScope(w http.ResponseWriter, r *
 		agentSlug, safeCrewID).Scan(&safeSlug)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "agent not found in this crew")
-		return "", false
+		return "", "", "", false
 	}
 	if err != nil {
 		h.logger.Error("memory portability: agent lookup", "err", err)
 		replyError(w, http.StatusInternalServerError, "agent lookup failed")
-		return "", false
+		return "", "", "", false
 	}
-	dir, err := memory.HostAgentMemoryRoot(h.outputBasePath, safeCrewID, safeSlug)
+	d, err := memory.HostAgentMemoryRoot(h.outputBasePath, safeCrewID, safeSlug)
 	if err != nil {
 		h.logger.Error("memory portability: agent memory root", "err", err)
 		replyError(w, http.StatusInternalServerError, "could not resolve agent memory")
-		return "", false
+		return "", "", "", false
 	}
-	return dir, true
+	return d, safeCrewID, crewSlug, true
 }
 
 // Export serves GET /api/v1/memory/export?crew_id=&agent_slug=.
@@ -234,7 +275,7 @@ func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusBadRequest, "no documents to import")
 		return
 	}
-	dir, ok := h.resolveMemoryScope(w, r, body.CrewID, body.AgentSlug)
+	dir, safeCrewID, crewSlug, ok := h.resolveMemoryScopeFull(w, r, body.CrewID, body.AgentSlug)
 	if !ok {
 		return
 	}
@@ -282,7 +323,8 @@ func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	res, err := memport.Apply(r.Context(), dir, docs, cfg)
+	placer := h.placerFor(r.Context(), safeCrewID, crewSlug, body.AgentSlug, dir)
+	res, err := memport.ApplyVia(r.Context(), placer, docs, cfg)
 	if err != nil {
 		// Apply only returns an error for something wrong with the
 		// TARGET (no root, cannot prepare it) — per-document problems

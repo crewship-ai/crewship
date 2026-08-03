@@ -1,9 +1,12 @@
 package api
 
 import (
+	"archive/tar"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -337,5 +340,79 @@ func TestMemoryImport_BlocksSecrets(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(base, "crews", crewID, "agents", "alex", ".memory", "AGENT.md")); !os.IsNotExist(err) {
 		t.Error("secret-bearing content reached disk")
+	}
+}
+
+// The tar handed to the container carries the parent directories the
+// documents need, before the documents, and nothing else.
+func TestTarStagedDocsShape(t *testing.T) {
+	staging := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(staging, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("AGENT.md", "knowledge\n")
+	write("daily/2026-08-01.md", "today\n")
+	write("peers/pavel.md", "prefers Czech\n")
+
+	archive, err := tarStagedDocs(staging, []string{"AGENT.md", "daily/2026-08-01.md", "peers/pavel.md"})
+	if err != nil {
+		t.Fatalf("tarStagedDocs: %v", err)
+	}
+
+	var order []string
+	bodies := map[string]string{}
+	tr := tar.NewReader(bytes.NewReader(archive))
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			break
+		}
+		order = append(order, h.Name)
+		if h.Typeflag == tar.TypeReg {
+			b, _ := io.ReadAll(tr)
+			bodies[h.Name] = string(b)
+		}
+	}
+
+	// Directories first — tar must never extract a file into a directory
+	// it has not created yet.
+	if len(order) < 5 {
+		t.Fatalf("entries = %v, want two dirs and three files", order)
+	}
+	if order[0] != "daily/" || order[1] != "peers/" {
+		t.Errorf("directory entries did not come first: %v", order)
+	}
+	if bodies["daily/2026-08-01.md"] != "today\n" {
+		t.Errorf("body = %q", bodies["daily/2026-08-01.md"])
+	}
+	if bodies["AGENT.md"] != "knowledge\n" {
+		t.Errorf("body = %q", bodies["AGENT.md"])
+	}
+}
+
+// The destination is the container's view of the tree, which is where
+// the bind mount surfaces — not the host path.
+func TestContainerMemoryDest(t *testing.T) {
+	if got := containerMemoryDest(""); got != "/crew/shared/.memory" {
+		t.Errorf("crew scope = %q", got)
+	}
+	if got := containerMemoryDest("alex"); got != "/crew/agents/alex/.memory" {
+		t.Errorf("agent scope = %q", got)
+	}
+}
+
+// Without Docker the handler must still work where this process owns
+// the tree, rather than refusing every import.
+func TestPlacerFallsBackToHostWithoutDocker(t *testing.T) {
+	h, _, _, _, _, base := newMemPortHandlerTest(t)
+	p := h.placerFor(context.Background(), "crew1", "eng", "alex", base)
+	if _, ok := p.(hostPlacer); !ok {
+		t.Errorf("placer = %T, want hostPlacer when no Docker is wired", p)
 	}
 }
