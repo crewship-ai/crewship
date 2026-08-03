@@ -151,6 +151,20 @@ func TestRuntimeConformance(t *testing.T) {
 			t.Fatalf("ensure volume %s: %v", v, err)
 		}
 	}
+	// Registered here, not alongside the container's cleanup below: the
+	// volumes exist from this line onward, and a create that fails after
+	// it (a runtime rejecting the HostConfig, a bind source its VM does
+	// not share) would otherwise leave them behind on the very runtimes
+	// whose failures this harness exists to record.
+	if os.Getenv("CREWSHIP_CONFORMANCE_KEEP") == "" {
+		t.Cleanup(func() {
+			rmCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			for _, v := range crewVolumes {
+				_, _ = p.client.VolumeRemove(rmCtx, v, client.VolumeRemoveOptions{Force: true})
+			}
+		})
+	}
 	p.fixBindMountOwnership(ctx, image, dirs, crewVolumes)
 
 	name := p.CrewContainerName(crew.ID, crew.Slug)
