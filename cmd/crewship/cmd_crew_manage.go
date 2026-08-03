@@ -385,13 +385,22 @@ var crewDeleteCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
-		if err := confirmAction(cmd, fmt.Sprintf("Delete crew %q?", args[0])); err != nil {
-			return err
-		}
-
+		// The crew is resolved BEFORE the prompt, not after: the prompt has to
+		// name what it is about to destroy, and that is a property of the crew
+		// (#1709). The cost is that an unresolvable slug now fails before the
+		// question instead of after the answer, which is the better order
+		// anyway.
 		client := newAPIClient()
 		crewID, err := resolveCrewID(client, args[0])
 		if err != nil {
+			return err
+		}
+
+		prompt := fmt.Sprintf("Delete crew %q?", args[0])
+		if warning := crewSidecarDeleteWarning(client, crewID); warning != "" {
+			prompt += "\n\n" + warning
+		}
+		if err := confirmAction(cmd, prompt); err != nil {
 			return err
 		}
 

@@ -410,6 +410,30 @@ container is not removed — it has an idle TTL and a reaper; sidecars have
 neither, which is why they are handled here.
 </Warning>
 
+The confirmation prompt says this too, and names the volumes, so it does not
+depend on having read this page:
+
+```text
+$ crewship crew delete data-crew
+Delete crew "data-crew"?
+
+This also destroys the crew's sidecar services — their containers are
+force-removed and their named volumes are deleted with them:
+
+  redis        redis:7-alpine
+  postgres     postgres:16
+               volume crewship-svc-data-crew-vol-pg-data
+
+Whatever those volumes hold — a database, a queue, an index — is gone for
+good; it cannot be recovered afterwards. Back it up first if it matters:
+  crewship backup create
+[y/N]:
+```
+
+A crew with no `services:` gets the plain one-line prompt it always had, and
+`--yes` skips the confirmation as it always did — so a script that already
+passes `--yes` deletes volumes without asking. Audit those before upgrading.
+
 ### Inventory: what's actually running
 
 The manifest above is what you *declared*. What's actually running can
