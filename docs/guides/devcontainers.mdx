@@ -73,6 +73,16 @@ builds it with BuildKit**, which buys:
 - **Deterministic ordering** — features install in dependency order
   (topological sort with `common-utils` first).
 
+The build shells out to the `docker` CLI (that is how BuildKit's cache mounts
+and the dockerfile frontend behave identically everywhere), and the CLI is
+**pinned to the daemon the container provider resolved** — not to whatever
+`docker context` happens to be current. This matters on any machine with more
+than one runtime installed: `colima start` and a Rancher Desktop launch both
+make themselves the current context without touching `/var/run/docker.sock`, so
+an unpinned build would land the image on one daemon while the container create
+looked for it on another. Your `docker context` is yours; it has no effect on
+where Crewship builds.
+
 Intermediate per-feature layers are tagged `crewship-feat:{hash}` (regenerable,
 never referenced directly); the final per-crew image is still tagged
 `crewship-cache:{hash[:12]}`. The transition is transparent: if BuildKit is
@@ -461,6 +471,30 @@ PR #225 extends the devcontainer expansion vocabulary the spec defines:
 <AccordionGroup>
   <Accordion title="sidecar binary not found; run 'make build:sidecar'">
     `autodetectSidecarPaths` in `internal/config/config.go` failed. Run `make build:sidecar` on the host, or set `CREWSHIP_SIDECAR_PATH=/absolute/path/to/crewship-sidecar` and `CREWSHIP_ENTRYPOINT_PATH=/absolute/path/to/entrypoint.sh`. For tests that never launch containers, set `CREWSHIP_SKIP_SIDECAR=1`.
+  </Accordion>
+
+  <Accordion title="pull access denied for crewship-feat… / crewship-cache… may require 'docker login'">
+    Nothing is wrong with your registry credentials — `crewship-feat:*` and
+    `crewship-cache:*` are **local-only** tags that exist on exactly one daemon.
+    This message means the create went looking for a locally-built image on a
+    daemon that never built it, so it fell back to pulling.
+
+    Historically that happened when the build (docker CLI, `docker context`) and
+    the create (the provider's probed socket) landed on different daemons — the
+    default state on a machine where `colima start` or Rancher Desktop took the
+    current context. The builder is now pinned to the provider's endpoint, so
+    the split cannot occur.
+
+    If you still see it, the image really was removed from the provider's
+    daemon (a `docker system prune` on that daemon, most often). Re-provision:
+
+    ```bash
+    crewship crew rebuild my-crew
+    ```
+
+    Check which daemon Crewship is on with `crewship doctor` or
+    `GET /api/v1/system/runtime`, and list the tags there with
+    `DOCKER_HOST=<that socket> docker images | grep crewship-`.
   </Accordion>
 
   <Accordion title="sidecar bind mount sanity check failed (exit 126)">

@@ -274,10 +274,13 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		logger = slog.Default()
 	}
 	return &Provisioner{
-		docker:         docker,
-		installer:      installer,
-		downloader:     downloader,
-		builder:        NewDockerBuildKitBuilder(logger),
+		docker:     docker,
+		installer:  installer,
+		downloader: downloader,
+		// Pinned to the same daemon this provisioner cache-checks and creates
+		// against, so `docker context` cannot split the build off onto another
+		// one (#1705).
+		builder:        NewDockerBuildKitBuilderFor(logger, docker),
 		logger:         logger,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 	}

@@ -57,7 +57,21 @@ type ImageBuilder interface {
 type DockerBuildKitBuilder struct {
 	bin    string // resolved docker-compatible CLI on PATH ("" = unavailable)
 	logger *slog.Logger
+	// host pins the build to one daemon: the endpoint the container provider
+	// resolved, rather than whatever `docker context` happens to point at
+	// (#1705). Empty = unpinned, the pre-#1705 behaviour, kept only for the
+	// hand-built case where no provider client is available.
+	host string
 }
+
+// daemonHoster is the one thing this builder needs from the provider's Docker
+// SDK client: the endpoint it dialled. *client.Client satisfies it.
+//
+// Type-asserted rather than added to CommitClient because CommitClient is the
+// *image* API surface and several tests implement it with fakes that have no
+// daemon at all; a builder that cannot learn the endpoint simply stays
+// unpinned instead of forcing every fake to grow a method.
+type daemonHoster interface{ DaemonHost() string }
 
 // NewDockerBuildKitBuilder probes for a BuildKit-capable CLI on PATH. Phase 1
 // restricts itself to the `docker` CLI (Docker Desktop, Colima, OrbStack and
@@ -75,9 +89,69 @@ func NewDockerBuildKitBuilder(logger *slog.Logger) *DockerBuildKitBuilder {
 	return &DockerBuildKitBuilder{bin: bin, logger: logger}
 }
 
+// NewDockerBuildKitBuilderFor is NewDockerBuildKitBuilder pinned to the daemon
+// that `docker` (the SDK client the provisioner runs and cache-checks against)
+// is connected to.
+//
+// It exists because the two halves of provisioning select their daemon by
+// different mechanisms and could disagree in silence (#1705). The build shells
+// out to the CLI, which resolves its endpoint from `docker context`; the "is it
+// already built?" check and the container create go through the provider's own
+// probed socket. `colima start` and a Rancher Desktop launch both make
+// themselves the current context without touching /var/run/docker.sock, so on a
+// machine with more than one runtime the default state is *split*: the image
+// builds into daemon A and the create looks for the local-only tag on daemon B,
+// fails to find it, tries to pull it from a registry, and reports
+// `pull access denied ... may require 'docker login'` — an authentication error
+// for a problem that has nothing to do with authentication.
+//
+// Pinning rather than detecting-and-refusing: a divergence that cannot happen
+// needs no error message, and the operator's `docker context` is their own
+// business — Crewship has no business failing because of where the human's
+// shell points, only because of where its own daemon is.
+//
+// docker is the provisioner's SDK client (a CommitClient); anything that can
+// report its endpoint pins the build, anything else leaves it unpinned.
+func NewDockerBuildKitBuilderFor(logger *slog.Logger, docker any) *DockerBuildKitBuilder {
+	b := NewDockerBuildKitBuilder(logger)
+	if h, ok := docker.(daemonHoster); ok {
+		b.host = strings.TrimSpace(h.DaemonHost())
+	}
+	return b
+}
+
 // Available reports whether a usable docker CLI was found.
 func (b *DockerBuildKitBuilder) Available() bool {
 	return b != nil && b.bin != ""
+}
+
+// buildEnv is the environment handed to `docker build`: the parent's, with
+// BuildKit on and — when host is set — the daemon pinned.
+//
+// Both DOCKER_HOST and DOCKER_CONTEXT are stripped from the inherited
+// environment first, and the order matters. Measured against Docker CLI 29.x on
+// macOS: DOCKER_CONTEXT alone selects that context's endpoint; DOCKER_HOST
+// alone overrides the *stored current context*; and with both set DOCKER_HOST
+// wins. Stripping DOCKER_CONTEXT rather than relying on that precedence keeps
+// the guarantee from depending on a CLI behaviour that has no compatibility
+// promise — the child sees exactly one endpoint selector, the one we set.
+//
+// Unpinned (host == "") the inherited values are left in place: that is the
+// pre-#1705 behaviour, and the only callers who get it are ones with no
+// provider client to pin to.
+func buildEnv(parent []string, host string) []string {
+	env := make([]string, 0, len(parent)+2)
+	for _, kv := range parent {
+		if host != "" && (strings.HasPrefix(kv, "DOCKER_HOST=") || strings.HasPrefix(kv, "DOCKER_CONTEXT=")) {
+			continue
+		}
+		env = append(env, kv)
+	}
+	env = append(env, "DOCKER_BUILDKIT=1")
+	if host != "" {
+		env = append(env, "DOCKER_HOST="+host)
+	}
+	return env
 }
 
 // Build runs `docker build` with DOCKER_BUILDKIT=1 against contextDir.
@@ -92,7 +166,10 @@ func (b *DockerBuildKitBuilder) Build(ctx context.Context, contextDir, tag strin
 		"--file", filepath.Join(contextDir, "Dockerfile"),
 		contextDir,
 	)
-	cmd.Env = append(os.Environ(), "DOCKER_BUILDKIT=1")
+	cmd.Env = buildEnv(os.Environ(), b.host)
+	if b.host != "" {
+		b.logger.Debug("docker build pinned to the provider's daemon", "docker_host", b.host, "tag", tag)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
