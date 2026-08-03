@@ -64,6 +64,35 @@ export const KeeperTab = React.memo(function KeeperTab({
 
       {!keeperLoading && keeperStatus && (
         <>
+          {/* What "Off" actually means for credentials, said where the operator
+              reads that it is off.
+
+              The gate is real and it is not the API path — that one answers
+              DENY "Keeper not configured" and fails closed. It is boot
+              delivery: buildCredFileScript withholds Keeper-gated types from
+              the container only when Keeper is ON, so with it OFF a SECRET is
+              written into /secrets at container start. No judge, no escalation,
+              no audit row.
+
+              That is a deliberate trade — an instance with no judge cannot gate
+              anything, and refusing every credential would make it useless. But
+              it lived in a Go comment, and an admin screen that says "Off"
+              without saying what is delivered instead is telling half of it. */}
+          {!keeperStatus.enabled && (
+            <div
+              data-testid="keeper-off-consequence"
+              className="rounded-xl border border-warn/30 bg-warn/5 dark:bg-warn/20 px-4 py-3"
+            >
+              <p className="text-body">
+                <span className="font-medium">Secrets reach agents ungated.</span>{" "}
+                With the Keeper off, SECRET credentials are written into each agent&rsquo;s
+                container at start — no judgement, no escalation, no audit trail. Turning
+                it on withholds them from delivery and routes every request through the
+                judge instead.
+              </p>
+            </div>
+          )}
+
           {/* ── Live state: three facts, one line each ──
               Engine, judge reachability, gatekeeper. The endpoint and model
               used to be repeated here as rows; they belong to the judge card
