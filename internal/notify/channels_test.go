@@ -209,3 +209,41 @@ func TestChannelStore_GetForDispatch_NotFound(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
+
+// ListEnabled feeds the legacy #850 fan-out (Dispatcher.Dispatch), which is
+// the ONE delivery path that does not consult user preferences, the admin
+// allowlist, the priority floor or the rate gate. It must therefore also be
+// the path that never sees somebody's personal channel: a workspace-wide
+// blast into a channel one person made for themselves is a subscription they
+// never chose and cannot mute.
+//
+// #1735: it did see them. Scope shipped in #1412 and this lister was never
+// taught about it, so every failed run in the workspace reached every
+// personal channel in it.
+func TestChannelStore_ListEnabled_ExcludesPersonalChannels(t *testing.T) {
+	s := newChannelStore(t)
+	ctx := context.Background()
+
+	if _, err := s.Create(ctx, ChannelInput{
+		WorkspaceID: "w", Type: ChannelWebhook, URL: "https://hooks.example.com/workspace-wide",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, ChannelInput{
+		WorkspaceID: "w", Type: ChannelWebhook, URL: "https://hooks.example.com/bobs-personal",
+		Scope: ScopeUser, OwnerUserID: "bob",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.ListEnabled(ctx, "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListEnabled returned %d channels, want only the workspace-scoped one: %+v", len(got), got)
+	}
+	if got[0].Scope == ScopeUser {
+		t.Fatalf("ListEnabled handed a personal channel to the unfiltered fan-out: %+v", got[0])
+	}
+}
