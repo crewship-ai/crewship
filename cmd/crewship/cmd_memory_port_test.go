@@ -125,3 +125,19 @@ func TestRouteByTarget_CrewPinsRoundTripHome(t *testing.T) {
 		t.Errorf("crew docs = %v, want the pins file", got)
 	}
 }
+
+// A source file the reader could not open must not end in a zero exit.
+// The plan lists it, but a plan scrolls past and an exit code does not.
+func TestUnreadableCount(t *testing.T) {
+	plan := memport.Plan{Skipped: []memport.Skip{
+		{Source: "sessions/a.jsonl", Reason: "derived data — embeddings and transcripts are rebuilt locally, never imported"},
+		{Source: "notes.md", Reason: "unreadable: open notes.md: permission denied"},
+		{Source: "other.md", Reason: "unreadable: invalid argument"},
+	}}
+	if got := unreadableCount(plan); got != 2 {
+		t.Errorf("unreadableCount = %d, want 2 (deliberate skips must not count)", got)
+	}
+	if got := unreadableCount(memport.Plan{}); got != 0 {
+		t.Errorf("unreadableCount on an empty plan = %d, want 0", got)
+	}
+}

@@ -1,6 +1,7 @@
 package memport
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -110,11 +111,16 @@ func containsFold(haystack []string, needle string) bool {
 	return false
 }
 
-// sniffFrontmatterBytes bounds the detection read. A YAML header lives at
-// the very start of a file, so there is no reason for detection to load a
-// whole document — and every reason not to, when the directory is one
-// somebody else assembled.
-const sniffFrontmatterBytes = 8 << 10
+// sniffFrontmatterBytes bounds the detection read. Detection asks one
+// question — does this file OPEN with a YAML delimiter line — and the
+// answer is in the first few bytes, so there is no reason to load a
+// whole document from a directory somebody else assembled.
+//
+// Deliberately not "can splitFrontmatter find the closing delimiter":
+// that made a document whose header ran past the read window invisible
+// to detection, which is a wrong answer produced by a size limit rather
+// than by the file.
+const sniffFrontmatterBytes = 512
 
 func sniffHasFrontmatter(fsys fs.FS, name string) bool {
 	f, err := fsys.Open(name)
@@ -126,6 +132,6 @@ func sniffHasFrontmatter(fsys fs.FS, name string) bool {
 	if err != nil {
 		return false
 	}
-	_, _, ok := splitFrontmatter(head)
-	return ok
+	head = bytes.TrimPrefix(head, []byte("\ufeff"))
+	return bytes.HasPrefix(head, []byte("---\n")) || bytes.HasPrefix(head, []byte("---\r\n"))
 }

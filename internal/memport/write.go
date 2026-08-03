@@ -50,13 +50,19 @@ func ExportOKF(dir string, docs []Doc) error {
 	if dir == "" {
 		return fmt.Errorf("memport: export needs a destination directory")
 	}
-	// A destination that already holds files is refused. Writing over an
-	// older bundle leaves whatever the new export does not overwrite
-	// sitting beside it, indistinguishable from current — a document
-	// deleted from memory since the last export would still be in the
-	// directory, and the manifest would not mention it.
-	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
-		return fmt.Errorf("memport: %s is not empty; export to a new directory so a stale bundle cannot be mistaken for this one", dir)
+	// Re-exporting into the same directory is the workflow this feature
+	// is sold on — "readable, diffable and git-friendly" only means
+	// anything if you can refresh a bundle in place and read the diff.
+	// So a previous bundle is not refused; it is PRUNED. Documents the
+	// last manifest listed and this export does not produce are removed,
+	// which is what stops a file deleted from memory since then sitting
+	// in the directory looking current.
+	//
+	// Only files the previous manifest claims are touched. Anything else
+	// in the directory — .git, a README, the operator's own notes — is
+	// left exactly alone, because this function did not put it there.
+	if err := pruneStaleBundle(dir, docs); err != nil {
+		return err
 	}
 	man := Manifest{
 		Format:    "okf",
@@ -176,7 +182,7 @@ func Apply(ctx context.Context, root string, docs []Doc, cfg memory.WriteConfig)
 
 	var res ApplyResult
 	for _, d := range docs {
-		maxBytes, refusal := checkImportPath(d.RelPath)
+		maxBytes, refusal := checkImportPath(d.RelPath, d.Scope)
 		if refusal != "" {
 			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: string(refusal)})
 			continue
@@ -234,4 +240,41 @@ func confinementReason(err error) string {
 		return "refused: a symlink inside the memory directory redirects this path"
 	}
 	return "refused: path does not stay inside the target memory directory"
+}
+
+// pruneStaleBundle removes documents a previous export wrote that this
+// one will not. Absent or unreadable manifest means nothing to prune —
+// a directory this function has never written to is not its business.
+func pruneStaleBundle(dir string, docs []Doc) error {
+	manPath, err := safepath.JoinRel(dir, manifestName)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(manPath)
+	if err != nil {
+		return nil
+	}
+	var prev Manifest
+	if err := yaml.Unmarshal(raw, &prev); err != nil {
+		return nil
+	}
+	keep := make(map[string]bool, len(docs))
+	for _, d := range docs {
+		keep[d.RelPath] = true
+	}
+	for _, e := range prev.Documents {
+		if e.Path == "" || keep[e.Path] {
+			continue
+		}
+		stale, err := safepath.JoinRel(dir, filepath.FromSlash(e.Path))
+		if err != nil {
+			// A manifest naming a path outside its own directory is not
+			// something to act on.
+			continue
+		}
+		if err := os.Remove(stale); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("memport: removing stale %s from the previous bundle: %w", e.Path, err)
+		}
+	}
+	return nil
 }

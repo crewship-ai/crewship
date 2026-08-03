@@ -31,6 +31,7 @@ const (
 	refusalUnknown      importRefusal = "not a recognised memory file"
 	refusalConsolidator importRefusal = "owned by the consolidator — it carries a YAML schema and its own locking; importing freeform markdown would destroy the store"
 	refusalQuarantine   importRefusal = "quarantined content is isolated on purpose and must not be reinstated by an import"
+	refusalCrewOnly     importRefusal = "the <crew>/topics/ tree exists only in crew-shared memory; import it with a crew target"
 )
 
 // checkImportPath decides whether rel may be written and, if so, under
@@ -41,7 +42,7 @@ const (
 // "recognised, uncapped" (the consolidator's files) this refuses
 // instead: uncapped is a statement about the writer that owns the file,
 // not permission for a different writer to replace it.
-func checkImportPath(rel string) (cap int, refusal importRefusal) {
+func checkImportPath(rel string, scope Scope) (cap int, refusal importRefusal) {
 	slashed := strings.ReplaceAll(rel, "\\", "/")
 	clean := path.Clean(slashed)
 
@@ -68,8 +69,18 @@ func checkImportPath(rel string) (cap int, refusal importRefusal) {
 	// the one nested shape the importer accepts, because it is the one
 	// nested shape the product itself writes and a crew export would
 	// otherwise not round-trip.
+	// The crew's pinned notes live one level down, at
+	// <crew-slug>/topics/pins.md (crewpaths.go HostCrewTopicsDir). That
+	// shape is legitimate ONLY in a crew tree — HostCrewTopicsDir never
+	// produces it under an agent root — so the scope decides, not the
+	// spelling. Accepting it on a character-class match alone let an
+	// import invent a directory inside an agent's memory, which the FTS
+	// indexer would then walk and serve back into that agent's context.
 	if segs := strings.Split(clean, "/"); len(segs) == 3 &&
 		segs[1] == "topics" && segs[2] == "pins.md" && crewSlugRe.MatchString(segs[0]) {
+		if scope != ScopeCrew {
+			return 0, refusalCrewOnly
+		}
 		c, _ := memory.CapForPath("pins.md")
 		return c, ""
 	}

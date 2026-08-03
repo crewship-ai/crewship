@@ -29,7 +29,7 @@ func TestCheckImportPathCrewTopicsShape(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.rel, func(t *testing.T) {
-			_, refusal := checkImportPath(tt.rel)
+			_, refusal := checkImportPath(tt.rel, ScopeCrew)
 			if tt.allowed && refusal != "" {
 				t.Errorf("checkImportPath(%q) refused: %s", tt.rel, refusal)
 			}

@@ -381,18 +381,18 @@ func TestReadSourceRejectsHostilePaths(t *testing.T) {
 	}
 }
 
-// A source tree is somebody else's directory. One enormous file must not
-// be loaded whole just to be turned into a memory document.
-func TestReadSourceSkipsOversizedFiles(t *testing.T) {
+// A FOREIGN source tree is somebody else's directory. One enormous file
+// must not be loaded whole just to be turned into a memory document.
+func TestReadSourceSkipsOversizedForeignFiles(t *testing.T) {
 	fsys := fstest.MapFS{
-		"AGENT.md": &fstest.MapFile{Data: []byte("small\n")},
-		"pins.md":  &fstest.MapFile{Data: make([]byte, maxSourceFileBytes+1)},
+		"MEMORY.md": &fstest.MapFile{Data: []byte("small\n")},
+		"SOUL.md":   &fstest.MapFile{Data: make([]byte, maxSourceFileBytes+1)},
 	}
-	plan, err := ReadSource(fsys, FormatCrewship, Options{})
+	plan, err := ReadSource(fsys, FormatOpenClaw, Options{})
 	if err != nil {
 		t.Fatalf("ReadSource() error = %v", err)
 	}
-	if _, ok := findDoc(plan, "pins.md"); ok {
+	if _, ok := findDoc(plan, "PERSONA.md"); ok {
 		t.Error("an oversized source file was read into a document")
 	}
 	if _, ok := findDoc(plan, "AGENT.md"); !ok {
@@ -400,11 +400,48 @@ func TestReadSourceSkipsOversizedFiles(t *testing.T) {
 	}
 	var reported bool
 	for _, s := range plan.Skipped {
-		if s.Source == "pins.md" {
+		if s.Source == "SOUL.md" {
 			reported = true
 		}
 	}
 	if !reported {
 		t.Errorf("the oversized file was dropped without a word: %+v", plan.Skipped)
+	}
+}
+
+// Our OWN tree carries no ceiling. memory.CapForPath calls lessons.md
+// and learned.md deliberately uncapped and the consolidator writes them
+// without one, so an export that silently omitted a large one would be
+// the same lie this feature already removed once.
+func TestReadCrewshipDoesNotCapOurOwnFiles(t *testing.T) {
+	big := make([]byte, maxSourceFileBytes+1)
+	for i := range big {
+		big[i] = 'x'
+	}
+	fsys := fstest.MapFS{"lessons.md": &fstest.MapFile{Data: big}}
+
+	plan, err := ReadSource(fsys, FormatCrewship, Options{})
+	if err != nil {
+		t.Fatalf("ReadSource() error = %v", err)
+	}
+	d, ok := findDoc(plan, "lessons.md")
+	if !ok {
+		t.Fatalf("a large lessons.md was dropped from an export of our own tree: %+v", plan.Skipped)
+	}
+	if len(d.Body) != len(big) {
+		t.Errorf("body truncated: %d bytes, want %d", len(d.Body), len(big))
+	}
+}
+
+// The ceiling is enforced on the read, not on a prior Stat: an fs whose
+// Stat is unavailable must still be bounded.
+func TestReadCappedBoundsWithoutStat(t *testing.T) {
+	b := newBuilder()
+	fsys := fstest.MapFS{"x.md": &fstest.MapFile{Data: make([]byte, 100)}}
+	if _, ok := readCapped(fsys, b, "x.md", 10); ok {
+		t.Fatal("readCapped accepted a file over the limit")
+	}
+	if len(b.skipped) != 1 {
+		t.Fatalf("skips = %+v, want the oversize reported", b.skipped)
 	}
 }

@@ -3,6 +3,7 @@ package memport
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"regexp"
@@ -41,26 +42,45 @@ func ReadSource(fsys fs.FS, f Format, opts Options) (Plan, error) {
 
 var dateFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-// maxSourceFileBytes bounds one source document. The largest ceiling any
-// memory file has is 30 KB (daily logs); this is generous next to that
-// and still refuses to load somebody's DVD image because it was named
-// AGENT.md. Oversized files are reported, never silently dropped.
+// maxSourceFileBytes bounds one document read from a FOREIGN source.
+//
+// It is not applied to our own tree: memory.CapForPath returns
+// "recognised, deliberately uncapped" for lessons.md and learned.md, the
+// consolidator writes them without a ceiling, and an export that
+// silently omitted an oversized one would be the same lie this feature
+// spent a whole review round removing. A foreign directory has no such
+// contract, so it gets a limit.
 const maxSourceFileBytes = 1 << 20 // 1 MiB
 
-// readCapped reads one source file, refusing anything over the per-file
-// ceiling. Returns ok=false having already recorded the skip.
-func readCapped(fsys fs.FS, b *builder, name string) ([]byte, bool) {
-	if info, err := fs.Stat(fsys, name); err == nil && info.Size() > maxSourceFileBytes {
-		b.skip(name, fmt.Sprintf("larger than the %d-byte limit for one memory document", maxSourceFileBytes))
-		return nil, false
-	}
-	body, err := fs.ReadFile(fsys, name)
+// readCapped reads one source file, refusing anything over limit.
+// limit <= 0 means no ceiling. Returns ok=false having recorded the skip.
+//
+// The bound is enforced on the READ, not on a prior Stat: Stat can fail,
+// or lie about a file being appended to, and a guarantee that depends on
+// an advisory number is not a guarantee. Reading limit+1 bytes and
+// checking the length needs no such trust.
+func readCapped(fsys fs.FS, b *builder, name string, limit int64) ([]byte, bool) {
+	f, err := fsys.Open(name)
 	if err != nil {
 		b.skip(name, "unreadable: "+err.Error())
 		return nil, false
 	}
-	if len(body) > maxSourceFileBytes {
-		b.skip(name, fmt.Sprintf("larger than the %d-byte limit for one memory document", maxSourceFileBytes))
+	defer f.Close()
+	if limit <= 0 {
+		body, err := io.ReadAll(f)
+		if err != nil {
+			b.skip(name, "unreadable: "+err.Error())
+			return nil, false
+		}
+		return body, true
+	}
+	body, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		b.skip(name, "unreadable: "+err.Error())
+		return nil, false
+	}
+	if int64(len(body)) > limit {
+		b.skip(name, fmt.Sprintf("larger than the %d-byte limit for one memory document", limit))
 		return nil, false
 	}
 	return body, true
@@ -109,7 +129,7 @@ func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 			continue
 		}
 
-		body, ok := readCapped(fsys, b, n)
+		body, ok := readCapped(fsys, b, n, maxSourceFileBytes)
 		if !ok {
 			continue
 		}
@@ -177,7 +197,7 @@ func readNanoClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		body, ok := readCapped(fsys, b, n)
+		body, ok := readCapped(fsys, b, n, maxSourceFileBytes)
 		if !ok {
 			continue
 		}
@@ -248,7 +268,7 @@ func readOKF(fsys fs.FS, names []string, b *builder) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		raw, ok := readCapped(fsys, b, n)
+		raw, ok := readCapped(fsys, b, n, maxSourceFileBytes)
 		if !ok {
 			continue
 		}
@@ -315,7 +335,8 @@ func readCrewship(fsys fs.FS, names []string, b *builder, opts Options) error {
 			b.skip(n, "not a markdown document")
 			continue
 		}
-		body, ok := readCapped(fsys, b, n)
+		// No ceiling on our own tree — see maxSourceFileBytes.
+		body, ok := readCapped(fsys, b, n, 0)
 		if !ok {
 			continue
 		}

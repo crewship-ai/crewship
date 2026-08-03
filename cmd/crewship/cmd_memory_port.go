@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -239,6 +240,13 @@ Examples:
 		if rejected > 0 {
 			return fmt.Errorf("import incomplete: %d document(s) rejected", rejected)
 		}
+		// A source file the reader could not open is not a clean import.
+		// It is listed in the plan, but a plan scrolls past and an exit
+		// code does not: without this, "some of your memory could not be
+		// read" ends in a zero exit and reads as success.
+		if n := unreadableCount(plan); n > 0 {
+			return fmt.Errorf("import incomplete: %d source file(s) could not be read — see the list above", n)
+		}
 		return nil
 	},
 }
@@ -352,6 +360,18 @@ func routeByTarget(plan memport.Plan, agentSlug string, withCrew bool) (agentDoc
 		}
 	}
 	return agentDocs, crewDocs, blocked
+}
+
+// unreadableCount counts source files the reader could not open, as
+// opposed to ones it deliberately left behind.
+func unreadableCount(plan memport.Plan) int {
+	n := 0
+	for _, s := range plan.Skipped {
+		if strings.HasPrefix(s.Reason, "unreadable:") {
+			n++
+		}
+	}
+	return n
 }
 
 // printImportPlan renders the mapping an operator is being asked to

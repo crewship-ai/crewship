@@ -292,17 +292,38 @@ func TestApplyRefusesConsolidatorOwnedFiles(t *testing.T) {
 }
 
 // The crew's pinned notes live under <slug>/topics/pins.md and must
-// round-trip; they are the one nested path the importer accepts.
+// round-trip into the crew tree they came from.
 func TestApplyAcceptsCrewTopicsPins(t *testing.T) {
 	root := t.TempDir()
 	res, err := Apply(context.Background(), root,
-		[]Doc{{Tier: memory.TierPins, RelPath: "engineering/topics/pins.md", Body: []byte("- never force-push\n")}},
+		[]Doc{{Tier: memory.TierPins, Scope: ScopeCrew, RelPath: "engineering/topics/pins.md",
+			Body: []byte("- never force-push\n")}},
 		memory.WriteConfig{})
 	if err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
 	if len(res.Written) != 1 {
 		t.Fatalf("Written = %v (failed: %+v), want the crew pins file", res.Written, res.Failed)
+	}
+}
+
+// The same shape aimed at an AGENT tree is a directory the product never
+// creates there. Accepting it on the strength of the spelling let an
+// import invent a directory inside one agent's memory, which the FTS
+// indexer then walks and serves back into that agent's context.
+func TestApplyRefusesCrewTopicsShapeOutsideCrewScope(t *testing.T) {
+	for _, sc := range []Scope{ScopeAgent, ""} {
+		t.Run(string(sc), func(t *testing.T) {
+			root := t.TempDir()
+			res, err := Apply(context.Background(), root,
+				[]Doc{{Tier: memory.TierPins, Scope: sc, RelPath: "engineering/topics/pins.md",
+					Body: []byte("x")}},
+				memory.WriteConfig{})
+			expectRefused(t, res, err, "crew-topics shape at scope "+string(sc))
+			if _, serr := os.Stat(filepath.Join(root, "engineering")); serr == nil {
+				t.Error("the invented directory was created anyway")
+			}
+		})
 	}
 }
 
@@ -331,5 +352,57 @@ func TestApplyReportsPerDocumentFailureWithoutAborting(t *testing.T) {
 	// The documents after the failure still ran.
 	if len(res.Written) != 2 {
 		t.Errorf("Written = %v, want AGENT.md and pins.md", res.Written)
+	}
+}
+
+// Re-exporting into the same directory is the workflow this feature is
+// sold on: a bundle kept in git only shows a useful diff if you can
+// refresh it in place. Refusing a non-empty destination broke that.
+func TestExportOKFRefreshesInPlace(t *testing.T) {
+	dir := t.TempDir()
+	first := []Doc{
+		{Tier: memory.TierAgent, Scope: ScopeAgent, RelPath: "AGENT.md", Body: []byte("v1\n")},
+		{Tier: memory.TierAgent, Scope: ScopeAgent, RelPath: "daily/2026-08-01.md", Body: []byte("monday\n")},
+	}
+	if err := ExportOKF(dir, first); err != nil {
+		t.Fatalf("first export: %v", err)
+	}
+	// Something the operator keeps alongside the bundle.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second := []Doc{{Tier: memory.TierAgent, Scope: ScopeAgent, RelPath: "AGENT.md", Body: []byte("v2\n")}}
+	if err := ExportOKF(dir, second); err != nil {
+		t.Fatalf("re-export into the same directory: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "AGENT.md"))
+	if err != nil || !strings.Contains(string(got), "v2") {
+		t.Errorf("AGENT.md not refreshed: %q (%v)", got, err)
+	}
+	// A document dropped from memory since the last export must not sit
+	// in the directory looking current.
+	if _, err := os.Stat(filepath.Join(dir, "daily", "2026-08-01.md")); !os.IsNotExist(err) {
+		t.Error("a stale document from the previous bundle survived the re-export")
+	}
+	// Anything this function did not write is not its business.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Error("the export removed a file it never wrote")
+	}
+}
+
+// With no previous manifest there is nothing to prune, and a directory
+// this function has never written to must be left alone.
+func TestExportOKFLeavesForeignDirectoriesAlone(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ExportOKF(dir, []Doc{{Tier: memory.TierAgent, RelPath: "AGENT.md", Body: []byte("x\n")}}); err != nil {
+		t.Fatalf("ExportOKF into a directory with unrelated files: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notes.txt")); err != nil {
+		t.Error("an unrelated file was removed")
 	}
 }
