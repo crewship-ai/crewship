@@ -78,7 +78,13 @@ func ApplyVia(ctx context.Context, placer Placer, docs []Doc, cfg memory.WriteCo
 		// that message reaches them. Anything else keeps the generic
 		// text, because a transport error carries container ids and
 		// host paths that a client has no business receiving.
-		reason := "the server could not place this document in the crew's memory — see the server log for the cause"
+		// "Placement failed" does NOT mean "nothing landed". The
+		// transport is a tar extraction, which is not atomic: it writes
+		// entries until one fails. Observed on dev3 — PERSONA.md and
+		// daily/ were on disk while this path reported nothing written.
+		// The operator is told the truth, which is that the state is
+		// now unknown and re-running is safe.
+		reason := "placement failed partway — some documents may already be in the crew's memory; fix the cause and import again. See the server log."
 		var op OperatorError
 		if errors.As(perr, &op) {
 			reason = op.OperatorMessage()

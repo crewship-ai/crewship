@@ -56,15 +56,19 @@ func (p crewContainerPlacer) Place(ctx context.Context, stagingDir string, rels 
 	}
 	return p.ops.CopyToPath(ctx, p.containerID, backup.ExtractSpec{
 		Dest: p.dest,
-		// 1001:1002 — the agent uid with the MEMORY group, not the
-		// agent's own group. The tree is built for exactly this
-		// (buildChownInitCmd: .memory is 1001:1002, mode 2775, files
-		// g+rw), and the sidecar that serves the agent's own memory
-		// writes runs as uid 1002. Extracting as 1001:1001 could not
-		// overwrite a file the sidecar had written:
-		//   tar: AGENT.md: Cannot open: Permission denied
-		// Group 1002 is the shared write channel the design intends.
-		User:          "1001:1002",
+		// 1002:1002 — the identity the SIDECAR uses, because the
+		// sidecar is the canonical writer of an agent's memory and its
+		// files carry its ownership. Observed live on dev3:
+		//
+		//   -rw-r--r--  1002 1002  AGENT.md     <- sidecar-written
+		//   drwxrwsr-x  1001 1002  .            <- setgid dir
+		//
+		// buildChownInitCmd does `chmod g+rw` on the files it finds AT
+		// CONTAINER START, but a file the sidecar creates later gets
+		// 0644 from its umask — so group 1002 can write the DIRECTORY
+		// and not that file. 1001:1001 and 1001:1002 both failed on it
+		// with "Cannot open: Permission denied"; the owner can.
+		User:          "1002:1002",
 		PreserveModes: true,
 		PreserveTimes: true,
 	}, bytes.NewReader(archive))
@@ -117,11 +121,21 @@ func tarStagedDocs(stagingDir string, rels []string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read staged %s: %w", rel, err)
 		}
+		st, err := os.Stat(src)
+		if err != nil {
+			return nil, fmt.Errorf("stat staged %s: %w", rel, err)
+		}
 		if err := tw.WriteHeader(&tar.Header{
 			Name:     rel,
 			Typeflag: tar.TypeReg,
-			Mode:     0o664,
-			Size:     int64(len(body)),
+			// Group-writable so the NEXT writer — whichever identity it
+			// is — can replace it. The 0644 the sidecar leaves behind is
+			// what made this file unwritable by anyone else.
+			Mode: 0o664,
+			// A memory note's mtime is content, not metadata; the
+			// restore path records the same decision for this tree.
+			ModTime: st.ModTime(),
+			Size:    int64(len(body)),
 		}); err != nil {
 			return nil, fmt.Errorf("tar header %s: %w", rel, err)
 		}
