@@ -891,15 +891,25 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 // section had already landed. ownershipSweep adds that condition for
 // exactly those sections.
 func probeWritable(ctx context.Context, ops DockerOps, containerID, crewSlug string, spec ExtractSpec, writesInto, writesPaths map[string]bool) error {
-	probe := path.Join(spec.Dest, ".crewship-restore-probe")
+	// The root touch answers "can this identity write here at all", and
+	// it is only a fair question when the section actually writes at the
+	// root. The crew memory section does not — it writes inside
+	// `.memory`, several levels down, and `/crew` itself belongs to the
+	// agent — so demanding write on the root refused a restore over a
+	// directory nothing was going to touch (#1746). Where the section
+	// writes deeper, the per-directory sweep below is the check.
+	rootProbe := ""
+	if writesInto[""] || writesInto["."] || len(writesInto) == 0 {
+		probe := path.Join(spec.Dest, ".crewship-restore-probe")
+		rootProbe = fmt.Sprintf("touch %q 2>&1 || exit 4\nrm -f %q", probe, probe)
+	}
 	script := fmt.Sprintf(
 		`[ -d %q ] || { echo "destination does not exist"; exit 3; }
-touch %q 2>&1 || exit 4
-rm -f %q
+%s
 find %q -maxdepth 0 -writable >/dev/null 2>&1 || { echo UNSUPPORTED; exit 0; }
 find %q ! -writable -print 2>/dev/null | head -n 500
 %s`,
-		spec.Dest, probe, probe, spec.Dest, spec.Dest, ownershipSweep(spec))
+		spec.Dest, rootProbe, spec.Dest, spec.Dest, ownershipSweep(spec))
 
 	code, out, err := ops.ExecAs(ctx, containerID, spec.User, []string{"sh", "-c", script})
 	if err != nil {
@@ -987,16 +997,28 @@ func sectionWriteDirs(r io.Reader) (dirs, paths map[string]bool, err error) {
 		}
 		if hdr.Typeflag == tar.TypeDir {
 			dirs[name] = true
-		} else {
-			// Non-directory entries are the ones tar opens for writing,
-			// so an existing unwritable file at this exact path is what
-			// fails the extraction.
-			paths[name] = true
+			// A directory ENTRY is created by tar, so every ancestor
+			// above it may have to be created too.
+			for d := path.Dir(name); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+				dirs[d] = true
+			}
+			continue
 		}
-		// Every ancestor is written into as well: tar creates
-		// intermediate directories, and creating an entry needs write on
-		// its immediate parent.
-		for d := path.Dir(name); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+		// Non-directory entries are the ones tar opens for writing,
+		// so an existing unwritable file at this exact path is what
+		// fails the extraction.
+		paths[name] = true
+		// Only the IMMEDIATE parent, not the whole chain. Creating a
+		// file needs write on the directory holding it and nothing
+		// above; an ancestor further up matters only when tar has to
+		// create it, which is the directory-entry case handled above.
+		//
+		// Walking the full chain here refused restores it should not:
+		// the crew memory section writes into `agents/<slug>/.memory`,
+		// which is group-writable by design, while `agents/` above it
+		// is not — and the section never touches `agents/` because it
+		// already exists (#1746).
+		if d := path.Dir(name); d != "." && d != "/" && d != "" {
 			dirs[d] = true
 		}
 	}

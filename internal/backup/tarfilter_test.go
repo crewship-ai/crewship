@@ -106,3 +106,56 @@ func TestFilesOnlyTarPropagatesReadErrors(t *testing.T) {
 		t.Fatal("a corrupt source produced no error — a short restore would look complete")
 	}
 }
+
+// The preflight refuses a section when a directory it writes into is
+// unwritable. "Writes into" has to mean the directories tar actually
+// opens — the immediate parent of each file, plus directories the
+// archive itself creates and their ancestors. Counting every ancestor
+// of every file refused restores over directories nothing touches
+// (#1746): the crew memory section writes into `agents/<slug>/.memory`,
+// which is group-writable by design, while `agents/` above it is not.
+func TestSectionWriteDirsCountsOnlyWhatTarOpens(t *testing.T) {
+	src := tarWith(t, []tar.Header{
+		{Name: "agents/alex/.memory/AGENT.md", Typeflag: tar.TypeReg, Mode: 0o644},
+		{Name: "shared/.memory/CREW.md", Typeflag: tar.TypeReg, Mode: 0o664},
+	}, map[string]string{
+		"agents/alex/.memory/AGENT.md": "a\n",
+		"shared/.memory/CREW.md":       "b\n",
+	})
+
+	dirs, paths, err := sectionWriteDirs(src)
+	if err != nil {
+		t.Fatalf("sectionWriteDirs: %v", err)
+	}
+	for _, want := range []string{"agents/alex/.memory", "shared/.memory"} {
+		if !dirs[want] {
+			t.Errorf("immediate parent %q missing from writesInto: %v", want, dirs)
+		}
+	}
+	for _, notWanted := range []string{"agents", "agents/alex", "shared"} {
+		if dirs[notWanted] {
+			t.Errorf("%q counted as written-into; tar never opens it when the child exists", notWanted)
+		}
+	}
+	if !paths["agents/alex/.memory/AGENT.md"] {
+		t.Errorf("file path missing from writesPaths: %v", paths)
+	}
+}
+
+// A directory the ARCHIVE creates is different: tar makes it, so every
+// ancestor above it may have to be made too.
+func TestSectionWriteDirsKeepsAncestorsOfDirectoryEntries(t *testing.T) {
+	src := tarWith(t, []tar.Header{
+		{Name: "a/b/c/", Typeflag: tar.TypeDir, Mode: 0o755},
+	}, nil)
+
+	dirs, _, err := sectionWriteDirs(src)
+	if err != nil {
+		t.Fatalf("sectionWriteDirs: %v", err)
+	}
+	for _, want := range []string{"a/b/c", "a/b", "a"} {
+		if !dirs[want] {
+			t.Errorf("%q missing: a directory entry may need its ancestors created: %v", want, dirs)
+		}
+	}
+}
