@@ -63,6 +63,13 @@ Export is OWNER/ADMIN only. It reads every private note an agent holds, includin
 
 ## Import
 
+<Warning>
+**Known limitation (#1741).** `--apply` writes into the memory tree from the **host** process. On deployments where that tree is owned by the container user — which is the current default, see #1623 — the server can read it but not write it, and every document is refused with *"write failed on the server"*.
+
+`crewship memory export` is unaffected and works today. Verified end to end on a dev instance: export succeeds against the same directory the import cannot write.
+</Warning>
+
+
 Import reads a source directory **on your machine**, maps it onto Crewship's tiers, shows you the plan, and only writes when you say so.
 
 ```bash
