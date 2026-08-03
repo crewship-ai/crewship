@@ -685,7 +685,7 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 				return memoryFilesTar(r), true, nil
 			},
 			name: "crew-memory",
-			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser},
+			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser, UnlinkFirst: true},
 		},
 		{
 			// The other half of the crew tree: an agent's own state —
