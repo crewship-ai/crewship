@@ -295,7 +295,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ID:   init.CrewID,
 				Slug: actualSlug,
 			})
-		if err != nil {
+		switch {
+		case errors.Is(err, crewstart.ErrSidecarStart):
+			// The one caller that proceeds anyway. Everywhere else a crew
+			// without its declared database cannot do the work it was woken
+			// for; here, the operator is opening a shell to find out WHY the
+			// database did not come up. Refusing over that fault leaves them
+			// with a message and no way in — and the runtime container is up,
+			// only the sidecar half failed.
+			h.logger.Warn("terminal: crew sidecars failed, opening the shell anyway",
+				"crew_slug", actualSlug, "error", err)
+			h.writeInfo(ws, "Sidecar services failed to start — opening the shell anyway: "+err.Error())
+		case err != nil:
 			h.logger.Error("terminal: failed to start container", "error", err)
 			h.writeError(ws, "failed to start container: "+err.Error())
 			return
