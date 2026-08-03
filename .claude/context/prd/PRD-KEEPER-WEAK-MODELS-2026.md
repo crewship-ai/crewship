@@ -525,3 +525,41 @@ prohlásit za důkaz.
 (OWNER/ADMIN). Workspace, kde jediný admin zároveň vytvořil žádajícího agenta,
 nemá L4 komu předat — pravidlo funguje správně, jen nemá adresáta. Na dev2 to
 řeší povýšení druhého člena na ADMIN.
+
+---
+
+## 9. Otevřený nález 2026-08-03 — replay nereprodukuje živé rozhodnutí
+
+**Změřeno na 50 čerstvých řádcích s NEuťatými prompty, 3 průchody:**
+
+| | |
+|---|---|
+| sebe-shoda soudce | **1,000** (obě půlky, mediány 2741 / 3226 znaků) |
+| shoda se záznamem | **0,360** |
+| směr všech 32 neshod | ALLOW→DENY (10), ESCALATE→DENY (22) |
+| opačný směr | **nikdy** |
+
+**Soudce je deterministický.** Tvrzení „protiřečí si", vyslovené 2026-08-02, bylo
+artefaktem useknutého promptu (`maxAuditText = 2000`) a je opravené — mediány
+promptů jsou teď nad tím stropem. **P5 self-consistency tím z priorit vypadává:**
+při 1,000 by tři vzorky a většinový hlas řešily problém, který neexistuje, za
+trojnásobek času na každé L3/L4 rozhodnutí.
+
+**Co zůstává nevysvětlené:** replay je systematicky přísnější než produkce na
+tomtéž promptu s tímtéž modelem. Porovnané a shodné: model, prompt,
+`temperature 0.1`, `MaxTokens 256`, `think:false`, schéma verdiktu
+(ALLOW/DENY/ESCALATE).
+
+**Vyloučené hypotézy** (každá daty, ne úvahou):
+1. nedeterminismus modelu — sebe-shoda 1,000
+2. patrový floor — aplikován, číslo se nehnulo
+3. minimální délka intentu — pod minimem 1 řádek z 50
+4. `think` / reasoning — obě cesty posílají `false`
+
+**Další krok, konkrétní:** zachytit skutečné HTTP tělo z obou cest a porovnat je.
+Kód vypadá shodně, takže rozdíl je v tom, co `newKeeperEvalProvider` a živý
+provider doopravdy serializují — ne v tom, co je napsané u volání.
+
+**Proč to neblokuje 1.0:** neshoda jde výhradně v přísném směru. Harness nikdy
+neoznačí kandidáta za bezpečnějšího, než je — selhává konzervativně. Znamená to,
+že **eval podhodnocuje**, ne že brána propouští.
