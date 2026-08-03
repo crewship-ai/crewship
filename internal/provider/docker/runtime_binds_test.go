@@ -117,6 +117,63 @@ func TestStageRuntimeArtifactsIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestStageRuntimeArtifactsRestagesAChangedArtifact is the half of the
+// up-to-date check that can actually hurt: skipping a re-copy when the install
+// HAS changed would leave every crew container bind-mounting the previous
+// deploy's sidecar forever.
+func TestStageRuntimeArtifactsRestagesAChangedArtifact(t *testing.T) {
+	installPrefix := t.TempDir()
+	src := filepath.Join(installPrefix, "crewship-sidecar")
+	if err := os.WriteFile(src, []byte{0x7f, 'E', 'L', 'F', 1}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	first := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
+
+	// A new deploy: different bytes, different length, newer mtime.
+	updated := []byte{0x7f, 'E', 'L', 'F', 2, 2, 2, 2}
+	if err := os.WriteFile(src, updated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	second := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
+	if second.SidecarBinaryPath != first.SidecarBinaryPath {
+		t.Fatalf("staged path moved between boots: %q then %q", first.SidecarBinaryPath, second.SidecarBinaryPath)
+	}
+	got, err := os.ReadFile(second.SidecarBinaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(updated) {
+		t.Errorf("staged copy still holds %v, want the redeployed %v — crews would bind the previous deploy's sidecar", got, updated)
+	}
+}
+
+// TestStageRuntimeArtifactsSkipsAnUnchangedArtifact: the same bytes at the same
+// mtime must not be re-copied, so a restart does not swap the inode under every
+// running crew's bind mount for nothing.
+func TestStageRuntimeArtifactsSkipsAnUnchangedArtifact(t *testing.T) {
+	installPrefix := t.TempDir()
+	src := filepath.Join(installPrefix, "crewship-sidecar")
+	if err := os.WriteFile(src, []byte{0x7f, 'E', 'L', 'F', 3}, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	first := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
+	before, err := os.Stat(first.SidecarBinaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
+	after, err := os.Stat(first.SidecarBinaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("an unchanged artifact was re-staged; the rename replaced the inode every running crew is bind-mounting")
+	}
+}
+
 // TestStageRuntimeArtifactsWithoutDataDirLeavesConfigAlone: a provider built
 // without a data dir (tests, embeddings) must keep its configured paths.
 func TestStageRuntimeArtifactsWithoutDataDirLeavesConfigAlone(t *testing.T) {

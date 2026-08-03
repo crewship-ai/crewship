@@ -129,6 +129,14 @@ func stageArtifact(src, dst string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if alreadyStaged(info, dst) {
+		// Same size and same mtime: the previous boot already staged this exact
+		// artifact. Skipping is not only about the ~20 MB copy — the rename
+		// swaps the inode under any crew container currently bind-mounting it,
+		// which is harmless (the mount holds the old inode) but pointless
+		// churn on every single restart.
+		return dst, nil
+	}
 	in, err := os.Open(src) // #nosec G304 — src is an operator-configured artifact path
 	if err != nil {
 		return "", err
@@ -159,6 +167,22 @@ func stageArtifact(src, dst string) (string, error) {
 		return "", err
 	}
 	return dst, nil
+}
+
+// alreadyStaged reports whether dst is a copy of the file src describes.
+//
+// Size and mtime, because mtime is what the staging contract already promises
+// to carry across (assertSidecarFreshAtStartup reads it) — a dst that matches on
+// both is a copy this function made from a src that has not changed since. It
+// deliberately does NOT hash: a content hash of the sidecar on every boot buys
+// nothing over the pair, since a rebuild that produced identical bytes needs no
+// re-copy either.
+func alreadyStaged(src os.FileInfo, dst string) bool {
+	di, err := os.Stat(dst)
+	if err != nil {
+		return false
+	}
+	return di.Size() == src.Size() && di.ModTime().Equal(src.ModTime())
 }
 
 // sameFile reports whether two paths are the same file on disk.
