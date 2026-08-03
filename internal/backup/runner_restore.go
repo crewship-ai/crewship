@@ -681,9 +681,21 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if err := dockerRestore(ctx); err != nil {
 			return nil, err
 		}
+		// RestoredWs is a SLUG everywhere else — it is what the CLI
+		// prints as `workspace=`. Resolve it rather than echoing the id
+		// into a field the operator reads as a name; a best-effort
+		// lookup because a failure here must not fail a restore that has
+		// already landed.
+		restoredSlug := opts.ResumeWorkspaceID
+		var slug string
+		if err := db.QueryRowContext(ctx,
+			`SELECT slug FROM workspaces WHERE id = ?`, opts.ResumeWorkspaceID,
+		).Scan(&slug); err == nil && slug != "" {
+			restoredSlug = slug
+		}
 		return &RestoreResult{
 			Manifest:            manifest,
-			RestoredWs:          opts.ResumeWorkspaceID,
+			RestoredWs:          restoredSlug,
 			RestoredWorkspaceID: opts.ResumeWorkspaceID,
 			CrewsCount:          len(manifest.Contents.Crews),
 		}, nil

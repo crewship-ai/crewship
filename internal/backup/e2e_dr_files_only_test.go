@@ -224,6 +224,12 @@ func TestE2E_DisasterRecovery_FilesOnlyResume(t *testing.T) {
 		}
 	}
 
+	// RestoredWs is what the CLI prints as `workspace=`, so it has to be
+	// the slug the operator named, not the id echoed back at them.
+	if resume.RestoredWs != "acme-dr" {
+		t.Errorf("resume reported workspace %q, want the slug acme-dr", resume.RestoredWs)
+	}
+
 	// The resume must not have touched the database. Re-inserting the
 	// bundle's rows under their original ids, into an instance that
 	// already holds remapped copies of all of them, is exactly what the
