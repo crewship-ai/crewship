@@ -391,3 +391,129 @@ func TestE2E_DisasterRecovery_FilesOnlyRefusesWhenNothingLands(t *testing.T) {
 		}
 	})
 }
+
+// TestE2E_OrdinaryRestore_ReportsCrewsActuallyRestored covers the plain
+// restore path's CrewsRestored, which nothing else does.
+//
+// The gap was real and it was mine: CrewsRestored went in to stop a
+// resume claiming the bundle's crew count when it had landed nothing,
+// and was then set on the resume path only — so an ordinary restore
+// reported crews_count 4, crews_restored 0. The follow-up commit set it
+// on the ordinary path too, and the only assertion that shipped
+// alongside read `fork.CrewsRestored == 0`. Zero is the ZERO VALUE:
+// that assertion passes whether the field is set or the line is deleted,
+// so it could not tell the fix from its absence.
+//
+// A number that is only ever asserted equal to zero is not covered. This
+// asserts a non-zero one, against the containers the restore actually
+// wrote to, so the count has to be earned rather than defaulted.
+func TestE2E_OrdinaryRestore_ReportsCrewsActuallyRestored(t *testing.T) {
+	ctx := context.Background()
+	containerFor := func(id, slug string) string { return "crewship-team-" + slug + "-" + id }
+
+	source := openMigratedDB(t)
+	sourceWorkspaceID := seedWorkspace(t, source)
+
+	const passphrase = "ordinary-restore-crews-restored"
+	created, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
+		Scope:             backup.ScopeWorkspace,
+		WorkspaceID:       sourceWorkspaceID,
+		OutputDir:         t.TempDir(),
+		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:        passphrase,
+		CrewContainerName: containerFor,
+		DockerOps:         &recordingOps{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	// How many crews the bundle can actually land, read off the manifest
+	// rather than hard-coded — the point is that the reported count
+	// matches reality, not that it matches a number in this file.
+	wantLanded := 0
+	for _, c := range created.Manifest.Contents.Crews {
+		if c.HasFilesystemSections(created.Manifest.FormatVersion) {
+			wantLanded++
+		}
+	}
+	if wantLanded == 0 {
+		t.Fatal("fixture bundle carries no crew filesystem sections; there would be nothing to count")
+	}
+
+	// A fresh instance: no --as-* rewrite, no --replace, so this is the
+	// ordinary committed path and the docker phase runs.
+	target := openMigratedDB(t)
+	ops := &recordingOps{}
+	res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+		Path:         created.Path,
+		Passphrase:   passphrase,
+		Actor:        backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		DockerOps:    ops,
+		ContainerFor: containerFor,
+	})
+	if err != nil {
+		t.Fatalf("ordinary restore: %v", err)
+	}
+	if res.DockerPhaseSkipped {
+		t.Fatalf("an ordinary restore must run the docker phase; it was skipped")
+	}
+	if res.CrewsRestored != wantLanded {
+		t.Errorf("CrewsRestored = %d, want %d — an ordinary restore must report what it landed, not zero",
+			res.CrewsRestored, wantLanded)
+	}
+	// Tie the number to the containers that were genuinely written to, so
+	// the field cannot drift into reporting a plausible constant.
+	if got := len(ops.containersTouched()); got != res.CrewsRestored {
+		t.Errorf("CrewsRestored = %d but %d container(s) were written to; the count must come from the writes",
+			res.CrewsRestored, got)
+	}
+	if res.CrewsRestored > res.CrewsCount {
+		t.Errorf("CrewsRestored (%d) exceeds CrewsCount (%d); it counts a subset of what the bundle describes",
+			res.CrewsRestored, res.CrewsCount)
+	}
+}
+
+// TestE2E_DryRun_ReportsNothingRestored pins the deliberate zero. A dry
+// run rolls back and writes no container state, so reporting anything
+// else would be the same false claim in the opposite direction.
+func TestE2E_DryRun_ReportsNothingRestored(t *testing.T) {
+	ctx := context.Background()
+	containerFor := func(id, slug string) string { return "crewship-team-" + slug + "-" + id }
+
+	db := openMigratedDB(t)
+	wsID := seedWorkspace(t, db)
+	const passphrase = "dry-run-crews-restored"
+	created, err := backup.CreateBackup(ctx, db, backup.CreateOptions{
+		Scope:             backup.ScopeWorkspace,
+		WorkspaceID:       wsID,
+		OutputDir:         t.TempDir(),
+		Actor:             backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		Passphrase:        passphrase,
+		CrewContainerName: containerFor,
+		DockerOps:         &recordingOps{},
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup: %v", err)
+	}
+
+	target := openMigratedDB(t)
+	ops := &recordingOps{}
+	res, err := backup.RestoreBackup(ctx, target, backup.RestoreOptions{
+		Path:         created.Path,
+		Passphrase:   passphrase,
+		DryRun:       true,
+		Actor:        backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
+		DockerOps:    ops,
+		ContainerFor: containerFor,
+	})
+	if err != nil {
+		t.Fatalf("dry-run restore: %v", err)
+	}
+	if res.CrewsRestored != 0 {
+		t.Errorf("dry run reports %d crews restored; it writes no container state", res.CrewsRestored)
+	}
+	if len(ops.written) != 0 {
+		t.Errorf("dry run wrote container state: %v", ops.written)
+	}
+}
