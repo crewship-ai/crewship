@@ -603,3 +603,43 @@ func TestSectionEntries_FromManifest(t *testing.T) {
 		t.Errorf("SectionEntries = %v, want %v", got, want)
 	}
 }
+
+// recordingOps captures the exec commands a restore issues.
+type reclaimRecordingOps struct {
+	DockerOps
+	cmds [][]string
+	err  error
+}
+
+func (o *reclaimRecordingOps) Exec(_ context.Context, _ string, cmd []string) (int, []byte, error) {
+	o.cmds = append(o.cmds, cmd)
+	return 0, nil, o.err
+}
+
+// The sidecar owns an agent's memory files (uid 1002); extraction runs
+// as the agent (1001). Without handing them back first, the preflight
+// refuses the whole restore and the crew is unrestorable (#1746).
+func TestReclaimCrewMemoryOwnershipAppliesTheContract(t *testing.T) {
+	ops := &reclaimRecordingOps{}
+	reclaimCrewMemoryOwnership(context.Background(), ops, "container-1")
+
+	if len(ops.cmds) != 1 {
+		t.Fatalf("exec calls = %d, want one sweep", len(ops.cmds))
+	}
+	got := strings.Join(ops.cmds[0], " ")
+	for _, want := range []string{"chown -R 1001:1002", "chgrp -R 1002", "2775", "g+rw", ContainerCrewPath} {
+		if !strings.Contains(got, want) {
+			t.Errorf("sweep missing %q: %s", want, got)
+		}
+	}
+}
+
+// A sweep that cannot run must not fail the restore on its own: the
+// preflight already refuses with an actionable message when it matters,
+// and a restore that never needed the sweep should not be blocked by it.
+func TestReclaimCrewMemoryOwnershipIsBestEffort(t *testing.T) {
+	ops := &reclaimRecordingOps{err: errors.New("exec unavailable")}
+	// Must not panic and must not propagate — the signature has no error
+	// by design.
+	reclaimCrewMemoryOwnership(context.Background(), ops, "container-1")
+}

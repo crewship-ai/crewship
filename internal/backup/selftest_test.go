@@ -43,6 +43,7 @@ type fakeDockerOps struct {
 
 	copyFromCalls int
 	execCalls     int
+	execCmds      []string
 }
 
 func newFakeDockerOps() *fakeDockerOps {
@@ -205,6 +206,7 @@ func (f *fakeDockerOps) Exec(_ context.Context, _ string, cmd []string) (int, []
 		return -1, nil, f.execErr
 	}
 	f.execCalls++
+	f.execCmds = append(f.execCmds, strings.Join(cmd, " "))
 	if len(cmd) == 3 && cmd[0] == "rm" && cmd[1] == "-f" {
 		path := cmd[2]
 		name := strings.TrimPrefix(path, ContainerWorkspacePath+"/")
@@ -258,11 +260,19 @@ func TestBackupSelfTest_Happy(t *testing.T) {
 			t.Errorf("canary %q left with %d bytes after cleanup", name, len(content))
 		}
 	}
-	// We deliberately avoid Exec — /workspace bind-mount permissions make
-	// `rm` flaky across runtimes. Any exec call means a regression back
-	// to the destroy-canary approach.
-	if ops.execCalls != 0 {
-		t.Errorf("exec called %d times, want 0 (self-test should use CopyTo only)", ops.execCalls)
+	// The canary must never be destroyed with Exec — /workspace
+	// bind-mount permissions make `rm` flaky across runtimes, and that
+	// regression is what this guard exists for. The restore path does
+	// now exec once, to hand the memory tree back to the agent before
+	// extraction (#1746); that is a different call and it is checked
+	// rather than merely tolerated.
+	for _, c := range ops.execCmds {
+		if strings.HasPrefix(c, "rm ") {
+			t.Errorf("canary destroyed with exec — regression to the flaky approach: %s", c)
+		}
+		if !strings.Contains(c, "chown -R 1001:1002") {
+			t.Errorf("unexpected exec during self-test: %s", c)
+		}
 	}
 }
 
