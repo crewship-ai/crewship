@@ -15,8 +15,10 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
@@ -481,6 +483,31 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// real people), import writes into the memory an agent will act
 	// on. Neither is member-grade.
 	mpH := NewMemoryPortabilityHandler(r.db, r.logger, r.outputBasePath)
+	// An import writes into a tree owned by the CONTAINER user
+	// (1001:1002, mode 2775 — see the docker provider's
+	// buildChownInitCmd), so a host-side write is refused however correct
+	// the bytes are (#1741). Wire the container path when Docker is
+	// available; without it the handler falls back to writing as this
+	// process, which is correct only where it owns the tree.
+	if r.dockerClient != nil {
+		dcl := r.dockerClient
+		mpH.SetContainerWriter(&backup.MobyDockerOps{Client: dcl},
+			func(ctx context.Context, crewID, slug string) (string, error) {
+				suffix := "-team-" + slug + "-" + crewID
+				listed, err := dcl.ContainerList(ctx, client.ContainerListOptions{All: true})
+				if err != nil {
+					return "", err
+				}
+				for _, c := range listed.Items {
+					for _, n := range c.Names {
+						if strings.HasSuffix(strings.TrimPrefix(n, "/"), suffix) {
+							return c.ID, nil
+						}
+					}
+				}
+				return "", nil
+			})
+	}
 	r.authedMut("GET", "/api/v1/memory/export", roleManage, mpH.Export)
 	r.authedMut("POST", "/api/v1/memory/import", roleManage, mpH.Import)
 
