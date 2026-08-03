@@ -260,19 +260,11 @@ func TestBackupSelfTest_Happy(t *testing.T) {
 			t.Errorf("canary %q left with %d bytes after cleanup", name, len(content))
 		}
 	}
-	// The canary must never be destroyed with Exec — /workspace
-	// bind-mount permissions make `rm` flaky across runtimes, and that
-	// regression is what this guard exists for. The restore path does
-	// now exec once, to hand the memory tree back to the agent before
-	// extraction (#1746); that is a different call and it is checked
-	// rather than merely tolerated.
-	for _, c := range ops.execCmds {
-		if strings.HasPrefix(c, "rm ") {
-			t.Errorf("canary destroyed with exec — regression to the flaky approach: %s", c)
-		}
-		if !strings.Contains(c, "chown -R 1001:1002") {
-			t.Errorf("unexpected exec during self-test: %s", c)
-		}
+	// We deliberately avoid Exec — /workspace bind-mount permissions make
+	// `rm` flaky across runtimes. Any exec call means a regression back
+	// to the destroy-canary approach.
+	if ops.execCalls != 0 {
+		t.Errorf("exec called %d times, want 0 (self-test should use CopyTo only)", ops.execCalls)
 	}
 }
 

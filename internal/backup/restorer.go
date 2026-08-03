@@ -5,10 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/memory"
 	"io"
 	"path"
-	"strconv"
 	"strings"
 )
 
@@ -744,28 +742,6 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 	// destination probed for existence and writability under the exact
 	// exec identity the apply pass will use. Nothing is written yet.
 	var preflightErrs []string
-	// Hand the memory tree back to the agent before anything looks at
-	// whether it is writable.
-	//
-	// The sidecar writes an agent's memory as uid 1002 — deliberately,
-	// so the agent process cannot read its /proc/<pid>/mem — at mode
-	// 0644. Extraction runs as the agent, 1001, which then cannot
-	// replace those files, and the preflight below correctly refused
-	// the whole restore. The effect was that a crew became
-	// unrestorable the moment its agents used the feature memory
-	// exists for (#1746).
-	//
-	// The sweep is the tree's own contract (internal/memory), the same
-	// one the docker provider applies at container start: owner 1001,
-	// group 1002, group-writable. Afterwards the agent can extract and
-	// the sidecar keeps write through the group.
-	//
-	// Failure is deliberately not fatal. If the reclaim could not run
-	// and it mattered, the preflight refuses with the message it
-	// already has; if it did not matter, a restore should not be
-	// blocked by a sweep it never needed.
-	reclaimCrewMemoryOwnership(ctx, ops, containerID)
-
 	present := map[string]bool{}
 	for _, s := range sections {
 		r, ok, err := s.open()
@@ -883,15 +859,6 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 // directory owned by the memory sidecar — mid-apply, after the workspace
 // section had already landed. ownershipSweep adds that condition for
 // exactly those sections.
-// reclaimCrewMemoryOwnership applies the memory tree's ownership
-// contract as root. Best-effort by design — see the call site.
-func reclaimCrewMemoryOwnership(ctx context.Context, ops DockerOps, containerID string) {
-	cmd := memory.MemoryReclaimOwnershipCmd(strconv.Quote(ContainerCrewPath))
-	if _, _, err := ops.Exec(ctx, containerID, []string{"sh", "-c", cmd}); err != nil {
-		_ = err // preflight decides; see the call site
-	}
-}
-
 func probeWritable(ctx context.Context, ops DockerOps, containerID, crewSlug string, spec ExtractSpec, writesInto, writesPaths map[string]bool) error {
 	probe := path.Join(spec.Dest, ".crewship-restore-probe")
 	script := fmt.Sprintf(
