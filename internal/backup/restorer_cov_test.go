@@ -485,8 +485,15 @@ func TestRestoreCrew_RoutesSectionsByStrategy(t *testing.T) {
 		}
 		// The identity per section is the distinction the old
 		// CopyToVolume/CopyToSystem split carried: everything under the
-		// agent, /var/lib under uid 0.
-		wantUser := []string{agentUser, agentUser, agentUser, agentUser, agentUser, rootUser}
+		// agent, /var/lib under uid 0 — with ONE exception.
+		//
+		// The crew memory tree restores as the memory writer (1002),
+		// because the sidecar owns the files there and no one can chown
+		// them afterwards: the container runs CapDrop ALL so even root
+		// inside it cannot, and the host process is neither uid. As the
+		// agent, the restore was refused outright on any crew whose
+		// agents had used their memory (#1746).
+		wantUser := []string{agentUser, memoryWriterUser, agentUser, agentUser, agentUser, rootUser}
 		if strings.Join(ops.copyPathUser, ",") != strings.Join(wantUser, ",") {
 			t.Errorf("CopyToPath users = %v, want %v", ops.copyPathUser, wantUser)
 		}

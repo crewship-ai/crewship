@@ -621,7 +621,10 @@ func splitFirst(s string) (head, tail string, ok bool) {
 // permits is an owner changing a file's group to a group it is itself a
 // member of, which is exactly this.
 const (
-	agentUser         = "1001:1001"
+	agentUser = "1001:1001"
+	// memoryWriterUser is the sidecar's identity, which owns the files
+	// in a crew's .memory tree. See the crew-memory section.
+	memoryWriterUser  = "1002:1002"
 	sidecarWriterUser = "1001:1002"
 	rootUser          = "0:0"
 )
@@ -646,15 +649,43 @@ func crewRestoreSections(ctx context.Context, crewSlug string, payload *Extracte
 			spec: ExtractSpec{Dest: ContainerWorkspacePath, User: agentUser, PreserveTimes: true},
 		},
 		{
-			// The crew memory tree. PreserveModes is not cosmetic here:
-			// the .memory directories are setgid 2775 so that everything
-			// the agent creates later inherits group 1002 and stays
-			// readable by the memory sidecar. A restore that drops the
-			// bit leaves memory that works today and silently stops
-			// being shared tomorrow.
-			open: func() (io.ReadCloser, bool, error) { return payload.OpenCrew(ctx, crewSlug) },
+			// The crew memory tree, restored as the MEMORY writer and
+			// files only. Both halves are forced by what the tree
+			// actually looks like once agents have used it (#1746).
+			//
+			// Identity: the sidecar writes an agent's memory as uid 1002
+			// — deliberately, so the agent process cannot read its
+			// /proc/<pid>/mem — at mode 0644. Extracting as the agent
+			// could not replace those files, and the preflight rightly
+			// refused the whole restore, which made a crew unrestorable
+			// the moment its agents used memory at all. Nothing can fix
+			// that after the fact: the container runs CapDrop ALL, so
+			// even root inside it cannot chown, and crewshipd on the
+			// host is neither uid. So the restore has to BE the writer
+			// that owns the files, and that writer is 1002.
+			//
+			// Files only: the section's tar also carries `agents/` and
+			// `agents/<slug>/`, which are 1001-owned. chmod and utime
+			// are owner rights, so tar exits 2 on them as 1002 —
+			// "Cannot utime: Operation not permitted" — having already
+			// written part of the section. Directory entries are
+			// therefore dropped: every .memory directory is created by
+			// prepMemoryDirs when the agent starts, and a restore
+			// already requires a running container.
+			//
+			// Which is also why PreserveModes is gone. It was here for
+			// the setgid bit on .memory, and .memory is one of the
+			// directories no longer extracted. The bit is set by the
+			// provider at container start and this no longer touches it.
+			open: func() (io.ReadCloser, bool, error) {
+				r, ok, err := payload.OpenCrew(ctx, crewSlug)
+				if !ok || err != nil {
+					return r, ok, err
+				}
+				return filesOnlyTar(r), true, nil
+			},
 			name: "crew-memory",
-			spec: ExtractSpec{Dest: ContainerCrewPath, User: agentUser, PreserveModes: true, PreserveTimes: true},
+			spec: ExtractSpec{Dest: ContainerCrewPath, User: memoryWriterUser},
 		},
 		{
 			open: func() (io.ReadCloser, bool, error) { return payload.OpenMemory(ctx, crewSlug) },
