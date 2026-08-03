@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
 // Confinement primitives shared by every door into a memory tree.
@@ -107,6 +109,14 @@ func EnsureDirNoFollow(root, dir string) error {
 	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
 		if seg == "" || seg == "." {
 			continue
+		}
+		// Validate every segment before it is joined. Rel already
+		// guarantees ".." can only appear at the front (rejected above),
+		// so this is defence in depth — but it puts the check on the
+		// value that actually reaches the syscall rather than on a
+		// property of the string three lines up.
+		if _, err := safepath.ValidateComponent(seg); err != nil {
+			return fmt.Errorf("memory directory component: %w", err)
 		}
 		cur = filepath.Join(cur, seg)
 		info, err := os.Lstat(cur)
