@@ -1251,25 +1251,25 @@ func capUsage(size, c int) string {
 // A non-existent file is fine — handleRead returns empty content
 // and handleWrite is about to create it. Only existing symlinks or
 // out-of-root paths get rejected.
+// The check itself lives in confine.go as AssertInsideRoot so every
+// door into a memory tree runs the same code — the dispatcher, the
+// portability importer, and anything added later. The dispatcher's own
+// contribution is that it has TWO roots and a path is legitimate under
+// either.
 func (d *Dispatcher) assertMemoryFile(path string) error {
-	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing symlinked memory entry: %s", filepath.Base(path))
+	var lastErr error
+	for _, root := range []string{d.ctx.AgentMemoryDir, d.ctx.CrewMemoryDir} {
+		if root == "" {
+			continue
+		}
+		if err := AssertInsideRoot(root, path); err == nil {
+			return nil
+		} else {
+			lastErr = err
 		}
 	}
-	// Verify containment using a canonicalised parent. EvalSymlinks
-	// on the final component would fail for not-yet-created files,
-	// so we resolve the parent directory and recombine.
-	parent := filepath.Dir(path)
-	canonParent, err := filepath.EvalSymlinks(parent)
-	if err != nil {
-		// Parent must exist (we MkdirAll before calling). Anything
-		// else is a fail-closed signal.
-		return fmt.Errorf("canonicalise parent: %w", err)
-	}
-	canon := filepath.Join(canonParent, filepath.Base(path))
-	if d.isInsideMemoryRoot(canon) {
-		return nil
+	if lastErr != nil {
+		return lastErr
 	}
 	return fmt.Errorf("path escapes memory root: %s", filepath.Base(path))
 }
@@ -1287,11 +1287,7 @@ func (d *Dispatcher) isInsideMemoryRoot(canon string) bool {
 		if err != nil {
 			continue
 		}
-		rel, err := filepath.Rel(canonRoot, canon)
-		if err != nil {
-			continue
-		}
-		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if isUnder(canonRoot, canon) {
 			return true
 		}
 	}

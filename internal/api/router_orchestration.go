@@ -475,6 +475,15 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/memory/versions/{sha}", authed(wsCtx(http.HandlerFunc(mvH.Show))))
 	r.authedMut("POST", "/api/v1/memory/versions/{sha}/restore", roleManage, mvH.Restore)
 
+	// Memory portability — the HTTP half of `crewship memory
+	// export|import`. Both directions are OWNER/ADMIN: export reads
+	// every private note an agent holds (including peer cards naming
+	// real people), import writes into the memory an agent will act
+	// on. Neither is member-grade.
+	mpH := NewMemoryPortabilityHandler(r.db, r.logger, r.outputBasePath)
+	r.authedMut("GET", "/api/v1/memory/export", roleManage, mpH.Export)
+	r.authedMut("POST", "/api/v1/memory/import", roleManage, mpH.Import)
+
 	// Host-side hybrid search — combines workspace FTS + episodic
 	// vec+BM25 via RRF (memory.HybridSearch primitive). MEMBER+ at
 	// the handler level; workspace-anchored so cross-workspace

@@ -190,6 +190,50 @@ crewship memory restore ws_a crew:abc/learned-2026-05-20.md <sha> /data/memory/w
 
 The path guard rejects empty strings, any path containing `..`, and any target whose absolute form does not start with `{blob-root}/..` (the data dir, one level above `versions`).
 
+### export
+
+Write memory out as a portable OKF bundle — markdown with YAML frontmatter, readable and git-friendly. Goes through the server, so it works from any machine the CLI can reach.
+
+```bash
+crewship memory export --crew engineering --agent alex --out ./alex-memory
+crewship memory export --crew engineering --out ./crew-memory
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--out` | — | Destination directory for the bundle. Required. |
+| `--crew` | — | Crew slug or id. Required. |
+| `--agent` | — | Agent slug. Omit for the crew-shared tier. |
+
+OWNER/ADMIN only — the bundle contains every private note the agent holds.
+
+### import
+
+Read a memory directory produced by another harness, map it onto Crewship's tiers, and write it in. Recognises `crewship`, `okf`, `nanoclaw` and `openclaw` layouts.
+
+```bash
+# Preview — no login needed, nothing written
+crewship memory import --from ~/.openclaw/workspace-main --crew engineering --agent alex --operator pavel
+
+# Write it
+crewship memory import --from ./nanoclaw --group telegram_dev-team --crew eng --agent alex --apply
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--from` | — | Source memory directory. Required. |
+| `--crew` | — | Target crew slug or id. Required. |
+| `--agent` | — | Target agent slug. Omit for the crew-shared tier. |
+| `--format` | `auto` | `auto` / `crewship` / `okf` / `nanoclaw` / `openclaw`. |
+| `--operator` | — | Slug of the person an operator card (OpenClaw `USER.md`) belongs to. Without it the card is skipped. |
+| `--group` | — | Which NanoClaw group to import when the source holds several. Required in that case. |
+| `--with-crew` | `false` | Also write crew-shared documents. Every agent in the crew reads them. |
+| `--apply` | `false` | Actually write. Without it the command prints the plan and exits. |
+
+`--apply` requires OWNER/ADMIN, the same as `export` — it writes into the context an agent reasons from.
+
+Imported documents pass through the same guards an agent's own writes do: a closed allowlist of paths, per-file size ceilings, secret and prompt-injection scanning, and symlink-safe confinement. Refusals are listed per document and the command exits non-zero; a failed document does not stop the rest. Full mapping table and limits: [Memory Portability](/guides/memory-portability).
+
 ## Scope and Path Resolution
 
 The meaning of `--path` depends on the selected scope:
