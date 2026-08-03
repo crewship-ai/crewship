@@ -71,7 +71,12 @@ func (h *MemoryPortabilityHandler) placerFor(ctx context.Context, crewID, crewSl
 		return hostPlacer{root: dir}
 	}
 	if containerID == "" {
-		return hostPlacer{root: dir}
+		// Docker IS wired and the crew has no running container. Falling
+		// back to a host write here would fail on ownership and report
+		// it as a filesystem problem; the operator's actual problem is
+		// that the crew is stopped, and that is what they should be
+		// told.
+		return unavailablePlacer{crewSlug: crewSlug}
 	}
 	return crewContainerPlacer{ops: h.dockerOps, containerID: containerID, dest: containerMemoryDest(agentSlug)}
 }

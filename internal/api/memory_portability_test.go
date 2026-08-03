@@ -416,3 +416,50 @@ func TestPlacerFallsBackToHostWithoutDocker(t *testing.T) {
 		t.Errorf("placer = %T, want hostPlacer when no Docker is wired", p)
 	}
 }
+
+// A stopped crew is the operator's problem to fix, and the message has
+// to say so. Before this, the tar failed with "container is not
+// running" from the daemon and the operator was told the server could
+// not place the document — true, and useless.
+func TestUnavailablePlacerNamesTheCrew(t *testing.T) {
+	err := unavailablePlacer{crewSlug: "engineering"}.Place(context.Background(), "", []string{"AGENT.md"})
+	if err == nil {
+		t.Fatal("Place() on a stopped crew returned nil")
+	}
+	for _, want := range []string{"engineering", "no running container", "run the import again"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// With Docker wired but no running crew, the handler must NOT fall back
+// to a host write: that fails on ownership and reports a filesystem
+// problem for what is actually a stopped crew.
+func TestPlacerDoesNotFallBackToHostWhenDockerIsWired(t *testing.T) {
+	h, _, _, _, _, base := newMemPortHandlerTest(t)
+	h.SetContainerWriter(stubDockerOps{}, func(context.Context, string, string) (string, error) {
+		return "", nil // docker present, no running container
+	})
+	p := h.placerFor(context.Background(), "crew1", "engineering", "alex", base)
+	if _, ok := p.(unavailablePlacer); !ok {
+		t.Errorf("placer = %T, want unavailablePlacer", p)
+	}
+}
+
+// A running container is used, and it is the container's path that is
+// targeted — not the host's.
+func TestPlacerUsesTheRunningContainer(t *testing.T) {
+	h, _, _, _, _, base := newMemPortHandlerTest(t)
+	h.SetContainerWriter(stubDockerOps{}, func(context.Context, string, string) (string, error) {
+		return "container-abc", nil
+	})
+	p := h.placerFor(context.Background(), "crew1", "engineering", "alex", base)
+	cp, ok := p.(crewContainerPlacer)
+	if !ok {
+		t.Fatalf("placer = %T, want crewContainerPlacer", p)
+	}
+	if cp.dest != "/crew/agents/alex/.memory" {
+		t.Errorf("dest = %q", cp.dest)
+	}
+}

@@ -164,7 +164,17 @@ func (p hostPlacer) Place(_ context.Context, stagingDir string, rels []string) e
 	return nil
 }
 
+// unavailablePlacer is what a stopped crew gets. It exists so the
+// failure names the thing the operator can act on — the crew is not
+// running — instead of the symptom two layers down.
+type unavailablePlacer struct{ crewSlug string }
+
+func (p unavailablePlacer) Place(context.Context, string, []string) error {
+	return fmt.Errorf("crew %q has no running container; start it (e.g. send its agent a message, or `crewship crew restart-agents %s`) and run the import again", p.crewSlug, p.crewSlug)
+}
+
 var (
+	_ memport.Placer = unavailablePlacer{}
 	_ memport.Placer = crewContainerPlacer{}
 	_ memport.Placer = hostPlacer{}
 )
