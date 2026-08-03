@@ -1,0 +1,390 @@
+package memport
+
+import (
+	"bytes"
+	"fmt"
+	"io/fs"
+	"path"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/crewship-ai/crewship/internal/memory"
+)
+
+// ReadSource lowers a source tree into a Plan. It reads; it never
+// writes. See the package doc for why applying a Plan is somebody
+// else's job.
+func ReadSource(fsys fs.FS, f Format, opts Options) (Plan, error) {
+	names, err := walkFiles(fsys)
+	if err != nil {
+		return Plan{}, err
+	}
+	b := newBuilder()
+	switch f {
+	case FormatCrewship:
+		err = readCrewship(fsys, names, b)
+	case FormatOKF:
+		err = readOKF(fsys, names, b)
+	case FormatNanoClaw:
+		err = readNanoClaw(fsys, names, b, opts)
+	case FormatOpenClaw:
+		err = readOpenClaw(fsys, names, b, opts)
+	default:
+		return Plan{}, fmt.Errorf("memport: unsupported format %q", f)
+	}
+	if err != nil {
+		return Plan{}, err
+	}
+	return b.plan(f), nil
+}
+
+var dateFileRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// --- OpenClaw ---------------------------------------------------------
+
+func readOpenClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
+	for _, n := range names {
+		body, err := fs.ReadFile(fsys, n)
+		if err != nil {
+			return fmt.Errorf("memport: read %s: %w", n, err)
+		}
+		dir, base := path.Dir(n), path.Base(n)
+
+		// Derived data. Named explicitly rather than by "anything we
+		// don't recognise" so a genuinely unknown file still shows up
+		// as an unhandled skip an operator can look at.
+		if top := topDir(n); top == "vectors" || top == "sessions" {
+			b.skip(n, "derived data — embeddings and transcripts are rebuilt locally, never imported")
+			continue
+		}
+		if !strings.EqualFold(path.Ext(base), ".md") {
+			b.skip(n, "not a markdown document")
+			continue
+		}
+
+		if dir == "." {
+			switch base {
+			case "SOUL.md", "IDENTITY.md":
+				b.merge("PERSONA.md", memory.TierAgent, n, body)
+			case "MEMORY.md":
+				b.merge("AGENT.md", memory.TierAgent, n, body)
+			case "AGENTS.md":
+				b.merge("CREW.md", memory.TierCrew, n, body)
+			case "USER.md":
+				if opts.OperatorSlug == "" {
+					b.skip(n, "operator-facing card needs a target person; re-run with the operator slug")
+					continue
+				}
+				b.merge("peers/"+opts.OperatorSlug+".md", memory.TierAgent, n, body)
+			default:
+				b.merge("AGENT.md", memory.TierAgent, n, body)
+			}
+			continue
+		}
+
+		if dir == "memory" {
+			stem := strings.TrimSuffix(base, path.Ext(base))
+			if dateFileRe.MatchString(stem) {
+				b.merge("daily/"+stem+".md", memory.TierAgent, n, body)
+				continue
+			}
+			// Topic notes are long-term knowledge with no tier of
+			// their own; they become sections of AGENT.md.
+			b.merge("AGENT.md", memory.TierAgent, n, body)
+			continue
+		}
+
+		b.skip(n, "outside the OpenClaw memory layout")
+	}
+	return nil
+}
+
+// --- NanoClaw ---------------------------------------------------------
+
+func readNanoClaw(fsys fs.FS, names []string, b *builder, opts Options) error {
+	group, err := pickNanoClawGroup(names, opts.Group)
+	if err != nil {
+		return err
+	}
+	for _, n := range names {
+		if !strings.HasPrefix(n, "groups/") {
+			b.skip(n, "outside groups/")
+			continue
+		}
+		rel := strings.TrimPrefix(n, "groups/")
+		slash := strings.Index(rel, "/")
+		if slash < 0 {
+			b.skip(n, "stray file at the groups/ root")
+			continue
+		}
+		g, within := rel[:slash], rel[slash+1:]
+
+		if path.Dir(within) != "." {
+			b.skip(n, "task logs and nested state are not memory")
+			continue
+		}
+		if !strings.EqualFold(path.Ext(within), ".md") {
+			b.skip(n, "not a markdown document")
+			continue
+		}
+		body, err := fs.ReadFile(fsys, n)
+		if err != nil {
+			return fmt.Errorf("memport: read %s: %w", n, err)
+		}
+
+		switch g {
+		case "global":
+			// Global memory is what every group shares — that is our
+			// crew-shared tier, not an agent's private one.
+			b.merge("CREW.md", memory.TierCrew, n, body)
+		case group:
+			b.merge("AGENT.md", memory.TierAgent, n, body)
+		default:
+			b.skip(n, "belongs to group "+g+", which this import did not select")
+		}
+	}
+	return nil
+}
+
+// pickNanoClawGroup resolves which group's memory becomes the agent's.
+// With several candidates and no choice supplied it refuses and names
+// them: merging two groups produces one agent that believes it was in
+// both conversations, which no later edit can untangle.
+func pickNanoClawGroup(names []string, want string) (string, error) {
+	seen := map[string]bool{}
+	var candidates []string
+	for _, n := range names {
+		if !strings.HasPrefix(n, "groups/") {
+			continue
+		}
+		rel := strings.TrimPrefix(n, "groups/")
+		slash := strings.Index(rel, "/")
+		if slash < 0 {
+			continue
+		}
+		g := rel[:slash]
+		if g == "global" || seen[g] {
+			continue
+		}
+		seen[g] = true
+		candidates = append(candidates, g)
+	}
+	sort.Strings(candidates)
+
+	if want != "" {
+		if !seen[want] {
+			return "", fmt.Errorf("memport: group %q not found in the source (available: %s)",
+				want, strings.Join(candidates, ", "))
+		}
+		return want, nil
+	}
+	switch len(candidates) {
+	case 0:
+		return "", nil // global-only source: crew memory with no agent tier
+	case 1:
+		return candidates[0], nil
+	default:
+		return "", fmt.Errorf("memport: source holds %d groups (%s) — pick one; "+
+			"importing several into one agent would merge separate conversations",
+			len(candidates), strings.Join(candidates, ", "))
+	}
+}
+
+// --- OKF --------------------------------------------------------------
+
+func readOKF(fsys fs.FS, names []string, b *builder) error {
+	for _, n := range names {
+		if !strings.EqualFold(path.Ext(n), ".md") {
+			b.skip(n, "not a markdown document")
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, n)
+		if err != nil {
+			return fmt.Errorf("memport: read %s: %w", n, err)
+		}
+		fm, body, err := parseFrontmatter(raw)
+		if err != nil {
+			b.skip(n, "frontmatter did not parse: "+err.Error())
+			continue
+		}
+
+		rel := fm.CrewshipPath
+		tier := tierFromOKFType(fm.Type)
+		if rel == "" {
+			rel = canonicalFileForTier(tier)
+		}
+		b.merge(rel, tier, n, body)
+		b.annotate(rel, fm.Title, fm.Tags)
+	}
+	return nil
+}
+
+// tierFromOKFType maps an OKF `type` to a Crewship tier. A foreign
+// bundle uses whatever vocabulary its author chose ("table", "metric",
+// "api"), none of which we have storage for — those become agent-tier
+// knowledge, which is the tier that means "things this agent knows".
+func tierFromOKFType(t string) memory.Tier {
+	switch memory.Tier(strings.ToLower(strings.TrimSpace(t))) {
+	case memory.TierCrew:
+		return memory.TierCrew
+	case memory.TierWorkspace:
+		return memory.TierWorkspace
+	case memory.TierPins:
+		return memory.TierPins
+	case memory.TierLearned:
+		return memory.TierLearned
+	default:
+		return memory.TierAgent
+	}
+}
+
+func canonicalFileForTier(t memory.Tier) string {
+	switch t {
+	case memory.TierCrew:
+		return "CREW.md"
+	case memory.TierWorkspace:
+		return "CREW.md"
+	case memory.TierPins:
+		return "pins.md"
+	case memory.TierLearned:
+		return "learned.md"
+	default:
+		return "AGENT.md"
+	}
+}
+
+// --- Crewship ---------------------------------------------------------
+
+func readCrewship(fsys fs.FS, names []string, b *builder) error {
+	for _, n := range names {
+		if !strings.EqualFold(path.Ext(n), ".md") {
+			b.skip(n, "not a markdown document")
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, n)
+		if err != nil {
+			return fmt.Errorf("memport: read %s: %w", n, err)
+		}
+		// Our own export carries frontmatter; a live .memory tree does
+		// not. Both must read back to the same document.
+		fm, body, err := parseFrontmatter(raw)
+		if err != nil {
+			b.skip(n, "frontmatter did not parse: "+err.Error())
+			continue
+		}
+		rel := n
+		if fm.CrewshipPath != "" {
+			rel = fm.CrewshipPath
+		}
+		tier := tierForCrewshipPath(rel)
+		b.merge(rel, tier, n, body)
+		b.annotate(rel, fm.Title, fm.Tags)
+	}
+	return nil
+}
+
+// tierForCrewshipPath mirrors the mapping internal/memory's audit
+// watcher applies to the live tree, so a file exported from a tier
+// returns to the same one.
+func tierForCrewshipPath(rel string) memory.Tier {
+	switch base := path.Base(rel); {
+	case strings.EqualFold(base, "CREW.md"):
+		return memory.TierCrew
+	case strings.EqualFold(base, "pins.md"):
+		return memory.TierPins
+	case strings.EqualFold(base, "lessons.md"), strings.EqualFold(base, "learned.md"):
+		return memory.TierLearned
+	default:
+		return memory.TierAgent
+	}
+}
+
+// --- builder ----------------------------------------------------------
+
+// builder accumulates fragments per canonical path and renders them in
+// insertion order. Insertion order (not map order) is what makes two
+// runs over the same source produce identical bytes.
+type builder struct {
+	order     []string
+	docs      map[string]*Doc
+	fragments map[string][][]byte
+	skipped   []Skip
+}
+
+func newBuilder() *builder {
+	return &builder{docs: map[string]*Doc{}, fragments: map[string][][]byte{}}
+}
+
+func (b *builder) merge(rel string, tier memory.Tier, source string, body []byte) {
+	d, ok := b.docs[rel]
+	if !ok {
+		d = &Doc{Tier: tier, RelPath: rel}
+		b.docs[rel] = d
+		b.order = append(b.order, rel)
+	}
+	d.Sources = append(d.Sources, source)
+	b.fragments[rel] = append(b.fragments[rel], body)
+}
+
+// annotate attaches metadata that only the first contributing source
+// can supply. A merged document has no single title, so later sources
+// do not overwrite an earlier one.
+func (b *builder) annotate(rel, title string, tags []string) {
+	d, ok := b.docs[rel]
+	if !ok {
+		return
+	}
+	if d.Title == "" {
+		d.Title = title
+	}
+	if len(d.Tags) == 0 {
+		d.Tags = tags
+	}
+}
+
+func (b *builder) skip(source, reason string) {
+	b.skipped = append(b.skipped, Skip{Source: source, Reason: reason})
+}
+
+func (b *builder) plan(f Format) Plan {
+	p := Plan{Format: f, Skipped: b.skipped}
+	for _, rel := range b.order {
+		d := b.docs[rel]
+		d.Body = renderFragments(d.Sources, b.fragments[rel])
+		p.Docs = append(p.Docs, *d)
+	}
+	return p
+}
+
+// renderFragments joins the pieces that became one canonical file. A
+// single source is passed through untouched — headings that nobody
+// asked for are noise. Several sources each get a heading naming the
+// file they came from, because "where did this sentence come from"
+// is the first question asked of imported memory.
+func renderFragments(sources []string, frags [][]byte) []byte {
+	if len(frags) == 1 {
+		return frags[0]
+	}
+	var buf bytes.Buffer
+	for i, frag := range frags {
+		if i > 0 {
+			buf.WriteString("\n")
+		}
+		src := ""
+		if i < len(sources) {
+			src = sources[i]
+		}
+		fmt.Fprintf(&buf, "## %s\n\n", src)
+		buf.Write(bytes.TrimRight(frag, "\n"))
+		buf.WriteString("\n")
+	}
+	return buf.Bytes()
+}
+
+func topDir(p string) string {
+	if i := strings.Index(p, "/"); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}

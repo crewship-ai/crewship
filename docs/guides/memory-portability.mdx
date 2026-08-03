@@ -1,0 +1,159 @@
+---
+title: "Memory Portability"
+description: "Export agent memory to a readable OKF bundle, and import memory from NanoClaw, OpenClaw or another Crewship."
+icon: "arrow-right-arrow-left"
+---
+
+# Memory Portability
+
+## Overview
+
+Crewship stores agent memory as plain markdown on disk — `AGENT.md`, `CREW.md`, `pins.md`, `PERSONA.md`, `daily/<date>.md`, `peers/<user>.md`. Memory portability turns that into something you can move: **export** writes a bundle you can read, diff and keep in git, and **import** brings memory in from another harness that stores it the same way.
+
+This is deliberately not a backup. `crewship backup` produces an encrypted archive built for disaster recovery — correct for restoring an instance, useless for reading. A portability bundle is the opposite: no encryption, no database, just the files, with a YAML header on each one saying what it is.
+
+The format is [OKF](https://cloud.google.com/blog) (Open Knowledge Format) — a vendor-neutral spec for agent knowledge as markdown plus YAML frontmatter. Using a published spec rather than our own directory convention is the whole point: a bundle should outlive the tool that wrote it.
+
+## When to use it
+
+- **Moving an agent between instances** — export from one, import into another.
+- **Migrating from another harness** — you have memory in NanoClaw or OpenClaw and want it to be your agent's starting knowledge.
+- **Reviewing what an agent knows** — a bundle in a git repo makes memory drift visible in a diff.
+- **Leaving** — your agents' knowledge is yours; this is how it walks out the door.
+
+## Export
+
+```bash
+# One agent's private memory
+crewship memory export --crew engineering --agent alex --out ./alex-memory
+
+# The crew-shared tier
+crewship memory export --crew engineering --out ./crew-memory
+```
+
+The result is a directory mirroring the memory layout, plus an `okf.yaml` manifest:
+
+```
+alex-memory/
+├── okf.yaml
+├── AGENT.md
+├── PERSONA.md
+├── pins.md
+├── daily/2026-08-01.md
+└── peers/pavel.md
+```
+
+Each file carries a header naming its tier and where it came from:
+
+```markdown
+---
+type: agent
+title: Long-term
+crewship_path: AGENT.md
+---
+
+The deploy key rotates monthly.
+```
+
+Exporting the same memory twice produces byte-identical output, so a bundle kept in git shows real changes rather than reshuffled keys.
+
+<Note>
+Export is OWNER/ADMIN only. It reads every private note an agent holds, including operator-model peer cards about named people — that is not member-grade data.
+</Note>
+
+## Import
+
+Import reads a source directory **on your machine**, maps it onto Crewship's tiers, shows you the plan, and only writes when you say so.
+
+```bash
+# See what would happen — no login needed, nothing written
+crewship memory import --from ~/.openclaw/workspace-main \
+  --crew engineering --agent alex --operator pavel
+
+# Write it
+crewship memory import --from ~/.openclaw/workspace-main \
+  --crew engineering --agent alex --operator pavel --apply
+```
+
+<Warning>
+**Nothing is written without `--apply`.** An import lands in the context an agent reasons from; reviewing it afterwards is too late. The default run prints the mapping and exits.
+</Warning>
+
+The plan names every target and its sources, and everything being left behind:
+
+```
+Detected format: openclaw
+Target: agent alex
+
+  PERSONA.md                        69 bytes  [agent]
+      <- IDENTITY.md
+      <- SOUL.md
+  AGENT.md                         104 bytes  [agent]
+      <- MEMORY.md
+      <- memory/projects.md
+  daily/2026-02-13.md               20 bytes  [agent]
+      <- memory/2026-02-13.md
+
+Not imported (2):
+  vectors/index.bin        derived data — embeddings and transcripts are rebuilt locally, never imported
+  sessions/abc/turns.jsonl derived data — embeddings and transcripts are rebuilt locally, never imported
+```
+
+### Supported sources
+
+The layout is detected from the directory's shape; `--format` overrides the guess.
+
+| Format | Recognised by |
+|---|---|
+| `crewship` | canonical tier files at the root (`AGENT.md`, `CREW.md`, …) |
+| `okf` | markdown carrying YAML frontmatter |
+| `nanoclaw` | a `groups/` directory whose children hold `CLAUDE.md` |
+| `openclaw` | `SOUL.md` / `IDENTITY.md` / `MEMORY.md` / `USER.md` at the root |
+
+An unrecognised tree is refused rather than guessed at.
+
+### How sources map onto tiers
+
+| Source file | Becomes |
+|---|---|
+| OpenClaw `MEMORY.md`, topic notes (`projects.md`, `decisions.md`, …) | `AGENT.md` |
+| OpenClaw `SOUL.md`, `IDENTITY.md` | `PERSONA.md` |
+| OpenClaw `USER.md` | `peers/<operator>.md` (needs `--operator`) |
+| OpenClaw `memory/<date>.md` | `daily/<date>.md` |
+| OpenClaw `AGENTS.md` | `CREW.md` |
+| NanoClaw `groups/global/CLAUDE.md` | `CREW.md` |
+| NanoClaw `groups/<group>/CLAUDE.md` and its `*.md` siblings | `AGENT.md` |
+| Embeddings, session transcripts, task logs | **not imported** |
+
+When several source files collapse into one canonical file, each gets a `## <source>` heading so you can still tell them apart afterwards.
+
+### Choices the import will not make for you
+
+- **Which NanoClaw group.** A source holding more than one group is refused until you pass `--group`. Merging two groups produces one agent that believes it was in both conversations, and no later edit untangles that.
+- **Who an operator card belongs to.** OpenClaw's `USER.md` describes a person. Without `--operator <slug>` it is skipped rather than filed under a guessed name.
+- **Whether to touch crew-shared memory.** Importing into `--agent alex` holds back crew-tier documents; every agent in the crew reads those. Pass `--with-crew` to include them — they are written to the crew tier, not into the agent's directory.
+
+### Policy on the way in
+
+Imported documents go through the same writer an agent's own memory writes use:
+
+- **Per-file size ceilings** — the same ones agents live under (`AGENT.md` 4 KB, `pins.md` 8 KB, daily logs 30 KB). Paths with no specific rule get the widest ceiling, never none.
+- **Secret scanning in block mode** — a document carrying a live credential is refused and named, not silently redacted. If a token was in your notes, you want to know.
+- **Atomic replace + version record** — an import is visible in `crewship memory versions` like any other write.
+
+Rejections are reported per document and the command exits non-zero, so a partially-applied import cannot read as a clean one.
+
+## API
+
+| Method | Route | Role |
+|---|---|---|
+| `GET` | `/api/v1/memory/export?crew_id=&agent_slug=` | OWNER/ADMIN |
+| `POST` | `/api/v1/memory/import` | OWNER/ADMIN |
+
+The server reads and writes only its own memory tree. Recognising a foreign layout happens in the CLI, against files on your machine — the wire carries already-mapped documents, so no foreign directory structure ever reaches the server.
+
+## Limits
+
+- **Import replaces, it does not merge.** A document that already exists is overwritten. Export first if you want the old copy.
+- **No transcripts or embeddings.** Conversation history and vector indexes are derived data; Crewship rebuilds its own.
+- **One group per import.** Run it again for the next one.

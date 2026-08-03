@@ -10313,9 +10313,58 @@
         ]
       }
     },
+    "/api/v1/memory/export": {
+      "get": {
+        "operationId": "get_api_v1_memory_export",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "memory"
+        ]
+      }
+    },
     "/api/v1/memory/health": {
       "get": {
         "operationId": "get_api_v1_memory_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "memory"
+        ]
+      }
+    },
+    "/api/v1/memory/import": {
+      "post": {
+        "operationId": "post_api_v1_memory_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

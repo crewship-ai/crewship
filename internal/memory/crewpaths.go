@@ -58,6 +58,25 @@ func HostCrewMemoryRoot(basePath, crewID string) (string, error) {
 	return p, nil
 }
 
+// HostAgentMemoryRoot resolves the host directory holding ONE agent's
+// private memory — the twin of the container-side
+// /crew/agents/<slug>/.memory that orchestrator_run.go hands the
+// sidecar as BasePath.
+//
+// Same contract as HostCrewMemoryRoot: an unresolvable path is an
+// error, never a best-effort guess, because the failure mode is a write
+// that lands somewhere no container reads (#1663).
+func HostAgentMemoryRoot(basePath, crewID, agentSlug string) (string, error) {
+	if basePath == "" {
+		return "", fmt.Errorf("agent memory root: storage base path not configured")
+	}
+	p, err := safepath.JoinUnder(basePath, "crews", crewID, "agents", agentSlug, ".memory")
+	if err != nil {
+		return "", fmt.Errorf("agent memory root: %w", err)
+	}
+	return p, nil
+}
+
 // HostCrewTopicsDir resolves the host directory the consolidator writes
 // its per-crew output into — the twin of ContainerCrewTopicsDir.
 func HostCrewTopicsDir(basePath, crewID, crewSlug string) (string, error) {

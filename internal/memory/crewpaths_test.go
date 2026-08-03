@@ -122,3 +122,51 @@ func TestContainerCrewMemoryRoot_IsTheMountedPath(t *testing.T) {
 		t.Fatalf("ContainerCrewTopicsDir = %q, want %q", got, want)
 	}
 }
+
+// The agent tier has the same two-addresses problem the crew tier has:
+// orchestrator_run.go hands the sidecar "/crew/agents/<slug>/.memory"
+// as BasePath, and a host process must resolve the bind SOURCE of that
+// exact path. This pins the correspondence so a layout change on either
+// side fails here instead of writing memory nobody reads.
+func TestHostAgentMemoryRoot_MatchesTheContainerBasePath(t *testing.T) {
+	const (
+		basePath  = "/var/lib/crewship/output"
+		crewID    = "ckcrew_123"
+		agentSlug = "alex"
+	)
+
+	host, err := HostAgentMemoryRoot(basePath, crewID, agentSlug)
+	if err != nil {
+		t.Fatalf("HostAgentMemoryRoot: %v", err)
+	}
+
+	// The container sees {basePath}/crews/{crewID} at /crew, so the
+	// host path must be that bind source plus the container-relative
+	// remainder of the agent's BasePath.
+	containerBasePath := path.Join("/crew", "agents", agentSlug, ".memory")
+	rel := strings.TrimPrefix(containerBasePath, "/crew/")
+	want := filepath.Join(basePath, "crews", crewID, filepath.FromSlash(rel))
+	if host != want {
+		t.Errorf("HostAgentMemoryRoot = %q, want %q (bind source of %q)", host, want, containerBasePath)
+	}
+}
+
+func TestHostAgentMemoryRoot_RejectsUnsafeInputs(t *testing.T) {
+	tests := []struct {
+		name              string
+		basePath          string
+		crewID, agentSlug string
+	}{
+		{"empty base path", "", "ckcrew_1", "alex"},
+		{"traversal in crew id", "/var/lib/crewship", "../../etc", "alex"},
+		{"traversal in agent slug", "/var/lib/crewship", "ckcrew_1", ".."},
+		{"separator in agent slug", "/var/lib/crewship", "ckcrew_1", "a/b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, err := HostAgentMemoryRoot(tt.basePath, tt.crewID, tt.agentSlug); err == nil {
+				t.Errorf("HostAgentMemoryRoot() = %q, want an error", got)
+			}
+		})
+	}
+}
