@@ -21,6 +21,19 @@ const STATUS_CLASS: Record<string, string> = {
 }
 
 /**
+ * toolOf reads the approved action's name out of the free-form payload.
+ *
+ * `payload` is whatever the producer wrote — harbormaster's gate puts
+ * `{tool, args}` there, the hire path puts something else — so the value
+ * is checked rather than trusted: a non-string would otherwise reach
+ * React as an object child (which throws) or render "[object Object]".
+ */
+function toolOf(row: ApprovalRow): string | null {
+  const tool = row.payload?.tool
+  return typeof tool === "string" && tool.trim() !== "" ? tool : null
+}
+
+/**
  * One row in the approvals list. Clickable — selection opens the detail
  * sheet. Pending rows show a live countdown to `timeout_at`.
  */
@@ -47,6 +60,9 @@ export function ApprovalCard({ row, active, onSelect }: ApprovalCardProps) {
           {formatRelativeTime(row.created_at)}
         </span>
       </div>
+      {toolOf(row) && (
+        <p className="mt-1.5 font-mono text-[11px] text-foreground/70">{toolOf(row)}</p>
+      )}
       <p className="mt-1.5 text-sm text-foreground/90 leading-snug line-clamp-2">
         {row.reason || <span className="text-muted-foreground italic">(no reason)</span>}
       </p>

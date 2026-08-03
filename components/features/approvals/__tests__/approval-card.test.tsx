@@ -203,3 +203,52 @@ describe("ApprovalCard — TimeoutCountdown", () => {
     expect(screen.queryByText("expired")).not.toBeInTheDocument()
   })
 })
+
+describe("ApprovalCard — what is being approved (#1738)", () => {
+  it("names the tool from the payload", () => {
+    render(
+      <ApprovalCard
+        row={row({ payload: { tool: "agent_run", args: { agent_slug: "alex" } } })}
+        active={false}
+        onSelect={() => {}}
+      />,
+    )
+    expect(screen.getByText("agent_run")).toBeInTheDocument()
+  })
+
+  // Triage is the whole job of this list. A card that shows only "kind"
+  // makes an operator open every row to find out what each one is.
+  it("does not require opening the detail sheet to see the tool", () => {
+    const { container } = render(
+      <ApprovalCard
+        row={row({ payload: { tool: "credential_reveal" } })}
+        active={false}
+        onSelect={() => {}}
+      />,
+    )
+    expect(container.textContent).toContain("credential_reveal")
+  })
+
+  it("renders unchanged when the payload carries no tool", () => {
+    render(<ApprovalCard row={row({ payload: { note: "x" } })} active={false} onSelect={() => {}} />)
+    expect(screen.getByText("rm -rf important")).toBeInTheDocument()
+  })
+
+  it("renders unchanged when there is no payload at all", () => {
+    render(<ApprovalCard row={row()} active={false} onSelect={() => {}} />)
+    expect(screen.getByText("rm -rf important")).toBeInTheDocument()
+  })
+
+  // payload is free-form JSON from the server; a non-string tool must not
+  // reach React as an object child (which throws) or render "[object Object]".
+  it("ignores a non-string tool value", () => {
+    const { container } = render(
+      <ApprovalCard
+        row={row({ payload: { tool: { nested: true } } })}
+        active={false}
+        onSelect={() => {}}
+      />,
+    )
+    expect(container.textContent).not.toContain("object Object")
+  })
+})
