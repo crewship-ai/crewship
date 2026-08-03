@@ -95,6 +95,13 @@ in_json() {
       statusState:$sstate, statusDesc:$sdesc,
       comments:$comments, reviews:$reviews}'
 }
+# in_json_rc — same, plus the bot's inline review comments. Kept separate so
+# the dozens of existing cases stay readable; they pass none.
+# in_json_rc <now> <createdAt> <headSha> <statusState> <statusDesc> <commentsJSON> <reviewsJSON> <reviewCommentsJSON>
+in_json_rc() {
+  in_json "$1" "$2" "$3" "$4" "$5" "$6" "$7" \
+    | jq -c --argjson rc "$8" '. + {reviewComments:$rc}'
+}
 cmt() { jq -nc --arg at "$1" --arg b "$2" '[{createdAt:$at, body:$b}]'; }
 rev() { # <at> <state> <body> <commitId>
   jq -nc --arg at "$1" --arg s "$2" --arg b "$3" --arg c "$4" \
@@ -152,6 +159,45 @@ expect_contains "reviewed carries the actionable count" \
 # every throttled PR as "review started".
 expect_not_contains "the summarize marker inside a throttle notice is not a walkthrough" \
   "$(state_of "$THROTTLED_IN")" "pending"
+
+echo "== an approval with no content is not a review (#1729) =="
+
+# Seen on PR #1722, 2026-08-03: CodeRabbit posted the rate-limit notice and
+# then submitted an APPROVED review whose body was zero-length, with no inline
+# comments. "Newest event wins" made that the winning event and the script
+# reported `reviewed / review approved` on a PR nothing had read — the exact
+# substitution this tool exists to refuse, arriving through a different field.
+EMPTY_APPROVAL_AFTER_THROTTLE="$(in_json "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+  "$(cmt 2026-07-30T21:15:08Z "$THROTTLE_BODY")" \
+  "$(rev 2026-07-30T21:35:00Z APPROVED "" "$SHA")")"
+expect_eq "an empty approval does not outrank the throttle it followed" \
+  "throttled" "$(state_of "$EMPTY_APPROVAL_AFTER_THROTTLE")"
+expect_contains "the empty approval is called out, not silently ignored" \
+  "$(notes_of "$EMPTY_APPROVAL_AFTER_THROTTLE")" "approved with no content"
+
+# On its own, with nothing else posted, an empty approval leaves the PR in the
+# same position as one CodeRabbit never touched.
+EMPTY_APPROVAL_ALONE="$(in_json "$NOW" "$OPENED" "$SHA" success "" \
+  "$NONE" "$(rev 2026-07-30T21:35:00Z APPROVED "" "$SHA")")"
+expect_eq "an empty approval alone is not a review" \
+  "absent" "$(state_of "$EMPTY_APPROVAL_ALONE")"
+
+# The inverse must keep working: a review that says nothing in its BODY but
+# left inline comments really did read the diff.
+EMPTY_BODY_WITH_INLINE="$(in_json_rc "$NOW" "$OPENED" "$SHA" success "" \
+  "$NONE" "$(rev 2026-07-30T21:35:00Z APPROVED "" "$SHA")" \
+  '[{"createdAt":"2026-07-30T21:35:04Z"}]')"
+expect_eq "an empty body with inline comments IS a review" \
+  "reviewed" "$(state_of "$EMPTY_BODY_WITH_INLINE")"
+
+# Inline comments from an EARLIER review must not launder a later empty
+# approval into looking like a fresh read.
+STALE_INLINE="$(in_json_rc "$NOW" "$OPENED" "$SHA" success "Review rate limited" \
+  "$(cmt 2026-07-30T21:30:00Z "$THROTTLE_BODY")" \
+  "$(rev 2026-07-30T21:35:00Z APPROVED "" "$SHA")" \
+  '[{"createdAt":"2026-07-30T21:00:00Z"}]')"
+expect_eq "inline comments predating the approval do not count for it" \
+  "throttled" "$(state_of "$STALE_INLINE")"
 
 echo "== newest event wins =="
 

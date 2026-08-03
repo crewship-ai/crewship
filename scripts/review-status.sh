@@ -152,16 +152,28 @@ CLASSIFY_JQ="$WAIT_JQ"'
                     else "other" end ),
           wait: ((.body // "") | waitMinutes)
         } ]
-      + [ $in.reviews[]? | {
+      + [ $in.reviews[]?
+          | ((((.submittedAt // "") | secs) // 0) - 60) as $since
+          | {
           at: (.submittedAt // ""),
           t:  ((.submittedAt // "") | secs),
-          kind: "review",
+          # A review event only counts when it carries CONTENT: a body, or
+          # at least one inline comment posted with it. #1729: CodeRabbit
+          # answered a rate-limited PR with an APPROVED review whose body was
+          # empty and which touched no line, and "newest event wins" made
+          # that outrank the throttle notice — the script reported `reviewed`
+          # on a PR nothing had read. An approval that says nothing is the
+          # same non-event the green check was.
+          kind: (if ((.body // "") | length) > 0
+                    or ([ $in.reviewComments[]? | select((((.createdAt // "") | secs) // 0) >= $since) ] | length) > 0
+                 then "review" else "empty-review" end),
           rstate: (.state // "?"),
           commitId: (.commitId // ""),
           actionable: ((.body // "") | actionable)
         } ] ) as $ev
 
   | ($ev | map(select(.kind == "review"))      | last) as $rev
+  | ($ev | map(select(.kind == "empty-review")) | last) as $emptyRev
   | ($ev | map(select(.kind == "throttle"))    | last) as $thr
   | ($ev | map(select(.kind == "failure"))     | last) as $fail
   | ($ev | map(select(.kind == "walkthrough")) | last) as $walk
@@ -200,6 +212,10 @@ CLASSIFY_JQ="$WAIT_JQ"'
               and ((($in.headSha) // "") != "") and ($rev.commitId != $in.headSha)
          then ["reviewed " + ($rev.commitId | short) + ", head is "
                + ($in.headSha | short) + " — the newest push is unreviewed"]
+         else [] end)
+      + (if $emptyRev != null
+         then ["CodeRabbit " + ($emptyRev.rstate | ascii_downcase)
+               + " with no content — no body, no inline comments; it did not read the diff"]
          else [] end)
       + (if $state == "throttled" and $rev != null
          then ["an earlier review exists (" + $rev.at + ") but does not cover the current head"]
@@ -265,13 +281,19 @@ CHECKS_JQ='
 # one thing this script must never do is turn "the API did not answer" into
 # "nothing was posted" — that is the exact substitution it exists to catch.
 fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
-  local n="$1" pr comments reviews status sha
+  local n="$1" pr comments reviews revcomments status sha
   pr="$(gh api "repos/$REPO/pulls/$n" 2>/dev/null)" || return 1
   [ -n "$pr" ] || return 1
   sha="$(printf '%s' "$pr" | jq -r '.head.sha // ""' 2>/dev/null)" || return 1
   [ -n "$sha" ] || return 1
   comments="$(gh api "repos/$REPO/issues/$n/comments" --paginate 2>/dev/null)" || return 1
   reviews="$(gh api "repos/$REPO/pulls/$n/reviews" --paginate 2>/dev/null)" || return 1
+  # Inline review comments. Needed because a review can carry its findings
+  # entirely on the diff with an empty body — and, the other way round (#1729),
+  # because an APPROVED review with neither body nor inline comments read
+  # nothing and must not be counted as a review.
+  revcomments="$(gh api "repos/$REPO/pulls/$n/comments" --paginate 2>/dev/null)" || return 1
+  revcomments="$(printf '%s' "$revcomments" | jq -s 'add // []' 2>/dev/null)" || return 1
   # --paginate concatenates one JSON array per page; slurp them back into one.
   comments="$(printf '%s' "$comments" | jq -s 'add // []' 2>/dev/null)" || return 1
   reviews="$(printf '%s' "$reviews" | jq -s 'add // []' 2>/dev/null)" || return 1
@@ -282,6 +304,7 @@ fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
     --argjson pr "$pr" \
     --argjson comments "$comments" \
     --argjson reviews "$reviews" \
+    --argjson revcomments "$revcomments" \
     --argjson status "$status" \
     --arg bot "$BOT" \
     --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -293,6 +316,8 @@ fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
         statusState: (($s.state) // ""), statusDesc: (($s.description) // ""),
         comments: [ $comments[] | select(.user.login == $bot)
                     | {createdAt: .created_at, body: (.body // "")} ],
+        reviewComments: [ $revcomments[] | select(.user.login == $bot)
+                    | {createdAt: .created_at} ],
         reviews:  [ $reviews[]  | select(.user.login == $bot)
                     | select((.state // "") != "PENDING")
                     | {submittedAt: .submitted_at, state: .state,
