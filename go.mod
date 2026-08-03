@@ -23,7 +23,7 @@ require (
 	github.com/klauspost/compress v1.19.1
 	github.com/mattn/go-isatty v0.0.24
 	github.com/moby/moby/api v1.55.0
-	github.com/moby/moby/client v0.5.0
+	github.com/moby/moby/client v0.5.1
 	github.com/nicholas-fedor/shoutrrr v0.16.2
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/robfig/cron/v3 v3.0.1
