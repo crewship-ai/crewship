@@ -2,6 +2,7 @@ package memport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -37,6 +38,15 @@ type Placer interface {
 	Place(ctx context.Context, stagingDir string, rels []string) error
 }
 
+// OperatorError is a placement failure whose cause is something the
+// operator can act on — a stopped crew, say — rather than an internal
+// transport detail. Its message is shown to them verbatim, so it must
+// name no container id, no host path and no internal identifier.
+type OperatorError interface {
+	error
+	OperatorMessage() string
+}
+
 // ApplyVia validates documents exactly as Apply does, into a private
 // staging directory, and then hands the result to placer.
 //
@@ -64,10 +74,19 @@ func ApplyVia(ctx context.Context, placer Placer, docs []Doc, cfg memory.WriteCo
 	}
 
 	if perr := placer.Place(ctx, staging, res.Written); perr != nil {
+		// A placer that knows what the OPERATOR should do says so, and
+		// that message reaches them. Anything else keeps the generic
+		// text, because a transport error carries container ids and
+		// host paths that a client has no business receiving.
+		reason := "the server could not place this document in the crew's memory — see the server log for the cause"
+		var op OperatorError
+		if errors.As(perr, &op) {
+			reason = op.OperatorMessage()
+		}
 		for _, rel := range res.Written {
 			res.Failed = append(res.Failed, Failure{
 				RelPath: rel,
-				Reason:  "the server could not place this document in the crew's memory — see the server log for the cause",
+				Reason:  reason,
 				Cause:   perr,
 			})
 		}

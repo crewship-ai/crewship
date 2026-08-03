@@ -169,9 +169,20 @@ func (p hostPlacer) Place(_ context.Context, stagingDir string, rels []string) e
 // running — instead of the symptom two layers down.
 type unavailablePlacer struct{ crewSlug string }
 
-func (p unavailablePlacer) Place(context.Context, string, []string) error {
-	return fmt.Errorf("crew %q has no running container; start it (e.g. send its agent a message, or `crewship crew restart-agents %s`) and run the import again", p.crewSlug, p.crewSlug)
+func (p unavailablePlacer) Place(context.Context, string, []string) error { return crewStoppedError(p) }
+
+// crewStoppedError names the crew and the fix. It carries no container
+// id and no host path, which is what lets it reach the operator instead
+// of stopping at the log.
+type crewStoppedError unavailablePlacer
+
+func (e crewStoppedError) Error() string { return e.OperatorMessage() }
+func (e crewStoppedError) OperatorMessage() string {
+	return fmt.Sprintf("crew %q has no running container — start it (send one of its agents a message, or run `crewship crew restart-agents %s`) and import again",
+		e.crewSlug, e.crewSlug)
 }
+
+var _ memport.OperatorError = crewStoppedError{}
 
 var (
 	_ memport.Placer = unavailablePlacer{}

@@ -426,7 +426,7 @@ func TestUnavailablePlacerNamesTheCrew(t *testing.T) {
 	if err == nil {
 		t.Fatal("Place() on a stopped crew returned nil")
 	}
-	for _, want := range []string{"engineering", "no running container", "run the import again"} {
+	for _, want := range []string{"engineering", "no running container", "restart-agents", "import again"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
