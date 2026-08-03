@@ -2,6 +2,7 @@ package memport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -147,7 +148,15 @@ type ApplyResult struct {
 // happened while half their memory was new.
 type Failure struct {
 	RelPath string
-	Reason  string
+	// Reason is what the OPERATOR is told. It never carries a host
+	// path — the client has no business learning the server's storage
+	// layout from a failed import.
+	Reason string
+	// Cause is the underlying error, for the SERVER's log. Redacting
+	// the path from the response was right; discarding the cause
+	// entirely was not — it left a failure that could not be diagnosed
+	// from either side (#1741). Never serialise this to a client.
+	Cause error
 }
 
 // Apply writes docs into the .memory directory rooted at root.
@@ -196,11 +205,11 @@ func Apply(ctx context.Context, root string, docs []Doc, cfg memory.WriteConfig)
 			continue
 		}
 		if err := memory.EnsureDirNoFollow(root, filepath.Dir(target)); err != nil {
-			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: confinementReason(err)})
+			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: confinementReason(err), Cause: err})
 			continue
 		}
 		if err := memory.AssertInsideRoot(root, target); err != nil {
-			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: confinementReason(err)})
+			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: confinementReason(err), Cause: err})
 			continue
 		}
 
@@ -210,10 +219,14 @@ func Apply(ctx context.Context, root string, docs []Doc, cfg memory.WriteConfig)
 		}
 		wr, err := memory.WriteFile(ctx, target, d.Body, docCfg)
 		if err != nil {
-			// WriteFile's error text carries the absolute host path. The
-			// caller is told WHICH document failed, not where the server
-			// keeps it.
-			res.Failed = append(res.Failed, Failure{RelPath: d.RelPath, Reason: "write failed on the server"})
+			// WriteFile's error text carries the absolute host path, so
+			// the caller is told WHICH document failed and not where the
+			// server keeps it. The cause rides along for the log.
+			res.Failed = append(res.Failed, Failure{
+				RelPath: d.RelPath,
+				Reason:  "write failed on the server — see the server log for the cause",
+				Cause:   err,
+			})
 			continue
 		}
 		if wr.Rejected {
@@ -229,17 +242,30 @@ func Apply(ctx context.Context, root string, docs []Doc, cfg memory.WriteConfig)
 	return res, nil
 }
 
-// confinementReason renders a containment failure without echoing the
-// server's absolute paths back to the caller. What the operator needs is
-// "this was refused for where it points", not the storage layout.
+// confinementReason renders a failure from the confinement helpers
+// without echoing the server's absolute paths back to the caller.
+//
+// It distinguishes a REFUSAL from a failure to look. EnsureDirNoFollow
+// returns errors for stat and mkdir problems too, and mapping those to
+// "path does not stay inside the memory directory" answered a
+// security-shaped question with a filesystem-shaped cause — an operator
+// hitting a plain EPERM was told their path was unsafe (#1741).
 func confinementReason(err error) string {
 	if err == nil {
 		return ""
 	}
-	if strings.Contains(err.Error(), "symlink") {
+	switch msg := err.Error(); {
+	case strings.Contains(msg, "symlink"):
 		return "refused: a symlink inside the memory directory redirects this path"
+	case strings.Contains(msg, "escapes memory root"),
+		strings.Contains(msg, "not a directory"),
+		errors.Is(err, safepath.ErrUnsafe):
+		return "refused: path does not stay inside the target memory directory"
+	default:
+		// Could not create or inspect the directory at all: a
+		// permission problem, a missing parent, a read-only mount.
+		return "the server could not prepare this document's directory — see the server log for the cause"
 	}
-	return "refused: path does not stay inside the target memory directory"
 }
 
 // pruneStaleBundle removes documents a previous export wrote that this

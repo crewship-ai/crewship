@@ -2,6 +2,9 @@ package memport
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -404,5 +407,59 @@ func TestExportOKFLeavesForeignDirectoriesAlone(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "notes.txt")); err != nil {
 		t.Error("an unrelated file was removed")
+	}
+}
+
+// A failure to LOOK is not a refusal to write. EnsureDirNoFollow
+// returns errors for stat and mkdir problems too, and reporting those
+// as "path does not stay inside the memory directory" answered a
+// security-shaped question with a filesystem-shaped cause (#1741).
+func TestConfinementReasonSeparatesRefusalFromFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantPart string
+	}{
+		{"symlinked directory", errors.New("refusing symlinked memory directory: daily"), "symlink"},
+		{"escape", errors.New("directory escapes memory root: x"), "does not stay inside"},
+		{"not a directory", errors.New("memory path component is not a directory: peers"), "does not stay inside"},
+		{"permission denied", fmt.Errorf("create memory directory peers: %w", fs.ErrPermission), "could not prepare"},
+		{"stat failed", errors.New("stat memory directory peers: input/output error"), "could not prepare"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := confinementReason(tt.err)
+			if !strings.Contains(got, tt.wantPart) {
+				t.Errorf("confinementReason(%v) = %q, want it to mention %q", tt.err, got, tt.wantPart)
+			}
+			if strings.Contains(got, "/") {
+				t.Errorf("reason leaks a path: %q", got)
+			}
+		})
+	}
+}
+
+// The cause must reach the caller of Apply so the server can log it,
+// and must never be the thing the operator is shown.
+func TestApplyCarriesTheCauseForTheLog(t *testing.T) {
+	root := t.TempDir()
+	// A file where a directory needs to be: the write cannot succeed.
+	if err := os.WriteFile(filepath.Join(root, "daily"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Apply(context.Background(), root,
+		[]Doc{{Tier: memory.TierAgent, Scope: ScopeAgent, RelPath: "daily/2026-08-01.md", Body: []byte("x")}},
+		memory.WriteConfig{})
+	if err != nil {
+		t.Fatalf("Apply() hard error = %v", err)
+	}
+	if len(res.Failed) != 1 {
+		t.Fatalf("Failed = %+v, want one", res.Failed)
+	}
+	if res.Failed[0].Cause == nil {
+		t.Error("the underlying cause was discarded — the failure is undiagnosable from either side")
+	}
+	if strings.Contains(res.Failed[0].Reason, root) {
+		t.Errorf("the operator-facing reason leaks the host path: %q", res.Failed[0].Reason)
 	}
 }

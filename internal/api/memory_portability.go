@@ -304,6 +304,14 @@ func (h *MemoryPortabilityHandler) Import(w http.ResponseWriter, r *http.Request
 	}
 	failed := make([]map[string]any, 0, len(res.Failed))
 	for _, f := range res.Failed {
+		if f.Cause != nil {
+			// The response carries a path-free reason; the log carries
+			// the cause. Without this the failure existed in neither
+			// place and could not be diagnosed from either side (#1741).
+			h.logger.Error("memory portability: document write failed",
+				"path", f.RelPath, "reason", f.Reason, "err", f.Cause,
+				"crew_id", body.CrewID, "agent_slug", body.AgentSlug)
+		}
 		failed = append(failed, map[string]any{"path": f.RelPath, "reason": f.Reason})
 	}
 	// 200 even with failures: some documents were written and the
