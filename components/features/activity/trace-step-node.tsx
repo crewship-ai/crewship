@@ -7,9 +7,11 @@ import {
   BellRing,
   Check,
   CircleDot,
+  Database,
   Globe,
   PauseCircle,
   FileCode2,
+  Repeat,
   ScrollText,
   Sparkles,
   Terminal,
@@ -57,6 +59,8 @@ const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: str
   call_pipeline: { Icon: ScrollText, label: "sub-routine", tint: "text-purple" },
   notify: { Icon: BellRing, label: "notify", tint: "text-pink-300" },
   script: { Icon: FileCode2, label: "script", tint: "text-lime-300" },
+  query: { Icon: Database, label: "query", tint: "text-cyan-300" },
+  foreach: { Icon: Repeat, label: "foreach", tint: "text-orange-300" },
 }
 
 // Trigger isn't a real step kind — it's a synthetic node for the
@@ -166,6 +170,18 @@ function subtitleFor(step: TraceStep): ReactNode {
       return (
         <span className="truncate font-mono text-foreground/80">
           {step.pipeline_slug ?? "(unknown)"}
+        </span>
+      )
+    case "query":
+      return (
+        <span className="truncate font-mono text-foreground/80">
+          {step.query?.datastore ?? "datastore"}
+        </span>
+      )
+    case "foreach":
+      return (
+        <span className="truncate font-mono text-foreground/80">
+          {step.foreach?.over ? `over ${step.foreach.over}` : "loop"}
         </span>
       )
     default:

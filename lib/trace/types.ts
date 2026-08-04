@@ -10,6 +10,11 @@
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { HeatmapBucket } from "./percentile-heatmap"
 
+// Mirrors the closed set in internal/pipeline/types.go (StepType).
+// Keep the two in sync: a kind the backend can execute but this list
+// omits still renders (KIND_VISUAL falls back to agent_run), but it
+// renders as the WRONG kind — a `foreach` loop drawn as an agent is
+// worse than an unknown-kind node, because it reads as truthful.
 export type StepKind =
   | "agent_run"
   | "call_pipeline"
@@ -19,6 +24,8 @@ export type StepKind =
   | "transform"
   | "notify"
   | "script"
+  | "query"
+  | "foreach"
 
 export type StepStatus =
   | "pending"
@@ -66,6 +73,17 @@ export interface TraceStep {
     kind?: string
     approval_prompt?: string
     until?: string
+  }
+  query?: {
+    datastore?: string
+    statement?: string
+  }
+  foreach?: {
+    // Template expression the loop iterates over, e.g.
+    // "{{ steps.worklist.output }}". Rendered as the node subtitle so
+    // "this runs once per invoice" is readable off the canvas.
+    over?: string
+    as?: string
   }
   pipeline_slug?: string
   inputs?: Record<string, unknown>
