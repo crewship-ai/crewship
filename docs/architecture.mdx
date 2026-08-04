@@ -197,7 +197,8 @@ The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The
 | **Keeper** | `/keeper/request`, `/keeper/execute` |
 | **MCP** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
 | **Connections** | `/connections`, `/connections/{id}/message`, `/connections/{id}/messages`, `/connections/{id}/files`, `/crew-connections` |
-| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials`, `/issue/create` |
+| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH), `/issue/{identifier}/comment`, `/issue/{identifier}/link` |
+| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials` |
 | **Pipelines** | `/pipelines`, `/pipelines/{slug}`, `/pipelines/save`, `/pipelines/{slug}/run`, `/pipelines/{slug}/dry_run` |
 | **Other** | `/manifest` (GET/PATCH), `/expose-port` |
 </Accordion>

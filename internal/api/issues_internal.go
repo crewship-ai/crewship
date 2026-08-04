@@ -86,6 +86,18 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		query += " AND m.assignee_id = ?"
 		args = append(args, assignee)
 	}
+	// ?q= free-text search over title and description. An agent looking for
+	// "the flaky login issue" has an identifier only if a human already told
+	// it one; without this the sidecar's list verb can filter but not FIND.
+	//
+	// escapeLikeWildcards is not optional here: `%` and `_` are LIKE
+	// metacharacters, so an unescaped q=% matches every row and turns a
+	// search into a full board dump (TestSecInternalIssueList_WildcardIsLiteral).
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		query += ` AND (m.title LIKE ? ESCAPE '\' OR COALESCE(m.description, '') LIKE ? ESCAPE '\')`
+		like := "%" + escapeLikeWildcards(q) + "%"
+		args = append(args, like, like)
+	}
 	if mtype := r.URL.Query().Get("mission_type"); mtype != "" {
 		query += " AND m.mission_type = ?"
 		args = append(args, mtype)
@@ -331,16 +343,43 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateStatus handles PATCH /api/v1/internal/issues/{identifier}
-// Allows agents to update issue status and add comments.
+//
+// Despite the name (kept so the route registration, the docs and the existing
+// #1365 security suite stay pointing at the same symbol) this is the general
+// agent-facing issue PATCH: status, priority, assignee, labels, estimate, due
+// date, and an optional comment in the same call.
+//
+// Every field beyond status/priority names a row in ANOTHER table, and each one
+// is fenced to the token's workspace the same way the public handler fences the
+// session's:
+//
+//   - assignee_id → validateAssigneeWorkspace / resolveAssigneeType. A foreign
+//     id is a 400, not a silent write: the read path resolves a display name
+//     for whatever id is stored, so persisting a foreign one leaks that
+//     tenant's user/agent name into this one.
+//   - labels → the INSERT itself is workspace-scoped (SELECT … WHERE
+//     workspace_id = ?), so a foreign label id simply attaches nothing.
+//
+// The fields this handler deliberately does NOT accept are the ones whose
+// meaning is structural rather than editorial: title/description (rewriting the
+// issue a human wrote is not a progress report), project_id, milestone_id,
+// routine_id, sort_order, and parent_issue_id — the last one is reachable, but
+// only through CreateRelation's sub_issue_of, where it is gated as a link
+// rather than a free-form column write.
 func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 
 	var req struct {
-		WorkspaceID string  `json:"workspace_id"`
-		Status      string  `json:"status"`
-		Priority    string  `json:"priority"`
-		Comment     *string `json:"comment"`
-		AgentID     string  `json:"agent_id"`
+		WorkspaceID  string    `json:"workspace_id"`
+		Status       string    `json:"status"`
+		Priority     string    `json:"priority"`
+		Comment      *string   `json:"comment"`
+		AgentID      string    `json:"agent_id"`
+		AssigneeType *string   `json:"assignee_type"`
+		AssigneeID   *string   `json:"assignee_id"`
+		DueDate      *string   `json:"due_date"`
+		Estimate     *int      `json:"estimate"`
+		Labels       *[]string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -423,6 +462,66 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		ub.Set("priority", req.Priority)
 	}
 
+	// Assignee. An empty string is an explicit UNASSIGN (both columns go NULL
+	// together — a dangling assignee_type with no id renders as "assigned to
+	// nobody, of type agent" in every read path).
+	assigneeChanged := false
+	if req.AssigneeID != nil {
+		if *req.AssigneeID == "" {
+			ub.SetNull("assignee_id")
+			ub.SetNull("assignee_type")
+			assigneeChanged = true
+		} else {
+			assigneeType := ""
+			if req.AssigneeType != nil {
+				assigneeType = *req.AssigneeType
+				if assigneeType != "user" && assigneeType != "agent" {
+					writeProblem(w, r, http.StatusBadRequest,
+						"assignee_type must be 'user' or 'agent' when assignee_id is set")
+					return
+				}
+				ok, vErr := validateAssigneeWorkspace(r.Context(), h.db, assigneeType, *req.AssigneeID, req.WorkspaceID)
+				if vErr != nil {
+					internalError(w, r, h.logger, "validate assignee_id", vErr)
+					return
+				}
+				if !ok {
+					writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+					return
+				}
+			} else {
+				// Type omitted: resolve it rather than inheriting the row's
+				// stale value. Trusting the stale type false-rejects a
+				// legitimate user→agent reassignment (the public handler's
+				// bug; do not reintroduce it here).
+				var ok bool
+				var rErr error
+				assigneeType, ok, rErr = resolveAssigneeType(r.Context(), h.db, *req.AssigneeID, req.WorkspaceID)
+				if rErr != nil {
+					internalError(w, r, h.logger, "resolve assignee_type", rErr)
+					return
+				}
+				if !ok {
+					writeProblem(w, r, http.StatusBadRequest, "assignee_id does not exist in this workspace")
+					return
+				}
+			}
+			ub.Set("assignee_type", assigneeType)
+			ub.Set("assignee_id", *req.AssigneeID)
+			assigneeChanged = true
+		}
+	}
+	if req.DueDate != nil {
+		if *req.DueDate == "" {
+			ub.SetNull("due_date")
+		} else {
+			ub.Set("due_date", *req.DueDate)
+		}
+	}
+	if req.Estimate != nil {
+		ub.Set("estimate", *req.Estimate)
+	}
+
 	if !ub.Empty() {
 		query, args := ub.Build("missions", "id = ?", missionID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
@@ -440,6 +539,32 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if req.Priority != "" {
 			h.logActivity(r.Context(), missionID, actorType, actorID,
 				"priority_changed", req.Priority)
+		}
+		if assigneeChanged {
+			h.logActivity(r.Context(), missionID, actorType, actorID,
+				"assignee_changed", "assignee_id: "+*req.AssigneeID)
+		}
+	}
+
+	// Labels are a full REPLACEMENT (matching the public handler), so an empty
+	// array clears them. The insert is workspace-scoped by construction:
+	// mission_labels carries no workspace column, so a label id from another
+	// tenant would otherwise attach and the read path's join would render that
+	// tenant's label name and colour inside this one.
+	if req.Labels != nil {
+		if _, err := h.db.ExecContext(r.Context(),
+			`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
+			internalError(w, r, h.logger, "clear issue labels", err)
+			return
+		}
+		for _, labelID := range *req.Labels {
+			if _, err := h.db.ExecContext(r.Context(),
+				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id)
+				 SELECT ?, id FROM labels WHERE id = ? AND workspace_id = ?`,
+				missionID, labelID, req.WorkspaceID); err != nil {
+				h.logger.Error("insert mission label", "error", err,
+					"mission_id", missionID, "label_id", labelID)
+			}
 		}
 	}
 
