@@ -249,10 +249,11 @@ func buildDocument(routes []route) map[string]any {
 	_, coreResourceRequestComponentsV2 := coreResourceRequestSchemaCatalogV2()
 	_, integrationsAuthRequestComponents := integrationsAuthRequestBodySchemaCatalog()
 	_, adminSpecialComponents := adminSpecialRequestSchemaCatalog()
+	_, finalCoreRequestComponents := finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -476,6 +477,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	adminSpecialRoutes, _ := adminSpecialRequestSchemaCatalog()
 	for key, schema := range adminSpecialRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	finalCoreRequests, _ := finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog()
+	for key, schema := range finalCoreRequests {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result

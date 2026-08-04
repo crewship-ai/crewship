@@ -4985,6 +4985,295 @@
         },
         "type": "object"
       },
+      "FinalCoreAgentAvatarRequest": {
+        "properties": {
+          "svg": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "svg"
+        ],
+        "type": "object"
+      },
+      "FinalCoreAgentPersonaSuggestionRequest": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
+      "FinalCoreAgentRehireRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "ttl_minutes": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "FinalCoreBootstrapRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name",
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "FinalCoreChatSteerRequest": {
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "FinalCoreCrewAvatarStyleRequest": {
+        "properties": {
+          "avatar_style": {
+            "type": "string"
+          },
+          "reset_overrides": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "FinalCoreCrewMemberRequest": {
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "FinalCoreCrewMemberRoleRequest": {
+        "properties": {
+          "role": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalCoreEmptyRequest": {
+        "properties": {},
+        "type": "object"
+      },
+      "FinalCoreInboxBulkRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "resolved_action": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "unread",
+              "read",
+              "resolved"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "ids",
+          "state"
+        ],
+        "type": "object"
+      },
+      "FinalCoreInvitationRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "FinalCoreIssueCommentRequest": {
+        "properties": {
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "FinalCoreIssueRelationRequest": {
+        "properties": {
+          "relation_type": {
+            "enum": [
+              "blocks",
+              "blocked_by",
+              "relates_to",
+              "duplicate_of"
+            ],
+            "type": "string"
+          },
+          "target_identifier": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_identifier",
+          "relation_type"
+        ],
+        "type": "object"
+      },
+      "FinalCoreIssueReviewRequest": {
+        "properties": {
+          "action": {
+            "enum": [
+              "approve",
+              "request_changes"
+            ],
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "reassign_to": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "FinalCorePortRevokeRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalCoreProvisionMemberRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "FinalCoreRefreshToolsRequest": {
+        "properties": {
+          "tools": {
+            "items": {
+              "properties": {
+                "description": {
+                  "nullable": true,
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "FinalCoreWorkspaceCapabilitiesRequest": {
+        "properties": {
+          "grant": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "revoke": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "set": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "FinalCoreWorkspaceMemberRoleRequest": {
+        "properties": {
+          "role": {
+            "enum": [
+              "OWNER",
+              "ADMIN",
+              "MANAGER",
+              "MEMBER",
+              "VIEWER"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "type": "object"
+      },
       "FinalCredentialReveal": {
         "properties": {
           "credential_id": {
@@ -26664,7 +26953,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -27196,7 +27485,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreAgentAvatarRequest"
               }
             }
           }
@@ -28199,7 +28488,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -33446,7 +33735,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreAgentPersonaSuggestionRequest"
               }
             }
           }
@@ -33616,7 +33905,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreAgentRehireRequest"
               }
             }
           }
@@ -34506,7 +34795,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -34646,7 +34935,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -38833,7 +39122,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreBootstrapRequest"
               }
             }
           }
@@ -41735,7 +42024,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreChatSteerRequest"
               }
             }
           }
@@ -51697,7 +51986,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreCrewAvatarStyleRequest"
               }
             }
           }
@@ -55050,7 +55339,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreRefreshToolsRequest"
               }
             }
           }
@@ -56472,7 +56761,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreIssueCommentRequest"
               }
             }
           }
@@ -56918,7 +57207,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreIssueRelationRequest"
               }
             }
           }
@@ -57152,7 +57441,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreIssueReviewRequest"
               }
             }
           }
@@ -57548,7 +57837,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -57794,7 +58083,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -58321,7 +58610,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreCrewMemberRequest"
               }
             }
           }
@@ -58706,7 +58995,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreCrewMemberRoleRequest"
               }
             }
           }
@@ -62196,7 +62485,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCorePortRevokeRequest"
               }
             }
           }
@@ -62534,7 +62823,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -62834,7 +63123,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -62974,7 +63263,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -67435,7 +67724,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreInboxBulkRequest"
               }
             }
           }
@@ -84848,7 +85137,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
               }
             }
           }
@@ -100766,7 +101055,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreInvitationRequest"
               }
             }
           }
@@ -101464,7 +101753,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreProvisionMemberRequest"
               }
             }
           }
@@ -101849,7 +102138,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreWorkspaceMemberRoleRequest"
               }
             }
           }
@@ -102293,7 +102582,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalCoreWorkspaceCapabilitiesRequest"
               }
             }
           }
