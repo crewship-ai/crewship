@@ -11,9 +11,17 @@ import { stepLineRanges } from "@/lib/routine-dsl-lines"
 // caret directly — the assertion is about what CodePane does with a
 // caret position, not about how the editor produces one.
 let emitCursorLine: ((line: number) => void) | null = null
+let emitDocChange: ((text: string) => void) | null = null
 vi.mock("@/components/features/files/file-editor", () => ({
-  FileEditor: ({ onCursorLine }: { onCursorLine?: (line: number) => void }) => {
+  FileEditor: ({
+    onCursorLine,
+    onDocChange,
+  }: {
+    onCursorLine?: (line: number) => void
+    onDocChange?: (text: string) => void
+  }) => {
     emitCursorLine = onCursorLine ?? null
+    emitDocChange = onDocChange ?? null
     return <div data-testid="editor" />
   },
 }))
@@ -100,5 +108,55 @@ describe("<CodePane> follow toggle", () => {
     expect(btn).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(btn)
     expect(onFollowChange).toHaveBeenCalledWith(false)
+  })
+})
+
+
+// The follow feature broke the moment anyone edited: line spans were
+// computed once from the definition as first rendered, so inserting a
+// line shifted every step below it and the caret resolved against
+// positions that no longer existed. "It works until you use it" is the
+// worst failure mode for a feature whose whole job is to track you.
+describe("<CodePane> caret after an edit", () => {
+  beforeEach(() => {
+    emitCursorLine = null
+    emitDocChange = null
+  })
+
+  it("re-reads the line spans from the edited buffer", async () => {
+    const onStepAtCaret = vi.fn()
+    render(<CodePane fidelity="granular" onStepAtCaret={onStepAtCaret} />)
+
+    // Two blank lines pushed in at the top: every step is now two
+    // lines lower than the pristine rendering said.
+    const edited = "\n\n" + yamlSource
+    await act(async () => {
+      emitDocChange!(edited)
+    })
+
+    const shifted = stepLineRanges(edited)
+    const worklist = shifted.find((r) => r.id === "worklist")!
+    await act(async () => {
+      emitCursorLine!(worklist.startLine + 1)
+    })
+    expect(onStepAtCaret).toHaveBeenLastCalledWith("worklist")
+  })
+
+  it("resolves the OLD position to something else once the buffer moved", async () => {
+    const onStepAtCaret = vi.fn()
+    render(<CodePane fidelity="granular" onStepAtCaret={onStepAtCaret} />)
+    const before = ranges.find((r) => r.id === "sbirat")!
+
+    await act(async () => {
+      emitDocChange!("\n\n\n\n\n\n" + yamlSource)
+    })
+    await act(async () => {
+      emitCursorLine!(before.startLine + 1)
+    })
+    // Six lines of shift means that row is no longer `sbirat`; the
+    // point is that the mapper moved with the buffer rather than
+    // confidently reporting a stale answer.
+    const last = onStepAtCaret.mock.calls.at(-1)?.[0]
+    expect(last).not.toBe("sbirat")
   })
 })

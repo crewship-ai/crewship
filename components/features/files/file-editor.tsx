@@ -44,6 +44,15 @@ interface FileEditorProps {
    */
   onCursorLine?: (line: number) => void
   /**
+   * Fires with the full document whenever it changes.
+   *
+   * For callers that derive something from the text itself — the
+   * routine editor maps caret lines onto steps, and those spans move
+   * the moment anyone types. Fires per keystroke; debounce or defer
+   * downstream if the derivation is expensive.
+   */
+  onDocChange?: (text: string) => void
+  /**
    * Extra CodeMirror extensions appended to the base set.
    *
    * Lets a caller add language-specific intelligence — the routine DSL
@@ -63,6 +72,7 @@ export function FileEditor({
   onDirtyChange,
   saveRef,
   onCursorLine,
+  onDocChange,
   extraExtensions,
 }: FileEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -70,11 +80,13 @@ export function FileEditor({
   const onSaveRef = useRef(onSave)
   const onDirtyChangeRef = useRef(onDirtyChange)
   const onCursorLineRef = useRef(onCursorLine)
+  const onDocChangeRef = useRef(onDocChange)
   const initialCodeRef = useRef(code)
 
   onSaveRef.current = onSave
   onDirtyChangeRef.current = onDirtyChange
   onCursorLineRef.current = onCursorLine
+  onDocChangeRef.current = onDocChange
   initialCodeRef.current = code
 
   const handleSave = useCallback(() => {
@@ -97,9 +109,10 @@ export function FileEditor({
     }])
 
     const updateListener = EditorView.updateListener.of((update) => {
-      if (update.docChanged && onDirtyChangeRef.current) {
+      if (update.docChanged) {
         const current = update.state.doc.toString()
-        onDirtyChangeRef.current(current !== initialCodeRef.current)
+        onDirtyChangeRef.current?.(current !== initialCodeRef.current)
+        onDocChangeRef.current?.(current)
       }
       // selectionSet covers clicks and arrow keys; docChanged covers
       // typing, which moves the caret without setting the selection.

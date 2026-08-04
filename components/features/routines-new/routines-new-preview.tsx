@@ -19,13 +19,14 @@
 // routine stops being six agent turns in a trench coat.
 
 import * as React from "react"
-import { Columns2, Maximize2, Workflow } from "lucide-react"
+import { Columns2, LayoutList, Maximize2, Workflow } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { SubBar } from "@/components/layout/sub-bar"
 import { opacityOf, type Fidelity } from "@/lib/routines-preview/fixtures"
 import { useWorkbench } from "./shared"
 import { VariantCanvasFirst } from "./variant-canvas-first"
+import { VariantCard } from "./variant-card"
 import { VariantSplit } from "./variant-split"
 
 // Two, not three. The inspector variant is gone: its right rail
@@ -48,6 +49,13 @@ const VARIANTS = [
     label: "Split",
     icon: Columns2,
     pitch: "Graf a kód vedle sebe, oba pořád vidět.",
+  },
+  {
+    id: "card" as const,
+    label: "Karta",
+    icon: LayoutList,
+    pitch:
+      "Návrh CELÉ karty routiny — bez tabů, kartami jako Inbox. Preview i Advanced pryč.",
   },
 ] as const
 
@@ -121,6 +129,7 @@ export function RoutinesNewPreview() {
       <div className="min-h-0 flex-1">
         {variant === "canvas" && <VariantCanvasFirst fidelity={fidelity} wb={wb} />}
         {variant === "split" && <VariantSplit fidelity={fidelity} wb={wb} />}
+        {variant === "card" && <VariantCard fidelity={fidelity} wb={wb} />}
       </div>
     </div>
   )

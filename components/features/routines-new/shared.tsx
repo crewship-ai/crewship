@@ -183,7 +183,19 @@ export function CodePane({
   // Line spans are a property of the source, so they are computed once
   // per definition rather than on every keystroke. Works in both
   // formats — the mapper runs on the YAML AST, and YAML 1.2 parses JSON.
-  const ranges = React.useMemo(() => stepLineRanges(source), [source])
+  // Spans come from the LIVE buffer, not the definition as first
+  // rendered. Computing them once meant inserting a single line shifted
+  // every step below it and the caret resolved against positions that
+  // no longer existed — the follow feature worked right up until anyone
+  // used it.
+  //
+  // Deferred so a parse does not run on the keystroke itself: the
+  // follower may lag a frame behind fast typing, which is invisible,
+  // whereas parsing synchronously per character is not.
+  const [liveText, setLiveText] = React.useState(source)
+  React.useEffect(() => setLiveText(source), [source])
+  const deferredText = React.useDeferredValue(liveText)
+  const ranges = React.useMemo(() => stepLineRanges(deferredText), [deferredText])
 
   // Rebuilt only when the format changes. FileEditor recreates its
   // EditorState when this identity changes, so an unmemoized array
@@ -333,6 +345,7 @@ export function CodePane({
           onSave={handleSave}
           onDirtyChange={setDirty}
           onCursorLine={handleCursorLine}
+          onDocChange={setLiveText}
           saveRef={saveRef}
           extraExtensions={extraExtensions}
         />
