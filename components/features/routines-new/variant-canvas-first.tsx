@@ -19,41 +19,21 @@ import * as React from "react"
 import { Code2, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { DSL_BY_FIDELITY, type Fidelity } from "@/lib/routines-preview/fixtures"
+import { type Fidelity } from "@/lib/routines-preview/fixtures"
 import {
   CodePane,
   DefinitionCanvas,
   DependencySummary,
   OpacityMeter,
   RunHistoryCard,
+  type Workbench,
 } from "./shared"
 
-export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
-  // The definition is local state, not a constant read: saving in the
-  // code pane replaces it and the canvas redraws from it. That loop IS
-  // the design under review, so the preview has to actually close it.
-  const [dsl, setDsl] = React.useState(DSL_BY_FIDELITY[fidelity])
-  React.useEffect(() => {
-    setDsl(DSL_BY_FIDELITY[fidelity])
-  }, [fidelity])
-  const [selected, setSelected] = React.useState<string | null>(null)
+export function VariantCanvasFirst({ fidelity, wb }: { fidelity: Fidelity; wb: Workbench }) {
+  // Local to this layout on purpose: "is the editor open" is a property
+  // of THIS arrangement, not of the routine. Split has no such state,
+  // and hoisting it would make one layout carry the other's concerns.
   const [editing, setEditing] = React.useState(false)
-  const [follow, setFollow] = React.useState(true)
-  const [focus, setFocus] = React.useState<string | null>(null)
-
-  const handleCaret = React.useCallback(
-    (stepId: string | null) => {
-      if (!follow || !stepId) return
-      setSelected(stepId)
-      setFocus(stepId)
-    },
-    [follow],
-  )
-
-  const handleSelect = React.useCallback((id: string | null) => {
-    setSelected(id)
-    setFocus(null)
-  }, [])
 
   return (
     <div className="flex h-full flex-col overflow-auto">
@@ -67,11 +47,12 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
       <div className="flex h-[68vh] min-h-[420px] shrink-0 flex-col border-b border-border/60 md:h-[68vh] md:flex-row">
         <div className="relative min-h-[240px] min-w-0 flex-1">
           <DefinitionCanvas
-            dsl={dsl}
-            selectedStepId={selected}
-            onStepSelect={handleSelect}
-            focusStepId={focus}
+            dsl={wb.dsl}
+            selectedStepId={wb.selected}
+            onStepSelect={wb.onSelect}
+            focusStepId={wb.focus}
             recenterOnResize
+            viewportRef={wb.viewportRef}
           />
 
           <button
@@ -96,17 +77,17 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
             <CodePane
               fidelity={fidelity}
               footnote="Zavři panel a graf se překreslí z uloženého DSL."
-              onStepAtCaret={handleCaret}
-              follow={follow}
-              onFollowChange={setFollow}
-              onApply={setDsl}
+              onStepAtCaret={wb.onCaret}
+              follow={wb.follow}
+              onFollowChange={wb.setFollow}
+              onApply={wb.setDsl}
             />
           </aside>
         )}
       </div>
 
       <div className="space-y-4 p-4">
-        <OpacityMeter dsl={dsl} />
+        <OpacityMeter dsl={wb.dsl} />
         <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
           <div>
             <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">

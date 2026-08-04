@@ -23,7 +23,8 @@ import { Columns2, Maximize2, Workflow } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { SubBar } from "@/components/layout/sub-bar"
-import { DSL_BY_FIDELITY, opacityOf, type Fidelity } from "@/lib/routines-preview/fixtures"
+import { opacityOf, type Fidelity } from "@/lib/routines-preview/fixtures"
+import { useWorkbench } from "./shared"
 import { VariantCanvasFirst } from "./variant-canvas-first"
 import { VariantSplit } from "./variant-split"
 
@@ -60,10 +61,12 @@ const FIDELITIES: { id: Fidelity; label: string; hint: string }[] = [
 export function RoutinesNewPreview() {
   const [variant, setVariant] = React.useState<VariantId>("canvas")
   const [fidelity, setFidelity] = React.useState<Fidelity>("granular")
+  // Owned here so switching layout rearranges the same work rather than
+  // restarting it — selection, edits and viewport all survive the tab.
+  const wb = useWorkbench(fidelity)
 
   const active = VARIANTS.find((v) => v.id === variant) ?? VARIANTS[0]
-  const dsl = DSL_BY_FIDELITY[fidelity]
-  const stepCount = (dsl.steps ?? []).length
+  const stepCount = (wb.dsl.steps ?? []).length
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -73,7 +76,7 @@ export function RoutinesNewPreview() {
         section="Návrh detailu"
         description={
           <>
-            náhled · {stepCount} kroků · {opacityOf(dsl)}% agentních
+            náhled · {stepCount} kroků · {opacityOf(wb.dsl)}% agentních
           </>
         }
         ariaLabel="Náhled návrhu detailu routiny"
@@ -116,8 +119,8 @@ export function RoutinesNewPreview() {
       </div>
 
       <div className="min-h-0 flex-1">
-        {variant === "canvas" && <VariantCanvasFirst fidelity={fidelity} />}
-        {variant === "split" && <VariantSplit fidelity={fidelity} />}
+        {variant === "canvas" && <VariantCanvasFirst fidelity={fidelity} wb={wb} />}
+        {variant === "split" && <VariantSplit fidelity={fidelity} wb={wb} />}
       </div>
     </div>
   )

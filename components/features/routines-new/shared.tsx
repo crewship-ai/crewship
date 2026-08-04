@@ -39,6 +39,7 @@ import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 import type { PipelineDSL } from "@/lib/trace/types"
 import {
   DEPENDENCY_SUMMARY,
+  DSL_BY_FIDELITY,
   RUN_HISTORY,
   definitionRun,
   dslSource,
@@ -71,6 +72,8 @@ interface DefinitionCanvasProps {
   focusStepId?: string | null
   /** Keep the view centred when a side panel takes part of the width. */
   recenterOnResize?: boolean
+  /** Carries the viewport across a layout switch. */
+  viewportRef?: React.MutableRefObject<{ x: number; y: number; zoom: number } | null>
   className?: string
 }
 
@@ -87,6 +90,7 @@ export function DefinitionCanvas({
   onStepSelect,
   focusStepId = null,
   recenterOnResize = false,
+  viewportRef,
   className,
 }: DefinitionCanvasProps) {
   // One run object per mounted canvas. React Flow keys node state off
@@ -112,6 +116,7 @@ export function DefinitionCanvas({
         centerOnSelect
         focusStepId={focusStepId}
         recenterOnResize={recenterOnResize}
+        viewportRef={viewportRef}
       />
       <div className="pointer-events-none absolute left-3 top-3 rounded-md border border-border/60 bg-card/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
         Definice · nikoli běh
@@ -566,4 +571,68 @@ export function OpacityMeter({ dsl }: { dsl: PipelineDSL }) {
       />
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Shared workbench state                                             *
+ * ------------------------------------------------------------------ */
+
+export interface Workbench {
+  dsl: PipelineDSL
+  setDsl: (next: PipelineDSL) => void
+  selected: string | null
+  focus: string | null
+  follow: boolean
+  setFollow: (next: boolean) => void
+  onSelect: (id: string | null) => void
+  onCaret: (stepId: string | null) => void
+  viewportRef: React.MutableRefObject<{ x: number; y: number; zoom: number } | null>
+}
+
+/**
+ * State the two layouts share, owned above both of them.
+ *
+ * Held in the shell rather than inside each variant so switching layout
+ * is a change of arrangement, not a reset: the selection survives, an
+ * edited definition survives, and the viewport survives — the last one
+ * mattering most, because re-running the opening fit on every layout
+ * switch yanked the reader back to the top of the routine and re-zoomed.
+ */
+export function useWorkbench(fidelity: Fidelity): Workbench {
+  const [dsl, setDsl] = React.useState<PipelineDSL>(DSL_BY_FIDELITY[fidelity])
+  const [selected, setSelected] = React.useState<string | null>(null)
+  const [follow, setFollow] = React.useState(true)
+  // Separate from `selected` on purpose. Selection is a persistent
+  // choice; focus is a one-shot "bring this into view". Merged, turning
+  // follow off could not leave the last selection highlighted, and a
+  // re-render could yank the viewport back after the user panned away.
+  const [focus, setFocus] = React.useState<string | null>(null)
+  const viewportRef = React.useRef<{ x: number; y: number; zoom: number } | null>(null)
+
+  // Switching the routine under inspection is a genuine reset — a
+  // remembered viewport belongs to a graph that no longer exists.
+  React.useEffect(() => {
+    setDsl(DSL_BY_FIDELITY[fidelity])
+    setSelected(null)
+    setFocus(null)
+    viewportRef.current = null
+  }, [fidelity])
+
+  const onCaret = React.useCallback(
+    (stepId: string | null) => {
+      if (!follow || !stepId) return
+      setSelected(stepId)
+      setFocus(stepId)
+    },
+    [follow],
+  )
+
+  // A click is its own focus request; clear the caret-driven one so a
+  // later caret move to the SAME step still re-centres.
+  const onSelect = React.useCallback((id: string | null) => {
+    setSelected(id)
+    setFocus(null)
+  }, [])
+
+  return { dsl, setDsl, selected, focus, follow, setFollow, onSelect, onCaret, viewportRef }
 }

@@ -143,6 +143,13 @@ interface TraceCanvasProps {
   // Centre this node when the id changes, without a click. Driven by
   // the editor caret: edit a step's lines, that step comes into view.
   focusStepId?: string | null
+  // Survive a remount with the view intact. Switching between two
+  // layouts that both host a canvas unmounts one and mounts the other,
+  // and a fresh mount would re-run the opening fit — yanking the reader
+  // back to the top of the routine and re-zooming, every single time
+  // they change layout. Handing in a ref lets the new instance pick up
+  // where the old one left off.
+  viewportRef?: React.MutableRefObject<{ x: number; y: number; zoom: number } | null>
   // Keep what is on screen centred when the PANE resizes — opening a
   // side panel next to the canvas shrinks it, and without this the
   // graph stays where it was and half of it ends up under the panel.
@@ -260,6 +267,7 @@ function CanvasInner({
   centerOnSelect = false,
   focusStepId = null,
   recenterOnResize = false,
+  viewportRef,
 }: TraceCanvasProps & { run: PipelineRun }) {
   const graphData = useMemo(
     () =>
@@ -340,7 +348,11 @@ function CanvasInner({
       if (width > 0 && pendingFitRef.current) {
         pendingFitRef.current = false
         last = width
-        applyInitialFit()
+        // A remembered viewport wins over the opening fit: the reader
+        // chose it, and re-fitting would silently discard that choice.
+        const saved = viewportRef?.current
+        if (saved) setViewport(saved)
+        else applyInitialFit()
         return
       }
       const delta = width - last
@@ -359,7 +371,7 @@ function CanvasInner({
     ro.observe(el)
     onSize()
     return () => ro.disconnect()
-  }, [applyInitialFit, recenterOnResize, getViewport, setViewport])
+  }, [applyInitialFit, recenterOnResize, getViewport, setViewport, viewportRef])
 
   // Centre a node without changing zoom. Used by both the click handler
   // and the caret follower, so they cannot drift apart.
@@ -469,6 +481,9 @@ function CanvasInner({
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
+        onMoveEnd={(_, vp) => {
+          if (viewportRef) viewportRef.current = vp
+        }}
         fitView
         fitViewOptions={FIT_VIEW}
         minZoom={0.1}
