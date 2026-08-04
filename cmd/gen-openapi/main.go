@@ -421,6 +421,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		schema.Request = ref(name)
 		result[key] = schema
 	}
+	for key, schema := range finalSpecialDomainSchemaCatalog() {
+		result[key] = schema
+	}
 	return result
 }
 
