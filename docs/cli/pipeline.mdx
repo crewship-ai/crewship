@@ -1,0 +1,25 @@
+---
+title: "Pipeline Commands"
+description: "Backwards-compatible alias for the routine CLI."
+icon: "workflow"
+---
+
+# crewship pipeline
+
+`pipeline` is a backwards-compatible alias for `routine`. Every command and
+flag documented on [the routine CLI page](/cli/routine) works with either
+prefix:
+
+```bash
+crewship pipeline list
+crewship pipeline run summarize-text --inputs '{"text":"..."}'
+crewship pipeline schedules list
+```
+
+The live Cobra command is named `routine` and declares `pipeline` as its alias;
+there is no separate pipeline command tree. API paths and server resources keep
+the historical `pipeline` name (for example,
+`/api/v1/workspaces/{workspace}/pipelines/{slug}`).
+
+See [Routine Commands](/cli/routine) for the complete subcommand, flag,
+output, and API reference.

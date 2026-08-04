@@ -1,0 +1,65 @@
+---
+title: "Routine Waitpoint Commands"
+description: "Inspect and decide human approval waitpoints created by routines."
+icon: "circle-stop"
+---
+
+# crewship routine waitpoints
+
+Waitpoints are HITL pauses created by a routine `wait` step of
+`kind: approval`. A parked run resumes when a human approves or rejects the
+waitpoint, or ends when its timeout elapses.
+
+```bash
+crewship routine waitpoints <subcommand> [flags]
+```
+
+The `pipeline` alias works in place of `routine`.
+
+## Subcommands
+
+| Command | API behavior |
+|---|---|
+| `list` | `GET /api/v1/workspaces/{workspace}/pipelines/waitpoints`; lists pending waitpoints. |
+| `show <token>` | Reads the pending list and prints full prompt and metadata for the exact token. |
+| `approve <token>` | `POST /api/v1/workspaces/{workspace}/pipelines/waitpoints/{token}/approve` with `approved: true`. |
+| `reject <token>` | The same endpoint with `approved: false`. |
+
+### `list`
+
+```bash
+crewship routine waitpoints list
+crewship routine waitpoints list --format json
+```
+
+Human output columns are `TOKEN RUN ID STEP KIND CREATED TIMEOUT PROMPT`.
+The full token is shown because it is required by `approve` and `reject`; the
+run ID is shortened only in the human table. An empty pending list prints
+`No pending waitpoints.` in table mode and `[]` in JSON mode. `--json` is a
+deprecated alias for `--format json`; YAML and NDJSON are also supported.
+
+### `show <token>`
+
+```bash
+crewship routine waitpoints show wpt_abc123
+```
+
+Prints token, run ID, step, kind, optional invoking crew, created/timeout
+timestamps, optional callback URL, and the full prompt. A missing, expired, or
+already-decided token returns a not-found error. If the server supplied a
+callback URL, the command also prints the unauthenticated external completion
+example; treat that URL as a secret.
+
+### `approve` and `reject`
+
+```bash
+crewship routine waitpoints approve wpt_abc123 --comment "LGTM"
+crewship routine waitpoints reject wpt_abc123 --comment "Needs revision"
+```
+
+Both commands accept `--comment` (default empty). The comment is forwarded to
+the parked run as the wait step's output; rejection additionally carries the
+rejection signal. Human output is `Approved waitpoint <short-token>.` or
+`Rejected waitpoint <short-token>.` Decisions require authentication and a
+workspace and return the server's Problem Details error for an invalid or
+already-resolved token.

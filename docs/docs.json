@@ -278,7 +278,10 @@
             "expanded": false,
             "pages": [
               "cli/mission",
-              "cli/routine"
+              "cli/routine",
+              "cli/pipeline",
+              "cli/webhook",
+              "cli/waitpoint"
             ]
           },
           {
