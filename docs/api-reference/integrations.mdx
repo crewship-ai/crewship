@@ -7,7 +7,10 @@ icon: "plug"
 Integrations connect agents to external tools through MCP (Model Context Protocol) servers. Crewship uses a three-tier model: workspace-level MCP servers cascade down to crews, which cascade down to agent bindings, and each level can override or extend the configuration. Servers can be defined directly, discovered from the MCP registry, and authenticated with stored credentials or a full OAuth 2.0 flow.
 
 <Note>
-All integration endpoints require authentication and workspace context (except where a step explicitly states otherwise, such as the OAuth callback).
+All integration endpoints require authentication. Workspace-scoped routes also
+require workspace context; OAuth provider/discovery routes and MCP registry
+list/search routes do not. Individual sections call out additional role
+requirements and the unauthenticated OAuth callback.
 </Note>
 
 ## Endpoints
@@ -33,7 +36,7 @@ All integration endpoints require authentication and workspace context (except w
 | `POST` | [`/api/v1/agents/{agentId}/integrations`](#create-agent-binding) | Create an agent binding |
 | `PATCH` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#update-agent-binding) | Update an agent binding |
 | `DELETE` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#delete-agent-binding) | Delete an agent binding |
-| `GET` | [`/api/v1/agents/{agentId}/integrations/resolved`](#resolve-agent-integrations) | Resolve effective integrations |
+| `GET` | [`/api/v1/agents/{agentId}/resolved-integrations`](#resolve-agent-integrations) | Resolve effective integrations |
 | `GET` | [`/api/v1/mcp-tool-calls`](#mcp-tool-call-audit) | Audit trail of MCP tool invocations |
 | `GET` | [`/api/v1/oauth/providers`](#list-oauth-providers) | List OAuth providers |
 | `POST` | [`/api/v1/oauth/initiate`](#initiate-oauth-flow) | Start an OAuth flow |
@@ -982,12 +985,36 @@ DELETE /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={works
 ### Resolve Agent Integrations
 
 ```
-GET /api/v1/agents/{agentId}/integrations/resolved?workspace_id={workspaceId}
+GET /api/v1/agents/{agentId}/resolved-integrations?workspace_id={workspaceId}
 ```
 
-Returns the effective set of MCP servers for an agent after cascading workspace, crew, and agent-level configurations. Includes resolved credentials.
+Returns the effective set of enabled MCP servers for an agent after cascading
+workspace and crew servers and applying the agent's bindings. Credential IDs
+and names may be present, but secret values are never returned. The response
+is a JSON array; a missing agent returns `404`.
 
-**Response:** `200 OK` -- array of resolved integration objects.
+```json
+[
+  {
+    "server_id": "srv_abc",
+    "scope": "workspace",
+    "name": "github-mcp",
+    "display_name": "GitHub MCP Server",
+    "transport": "streamable-http",
+    "endpoint": "https://mcp.example.com",
+    "command": null,
+    "args_json": null,
+    "env_json": null,
+    "config_json": null,
+    "icon": "github",
+    "enabled": true,
+    "credential_id": "cred_abc",
+    "credential_name": "github-primary"
+  }
+]
+```
+
+**Auth:** authenticated workspace member.
 
 ---
 
@@ -1073,9 +1100,21 @@ POST /api/v1/oauth/initiate?workspace_id={workspaceId}
 
 Starts the OAuth authorization flow by generating an authorization URL.
 
-**Auth:** Session or CLI token + workspace membership
+**Auth:** `MANAGER+` role, or a member with the `credential.create` capability.
 
-**Response:** `200 OK` -- includes the authorization URL to redirect the user to.
+**Request Body:**
+
+```json
+{ "credential_id": "cred_oauth", "redirect_uri": "https://app.example/callback" }
+```
+
+`redirect_uri` is optional; when omitted, Crewship uses its backend callback.
+
+**Response:** `200 OK`
+
+```json
+{ "auth_url": "https://provider.example/authorize?...", "state": "..." }
+```
 
 ### OAuth Callback
 
@@ -1097,7 +1136,17 @@ POST /api/v1/oauth/exchange?workspace_id={workspaceId}
 
 Exchanges an authorization code for access and refresh tokens.
 
-**Response:** `200 OK`
+**Auth:** `MANAGER+` role, or a member with the `credential.create` capability.
+
+**Request Body:** `credential_id` and `code` are required; `redirect_uri`,
+`code_verifier`, and `state` are optional. When `state` is supplied without a
+`code_verifier`, the server recovers the stored PKCE verifier.
+
+```json
+{ "credential_id": "cred_oauth", "code": "provider-code", "state": "..." }
+```
+
+**Response:** `200 OK` — `{ "status": "ok", "credential_id": "cred_oauth" }`.
 
 ### Loopback
 
@@ -1107,7 +1156,15 @@ POST /api/v1/oauth/loopback?workspace_id={workspaceId}
 
 Handles loopback redirect for local OAuth flows.
 
+**Auth:** `MANAGER+` role, or a member with the `credential.create` capability.
+
+**Request Body:** `{ "credential_id": "cred_oauth" }`.
+
 **Response:** `200 OK`
+
+```json
+{ "auth_url": "https://provider.example/authorize?...", "loopback_port": 43127, "state": "..." }
+```
 
 ### Discover OAuth Endpoints
 
@@ -1119,7 +1176,10 @@ Discovers OAuth endpoints from an OpenID Connect discovery document or well-know
 
 **Auth:** Session or CLI token (no workspace context needed)
 
-**Response:** `200 OK` -- discovered endpoints.
+**Request Body:** `{ "mcp_url": "https://mcp.example.com" }`.
+
+**Response:** `200 OK` -- `{ "auth_url", "token_url", "registration_endpoint?",
+"scopes?", "supports_pkce", "supports_dcr" }`.
 
 ### Auto-Connect Integration
 
@@ -1129,7 +1189,20 @@ POST /api/v1/oauth/auto-connect?workspace_id={workspaceId}
 
 Automatically creates an integration from an OAuth connection.
 
-**Response:** `200 OK`
+**Auth:** `OWNER` or `ADMIN` role.
+
+**Request Body:**
+
+```json
+{ "mcp_url": "https://mcp.example.com", "server_name": "linear", "provider_hint": "linear" }
+```
+
+`mcp_url` is required; `server_name` defaults to `mcp-server` and
+`provider_hint` is optional. With dynamic client registration, the response is
+`{ "status": "authorize", "auth_url": "...", "credential_id": "..." }`.
+When client registration is unavailable it returns `200` with
+`status: "needs_client_id"`, `auth_url`, `token_url`, `scopes`, and a message
+so the caller can collect a client ID.
 
 ---
 
@@ -1145,7 +1218,15 @@ GET /api/v1/mcp-registry
 
 **Auth:** Session or CLI token (no workspace context needed)
 
-**Response:** `200 OK` -- array of registry entries.
+**Query Parameters:** `limit` (default `50`, max `200`), `offset` (default `0`),
+`trust_tier` (`anthropic`, `crewship`, or `community`), and `featured`
+(`true`/`false`/`1`/`0`).
+
+**Response:** `200 OK`
+
+```json
+{ "servers": [], "total": 0, "limit": 50, "offset": 0 }
+```
 
 ### Search Registry
 
@@ -1155,7 +1236,11 @@ GET /api/v1/mcp-registry/search?q={query}
 
 **Auth:** Session or CLI token
 
-**Response:** `200 OK` -- matching registry entries.
+**Query Parameters:** `q`, plus the same `limit`, `offset`, `trust_tier`, and
+`featured` filters as List. An empty `q` behaves like List.
+
+**Response:** `200 OK` — `{ "servers": [], "total": 0, "limit": 50,
+"offset": 0, "query": "github" }`.
 
 ### Sync Registry
 
@@ -1165,6 +1250,8 @@ POST /api/v1/mcp-registry/sync?workspace_id={workspaceId}
 
 Triggers a manual sync of the MCP registry.
 
-**Auth:** Session or CLI token + workspace membership
+**Auth:** `OWNER` or `ADMIN` role on the workspace.
 
-**Response:** `200 OK`
+**Response:** `202 Accepted` — `{ "status": "sync_started", "message": "..." }`.
+Manual sync is limited to once per hour; a request during the cooldown returns
+`429`.

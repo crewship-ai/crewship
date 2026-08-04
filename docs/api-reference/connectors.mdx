@@ -189,7 +189,7 @@ at workspace scope; set it to install at crew scope.
 | Field | Type | Description |
 |---|---|---|
 | `integration_id` | string | ID of the created integration row |
-| `next_step` | string? | `""` (complete), `"oauth"` (open `oauth_url`), or `"mcp_oauth"` (hand off to MCP-OAuth/DCR) |
+| `next_step` | string? | Omitted for a complete install, or `"oauth"` (open `oauth_url`) / `"mcp_oauth"` (hand off to MCP-OAuth/DCR) |
 | `oauth_url` | string? | Authorization URL to open in a popup (only when `next_step` is `"oauth"`) |
 
 | Status | Condition |
