@@ -433,7 +433,7 @@ export function OrchestrationLayout({
   const projectDetailFullWidth =
     selectedProjectId !== null && !selectedIssue && activeTab === "issues"
 
-  const filteredIssues = useFilteredIssues({
+  const { visible: filteredIssues, statusFacet: statusChipIssues } = useFilteredIssues({
     issues,
     search: issueSearch,
     selectedProjectId,
@@ -851,7 +851,7 @@ export function OrchestrationLayout({
                   user can see how many issues are in each status without
                   losing the current crew/agent/project filter context. */}
               <IssuesStatusChips
-                issues={filteredIssues}
+                issues={statusChipIssues}
                 selected={filterStatuses}
                 onToggle={(s) =>
                   setFilterStatuses((prev) =>
@@ -874,7 +874,7 @@ export function OrchestrationLayout({
                     {issueViewMode === "board" ? (
                       <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
                     ) : (
-                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
+                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} workspaceId={workspaceId} />
                     )}
                   </motion.div>
                 </AnimatePresence>
