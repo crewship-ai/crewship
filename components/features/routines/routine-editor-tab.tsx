@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
-import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
+import { convertDsl, hasYamlComments, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 import { parseRoutineBuffer } from "@/lib/routine-buffer"
 import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
@@ -100,6 +100,10 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   // a frame of lag is invisible, parsing per character is not.
   const deferredText = useDeferredValue(text)
   const stepRanges = useMemo(() => stepLineRanges(deferredText), [deferredText])
+  const bufferHasComments = useMemo(
+    () => format === "yaml" && hasYamlComments(deferredText),
+    [deferredText, format],
+  )
   const lastStepRef = useRef<string | null>(null)
   const handleCursorLine = useCallback(
     (line: number) => {
@@ -284,7 +288,11 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
             onClick={handleSave}
             disabled={!validation.ok || !dirty || saving}
             className="h-8 gap-1.5 px-3 text-xs font-semibold"
-            title="Save changes (requires OWNER / ADMIN)"
+            title={
+              validation.ok
+                ? "Save changes. \u2318/Ctrl+S flushes the buffer first. Requires OWNER / ADMIN."
+                : `Cannot save: ${validation.ok ? "" : validation.message}`
+            }
           >
             <Save className="h-3.5 w-3.5" />
             {saving ? "Saving…" : "Save"}
@@ -317,20 +325,22 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
         />
       </div>
 
-      {/* ── Footer hint ────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-border/60 bg-card/20 px-4 py-2 text-[11px] text-muted-foreground">
-        <span className="font-mono">⌘/Ctrl+S</span> flushes the buffer · Save lands changes when the
-        document parses with both <span className="font-mono">name</span> and{" "}
-        <span className="font-mono">steps</span>. Requires OWNER/ADMIN role.
-        {format === "yaml" && (
-          <>
-            {" "}
-            <span className="text-warn">
-              Canonical JSON is what gets stored, so YAML comments do not survive a save.
-            </span>
-          </>
-        )}
-      </div>
+      {/* The footer earns its place or it does not appear.
+          
+          It used to carry three permanent sentences — how to flush the
+          buffer, what makes a save land, which role is required — plus
+          a standing warning about YAML comments. All true, none of it
+          news after the first read, and a strip of always-on text is
+          what people learn to skip. The instructions moved onto the
+          Save button, which is where you look when Save does not do
+          what you expected. What is left is the one thing that can lose
+          work, shown only when there is work to lose. */}
+      {format === "yaml" && bufferHasComments && (
+        <div className="shrink-0 border-t border-warn/30 bg-warn/[0.06] px-4 py-2 text-[11px] text-warn">
+          This document has comments. Canonical JSON is what gets stored, so they will not survive
+          the save.
+        </div>
+      )}
     </div>
   )
 }

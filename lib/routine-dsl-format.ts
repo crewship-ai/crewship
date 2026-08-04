@@ -14,7 +14,7 @@
 // 1.2, so the Norway problem is gone — a step id of `no` stays the
 // string "no" instead of silently becoming the boolean false.
 
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
+import { parse as parseYaml, parseDocument, stringify as stringifyYaml, visit } from "yaml"
 
 export type DslFormat = "json" | "yaml"
 
@@ -116,5 +116,41 @@ export function convertDsl(text: string, from: DslFormat, to: DslFormat): Conver
   return {
     ok: true,
     text: to === "yaml" ? toYaml(parsed.value) : JSON.stringify(parsed.value, null, 2),
+  }
+}
+
+/**
+ * Does this YAML document carry comments a save would discard?
+ *
+ * The editor used to warn about this permanently. It is true —
+ * canonical JSON is what gets stored — but a warning that is always on
+ * screen is chrome, and chrome is what people stop reading. It matters
+ * exactly when someone has written a comment.
+ *
+ * Detection uses the parser's own comment fields rather than scanning
+ * for `#`, because a `#` is only a comment outside a string, and agent
+ * prompts are full of markdown headings inside block scalars. Warning
+ * about those would train the reader to dismiss the warning that
+ * counts.
+ *
+ * Never throws: a half-typed buffer is exactly when this runs.
+ */
+export function hasYamlComments(text: string): boolean {
+  if (!text.includes("#")) return false
+  try {
+    const doc = parseDocument(text, { prettyErrors: false })
+    if (doc.commentBefore || doc.comment) return true
+    let found = false
+    visit(doc, (_key, node) => {
+      const n = node as { comment?: string | null; commentBefore?: string | null } | null
+      if (n && (n.comment || n.commentBefore)) {
+        found = true
+        return visit.BREAK
+      }
+      return undefined
+    })
+    return found
+  } catch {
+    return false
   }
 }
