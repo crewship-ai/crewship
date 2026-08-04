@@ -38,6 +38,9 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}/files`](#crew-files-proxy) | List files in the crew workspace |
 | GET | [`/api/v1/crews/{crewId}/files/download`](#crew-files-proxy) | Download a file |
 | PUT | [`/api/v1/crews/{crewId}/files/save`](#crew-files-proxy) | Save/upload a file |
+| DELETE | [`/api/v1/crews/{crewId}/files/delete`](#delete-a-crew-file) | Delete a file |
+| GET | [`/api/v1/crews/{crewId}/git-diff`](#crew-git-diff) | Read the crew's base-branch diff |
+| GET | [`/api/v1/crews/{crewId}/services`](#live-service-inventory) | List live sidecar services |
 | GET | [`/api/v1/crews/{crewId}/assignments`](#crew-assignments) | List task assignments |
 | GET | [`/api/v1/crews/{crewId}/peer-conversations`](#crew-peer-conversations) | List peer conversations |
 | GET | [`/api/v1/crews/{crewId}/standup`](#crew-standup) | Get the crew standup summary |
@@ -872,6 +875,89 @@ File operations are proxied through the crewshipd sidecar to the crew's containe
 | `GET /api/v1/crews/{crewId}/files` | GET | List files in crew workspace |
 | `GET /api/v1/crews/{crewId}/files/download?path=...` | GET | Download a file |
 | `PUT /api/v1/crews/{crewId}/files/save` | PUT | Save/upload a file |
+
+### Delete a Crew File
+
+`DELETE /api/v1/crews/{crewId}/files/delete?path={path}`
+
+**Auth:** Authenticated workspace member with the `create` capability. The
+crew must belong to the selected workspace.
+
+**Request:** No body. The required `path` query parameter is a relative file
+path under the crew's shared/output tree. Absolute paths and traversal are
+rejected.
+
+**Response:** `200 OK` with the sidecar response:
+
+```json
+{ "status": "deleted", "path": "shared/probe.sh" }
+```
+
+Deletion is idempotent: a missing file still returns success.
+
+**Statuses:** `400` missing or invalid `path`; `401` unauthenticated; `403`
+insufficient role/capability; `404` crew not found in the workspace; `500`
+storage/delete failure; `502` sidecar unavailable. A missing storage provider
+may return `503` from the sidecar.
+
+## Crew Git Diff
+
+### Crew Git Diff
+
+`GET /api/v1/crews/{crewId}/git-diff?agent_slug={agentSlug}`
+
+Returns the crew container's base-branch diff, the same change set used by the
+dashboard's Changes tab. `agent_slug` is optional and selects the agent
+workspace when the crew has multiple agent workspaces.
+
+**Auth:** Authenticated workspace member with the `read` capability. The crew
+must belong to the selected workspace.
+
+**Request:** No body. Optional `agent_slug` query parameter.
+
+**Response:** `200 OK` with the decoded git-diff object from crewshipd. If the
+workspace is not a repository, the response is `{ "is_repo": false }`.
+
+**Statuses:** `401` unauthenticated; `403` insufficient role/capability; `404`
+crew not found in the workspace; `500` crew lookup failure; `502` crewshipd
+unavailable or diff computation failure.
+
+## Live Service Inventory
+
+### Live Service Inventory
+
+`GET /api/v1/crews/{crewId}/services`
+
+Returns the live sidecar containers, not the stored `services_json` configuration
+snapshot.
+
+**Auth:** Authenticated workspace member with the `read` capability. The crew
+must belong to the selected workspace.
+
+**Request:** No body or query parameters.
+
+**Response:** `200 OK`:
+
+```json
+{
+  "services": [
+    {
+      "name": "postgres",
+      "image": "postgres:16",
+      "type": "postgres",
+      "status": "running",
+      "ports": ["5432/tcp"]
+    }
+  ]
+}
+```
+
+`type` is one of `postgres`, `redis`, `mysql`, `mongodb`, or `other`. A
+provider without live service-list capability returns `200` with an empty
+`services` array.
+
+**Statuses:** `401` unauthenticated; `403` insufficient role/capability; `404`
+crew not found in the workspace; `500` crew lookup or service-list failure.
 
 ---
 
