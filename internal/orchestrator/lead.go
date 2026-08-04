@@ -149,6 +149,11 @@ Response includes the new agent_id; assign it work via /assign as usual.
 Strict crews REJECT this call (autonomy_level=strict forbids ephemeral_spawn).
 Guided crews block until an operator approves the hire in their inbox.
 Trusted/full crews auto-spawn and log to the audit feed.
+` + delegationLimitsNote + `
+
+Your crew members can now delegate too, under the same limits — so a task you
+hand to a specialist may come back having been split further. Budget for that
+when you size the work.
 [END CREW CONTEXT]`
 
 // BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system
