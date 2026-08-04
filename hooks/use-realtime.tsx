@@ -74,6 +74,11 @@ export type RealtimeEventType =
   | "pipeline.step.failed"
   | "pipeline.step.validation_failed"
   | "pipeline.waitpoint.created"
+  // The catalog moved: a routine was saved, approved, rejected,
+  // disabled, enabled or deleted. Run events only ever said "a routine
+  // RAN"; nothing said "a routine appeared", which is why the routines
+  // overview needed a Refresh button to see an agent's work.
+  | "pipeline.saved"
   | "inbox.updated"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
@@ -132,6 +137,7 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   // in real time — silent regression that would only surface as
   // "the badge count looks stuck."
   "pipeline.waitpoint.created",
+  "pipeline.saved",
   "inbox.updated",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's

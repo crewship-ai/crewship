@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { RoutinesOverview } from "./routines-overview"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { type RoutineFilters } from "./routines-filter-sidebar"
@@ -49,7 +50,15 @@ interface RoutinesLayoutProps {
 
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
+  const isMobile = useIsMobile()
   const [leftCollapsed, setLeftCollapsed] = useState(false)
+  // On a phone the sidebar is 280px of a 390px screen — it does not
+  // sit BESIDE the content, it replaces it. Collapse it when the
+  // viewport narrows, and let it open as an overlay instead of a
+  // column, so the overview keeps the full width it was designed for.
+  useEffect(() => {
+    if (isMobile) setLeftCollapsed(true)
+  }, [isMobile])
   const [search, setSearch] = useState("")
   const [filters, setFilters] = useState<RoutineFilters>({
     status: "all",
@@ -113,6 +122,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
   const handleSelect = (slug: string) => {
     setSelectedSlug((prev) => (prev === slug ? null : slug))
+    // Picking a routine on a phone means "show me that", and the
+    // overlay covering it would be the opposite.
+    if (isMobile) setLeftCollapsed(true)
   }
 
   // Selected routine — looked up from the loaded pipeline list so the
@@ -177,15 +189,27 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       />
 
       {/* ---- Body: 3-column layout ---- */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
         {/* Left filter panel — same chrome as the /issues sidebar
           * (bg-card, not bg-card/30) so the two surfaces feel like
           * pieces of one app rather than two near-misses. Width unified
           * to the shared sidebar-kit 280px (SIDEBAR_WIDTH). */}
+        {/* Overlay on a phone, column everywhere else. The collapsed
+            rail stays in flow at both sizes so the expand button never
+            moves. */}
+        {isMobile && !leftCollapsed && (
+          <button
+            type="button"
+            aria-label="Close routine list"
+            onClick={() => setLeftCollapsed(true)}
+            className="absolute inset-0 z-20 bg-black/50"
+          />
+        )}
         <aside
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
             leftCollapsed ? "w-9" : "w-[280px]",
+            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
           )}
         >
           {leftCollapsed ? (
@@ -281,7 +305,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   onFilter={(status) =>
                     setFilters((f) => ({ ...f, status: status as RoutineFilters["status"] }))
                   }
-                  onRefresh={refresh}
                 />
               </motion.div>
             )}

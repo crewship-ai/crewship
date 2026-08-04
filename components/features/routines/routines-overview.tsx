@@ -32,12 +32,19 @@ import {
   CheckCircle2,
   ChevronRight,
   PieChart,
-  RefreshCw,
   UserCheck,
   XCircle,
 } from "lucide-react"
 
+import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts"
+
 import { cn } from "@/lib/utils"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
 import { Appear } from "@/components/ui/detail"
 import { Skeleton } from "@/components/ui/skeleton"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
@@ -69,6 +76,7 @@ import {
   upcomingSchedules,
   pendingApprovals,
   type PendingApproval,
+  type SpendDay,
 } from "@/lib/routines-overview"
 
 const SUCCESS_WINDOW_DAYS = 7
@@ -84,7 +92,6 @@ interface Props {
   onSelect: (slug: string) => void
   /** Sets the sidebar's status filter — the donut's click-through. */
   onFilter?: (filter: string) => void
-  onRefresh: () => void
 }
 
 export function RoutinesOverview({
@@ -94,7 +101,6 @@ export function RoutinesOverview({
   error,
   onSelect,
   onFilter,
-  onRefresh,
 }: Props) {
   const { runs } = usePipelineRuns(workspaceId, "all")
   const { schedules } = usePipelineSchedules(workspaceId)
@@ -160,22 +166,19 @@ export function RoutinesOverview({
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
+        {/* No Refresh button. A dashboard with one is a dashboard
+            admitting it is not live, and this one is: run events
+            already pushed themselves, and the catalog now broadcasts
+            `pipeline.saved` on every save, approval, rejection,
+            disable and delete — which is the gap the button was
+            really covering. Schedules listen to run events too, since
+            next_run_at moves the moment one fires. */}
         <Appear order={0}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
-              <p className="text-xs text-muted-foreground">
-                {routines.length} {routines.length === 1 ? "routine" : "routines"} in this workspace
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={onRefresh}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </button>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
+            <p className="text-xs text-muted-foreground">
+              {routines.length} {routines.length === 1 ? "routine" : "routines"} in this workspace
+            </p>
           </div>
         </Appear>
 
@@ -292,7 +295,7 @@ export function RoutinesOverview({
                         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/85">
                           {r?.name || s.target_pipeline_slug || s.name}
                         </span>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                        <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:block">
                           {describeCron(s.cron_expr)}
                         </span>
                         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft opacity-0 transition-opacity group-hover:opacity-100" />
@@ -444,32 +447,18 @@ export function RoutinesOverview({
               {/* Real per-run cost_usd, or nothing. This card's
                   ancestor had decorative sparklines drawn from a mock
                   function; they were removed for promising a trend that
-                  did not exist, and the lesson stands. */}
+                  did not exist, and the lesson stands.
+
+                  Recharts, not hand-rolled bars. The first version set
+                  a percentage height on a flex item whose own height
+                  came from flex-1 — a percentage against an indefinite
+                  parent, which resolves to auto. Every bar computed to
+                  zero, so a card reporting $0.19 drew seven weekday
+                  labels under an empty box. */}
               {spendTotal === 0 ? (
                 <Empty icon={Banknote}>No run in this window carried a cost.</Empty>
               ) : (
-                <div className="flex h-[120px] items-end gap-1.5">
-                  {spend.map((d, i) => {
-                    const max = Math.max(...spend.map((x) => x.usd), 0.0000001)
-                    const pct = Math.max(2, Math.round((d.usd / max) * 100))
-                    return (
-                      <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
-                        <div className="flex w-full flex-1 items-end">
-                          <div
-                            title={`${d.label}: ${formatUsd(d.usd)}`}
-                            style={{ height: `${pct}%` }}
-                            className={cn(
-                              "w-full rounded-sm transition-[height] duration-500 ease-out",
-                              d.usd > 0 ? "bg-primary/70" : "bg-muted",
-                              d.isToday && "bg-primary",
-                            )}
-                          />
-                        </div>
-                        <span className="text-[9px] text-muted-foreground-soft">{d.label}</span>
-                      </div>
-                    )
-                  })}
-                </div>
+                <SpendChart data={spend} />
               )}
             </DashboardCard>
 
@@ -656,5 +645,54 @@ function WaitpointRow({
         </Link>
       </div>
     </div>
+  )
+}
+
+/**
+ * Daily spend, drawn by the same chart library as the dashboard.
+ *
+ * The hand-rolled version put `height: N%` on a flex item nested in a
+ * flex-1 parent. A percentage height resolves against a DEFINITE
+ * parent height, and flex-1 does not give one — so every bar computed
+ * to zero and the card reported $0.19 above an empty box with seven
+ * weekday labels under it. The failure looked exactly like "no data",
+ * which is why it survived a read-through.
+ */
+function SpendChart({ data }: { data: SpendDay[] }) {
+  const config = React.useMemo<ChartConfig>(
+    () => ({ usd: { label: "Spend", color: "var(--primary)" } }),
+    [],
+  )
+  return (
+    <ChartContainer config={config} className="aspect-auto h-[140px] w-full">
+      <BarChart data={data} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+        <CartesianGrid vertical={false} strokeOpacity={0.08} />
+        <XAxis
+          dataKey="label"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={6}
+          className="text-[10px]"
+        />
+        <YAxis
+          tickLine={false}
+          axisLine={false}
+          width={52}
+          tickFormatter={(v: number) => formatUsd(v)}
+          className="text-[10px]"
+        />
+        <ChartTooltip
+          cursor={false}
+          content={<ChartTooltipContent formatter={(v) => formatUsd(Number(v))} />}
+        />
+        <Bar dataKey="usd" radius={[3, 3, 0, 0]}>
+          {data.map((d, i) => (
+            // Today is the bar the reader is standing in; the rest of
+            // the week is context.
+            <Cell key={i} fill={d.isToday ? "var(--primary)" : "color-mix(in oklab, var(--primary) 55%, transparent)"} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ChartContainer>
   )
 }

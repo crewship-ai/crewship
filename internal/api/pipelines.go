@@ -347,6 +347,11 @@ type pipelineResponse struct {
 	// to approve something they cannot see.
 	RiskReasons []string `json:"risk_reasons,omitempty"`
 
+	// InboxItemID deep-links the routine's "awaiting approval" banner
+	// straight at the review row instead of the inbox root. Empty once
+	// the review is resolved.
+	InboxItemID string `json:"inbox_item_id,omitempty"`
+
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 	// LinkedIssueCount is the number of issues bound to this routine

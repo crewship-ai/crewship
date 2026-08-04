@@ -108,6 +108,20 @@ func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID s
 			payload["from_version"] = head - 1
 		}
 	}
+	// WHAT it is asking for, not just that it asks.
+	//
+	// "requires credentials" is a category. The question a reviewer
+	// actually has is which ones, and the routine declares them — so
+	// leaving them off the item meant the only way to answer it was to
+	// leave the inbox, find the routine and read its DSL. Most people
+	// pressed Approve instead.
+	//
+	// Best-effort: the proposal is the authoritative record that a human
+	// must rule on this, and failing to decorate it must not stop it
+	// being raised.
+	for k, v := range routineAsks(saved.DefinitionJSON) {
+		payload[k] = v
+	}
 
 	// Upsert, not Insert. The source id is the slug — deliberately
 	// stable, so a retried save does not pile up siblings — and
@@ -169,6 +183,35 @@ func (h *PipelineHandler) riskReasonsForRoutine(ctx context.Context, workspaceID
 	return decoded.RiskReasons
 }
 
+// inboxItemForRoutine returns the id of the OPEN review row for a
+// routine, or "" when there is none.
+//
+// The banner on a proposed routine offers to open "the review item in
+// Inbox" and used to land on the inbox root, leaving the reader to find
+// the row. Deep-linking needs the row id, and that id is built inside
+// the inbox writer from the (kind, source_id) pair — a client that
+// reconstructed it would be a second copy of that rule, silently wrong
+// the day the first one changes.
+//
+// Resolved rows are excluded on purpose: pointing at a decided review
+// invites a second decision on something already ruled on.
+func (h *PipelineHandler) inboxItemForRoutine(ctx context.Context, workspaceID, slug string) string {
+	if h.db == nil {
+		return ""
+	}
+	var id string
+	err := h.db.QueryRowContext(ctx,
+		`SELECT id FROM inbox_items
+         WHERE workspace_id = ? AND source_id = ? AND state != 'resolved'
+         ORDER BY created_at DESC LIMIT 1`,
+		workspaceID, routineProposalInboxSource(workspaceID, slug),
+	).Scan(&id)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
 // broadcastInboxUpdated pushes the same inbox.updated event the inbox handler
 // uses so any subscribed client repaints its inbox. No-op when the WS
 // broadcaster isn't wired (tests / headless boot).
@@ -177,6 +220,22 @@ func (h *PipelineHandler) broadcastInboxUpdated(workspaceID, reason string) {
 		return
 	}
 	h.ws.BroadcastWorkspace(workspaceID, "inbox.updated", map[string]string{"reason": reason})
+}
+
+// broadcastRoutinesChanged tells every client in the workspace that the
+// routine catalog moved: something was saved, approved, rejected,
+// disabled, enabled or deleted.
+//
+// The overview had a Refresh button, which is a dashboard admitting it
+// is not live. Run events already pushed themselves; the catalog did
+// not, so a routine authored by an agent — or approved in another tab —
+// sat invisible until someone pressed it. A page that shows a queue has
+// to be told when the queue changes.
+func (h *PipelineHandler) broadcastRoutinesChanged(workspaceID, reason string) {
+	if h.ws == nil {
+		return
+	}
+	h.ws.BroadcastWorkspace(workspaceID, "pipeline.saved", map[string]string{"reason": reason})
 }
 
 // gateRoutineStatus blocks a run whose routine isn't 'active'. Returns true
@@ -258,6 +317,7 @@ func (h *PipelineHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	inbox.ResolveBySource(r.Context(), h.db, h.logger,
 		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "approved", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_approved")
+	h.broadcastRoutinesChanged(workspaceID, "approved")
 	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "status": "active"})
 }
 
@@ -304,6 +364,7 @@ func (h *PipelineHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	inbox.ResolveBySource(r.Context(), h.db, h.logger,
 		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "rejected", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_rejected")
+	h.broadcastRoutinesChanged(workspaceID, "rejected")
 	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "status": "rejected"})
 }
 
@@ -352,6 +413,7 @@ func (h *PipelineHandler) Disable(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.broadcastInboxUpdated(workspaceID, "routine_disabled")
+	h.broadcastRoutinesChanged(workspaceID, "disabled")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"slug":           slug,
 		"status":         "disabled",
@@ -388,6 +450,7 @@ func (h *PipelineHandler) Enable(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "enable routine")
 		return
 	}
+	h.broadcastRoutinesChanged(workspaceID, "enabled")
 	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "status": "active"})
 }
 
@@ -511,4 +574,45 @@ func (h *PipelineHandler) currentRiskProfile(ctx context.Context, workspaceID, s
 	}
 	_, reasons := h.classifyRoutineRisk(ctx, workspaceID, p.AuthorCrewID, dsl)
 	return p.Status, reasons
+}
+
+// routineAsks pulls the concrete declarations out of a routine's DSL so
+// the review item can name them: which credentials, which integrations,
+// which egress hosts.
+//
+// Keys are omitted rather than emitted empty. A heading with nothing
+// under it reads as "we could not find out", which is a different claim
+// from "it asks for none" — and on a governance card the difference
+// decides whether someone goes and checks.
+//
+// A credential is rendered "type:scope" when it carries a scope:
+// github and github:repo are different asks, and collapsing them would
+// understate one of them.
+func routineAsks(definitionJSON string) map[string]interface{} {
+	dsl, err := pipeline.Parse([]byte(definitionJSON))
+	if err != nil || dsl == nil {
+		return nil
+	}
+	out := map[string]interface{}{}
+	if len(dsl.CredsRequired) > 0 {
+		creds := make([]string, 0, len(dsl.CredsRequired))
+		for _, c := range dsl.CredsRequired {
+			if c.Scope != "" {
+				creds = append(creds, c.Type+":"+c.Scope)
+				continue
+			}
+			creds = append(creds, c.Type)
+		}
+		out["credentials_required"] = creds
+	}
+	if ints := dsl.NormalizedIntegrationsRequired(); len(ints) > 0 {
+		out["integrations_required"] = ints
+	}
+	if len(dsl.EgressTargets) > 0 {
+		out["egress_targets"] = dsl.EgressTargets
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

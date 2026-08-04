@@ -213,3 +213,151 @@ func TestProposeRoutineInbox_ReturnsToTheInboxAfterAnApproval(t *testing.T) {
 		t.Fatalf("inbox state = %q, want unread — the new proposal never surfaced", got)
 	}
 }
+
+// A reviewer is told the routine "requires credentials". Which ones is
+// the question they actually have, and it was never on the item — the
+// payload carried the risk CATEGORY and stopped there. So the honest
+// reading of the card was "something wants something", and the only
+// way to learn what was to leave the inbox, find the routine and read
+// its DSL.
+//
+// The routine declares all of it: credentials_required, integrations,
+// egress targets. Putting the declarations on the item is what turns
+// Approve from a reflex into a decision.
+
+// seedPipelineWithDefinition writes a routine whose DSL is exactly what
+// the caller passes, so a test can propose a routine that declares
+// something.
+func seedPipelineWithDefinition(t *testing.T, h *PipelineHandler, wsID, id, slug, defJSON string) {
+	t.Helper()
+	if _, err := h.db.Exec(`
+		INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash,
+		                       dsl_version, head_version, last_test_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'hash-head', '1.0', 1, datetime('now'), datetime('now'), datetime('now'))`,
+		id, wsID, slug, slug, defJSON); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+}
+
+func TestProposeRoutineInbox_NamesWhatTheRoutineIsAskingFor(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithDefinition(t, h, wsID, "pln-asks", "asks-routine", `{
+		"name":"asks-routine","dsl_version":"1.0",
+		"credentials_required":[{"type":"github","scope":"repo"},{"type":"openai"}],
+		"integrations_required":["slack"],
+		"egress_targets":["api.example.com"],
+		"steps":[{"id":"a","type":"agent_run","agent_slug":"morgan"}]}`)
+	saved, err := h.store.GetBySlug(context.Background(), wsID, "asks-routine")
+	if err != nil {
+		t.Fatalf("seed lookup: %v", err)
+	}
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"credentials_required"}, "test")
+
+	payload := inboxPayloadFor(t, h, wsID, routineProposalInboxSource(wsID, "asks-routine"))
+
+	creds := stringsFromPayload(t, payload, "credentials_required")
+	// Scope matters: "github" and "github:repo" are different asks.
+	if len(creds) != 2 || creds[0] != "github:repo" || creds[1] != "openai" {
+		t.Fatalf("credentials_required = %v, want [github:repo openai]", creds)
+	}
+	if got := stringsFromPayload(t, payload, "integrations_required"); len(got) != 1 || got[0] != "slack" {
+		t.Fatalf("integrations_required = %v, want [slack]", got)
+	}
+	if got := stringsFromPayload(t, payload, "egress_targets"); len(got) != 1 || got[0] != "api.example.com" {
+		t.Fatalf("egress_targets = %v, want [api.example.com]", got)
+	}
+}
+
+func TestProposeRoutineInbox_OmitsWhatTheRoutineDoesNotDeclare(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithDefinition(t, h, wsID, "pln-plain", "plain-routine",
+		`{"name":"plain-routine","dsl_version":"1.0","steps":[{"id":"a","type":"http","url":"https://x"}]}`)
+	saved, _ := h.store.GetBySlug(context.Background(), wsID, "plain-routine")
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"http_step"}, "test")
+
+	payload := inboxPayloadFor(t, h, wsID, routineProposalInboxSource(wsID, "plain-routine"))
+	// An empty list rendered as a heading with nothing under it reads as
+	// "we could not find out", which is a different claim from "it asks
+	// for none".
+	for _, k := range []string{"credentials_required", "integrations_required", "egress_targets"} {
+		if _, present := payload[k]; present {
+			t.Fatalf("%s should be absent when nothing is declared, got %v", k, payload[k])
+		}
+	}
+}
+
+func TestProposeRoutineInbox_SurvivesAnUnparseableDefinition(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithDefinition(t, h, wsID, "pln-bad", "bad-routine", `{not json`)
+	saved, _ := h.store.GetBySlug(context.Background(), wsID, "bad-routine")
+	// The proposal is the authoritative record that a human must rule on
+	// this. Failing to decorate it must not stop it being raised.
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"credentials_required"}, "test")
+
+	payload := inboxPayloadFor(t, h, wsID, routineProposalInboxSource(wsID, "bad-routine"))
+	if payload["slug"] != "bad-routine" {
+		t.Fatalf("the item was not raised for an unparseable definition: %v", payload)
+	}
+}
+
+// stringsFromPayload reads a JSON array of strings back out of a payload.
+func stringsFromPayload(t *testing.T, payload map[string]any, key string) []string {
+	t.Helper()
+	raw, ok := payload[key].([]any)
+	if !ok {
+		t.Fatalf("payload[%q] = %v, want a list", key, payload[key])
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("payload[%q] holds a non-string: %v", key, v)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// The banner on a proposed routine links to "the review item in Inbox"
+// and landed on the inbox root, leaving the reader to find the row
+// themselves. Deep-linking it needs the row's id, and the id is the
+// server's to know: it is built from the (kind, source_id) pair inside
+// the inbox writer. A client that reconstructed it would be a second
+// copy of that rule, silently wrong the day the first one changes.
+
+func TestInboxItemForRoutine_ReturnsTheRowToDeepLinkTo(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-link", "link-routine", 1)
+	saved, _ := h.store.GetBySlug(context.Background(), wsID, "link-routine")
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"credentials_required"}, "test")
+
+	id := h.inboxItemForRoutine(context.Background(), wsID, "link-routine")
+	if id == "" {
+		t.Fatal("no inbox item id for a routine that was just proposed")
+	}
+	// It has to be the row that actually exists, not a plausible string.
+	var found string
+	if err := h.db.QueryRowContext(context.Background(),
+		`SELECT id FROM inbox_items WHERE workspace_id = ? AND source_id = ?`,
+		wsID, routineProposalInboxSource(wsID, "link-routine")).Scan(&found); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if id != found {
+		t.Fatalf("id = %q, want the real row %q", id, found)
+	}
+}
+
+func TestInboxItemForRoutine_EmptyOnceResolved(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-done", "done-routine", 1)
+	saved, _ := h.store.GetBySlug(context.Background(), wsID, "done-routine")
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"credentials_required"}, "test")
+	if _, err := h.db.Exec(`UPDATE inbox_items SET state = 'resolved' WHERE workspace_id = ?`, wsID); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	// Pointing at a decided row invites a second decision on something
+	// already ruled on.
+	if id := h.inboxItemForRoutine(context.Background(), wsID, "done-routine"); id != "" {
+		t.Fatalf("want no id for a resolved review, got %q", id)
+	}
+}

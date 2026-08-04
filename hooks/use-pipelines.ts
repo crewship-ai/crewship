@@ -124,6 +124,12 @@ export function usePipelines(workspaceId: string | null | undefined) {
   // page reload. Cheap because the list endpoint is small + cached.
   useRealtimeEvent("pipeline.run.completed", refresh)
   useRealtimeEvent("pipeline.run.failed", refresh)
+  // The catalog itself moving — saved, approved, rejected, disabled,
+  // deleted. Run events covered "a routine ran"; nothing covered "a
+  // routine appeared", so an agent-authored routine stayed invisible
+  // until a manual refresh. That gap is what the Refresh button was
+  // really for.
+  useRealtimeEvent("pipeline.saved", refresh)
 
   return { pipelines, loading, error, refresh }
 }

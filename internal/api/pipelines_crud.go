@@ -100,6 +100,7 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// would be worse than none.
 	if p.Status == "proposed" {
 		out.RiskReasons = h.riskReasonsForRoutine(r.Context(), workspaceID, p.Slug)
+		out.InboxItemID = h.inboxItemForRoutine(r.Context(), workspaceID, p.Slug)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -150,6 +151,7 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "dismissed", actorID)
 	inbox.ResolveByPipeline(r.Context(), h.db, h.logger, workspaceID, p.ID, "dismissed", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_deleted")
+	h.broadcastRoutinesChanged(workspaceID, "deleted")
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -786,6 +788,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 			inbox.KindEscalation, routineProposalInboxSource(workspaceID, saved.Slug), "approved", user.ID)
 		h.broadcastInboxUpdated(workspaceID, "routine_governance_skipped")
 	}
+	h.broadcastRoutinesChanged(workspaceID, "saved")
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }
 
@@ -930,5 +933,6 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if risky && saved.Status == "proposed" {
 		h.proposeRoutineInbox(r.Context(), body.WorkspaceID, saved, riskReasons, "Agent routine author")
 	}
+	h.broadcastRoutinesChanged(body.WorkspaceID, "saved")
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }

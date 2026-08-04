@@ -34,7 +34,10 @@ export function StatusDonut({ data, centerLabel = "missions", onSelect }: Status
   }, [data])
 
   return (
-    <div className="flex items-center gap-4">
+    // Stacked on a phone: at 390px the ring and a six-row legend
+    // cannot share a line, and side-by-side clipped the labels off the
+    // right edge — leaving colour dots against no words at all.
+    <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:gap-4">
       <ChartContainer config={chartConfig} className="h-[160px] w-[160px] aspect-square shrink-0">
         <PieChart>
           <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
@@ -70,7 +73,7 @@ export function StatusDonut({ data, centerLabel = "missions", onSelect }: Status
       {/* Legend. A row is a button only when the caller can do
           something with the click — a cursor that promises navigation
           and then does nothing is worse than plain text. */}
-      <div className="flex-1 flex flex-col gap-1 text-[11px]">
+      <div className="flex w-full flex-1 flex-col gap-1 text-[11px]">
         {data.map((d) => {
           const row = (
             <>

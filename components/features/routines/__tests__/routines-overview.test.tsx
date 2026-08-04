@@ -99,7 +99,6 @@ const PROPS = {
   loading: false,
   error: null,
   onSelect: vi.fn(),
-  onRefresh: vi.fn(),
 }
 
 describe("<RoutinesOverview>", () => {

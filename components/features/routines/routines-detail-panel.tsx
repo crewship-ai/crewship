@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "motion/react"
-import { Play, Square, Check, Ban } from "lucide-react"
+import { Play, Square, Check, Ban, Inbox } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -28,6 +28,7 @@ import { PipelineRunActivity } from "@/components/features/activity/pipeline-run
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
 import { RoutineActionsMenu } from "./routine-actions-menu"
+import { RoutineProposalAsk, type RoutineAskDefinition } from "./routine-proposal-ask"
 import { RoutineCardDetail } from "./routine-card-detail"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 
@@ -82,6 +83,10 @@ export interface RoutineDetail {
   // only while a proposal is open. Without it the reviewer is asked to
   // approve something they cannot see.
   risk_reasons?: string[]
+  // The review row to deep-link the banner at. The server builds the
+  // id from (kind, source_id) inside the inbox writer; reconstructing
+  // it here would be a second copy of that rule.
+  inbox_item_id?: string
 }
 
 interface Props {
@@ -425,14 +430,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 It was proposed for review and can&apos;t run until a manager approves it.
               </p>
             )}
-            <a
-              href="/inbox"
-              className="mt-1 inline-flex items-center gap-1 text-[11px] text-warn underline-offset-2 hover:underline"
-            >
-              Open the review item in Inbox
-            </a>
+            {/* The reasons are the category; this is the thing itself.
+                "Requires credentials" does not tell a reviewer which
+                ones, and that is the question they have. */}
+            <RoutineProposalAsk definition={routine?.definition as RoutineAskDefinition | undefined} />
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button
               size="sm"
               onClick={() => governanceAction("approve")}
@@ -451,6 +454,27 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             >
               <Ban className="h-3.5 w-3.5" />
               Reject
+            </Button>
+            {/* Beside the decision, not buried in the prose above it.
+                The review row carries the diff, the risk reasons and
+                the audit trail, and someone deciding may well want to
+                read it first — so it is a button, and it lands on the
+                row rather than on the inbox root. */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                router.push(
+                  routine?.inbox_item_id
+                    ? `/inbox?item=${encodeURIComponent(routine.inbox_item_id)}`
+                    : "/inbox",
+                )
+              }
+              className="h-8 gap-1.5 px-3 text-sm"
+              title="Open the review item in Inbox"
+            >
+              <Inbox className="h-3.5 w-3.5" />
+              Inbox
             </Button>
           </div>
         </div>

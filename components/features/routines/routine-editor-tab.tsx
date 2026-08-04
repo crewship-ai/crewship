@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, RotateCcw, Save, Wand2 } from "lucide-react"
+import { AlertCircle, Maximize2, Minimize2, RotateCcw, Save, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { FileEditor } from "@/components/features/files/file-editor"
@@ -45,6 +45,24 @@ interface Props {
 }
 
 export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret }: Props) {
+  // Beside the graph the editor is a 48%-wide column, which is right
+  // for reading a step and wrong for reading a routine. Expanded, it
+  // takes the window and blurs everything behind it.
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (!expanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        const live = bufferRef.current
+        setText(live)
+        setLiveText(live)
+        setEditorKey((k) => k + 1)
+        setExpanded(false)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [expanded])
   const [format, setFormat] = useState<DslFormat>("yaml")
   const initial = useMemo(() => {
     try {
@@ -154,6 +172,20 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     setLiveText(next)
   }
 
+  // Expanding moves the editor into a different place in the tree, so
+  // React unmounts and remounts it — and a remounted FileEditor is
+  // constructed from `text`, which by design does NOT track typing.
+  // Without carrying the live buffer across, the full-screen editor
+  // would open showing the document as it was before you started, and
+  // the work in between would be gone with no error and no undo.
+  const toggleExpanded = () => {
+    const live = bufferRef.current
+    setText(live)
+    setLiveText(live)
+    setEditorKey((k) => k + 1)
+    setExpanded((v) => !v)
+  }
+
   const handleFormat = () => {
     if (!validation.ok || !validation.parsed) {
       toast.error(`Fix the ${format.toUpperCase()} error before formatting`)
@@ -248,7 +280,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     }
   }
 
-  return (
+  const body = (
     <div className="flex h-full flex-col">
       {/* ── Toolbar ─────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
@@ -286,11 +318,21 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
             variant="ghost"
             onClick={handleFormat}
             disabled={!validation.ok}
-            className="h-8 gap-1.5 px-2.5 text-xs"
-            title="Re-indent the buffer from the parsed definition — sorts nothing, changes no values"
+            className="h-8 w-8 p-0"
+            title="Format — re-indent the buffer from the parsed definition; sorts nothing, changes no values"
+            aria-label="Format"
           >
             <Wand2 className="h-3.5 w-3.5" />
-            Format
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={toggleExpanded}
+            className="h-8 w-8 p-0"
+            title={expanded ? "Close the full-screen editor (Esc)" : "Open the whole definition full screen"}
+            aria-label={expanded ? "Collapse editor" : "Expand editor"}
+          >
+            {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </Button>
           <Button
             size="sm"
@@ -362,6 +404,27 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
           the save.
         </div>
       )}
+    </div>
+  )
+
+  // Same element, different parent — which React treats as a remount,
+  // so the live buffer is carried across in toggleExpanded rather than
+  // assumed to survive. Exactly one editor exists either way; a second
+  // one mounted over the first would keep its own CodeMirror state and
+  // the two would drift apart on the next keystroke.
+  if (!expanded) return body
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
+      <button
+        type="button"
+        aria-label="Close the full-screen editor"
+        onClick={toggleExpanded}
+        className="absolute inset-0 bg-background/70 backdrop-blur-md"
+      />
+      <div className="relative flex h-full max-h-[92vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl">
+        {body}
+      </div>
     </div>
   )
 }
