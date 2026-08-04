@@ -1,19 +1,47 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Bell, Check, CheckCheck } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
+import { Bell } from "lucide-react"
+
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
+  BarMenu,
+  BarMenuBody,
+  BarMenuEmpty,
+  BarMenuFooter,
+  BarMenuFooterAction,
+  BarMenuFooterLink,
+  BarMenuHeader,
+  BarMenuRow,
+  BarMenuSection,
+} from "@/components/layout/bar-menu"
+import { ActorAvatar } from "@/components/features/inbox/inbox-actor"
+import type { Actor, ActorKind } from "@/components/features/inbox/inbox-types"
 import { formatRelativeTime } from "@/lib/time"
-import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import type { Notification } from "@/lib/types/mission"
+
+// NotificationBell — the FYI half of the pair. Inbox = "you need to do
+// something"; this = "something happened, in case you care". The two sit one
+// icon apart and are read in the same glance, so they are now the same object:
+// the shared top-bar kit (components/layout/bar-menu.tsx) draws both.
+//
+// What changed with the kit, beyond the frame:
+//   · 9+ became 99+. The old badge capped at nine, so an eleventh unread read
+//     "9+" next to an Inbox reporting "10" for the same size of pile.
+//   · The flat list became UNREAD / EARLIER. One undivided run of rows made a
+//     week-old status change look exactly as new as a mention from a minute
+//     ago; the Inbox had solved that with sections and this had not.
+//   · The row grew a face. "casey commented on Fix the login redirect" was a
+//     paragraph of the same weight as everything around it; the actor's own
+//     avatar (square = machine, circle = person, the rule inbox-actor.tsx
+//     applies everywhere) does that identification faster than the words.
+//   · The hover "mark as read" tick is gone: clicking the row already did
+//     exactly that, and the tick only appeared on hover, so it taught a
+//     control that a touch user could never find.
+//   · A footer. "Mark N read" on the left, notification settings on the right
+//     — the panel had no way out to the place where these are configured.
 
 const ACTION_LABELS: Record<string, string> = {
   created: "created",
@@ -23,6 +51,15 @@ const ACTION_LABELS: Record<string, string> = {
   completed: "completed",
   status_changed: "changed status of",
   priority_changed: "changed priority of",
+}
+
+// Notifications carry three actor types; the inbox's Actor covers five. Map
+// rather than re-implement, so a notification from casey draws the same tile
+// as an inbox item from casey.
+function actorOf(n: Notification): Actor {
+  const kind: ActorKind = n.actor_type === "user" ? "user" : n.actor_type === "agent" ? "agent" : "system"
+  const label = n.actor_name || n.actor_type
+  return { kind, id: n.actor_id, label, seed: kind === "agent" ? label : undefined }
 }
 
 export function NotificationBell() {
@@ -76,7 +113,7 @@ export function NotificationBell() {
     return () => clearInterval(interval)
   }, [fetchCount])
 
-  // Fetch list when dropdown opens
+  // Fetch list when the panel opens
   useEffect(() => {
     if (open) {
       fetchNotifications()
@@ -118,111 +155,95 @@ export function NotificationBell() {
     }
   }, [workspaceId])
 
+  // Newest first inside each bucket, unread above seen. Arrival order alone
+  // put a read status change from Tuesday above a mention from a minute ago.
+  const { unread, earlier } = useMemo(() => {
+    const byNewest = (a: Notification, b: Notification) =>
+      Date.parse(b.created_at) - Date.parse(a.created_at)
+    return {
+      unread: notifications.filter((n) => !n.read_at).sort(byNewest),
+      earlier: notifications.filter((n) => n.read_at).sort(byNewest),
+    }
+  }, [notifications])
+
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 relative"
-          aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
-        >
-          <Bell className="h-4 w-4" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-info text-[9px] font-bold text-white ring-2 ring-background">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[360px] p-0">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
-          <span className="text-xs font-semibold">Notifications</span>
-          {unreadCount > 0 && (
-            <button
-              onClick={markAllRead}
-              className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
-            >
-              <CheckCheck className="h-3 w-3" />
-              Mark all read
-            </button>
-          )}
-        </div>
-        <ScrollArea className="max-h-[400px]">
-          {loading && notifications.length === 0 ? (
-            <div className="py-8 text-center text-xs text-muted-foreground-soft">Loading...</div>
-          ) : notifications.length === 0 ? (
-            <div className="py-8 text-center">
-              <Bell className="h-5 w-5 mx-auto mb-2 text-muted-foreground/30" />
-              <p className="text-xs text-muted-foreground-soft">No notifications yet</p>
-            </div>
-          ) : (
-            <div className="py-1">
-              {notifications.map((n) => {
-                const isUnread = !n.read_at
-                return (
-                  <div
-                    key={n.id}
-                    role={isUnread ? "button" : undefined}
-                    tabIndex={isUnread ? 0 : undefined}
-                    aria-label={isUnread ? `Mark notification as read: ${n.actor_name || n.actor_type} ${ACTION_LABELS[n.action] || n.action} ${n.entity_title || ""}` : undefined}
-                    className={cn(
-                      "flex items-start gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors cursor-pointer group",
-                      isUnread && "bg-info/[0.03]",
-                    )}
-                    onClick={() => {
-                      if (isUnread) markAsRead(n.id)
-                    }}
-                    onKeyDown={(e) => {
-                      if (isUnread && (e.key === "Enter" || e.key === " ")) {
-                        e.preventDefault()
-                        markAsRead(n.id)
-                      }
-                    }}
-                  >
-                    {/* Unread dot */}
-                    <div className="pt-1.5 shrink-0 w-2">
-                      {isUnread && (
-                        <div className="h-1.5 w-1.5 rounded-full bg-info" />
-                      )}
-                    </div>
+    <BarMenu
+      icon={Bell}
+      ariaLabel={unreadCount > 0 ? `${unreadCount} unread notifications` : "Notifications"}
+      badge={{ count: unreadCount, tone: "info" }}
+      open={open}
+      onOpenChange={setOpen}
+      testId="notifications"
+    >
+      <BarMenuHeader
+        title="Notifications"
+        meta={unreadCount > 0 ? `${unreadCount} unread` : "all read"}
+      />
 
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] text-foreground/80 leading-relaxed">
-                        <span className="font-medium">{n.actor_name || n.actor_type}</span>
-                        {" "}
-                        {ACTION_LABELS[n.action] || n.action}
-                        {" "}
-                        {n.entity_title && (
-                          <span className="text-foreground/60">{n.entity_title}</span>
-                        )}
-                      </p>
-                      <span className="text-[10px] text-muted-foreground-soft">
-                        {formatRelativeTime(n.created_at)}
-                      </span>
-                    </div>
+      <BarMenuBody>
+        {loading && notifications.length === 0 ? (
+          <p className="type-meta py-8 text-center text-muted-foreground-soft">Loading…</p>
+        ) : notifications.length === 0 ? (
+          <BarMenuEmpty icon={Bell} message="No notifications yet" />
+        ) : (
+          <>
+            {unread.length > 0 && (
+              <BarMenuSection label="Unread" count={unread.length}>
+                {unread.map((n) => (
+                  <NotificationRow key={n.id} n={n} onClick={() => markAsRead(n.id)} />
+                ))}
+              </BarMenuSection>
+            )}
+            {earlier.length > 0 && (
+              <BarMenuSection label="Earlier" count={earlier.length}>
+                {earlier.map((n) => (
+                  <NotificationRow key={n.id} n={n} />
+                ))}
+              </BarMenuSection>
+            )}
+          </>
+        )}
+      </BarMenuBody>
 
-                    {/* Mark as read button */}
-                    {isUnread && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          markAsRead(n.id)
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/[0.08] text-muted-foreground-soft hover:text-primary transition-all shrink-0 mt-0.5"
-                        aria-label="Mark as read"
-                        title="Mark as read"
-                      >
-                        <Check className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </ScrollArea>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      <BarMenuFooter>
+        {unreadCount > 0 && (
+          <BarMenuFooterAction onClick={markAllRead}>Mark {unreadCount} read</BarMenuFooterAction>
+        )}
+        <BarMenuFooterLink asChild onClick={() => setOpen(false)}>
+          <Link href="/integrations?tab=notifications">Notification settings →</Link>
+        </BarMenuFooterLink>
+      </BarMenuFooter>
+    </BarMenu>
+  )
+}
+
+// One notification, in the bar's row skeleton: who, in the identity slot;
+// what happened, on the title line; what it was about and its kind, on the
+// meta line; when, on the right. A read row has nothing left to do, so it is
+// not clickable — the old one was a focusable control that no-oped.
+function NotificationRow({ n, onClick }: { n: Notification; onClick?: () => void }) {
+  const actor = actorOf(n)
+  const action = ACTION_LABELS[n.action] || n.action
+
+  return (
+    <BarMenuRow
+      testId={`notification-row-${n.id}`}
+      onClick={onClick}
+      leading={<ActorAvatar actor={actor} size={24} />}
+      // The actor is the face on the left and the name on the meta line, so
+      // the title is what HAPPENED — the same split the inbox row uses
+      // ("Skill review sk_469…" over "Skill Curator · agents.escalation").
+      title={n.entity_title ? `${action} ${n.entity_title}` : `${action} ${n.entity_type}`}
+      meta={
+        <>
+          <span className="truncate">{actor.label}</span>
+          <span>·</span>
+          <span className="truncate font-mono">{n.entity_type}</span>
+        </>
+      }
+      trailing={
+        <span className="type-meta text-muted-foreground-soft">{formatRelativeTime(n.created_at)}</span>
+      }
+    />
   )
 }

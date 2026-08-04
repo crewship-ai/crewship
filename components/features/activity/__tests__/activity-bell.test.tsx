@@ -13,20 +13,6 @@ import { deriveActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 // the ~400px panel. Same data layer (useActiveRoutineRuns), same
 // cancel contract, so the chip's assertions carry over.
 
-// Radix DropdownMenu relies on pointer-capture + scrollIntoView, which
-// happy-dom doesn't implement. Polyfill so the menu can open here.
-beforeEach(() => {
-  if (!Element.prototype.hasPointerCapture) {
-    Element.prototype.hasPointerCapture = () => false
-  }
-  if (!Element.prototype.releasePointerCapture) {
-    Element.prototype.releasePointerCapture = () => {}
-  }
-  if (!Element.prototype.scrollIntoView) {
-    Element.prototype.scrollIntoView = () => {}
-  }
-})
-
 // Hoisted holder so the vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
   runs: [] as unknown[],
@@ -95,6 +81,10 @@ vi.mock("motion/react", () => ({
     span: ({ children, initial: _i, animate: _a, exit: _e, ...rest }: any) => (
       <span {...rest}>{children}</span>
     ),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    div: ({ children, initial: _i, animate: _a, exit: _e, ...rest }: any) => (
+      <div {...rest}>{children}</div>
+    ),
   },
 }))
 
@@ -125,9 +115,9 @@ function run(overrides: Partial<PipelineRun>): PipelineRun {
 }
 
 function openDropdown() {
-  // Radix DropdownMenu opens on pointerdown (primary button), not click.
-  const trigger = screen.getByRole("button", { name: /^activity/i })
-  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
+  // The panel is the shared top-bar kit (BarMenu), not a Radix dropdown:
+  // a plain click on the trigger, no pointer-capture polyfill needed.
+  fireEvent.click(screen.getByTestId("activity-trigger"))
 }
 
 describe("<ActivityBell> badge", () => {
@@ -138,13 +128,13 @@ describe("<ActivityBell> badge", () => {
 
   it("hides the badge when nothing is live", () => {
     render(<ActivityBell />)
-    expect(screen.queryByTestId("activity-live-badge")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("activity-badge")).not.toBeInTheDocument()
   })
 
   it("badges the live routine-run count in blue", () => {
     h.runs = [run({ id: "r1" }), run({ id: "r2", pipeline_slug: "digest" })]
     render(<ActivityBell />)
-    const badge = screen.getByTestId("activity-live-badge")
+    const badge = screen.getByTestId("activity-badge")
     expect(badge).toHaveTextContent("2")
     expect(badge.className).toContain("bg-primary")
   })
@@ -152,7 +142,7 @@ describe("<ActivityBell> badge", () => {
   it("turns the badge amber when a run awaits approval", () => {
     h.runs = [run({ id: "r1" }), run({ id: "r2", status: "waiting" })]
     render(<ActivityBell />)
-    const badge = screen.getByTestId("activity-live-badge")
+    const badge = screen.getByTestId("activity-badge")
     expect(badge).toHaveTextContent("2")
     expect(badge.className).toContain("bg-warn")
   })
@@ -163,7 +153,7 @@ describe("<ActivityBell> badge", () => {
       { id: "a1", kind: "agent", label: "Casey", href: "/chat/casey" },
     ]
     render(<ActivityBell />)
-    const badge = screen.getByTestId("activity-live-badge")
+    const badge = screen.getByTestId("activity-badge")
     expect(badge).toHaveTextContent("1")
     expect(badge.className).toContain("bg-success")
   })

@@ -441,17 +441,21 @@ export function AppToolbar() {
           )
         })()}
 
-        {/* Desktop: search button */}
+        {/* Desktop: search button. Same pill geometry as the System / Crews
+            status pills it sits beside, and the same .type-meta register as
+            everything else in the strip — it had been the one control here
+            wearing a hardcoded text-xs label and a text-xs ⌘ inside a
+            text-[10px] key cap. */}
         <Button variant="outline" size="sm" className="hidden md:flex h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-3.5 w-3.5" />
-          <span className="text-xs hidden sm:inline">Search...</span>
-          <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium sm:flex">
-            <span className="text-xs">&#8984;</span>K
+          <span className="type-meta hidden sm:inline">Search...</span>
+          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
+            &#8984;K
           </kbd>
         </Button>
 
         {/* Mobile: search icon only */}
-        <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" aria-label="Search" onClick={() => setCmdkOpen(true)}>
+        <Button variant="ghost" size="icon-sm" className="md:hidden" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
         </Button>
 
