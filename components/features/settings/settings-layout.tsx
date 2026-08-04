@@ -88,6 +88,17 @@ export function initialSettingsTab(search: string): string {
   return t && (t in sectionTitles || t in MOVED_SECTIONS) ? t : "profile"
 }
 
+/**
+ * The user whose row a `?member=` deep link names, or "".
+ *
+ * Read alongside the tab, and for the same reason: the ⌘K palette can find a
+ * person by name or email, and landing on the roster without saying which of
+ * them you picked makes the caller search a second time by eye.
+ */
+export function initialFocusedMember(search: string): string {
+  return new URLSearchParams(search).get("member") ?? ""
+}
+
 export function SettingsLayout() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
@@ -95,6 +106,11 @@ export function SettingsLayout() {
   const isMobile = useIsMobile()
   const [requestedTab, _setActiveTab] = useState(() =>
     typeof window === "undefined" ? "profile" : initialSettingsTab(window.location.search),
+  )
+  // Read once, on mount, exactly like the tab: this addresses the arrival,
+  // not the state of the page afterwards.
+  const [focusedMember] = useState(() =>
+    typeof window === "undefined" ? "" : initialFocusedMember(window.location.search),
   )
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
@@ -247,6 +263,7 @@ export function SettingsLayout() {
         <MembersSection
           members={members}
           workspaceId={workspaceId}
+          focusUserId={focusedMember || undefined}
           currentUserId={session?.user?.id}
           callerRole={role ?? undefined}
           onRefresh={handleRefresh}

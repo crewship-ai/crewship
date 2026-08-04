@@ -611,14 +611,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <CommandGroup heading={<GroupLabel>People</GroupLabel>} className={PALETTE_GROUP_CLASS}>
             {members.map((m) => {
               const name = m.user.full_name || m.user.email
+              // Deep-link to the person, not just the roster: the settings
+              // layout reads ?member= and opens that row (and only that row).
+              const href = `/settings?tab=members&member=${encodeURIComponent(m.user.id)}`
               return (
                 <CommandItem
                   key={m.id}
                   value={`member ${name} ${m.user.email}`}
                   keywords={[m.role.toLowerCase()]}
                   className={PALETTE_ITEM_CLASS}
-                  data-href="/settings?tab=members"
-                  onSelect={() => go("/settings?tab=members", name, "People")}
+                  data-href={href}
+                  onSelect={() => go(href, name, "People")}
                 >
                   <UserAvatar
                     name={name}

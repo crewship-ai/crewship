@@ -229,3 +229,19 @@ describe("CommandPalette — recent", () => {
     expect(within(g).getByText("Real one")).toBeInTheDocument()
   })
 })
+
+describe("CommandPalette — people deep-link", () => {
+  it("names the person in the link, not just the roster", async () => {
+    FIXTURES["/members"] = [
+      { id: "m1", role: "ADMIN", user: { id: "u-fredy", email: "f@x.dev", full_name: "Fredy", avatar_url: null } },
+    ]
+    openPalette()
+    const g = await group(/people/i)
+    // Landing on /settings?tab=members alone left the caller to find the row
+    // they had just searched for, by eye.
+    expect(within(g).getByRole("option")).toHaveAttribute(
+      "data-href",
+      "/settings?tab=members&member=u-fredy",
+    )
+  })
+})
