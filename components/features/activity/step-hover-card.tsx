@@ -4,8 +4,8 @@ import { ArrowRight } from "lucide-react"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { cn } from "@/lib/utils"
 import { formatDurationDecimal } from "@/lib/time"
-import { summarizeValue } from "@/lib/format/summarize-value"
 import type { StepStatus, TraceStep } from "@/lib/trace/types"
+import { describeStepInput, hasHoverStats } from "@/lib/trace/describe-step-input"
 
 // StepHoverCard — quick-peek shown while the user hovers a step
 // node on the canvas. Click still opens the side panel (full detail);
@@ -77,11 +77,7 @@ const STATUS_COLOR: Record<StepStatus, string> = {
 }
 
 function Stats({ payload }: { payload: StepHoverPayload }) {
-  const showAny =
-    payload.durationMs !== undefined ||
-    payload.costUsd !== undefined ||
-    payload.status !== "pending"
-  if (!showAny) return null
+  if (!hasHoverStats(payload)) return null
   return (
     <dl className="grid grid-cols-2 gap-x-2 gap-y-1 px-3 py-2 text-[11px]">
       {payload.durationMs !== undefined && payload.durationMs !== null && payload.durationMs > 0 && (
@@ -136,36 +132,4 @@ function InputOutput({ payload }: { payload: StepHoverPayload }) {
       )}
     </div>
   )
-}
-
-// describeStepInput — one-line summary of what the step is invoked
-// with, picking the most important field per kind. Skips the empty
-// case (some steps just inherit from the previous one).
-function describeStepInput(step: TraceStep): string | null {
-  switch (step.type) {
-    case "http": {
-      const method = (step.http?.method ?? "GET").toUpperCase()
-      const url = step.http?.url
-      return url ? `${method} ${url}` : method
-    }
-    case "agent_run":
-      if (step.prompt) return summarizeValue(step.prompt, { maxChars: 120 })
-      if (step.agent_slug) return `agent: ${step.agent_slug}`
-      return null
-    case "transform":
-      if (step.transform?.expression) return step.transform.expression
-      if (step.transform?.input) return `from ${step.transform.input}`
-      return null
-    case "code":
-      return step.code?.runtime ? `${step.code.runtime} script` : "code"
-    case "wait": {
-      const kind = step.wait?.kind ?? "approval"
-      if (step.wait?.approval_prompt) return `${kind} — ${step.wait.approval_prompt}`
-      return kind
-    }
-    case "call_pipeline":
-      return step.pipeline_slug ? `→ ${step.pipeline_slug}` : "sub-routine"
-    default:
-      return null
-  }
 }

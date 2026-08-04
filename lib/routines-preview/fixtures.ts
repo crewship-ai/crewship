@@ -135,7 +135,7 @@ const GRANULAR_STEPS: TraceStep[] = [
     id: "parse_vypis",
     type: "script",
     needs: ["stahnout_vypis"],
-    code: { runtime: "scripts/parse_vypis.py" },
+    script: { path: "scripts/parse_vypis.py" },
   },
   {
     // Genuinely a judgement call: naming conventions, supplier matching.
@@ -185,7 +185,7 @@ const GRANULAR_STEPS: TraceStep[] = [
     id: "verify",
     type: "script",
     needs: ["drive_nahrat", "parse_vypis"],
-    code: { runtime: "scripts/verify.py" },
+    script: { path: "scripts/verify.py" },
   },
   {
     id: "kontrolni_soucet",
@@ -209,6 +209,7 @@ const GRANULAR_STEPS: TraceStep[] = [
     id: "oznamit",
     type: "notify",
     needs: ["vysvetlit_rozdil"],
+    notify: { to: "trigger", title: "Účetní podklady jsou připravené", category: "routines.completed" },
   },
   {
     id: "schvaleni",

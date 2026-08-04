@@ -78,6 +78,15 @@ export interface TraceStep {
   // ForeachStep in internal/pipeline/types.go). A name invented on
   // this side renders a blank subtitle on every real run of that kind,
   // which is how a renderer quietly stops describing the routine.
+  script?: {
+    path?: string
+    args?: string[]
+  }
+  notify?: {
+    to?: string
+    title?: string
+    category?: string
+  }
   query?: {
     source?: string
     window_hours?: number

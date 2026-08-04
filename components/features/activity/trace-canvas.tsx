@@ -132,6 +132,12 @@ interface TraceCanvasProps {
   // Centre this node when the id changes, without a click. Driven by
   // the editor caret: edit a step's lines, that step comes into view.
   focusStepId?: string | null
+  // Keep what is on screen centred when the PANE resizes — opening a
+  // side panel next to the canvas shrinks it, and without this the
+  // graph stays where it was and half of it ends up under the panel.
+  // Shifts by half the width delta, preserving zoom and position in the
+  // graph: the reader keeps their place, the picture just slides over.
+  recenterOnResize?: boolean
 }
 
 export function TraceCanvas(props: TraceCanvasProps) {
@@ -242,6 +248,7 @@ function CanvasInner({
   initialFocus = "all",
   centerOnSelect = false,
   focusStepId = null,
+  recenterOnResize = false,
 }: TraceCanvasProps & { run: PipelineRun }) {
   const graphData = useMemo(
     () =>
@@ -273,7 +280,29 @@ function CanvasInner({
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
-  const { setCenter, getZoom } = useReactFlow()
+  const { setCenter, getZoom, getViewport, setViewport } = useReactFlow()
+
+  // Hold the view steady across a pane resize. ReactFlow keeps its
+  // transform when the container changes size, so shrinking the pane
+  // from the right leaves the graph sitting under whatever took the
+  // space. Shifting by half the delta puts it back in the middle of
+  // what is still visible.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = paneRef.current
+    if (!recenterOnResize || !el || typeof ResizeObserver === "undefined") return
+    let last = el.clientWidth
+    const ro = new ResizeObserver(() => {
+      const next = el.clientWidth
+      const delta = next - last
+      if (delta === 0) return
+      last = next
+      const vp = getViewport()
+      setViewport({ ...vp, x: vp.x + delta / 2 })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [recenterOnResize, getViewport, setViewport])
 
   // Centre a node without changing zoom. Used by both the click handler
   // and the caret follower, so they cannot drift apart.
@@ -382,7 +411,7 @@ function CanvasInner({
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-background">
+    <div ref={paneRef} className="h-full w-full overflow-hidden bg-background">
       <ReactFlow
         nodes={nodes}
         edges={edges}

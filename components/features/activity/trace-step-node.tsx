@@ -172,6 +172,14 @@ function subtitleFor(step: TraceStep): ReactNode {
           {step.pipeline_slug ?? "(unknown)"}
         </span>
       )
+    case "script":
+      return step.script?.path ? (
+        <span className="truncate font-mono text-foreground/80">{step.script.path}</span>
+      ) : null
+    case "notify":
+      return step.notify?.to ? (
+        <span className="truncate font-mono text-foreground/80">→ {step.notify.to}</span>
+      ) : null
     case "query":
       return (
         <span className="truncate font-mono text-foreground/80">

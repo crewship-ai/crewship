@@ -33,10 +33,10 @@ import { Progress } from "@/components/ui/progress"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
-import { convertDsl, parseDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
+import { convertDsl, parseDsl, type DslFormat } from "@/lib/routine-dsl-format"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
-import type { PipelineDSL, TraceStep } from "@/lib/trace/types"
+import type { PipelineDSL } from "@/lib/trace/types"
 import {
   DEPENDENCY_SUMMARY,
   RUN_HISTORY,
@@ -69,6 +69,8 @@ interface DefinitionCanvasProps {
   onStepSelect?: (id: string | null) => void
   /** Node to bring into view without a click — driven by the caret. */
   focusStepId?: string | null
+  /** Keep the view centred when a side panel takes part of the width. */
+  recenterOnResize?: boolean
   className?: string
 }
 
@@ -84,6 +86,7 @@ export function DefinitionCanvas({
   selectedStepId = null,
   onStepSelect,
   focusStepId = null,
+  recenterOnResize = false,
   className,
 }: DefinitionCanvasProps) {
   // One run object per mounted canvas. React Flow keys node state off
@@ -108,6 +111,7 @@ export function DefinitionCanvas({
         initialFocus="start"
         centerOnSelect
         focusStepId={focusStepId}
+        recenterOnResize={recenterOnResize}
       />
       <div className="pointer-events-none absolute left-3 top-3 rounded-md border border-border/60 bg-card/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
         Definice · nikoli běh
@@ -560,138 +564,6 @@ export function OpacityMeter({ dsl }: { dsl: PipelineDSL }) {
           pct >= 60 ? "bg-warn" : pct >= 30 ? "bg-notice" : "bg-success",
         )}
       />
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ *
- *  Step inspector — variant C's right rail                            *
- * ------------------------------------------------------------------ */
-
-/**
- * One step, as YAML.
- *
- * The editor authors YAML, so the read-only fragment shows YAML too —
- * two syntaxes on one screen means the reader holds both in their head
- * to compare the panel against the buffer. A multiline prompt is the
- * case that makes the difference obvious: `prompt: |` and real line
- * breaks, rather than one long line of \n escapes.
- */
-function stepFragment(step: TraceStep): string {
-  return toYaml(step)
-}
-
-/** Prose describing what a step kind guarantees the operator. */
-const KIND_CONTRACT: Record<string, string> = {
-  agent_run: "Agent rozhoduje. Výsledek nelze předpovědět z definice — jen auditovat po běhu.",
-  http: "Deterministické. Jedno volání, známý endpoint, known-shape odpověď.",
-  script: "Deterministické. Spustí soubor z repozitáře receptu.",
-  transform: "Deterministické. Čistá funkce nad výstupem předchozího kroku.",
-  foreach: "Smyčka. Tělo se spustí jednou za položku — tady běh tráví většinu času.",
-  notify: "Zapíše kartu do inboxu a pošle ji kanály dle kategorie.",
-  wait: "Zaparkuje běh, dokud člověk nerozhodne.",
-  query: "Přečte datastore. Deterministické.",
-  call_pipeline: "Zavolá jiný recept jako podproces.",
-  code: "Spustí inline kód v sandboxu.",
-}
-
-export function StepInspector({
-  dsl,
-  fidelity,
-  stepId,
-}: {
-  dsl: PipelineDSL
-  // Threaded, never re-derived. The empty-selection branch prints the
-  // whole definition, and printing a different fidelity than the one
-  // the canvas is drawing would have the two halves contradict each
-  // other — the exact failure this design exists to prevent.
-  fidelity: Fidelity
-  stepId: string | null
-}) {
-  const step = (dsl.steps ?? []).find((s) => s.id === stepId) ?? null
-
-  if (!step) {
-    return (
-      <div className="flex h-full flex-col">
-        <header className="shrink-0 border-b border-border/60 px-3 py-2">
-          <h4 className="text-[12px] font-semibold">Celá definice</h4>
-          <p className="text-[11px] text-muted-foreground">
-            Klikni na krok v grafu a uvidíš jen jeho fragment.
-          </p>
-        </header>
-        <div className="min-h-0 flex-1">
-          <CodePane fidelity={fidelity} footnote="Nic není vybráno — editujeme celý recept." />
-        </div>
-      </div>
-    )
-  }
-
-  const contract = KIND_CONTRACT[step.type] ?? ""
-  const dependsOn = step.needs ?? []
-  const feeds = (dsl.steps ?? []).filter((s) => (s.needs ?? []).includes(step.id))
-
-  return (
-    <div className="flex h-full flex-col overflow-auto">
-      <header className="shrink-0 border-b border-border/60 px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <h4 className="font-mono text-[13px] font-semibold">{step.id}</h4>
-          <span className="rounded border border-border/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-            {step.type}
-          </span>
-        </div>
-        {contract && (
-          <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">{contract}</p>
-        )}
-      </header>
-
-      <div className="space-y-3 p-3">
-        <div className="grid grid-cols-2 gap-2 text-[11px]">
-          <div className="rounded-lg border border-border/60 bg-card p-2">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Čeká na
-            </div>
-            {dependsOn.length === 0 ? (
-              <span className="text-muted-foreground">nic — startuje hned</span>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {dependsOn.map((n) => (
-                  <span key={n} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                    {n}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rounded-lg border border-border/60 bg-card p-2">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Odblokuje
-            </div>
-            {feeds.length === 0 ? (
-              <span className="text-muted-foreground">nic — konec větve</span>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {feeds.map((s) => (
-                  <span key={s.id} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                    {s.id}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
-          <div className="border-b border-border/60 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Fragment DSL · YAML
-          </div>
-          <pre
-            data-testid="step-fragment"
-            className="overflow-x-auto p-2.5 font-mono text-[10.5px] leading-relaxed text-foreground/85"
-          >
-            {stepFragment(step)}
-          </pre>
-        </div>
-      </div>
     </div>
   )
 }

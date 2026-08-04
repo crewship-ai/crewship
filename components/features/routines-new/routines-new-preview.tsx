@@ -19,33 +19,34 @@
 // routine stops being six agent turns in a trench coat.
 
 import * as React from "react"
-import { Columns2, Maximize2, PanelRight, Workflow } from "lucide-react"
+import { Columns2, Maximize2, Workflow } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { SubBar } from "@/components/layout/sub-bar"
 import { DSL_BY_FIDELITY, opacityOf, type Fidelity } from "@/lib/routines-preview/fixtures"
-import { VariantSplit } from "./variant-split"
 import { VariantCanvasFirst } from "./variant-canvas-first"
-import { VariantInspector } from "./variant-inspector"
+import { VariantSplit } from "./variant-split"
 
+// Two, not three. The inspector variant is gone: its right rail
+// answered "what does THIS box do", which the hover card already
+// answers for a glance and the code panel answers in full — a third
+// surface for the same question is a third place to keep in sync.
+//
+// Canvas-first leads because reading a routine is the common act and
+// editing is the occasional one. Split is one click away for the times
+// the job really is watching the code and the graph agree.
 const VARIANTS = [
   {
+    id: "canvas" as const,
+    label: "Plátno napřed",
+    icon: Maximize2,
+    pitch: "Graf přes celou šířku; kód si vezme část plochy, až o něj řekneš.",
+  },
+  {
     id: "split" as const,
-    label: "A · Split",
+    label: "Split",
     icon: Columns2,
     pitch: "Graf a kód vedle sebe, oba pořád vidět.",
-  },
-  {
-    id: "canvas" as const,
-    label: "B · Plátno napřed",
-    icon: Maximize2,
-    pitch: "Graf přes celou šířku, kód se vysune až když editujete.",
-  },
-  {
-    id: "inspector" as const,
-    label: "C · Inspektor",
-    icon: PanelRight,
-    pitch: "Klik na krok → jen jeho fragment, závislosti a záruky.",
   },
 ] as const
 
@@ -57,7 +58,7 @@ const FIDELITIES: { id: Fidelity; label: string; hint: string }[] = [
 ]
 
 export function RoutinesNewPreview() {
-  const [variant, setVariant] = React.useState<VariantId>("split")
+  const [variant, setVariant] = React.useState<VariantId>("canvas")
   const [fidelity, setFidelity] = React.useState<Fidelity>("granular")
 
   const active = VARIANTS.find((v) => v.id === variant) ?? VARIANTS[0]
@@ -115,9 +116,8 @@ export function RoutinesNewPreview() {
       </div>
 
       <div className="min-h-0 flex-1">
-        {variant === "split" && <VariantSplit fidelity={fidelity} />}
         {variant === "canvas" && <VariantCanvasFirst fidelity={fidelity} />}
-        {variant === "inspector" && <VariantInspector fidelity={fidelity} />}
+        {variant === "split" && <VariantSplit fidelity={fidelity} />}
       </div>
     </div>
   )

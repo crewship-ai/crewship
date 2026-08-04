@@ -6,12 +6,14 @@
 // Thesis: reading a routine and editing a routine are different jobs
 // done at different moments, and reading is the far more common one.
 // Give reading the full width — wide DAGs, foreach bodies and fan-in
-// all need it — and let the editor slide over when you actually mean
+// all need it — and let the editor take a share when you actually mean
 // to change something.
 //
-// Cost: you cannot watch the JSON and the graph agree side by side.
-// The drawer overlays the right third, so the graph stays partly
-// visible while editing, but it is a compromise, not the split.
+// The panel is a sibling rather than an overlay, so opening it shrinks
+// the canvas and the graph slides left instead of hiding under it.
+//
+// Cost: opening the editor is a deliberate act. If your job is to watch
+// the code and the graph agree line by line, Split starts you there.
 
 import * as React from "react"
 import { Code2, X } from "lucide-react"
@@ -55,33 +57,39 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
 
   return (
     <div className="flex h-full flex-col overflow-auto">
-      {/* Hero canvas — full width, with the editor as an overlay. */}
-      <div className="relative h-[68vh] min-h-[440px] shrink-0 border-b border-border/60">
-        <DefinitionCanvas
-          dsl={dsl}
-          selectedStepId={selected}
-          onStepSelect={handleSelect}
-          focusStepId={focus}
-        />
+      {/* Hero canvas. The code panel is a SIBLING, not an overlay: as a
+          sibling it takes real width, the canvas shrinks, and the graph
+          slides left into what is still visible. As an overlay it
+          covered the half of the graph the reader was looking at. */}
+      <div className="flex h-[68vh] min-h-[440px] shrink-0 border-b border-border/60">
+        <div className="relative min-w-0 flex-1">
+          <DefinitionCanvas
+            dsl={dsl}
+            selectedStepId={selected}
+            onStepSelect={handleSelect}
+            focusStepId={focus}
+            recenterOnResize
+          />
 
-        <button
-          type="button"
-          onClick={() => setEditing((v) => !v)}
-          className={cn(
-            "absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition-colors",
-            editing
-              ? "border-primary/40 bg-primary/15 text-primary"
-              : "border-border/60 bg-card/85 text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {editing ? <X className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />}
-          {editing ? "Zavřít kód" : "Upravit kód"}
-        </button>
+          <button
+            type="button"
+            onClick={() => setEditing((v) => !v)}
+            className={cn(
+              "absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition-colors",
+              editing
+                ? "border-primary/40 bg-primary/15 text-primary"
+                : "border-border/60 bg-card/85 text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {editing ? <X className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />}
+            {editing ? "Zavřít kód" : "Upravit kód"}
+          </button>
+        </div>
 
-        {/* Drawer. Rendered only while open so CodeMirror is not
-            mounted (and re-measuring) behind an invisible panel. */}
+        {/* Rendered only while open so CodeMirror is not mounted, and
+            re-measuring, behind a panel nobody asked for. */}
         {editing && (
-          <aside className="absolute inset-y-0 right-0 z-[5] w-full border-l border-border/60 bg-background/95 shadow-2xl backdrop-blur md:w-[46%] lg:w-[38%]">
+          <aside className="w-full shrink-0 border-l border-border/60 md:w-[46%] lg:w-[38%]">
             <CodePane
               fidelity={fidelity}
               footnote="Zavři panel a graf se překreslí z uloženého DSL."
