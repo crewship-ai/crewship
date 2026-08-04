@@ -22,6 +22,7 @@ import {
   KeyRound,
   PauseCircle,
   Puzzle,
+  Crosshair,
   ShieldAlert,
   XCircle,
   type LucideIcon,
@@ -30,6 +31,7 @@ import {
 import { cn } from "@/lib/utils"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
+import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 import type { PipelineDSL, TraceStep } from "@/lib/trace/types"
 import {
@@ -62,6 +64,8 @@ interface DefinitionCanvasProps {
   dsl: PipelineDSL
   selectedStepId?: string | null
   onStepSelect?: (id: string | null) => void
+  /** Node to bring into view without a click — driven by the caret. */
+  focusStepId?: string | null
   className?: string
 }
 
@@ -76,6 +80,7 @@ export function DefinitionCanvas({
   dsl,
   selectedStepId = null,
   onStepSelect,
+  focusStepId = null,
   className,
 }: DefinitionCanvasProps) {
   // One run object per mounted canvas. React Flow keys node state off
@@ -97,6 +102,9 @@ export function DefinitionCanvas({
         waitpointTokensByStepId={NO_TOKENS}
         heatmapBuckets={NO_BUCKETS}
         stepMetrics={NO_METRICS}
+        initialFocus="start"
+        centerOnSelect
+        focusStepId={focusStepId}
       />
       <div className="pointer-events-none absolute left-3 top-3 rounded-md border border-border/60 bg-card/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
         Definice · nikoli běh
@@ -113,6 +121,15 @@ interface CodePaneProps {
   fidelity: Fidelity
   /** Shown under the editor; the variants word this differently. */
   footnote?: string
+  /**
+   * Fires with the step the caret is inside, or null between steps.
+   * Already deduped — it only fires when the STEP changes, not on every
+   * caret move, so the caller can drive a viewport with it directly.
+   */
+  onStepAtCaret?: (stepId: string | null) => void
+  /** Renders the follow toggle. Omit for panes with nothing to follow. */
+  follow?: boolean
+  onFollowChange?: (next: boolean) => void
 }
 
 /**
@@ -123,8 +140,17 @@ interface CodePaneProps {
  * to persist. A preview that silently swallows a save is worse than one
  * that admits it is a preview.
  */
-export function CodePane({ fidelity, footnote }: CodePaneProps) {
+export function CodePane({
+  fidelity,
+  footnote,
+  onStepAtCaret,
+  follow,
+  onFollowChange,
+}: CodePaneProps) {
   const source = React.useMemo(() => dslSource(fidelity), [fidelity])
+  // Line spans are a property of the source, so they are computed once
+  // per definition rather than on every keystroke.
+  const ranges = React.useMemo(() => stepLineRanges(source), [source])
   const [dirty, setDirty] = React.useState(false)
   const [saved, setSaved] = React.useState(false)
 
@@ -148,6 +174,21 @@ export function CodePane({ fidelity, footnote }: CodePaneProps) {
     savedTimer.current = setTimeout(() => setSaved(false), 2400)
   }, [])
 
+  // Dedupe here rather than in the caller: the caret fires on every
+  // arrow key, but only a change of STEP is news. Without this the
+  // canvas would be asked to re-centre on the node it is already
+  // centred on, dozens of times a second while someone types.
+  const lastStepRef = React.useRef<string | null>(null)
+  const handleCursorLine = React.useCallback(
+    (line: number) => {
+      const id = stepIdAtLine(ranges, line)
+      if (id === lastStepRef.current) return
+      lastStepRef.current = id
+      onStepAtCaret?.(id)
+    },
+    [ranges, onStepAtCaret],
+  )
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-card/30">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
@@ -168,6 +209,23 @@ export function CodePane({ fidelity, footnote }: CodePaneProps) {
             <CheckCircle2 className="h-3 w-3" />
             doctor ok
           </span>
+          {onFollowChange && (
+            <button
+              type="button"
+              onClick={() => onFollowChange(!follow)}
+              aria-pressed={follow}
+              title="Kurzor v kódu vybírá a vystředí odpovídající krok v grafu"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] font-medium transition-colors",
+                follow
+                  ? "border-primary/40 bg-primary/15 text-primary"
+                  : "border-border/60 text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Crosshair className="h-3 w-3" />
+              Sledovat pohyb
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSave}
@@ -188,6 +246,7 @@ export function CodePane({ fidelity, footnote }: CodePaneProps) {
           language="json"
           onSave={handleSave}
           onDirtyChange={setDirty}
+          onCursorLine={handleCursorLine}
         />
       </div>
       <p className="shrink-0 border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">

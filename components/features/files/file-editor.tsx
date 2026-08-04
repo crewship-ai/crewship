@@ -34,17 +34,35 @@ interface FileEditorProps {
   onSave: (content: string) => void
   onDirtyChange?: (dirty: boolean) => void
   saveRef?: React.MutableRefObject<(() => void) | null>
+  /**
+   * Fires with the 1-indexed line the caret sits on, whenever it moves.
+   *
+   * Lets a caller tie the caret to something outside the editor — the
+   * routine split view uses it to select the graph node the edited
+   * lines define. Fires often (every arrow key), so consumers should
+   * dedupe on whatever they actually derive from the line.
+   */
+  onCursorLine?: (line: number) => void
 }
 
-export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: FileEditorProps) {
+export function FileEditor({
+  code,
+  language,
+  onSave,
+  onDirtyChange,
+  saveRef,
+  onCursorLine,
+}: FileEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onSaveRef = useRef(onSave)
   const onDirtyChangeRef = useRef(onDirtyChange)
+  const onCursorLineRef = useRef(onCursorLine)
   const initialCodeRef = useRef(code)
 
   onSaveRef.current = onSave
   onDirtyChangeRef.current = onDirtyChange
+  onCursorLineRef.current = onCursorLine
   initialCodeRef.current = code
 
   const handleSave = useCallback(() => {
@@ -70,6 +88,12 @@ export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: F
       if (update.docChanged && onDirtyChangeRef.current) {
         const current = update.state.doc.toString()
         onDirtyChangeRef.current(current !== initialCodeRef.current)
+      }
+      // selectionSet covers clicks and arrow keys; docChanged covers
+      // typing, which moves the caret without setting the selection.
+      if ((update.selectionSet || update.docChanged) && onCursorLineRef.current) {
+        const head = update.state.selection.main.head
+        onCursorLineRef.current(update.state.doc.lineAt(head).number)
       }
     })
 

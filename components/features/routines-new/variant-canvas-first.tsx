@@ -30,6 +30,22 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
   const dsl = DSL_BY_FIDELITY[fidelity]
   const [selected, setSelected] = React.useState<string | null>(null)
   const [editing, setEditing] = React.useState(false)
+  const [follow, setFollow] = React.useState(true)
+  const [focus, setFocus] = React.useState<string | null>(null)
+
+  const handleCaret = React.useCallback(
+    (stepId: string | null) => {
+      if (!follow || !stepId) return
+      setSelected(stepId)
+      setFocus(stepId)
+    },
+    [follow],
+  )
+
+  const handleSelect = React.useCallback((id: string | null) => {
+    setSelected(id)
+    setFocus(null)
+  }, [])
 
   return (
     <div className="flex h-full flex-col overflow-auto">
@@ -38,7 +54,8 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
         <DefinitionCanvas
           dsl={dsl}
           selectedStepId={selected}
-          onStepSelect={setSelected}
+          onStepSelect={handleSelect}
+          focusStepId={focus}
         />
 
         <button
@@ -62,6 +79,9 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
             <CodePane
               fidelity={fidelity}
               footnote="Zavři panel a graf se překreslí z uloženého DSL."
+              onStepAtCaret={handleCaret}
+              follow={follow}
+              onFollowChange={setFollow}
             />
           </aside>
         )}

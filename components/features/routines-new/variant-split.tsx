@@ -24,6 +24,29 @@ import {
 export function VariantSplit({ fidelity }: { fidelity: Fidelity }) {
   const dsl = DSL_BY_FIDELITY[fidelity]
   const [selected, setSelected] = React.useState<string | null>(null)
+  const [follow, setFollow] = React.useState(true)
+  // Separate from `selected` on purpose. Selection is a persistent
+  // choice; focus is a one-shot "bring this into view". Merging them
+  // would mean turning follow off could not leave the last selection
+  // highlighted, and that a re-render could re-centre the viewport
+  // after the user had panned away from it.
+  const [focus, setFocus] = React.useState<string | null>(null)
+
+  const handleCaret = React.useCallback(
+    (stepId: string | null) => {
+      if (!follow || !stepId) return
+      setSelected(stepId)
+      setFocus(stepId)
+    },
+    [follow],
+  )
+
+  // A click is its own focus request; clear the caret-driven one so a
+  // later caret move to the SAME step still re-centres.
+  const handleSelect = React.useCallback((id: string | null) => {
+    setSelected(id)
+    setFocus(null)
+  }, [])
 
   return (
     <div className="flex h-full flex-col overflow-auto">
@@ -34,11 +57,17 @@ export function VariantSplit({ fidelity }: { fidelity: Fidelity }) {
           <DefinitionCanvas
             dsl={dsl}
             selectedStepId={selected}
-            onStepSelect={setSelected}
+            onStepSelect={handleSelect}
+            focusStepId={focus}
           />
         </div>
         <div className="min-h-[280px]">
-          <CodePane fidelity={fidelity} />
+          <CodePane
+            fidelity={fidelity}
+            onStepAtCaret={handleCaret}
+            follow={follow}
+            onFollowChange={setFollow}
+          />
         </div>
       </div>
 

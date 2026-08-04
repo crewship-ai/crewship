@@ -73,6 +73,28 @@ const edgeTypes: EdgeTypes = {
 // different topology would be guessing.
 const FIT_VIEW = { padding: 0.18, minZoom: 0.62, maxZoom: 1.15 } as const
 
+// Fallbacks for centring a node before React Flow has measured it —
+// the first click can land before measurement, and half of an
+// unmeasured node is better than centring on its top-left corner.
+// Same numbers buildTraceGraph hands dagre.
+const NODE_W_FALLBACK = 200
+const NODE_H_FALLBACK = 70
+
+/**
+ * The trigger plus the first couple of ranks, for initialFocus="start".
+ *
+ * Ranks are read off the dagre-assigned y, not the step order: a fan-out
+ * puts several nodes on one rank, and showing one of three siblings
+ * would misrepresent the shape at the very moment the reader is forming
+ * their first impression of it.
+ */
+function headNodeIds(nodes: Node[], ranks = 3): string[] {
+  if (nodes.length === 0) return []
+  const ys = Array.from(new Set(nodes.map((n) => Math.round(n.position.y)))).sort((a, b) => a - b)
+  const cutoff = ys[Math.min(ranks, ys.length) - 1]
+  return nodes.filter((n) => Math.round(n.position.y) <= cutoff).map((n) => n.id)
+}
+
 interface TraceCanvasProps {
   run: PipelineRun | null
   dsl: PipelineDSL | null
@@ -93,6 +115,21 @@ interface TraceCanvasProps {
   // + runs and memoizes; passing in keeps the canvas dumb.
   overview?: { nodes: Node[]; edges: Edge[] } | null
   onSelectRun?: (runId: string) => void
+  // ── Reading aids, all opt-in ────────────────────────────────────
+  // Activity keeps its existing behaviour by default; the routine
+  // detail turns these on, where the graph is a document you read from
+  // the top rather than a run you are watching.
+  //
+  // "start" opens on the trigger and the first ranks instead of fitting
+  // the whole routine — a 14-step graph fitted whole is a graph you
+  // start reading in the middle.
+  initialFocus?: "all" | "start"
+  // Centre a clicked node instead of leaving it wherever it was. Makes
+  // the click say "show me this and its neighbours".
+  centerOnSelect?: boolean
+  // Centre this node when the id changes, without a click. Driven by
+  // the editor caret: edit a step's lines, that step comes into view.
+  focusStepId?: string | null
 }
 
 export function TraceCanvas(props: TraceCanvasProps) {
@@ -200,6 +237,9 @@ function CanvasInner({
   waitpointTokensByStepId,
   heatmapBuckets,
   stepMetrics,
+  initialFocus = "all",
+  centerOnSelect = false,
+  focusStepId = null,
 }: TraceCanvasProps & { run: PipelineRun }) {
   const graphData = useMemo(
     () =>
@@ -231,6 +271,24 @@ function CanvasInner({
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
+  const { setCenter, getZoom } = useReactFlow()
+
+  // Centre a node without changing zoom. Used by both the click handler
+  // and the caret follower, so they cannot drift apart.
+  const centerNode = useCallback(
+    (id: string, duration = 320) => {
+      const node = graphData.nodes.find((n) => n.id === id)
+      if (!node) return
+      const w = (node.measured?.width ?? node.width ?? NODE_W_FALLBACK) / 2
+      const h = (node.measured?.height ?? node.height ?? NODE_H_FALLBACK) / 2
+      setCenter(node.position.x + w, node.position.y + h, {
+        zoom: Math.max(getZoom(), FIT_VIEW.minZoom),
+        duration,
+      })
+    },
+    [graphData.nodes, setCenter, getZoom],
+  )
+
   // Detect "different run" vs "same run, status changed". When the
   // run changes we reset positions + fitView. When the same run gets
   // re-rendered (status update), we preserve user-dragged positions.
@@ -245,7 +303,20 @@ function CanvasInner({
       setEdges(graphData.edges)
       // Slight delay so React Flow has the new graph in state
       // before we ask it to fit view.
-      const t = setTimeout(() => fitView({ ...FIT_VIEW, duration: 400 }), 50)
+      const t = setTimeout(() => {
+        if (initialFocus === "start") {
+          // Fit the trigger plus the first couple of ranks. fitView
+          // centres what it is given, so handing it the head of the
+          // graph lands the reader at the beginning at a readable zoom
+          // rather than in the middle of the routine at a tiny one.
+          const head = headNodeIds(graphData.nodes)
+          if (head.length > 0) {
+            fitView({ ...FIT_VIEW, nodes: head.map((id) => ({ id })), duration: 400 })
+            return
+          }
+        }
+        fitView({ ...FIT_VIEW, duration: 400 })
+      }, 50)
       return () => clearTimeout(t)
     }
 
@@ -262,7 +333,7 @@ function CanvasInner({
       })
     })
     setEdges(graphData.edges)
-  }, [graphData, run.id, setNodes, setEdges, fitView])
+  }, [graphData, run.id, setNodes, setEdges, fitView, initialFocus])
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -271,9 +342,24 @@ function CanvasInner({
         return
       }
       onStepSelect(node.id)
+      if (centerOnSelect) centerNode(node.id)
     },
-    [onStepSelect],
+    [onStepSelect, centerOnSelect, centerNode],
   )
+
+  // Caret follower. Centres whenever the requested id CHANGES, not on
+  // every render: the caret moves constantly while typing, and
+  // re-centring on the node already centred would fight the user for
+  // control of the viewport.
+  const lastFocusRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!focusStepId || focusStepId === lastFocusRef.current) {
+      lastFocusRef.current = focusStepId
+      return
+    }
+    lastFocusRef.current = focusStepId
+    centerNode(focusStepId)
+  }, [focusStepId, centerNode])
 
   const onPaneClick = useCallback(() => {
     onStepSelect(null)
