@@ -241,8 +241,10 @@ func buildDocument(routes []route) map[string]any {
 	components := responseComponents()
 	schemas := components["schemas"].(map[string]any)
 	_, crewWorkspaceComponentsV1 := crewWorkspaceGETSchemaCatalogV1()
+	_, credentialComponents := credentialsConnectorsAuthProfileSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
+		credentialComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -368,6 +370,12 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	for key, schema := range observabilityPaymentsSchemaCatalog() {
 		result[key] = schema
+	}
+	credentialCatalog, _ := credentialsConnectorsAuthProfileSchemaCatalog()
+	for _, domain := range credentialCatalog {
+		for key, schema := range domain {
+			result[key] = schema
+		}
 	}
 	crewWorkspaceCatalogV1, _ := crewWorkspaceGETSchemaCatalogV1()
 	for _, domain := range crewWorkspaceCatalogV1 {

@@ -8,9 +8,9 @@
     "cli_exact_docs": 723,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 364,
-    "api_with_concrete_response_schemas": 95,
-    "api_generic_response_schemas": 436,
+    "api_with_test_signals": 367,
+    "api_with_concrete_response_schemas": 224,
+    "api_generic_response_schemas": 307,
     "cli_with_test_signals": 709
   },
   "api": [
@@ -621,8 +621,8 @@
         "internal/api/admin_observability_keysource_test.go",
         "internal/api/admin_observability_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1772,12 +1772,13 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/admin_authz_floor_test.go",
         "internal/api/memory_pipeline_e2e_test.go",
         "internal/api/memory_stats_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1790,6 +1791,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/admin_authz_floor_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/admin_authz_floor_test.go",
             "internal/api/memory_pipeline_e2e_test.go",
             "internal/api/memory_stats_handler_test.go"
@@ -2132,8 +2134,8 @@
         "cmd/crewship/cmd_admin_security_posture_test.go",
         "internal/api/admin_security_posture_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2170,13 +2172,14 @@
         "cmd/crewship/cmd_admin_stats_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "internal/api/admin_authz_floor_test.go",
         "internal/api/admin_stats_crews_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2192,6 +2195,7 @@
             "cmd/crewship/cmd_admin_stats_test.go",
             "cmd/crewship/cmd_system_cov_test.go",
             "cmd/crewship/cmd_system_format_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "internal/api/admin_authz_floor_test.go",
             "internal/api/admin_stats_crews_test.go",
@@ -3526,8 +3530,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3556,8 +3560,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3613,8 +3617,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3643,8 +3647,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4290,13 +4294,13 @@
         "cmd/crewship/cmd_format_sweep_batch5_test.go",
         "cmd/crewship/cmd_open_test.go",
         "cmd/crewship/cmd_quickactions_cov_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/agents_hire_approvals_test.go",
         "internal/api/agents_hire_recovery_test.go",
-        "internal/api/approvals_handler_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4314,9 +4318,9 @@
             "cmd/crewship/cmd_format_sweep_batch5_test.go",
             "cmd/crewship/cmd_open_test.go",
             "cmd/crewship/cmd_quickactions_cov_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/agents_hire_approvals_test.go",
             "internal/api/agents_hire_recovery_test.go",
-            "internal/api/approvals_handler_test.go",
             "…"
           ]
         }
@@ -4340,8 +4344,8 @@
         "cmd/crewship/cmd_approvals_cov_test.go",
         "internal/api/approvals_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4375,11 +4379,12 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/agents_hire_recovery_test.go",
         "internal/harbormaster/decide_tx_reload_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4391,6 +4396,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/agents_hire_recovery_test.go",
             "internal/harbormaster/decide_tx_reload_test.go"
           ]
@@ -4411,8 +4417,8 @@
         "docs/api-reference/approvals.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4443,11 +4449,12 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/agents_hire_recovery_test.go",
         "internal/harbormaster/decide_tx_reload_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4460,6 +4467,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/agents_hire_recovery_test.go",
             "internal/harbormaster/decide_tx_reload_test.go"
           ]
@@ -4541,12 +4549,12 @@
         "cmd/crewship/cmd_seed_cov2_test.go",
         "cmd/crewship/cmd_seed_cov_test.go",
         "cmd/crewship/cmd_token_cov_test.go",
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/cli_token_test.go",
-        "internal/api/ratelimit_self_service_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4565,8 +4573,8 @@
             "cmd/crewship/cmd_seed_cov2_test.go",
             "cmd/crewship/cmd_seed_cov_test.go",
             "cmd/crewship/cmd_token_cov_test.go",
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/cli_token_test.go",
-            "internal/api/ratelimit_self_service_test.go",
             "…"
           ]
         }
@@ -4596,8 +4604,8 @@
         "cmd/crewship/cmd_token_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4638,13 +4646,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_token_cov_test.go",
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/cli_token_test.go",
         "internal/api/ratelimit_self_service_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4658,6 +4667,7 @@
           "source_file": "internal/api/cli_token_test.go",
           "test_signals": [
             "cmd/crewship/cmd_token_cov_test.go",
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/cli_token_test.go",
             "internal/api/ratelimit_self_service_test.go",
             "internal/api/route_read_scope_invariant_test.go",
@@ -4682,8 +4692,8 @@
         "docs/api-reference/auth.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5148,10 +5158,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/crewship/cmd_crew_cache_cov_test.go"
+        "cmd/crewship/cmd_crew_cache_cov_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5163,7 +5174,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "cmd/crewship/cmd_crew_cache_cov_test.go"
+            "cmd/crewship/cmd_crew_cache_cov_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go"
           ]
         }
       }
@@ -5178,8 +5190,8 @@
         "docs/api-reference/provisioning.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5472,6 +5484,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/cartographer_fork_delete_test.go"
       ],
       "concrete_response_schema": false,
@@ -5488,6 +5501,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/cartographer_fork_delete_test.go"
           ]
         }
@@ -5508,10 +5522,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/cartographer_fork_delete_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5524,6 +5539,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/cartographer_fork_delete_test.go"
           ]
         }
@@ -5546,8 +5562,8 @@
       "test_signals": [
         "internal/api/cartographer_fork_delete_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5579,8 +5595,8 @@
         "docs/api-reference/checkpoints.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5611,17 +5627,17 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_parity_test.go",
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/connectors_handler_cov_test.go",
         "internal/api/connectors_handler_test.go",
         "internal/api/connectors_routes_test.go",
         "internal/api/connectors_verify_sql_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/connectors/loader_test.go",
-        "internal/connectors/manifest_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5635,13 +5651,13 @@
           "source_file": "internal/api/connectors_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_parity_test.go",
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/connectors_handler_cov_test.go",
             "internal/api/connectors_handler_test.go",
             "internal/api/connectors_routes_test.go",
             "internal/api/connectors_verify_sql_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/connectors/loader_test.go",
-            "internal/connectors/manifest_test.go",
             "…"
           ]
         }
@@ -5660,11 +5676,12 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/connectors_routes_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5676,6 +5693,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/connectors_routes_test.go",
             "internal/api/route_read_scope_invariant_test.go"
           ]
@@ -5696,10 +5714,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/connectors_routes_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5712,6 +5731,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_crews.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/connectors_routes_test.go"
           ]
         }
@@ -5733,8 +5753,8 @@
       "test_signals": [
         "internal/api/connectors_routes_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6083,8 +6103,8 @@
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6181,8 +6201,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6377,8 +6397,8 @@
         "internal/api/ratelimit_cli_exemption_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6418,13 +6438,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6437,6 +6458,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6459,6 +6481,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
@@ -6478,6 +6501,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6500,13 +6524,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6519,6 +6544,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6541,13 +6567,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6560,6 +6587,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6657,8 +6685,8 @@
         "internal/api/credential_fields_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6798,8 +6826,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6833,8 +6861,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6897,8 +6925,8 @@
       "test_signals": [
         "internal/api/credentials_test_stored_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7418,11 +7446,11 @@
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
-        "internal/api/crew_policy_test.go",
-        "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
       "concrete_response_schema": false,
@@ -7442,11 +7470,11 @@
             "cmd/crewship/cmd_crew_avatar_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
-            "internal/api/crew_policy_test.go",
-            "internal/api/crew_provisioning_durable_test.go",
             "…"
           ]
         }
@@ -7497,11 +7525,11 @@
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
-        "internal/api/crew_policy_test.go",
-        "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7521,11 +7549,11 @@
             "cmd/crewship/cmd_crew_avatar_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
-            "internal/api/crew_policy_test.go",
-            "internal/api/crew_provisioning_durable_test.go",
             "…"
           ]
         }
@@ -7576,11 +7604,11 @@
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
-        "internal/api/crew_policy_test.go",
-        "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
       "concrete_response_schema": false,
@@ -7600,11 +7628,11 @@
             "cmd/crewship/cmd_crew_avatar_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
-            "internal/api/crew_policy_test.go",
-            "internal/api/crew_provisioning_durable_test.go",
             "…"
           ]
         }
@@ -7655,11 +7683,11 @@
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
-        "internal/api/crew_policy_test.go",
-        "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
       "concrete_response_schema": false,
@@ -7679,11 +7707,11 @@
             "cmd/crewship/cmd_crew_avatar_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
-            "internal/api/crew_policy_test.go",
-            "internal/api/crew_provisioning_durable_test.go",
             "…"
           ]
         }
@@ -7739,8 +7767,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7767,8 +7795,12 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7778,7 +7810,11 @@
           "statuses": true
         },
         "semantic_runtime": {
-          "openapi_operation": true
+          "openapi_operation": true,
+          "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go"
+          ]
         }
       }
     },
@@ -7798,8 +7834,8 @@
       "test_signals": [
         "internal/api/crew_container_status_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7829,8 +7865,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7901,8 +7937,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8053,8 +8089,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8082,8 +8118,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8112,8 +8148,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8141,8 +8177,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8170,8 +8206,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8199,8 +8235,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8227,8 +8263,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8284,8 +8320,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8383,8 +8419,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8441,8 +8477,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8469,8 +8505,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8527,8 +8563,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8613,8 +8649,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8698,8 +8734,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8730,8 +8766,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8865,8 +8901,8 @@
         "internal/api/missions_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8985,8 +9021,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9244,8 +9280,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9315,8 +9351,8 @@
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9392,8 +9428,8 @@
         "internal/api/crew_policy_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9464,8 +9500,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9530,8 +9566,8 @@
         "internal/api/crew_provisioning_progress_test.go",
         "internal/api/crew_provisioning_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9677,8 +9713,8 @@
         "internal/api/crew_service_inventory_test.go",
         "internal/provider/docker/service_inventory_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9708,8 +9744,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10006,14 +10042,15 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_feature_flag_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/feature_flags_handler_test.go",
         "internal/api/flags_templates_consolidate_cov_test.go",
         "internal/api/route_scope_invariant_test.go",
         "internal/api/unauth_reachability_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10027,6 +10064,7 @@
           "source_file": "internal/api/feature_flags_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_feature_flag_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/feature_flags_handler_test.go",
             "internal/api/flags_templates_consolidate_cov_test.go",
             "internal/api/route_scope_invariant_test.go",
@@ -10053,14 +10091,15 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_feature_flag_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/feature_flags_handler_test.go",
         "internal/api/flags_templates_consolidate_cov_test.go",
         "internal/api/route_scope_invariant_test.go",
         "internal/api/unauth_reachability_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10074,6 +10113,7 @@
           "source_file": "internal/api/feature_flags_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_feature_flag_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/feature_flags_handler_test.go",
             "internal/api/flags_templates_consolidate_cov_test.go",
             "internal/api/route_scope_invariant_test.go",
@@ -10141,8 +10181,8 @@
         "cmd/crewship/cmd_feature_flag_cov_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10216,8 +10256,8 @@
       "test_signals": [
         "internal/manifest/kinds/feature_flag_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11019,8 +11059,8 @@
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11721,8 +11761,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11750,8 +11790,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11779,8 +11819,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11808,8 +11848,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11987,8 +12027,8 @@
         "cmd/crewship/cmd_inspect_cov_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12034,8 +12074,8 @@
         "internal/api/journal_handler_cov2_test.go",
         "internal/api/journal_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12082,8 +12122,8 @@
         "internal/api/journal_lookup_cov_test.go",
         "internal/api/journal_lookup_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12125,8 +12165,8 @@
         "cmd/crewship/cmd_spend_test.go",
         "internal/api/journal_handler_spend_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12208,8 +12248,8 @@
         "docs/api-reference/journal.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12238,8 +12278,8 @@
         "docs/api-reference/journal.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12607,8 +12647,8 @@
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "internal/api/notification_prefs_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12641,8 +12681,8 @@
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "internal/api/notification_prefs_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12812,8 +12852,8 @@
         "cmd/crewship/cmd_memory_health_test.go",
         "internal/api/memory_health_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12979,8 +13019,8 @@
         "docs/api-reference/memory.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13036,11 +13076,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/metrics_fillers_cov_test.go",
         "internal/api/metrics_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13054,6 +13095,7 @@
           "source_file": "internal/api/metrics_fillers_cov_test.go",
           "test_signals": [
             "cmd/crewship/cmd_admin_extras_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/metrics_fillers_cov_test.go",
             "internal/api/metrics_handler_test.go"
           ]
@@ -13153,8 +13195,8 @@
         "internal/api/missions_test.go",
         "internal/api/query_messaging_mission_cov_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13248,10 +13290,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13264,6 +13307,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -13285,10 +13329,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13301,6 +13346,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -13375,11 +13421,11 @@
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/agent_notification_channels_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/notification_admin_scope_test.go",
-        "internal/api/notification_channels_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13399,11 +13445,11 @@
             "cmd/crewship/cmd_agent_channels_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/agent_notification_channels_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
             "internal/api/notification_admin_scope_test.go",
-            "internal/api/notification_channels_test.go",
             "…"
           ]
         }
@@ -13427,15 +13473,15 @@
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/agent_notification_channels_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/notification_admin_scope_test.go",
-        "internal/api/notification_channels_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13451,11 +13497,11 @@
             "cmd/crewship/cmd_agent_channels_test.go",
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/agent_notification_channels_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
             "internal/api/notification_admin_scope_test.go",
-            "internal/api/notification_channels_test.go",
             "…"
           ]
         }
@@ -13478,8 +13524,8 @@
       "test_signals": [
         "internal/api/notification_testdraft_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13514,8 +13560,8 @@
       "test_signals": [
         "internal/api/agent_notification_channels_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13550,8 +13596,8 @@
       "test_signals": [
         "internal/api/agent_notification_channels_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13685,8 +13731,8 @@
         "docs/api-reference/notification-channels.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13714,6 +13760,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/notification_deliveries_test.go",
         "internal/api/notification_deliveries_wire_test.go"
       ],
@@ -13732,6 +13779,7 @@
           "source_file": "internal/api/notification_deliveries_test.go",
           "test_signals": [
             "cmd/crewship/cmd_notifychannel_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/notification_deliveries_test.go",
             "internal/api/notification_deliveries_wire_test.go"
           ]
@@ -13788,8 +13836,8 @@
         "docs/guides/notifications.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13884,8 +13932,8 @@
       "test_signals": [
         "internal/api/notification_outbound_handlers_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14502,8 +14550,8 @@
         "docs/api-reference/paymaster.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14538,11 +14586,12 @@
         "cmd/crewship/cmd_format_sweep_batch1_test.go",
         "cmd/crewship/cmd_format_sweep_batch5_test.go",
         "cmd/crewship/cmd_paymaster_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/paymaster_handler_cov_test.go",
         "internal/api/paymaster_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14560,6 +14609,7 @@
             "cmd/crewship/cmd_format_sweep_batch1_test.go",
             "cmd/crewship/cmd_format_sweep_batch5_test.go",
             "cmd/crewship/cmd_paymaster_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/paymaster_handler_cov_test.go",
             "internal/api/paymaster_handler_test.go"
           ]
@@ -14579,8 +14629,8 @@
         "docs/api-reference/paymaster.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14617,8 +14667,8 @@
         "internal/api/paymaster_handler_cov_test.go",
         "internal/api/paymaster_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14667,8 +14717,8 @@
         "internal/api/paymaster_handler_cov_test.go",
         "internal/api/paymaster_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14749,10 +14799,11 @@
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_presence_cov_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/presence_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14767,6 +14818,7 @@
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch2_test.go",
             "cmd/crewship/cmd_presence_cov_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/presence_handler_test.go"
           ]
         }
@@ -14799,7 +14851,7 @@
         "cmd/crewship/cmd_seed_data_issues_cov_test.go",
         "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -14823,7 +14875,7 @@
             "cmd/crewship/cmd_seed_data_issues_cov_test.go",
             "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "…"
           ]
         }
@@ -14856,11 +14908,11 @@
         "cmd/crewship/cmd_seed_data_issues_cov_test.go",
         "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14880,7 +14932,7 @@
             "cmd/crewship/cmd_seed_data_issues_cov_test.go",
             "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "…"
           ]
         }
@@ -14991,8 +15043,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15103,8 +15155,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15138,17 +15190,17 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_parity_test.go",
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/connectors_routes_test.go",
         "internal/api/recipes_cov_test.go",
         "internal/api/recipes_feedback_cov_test.go",
         "internal/api/recipes_get_test.go",
         "internal/api/recipes_test.go",
         "internal/api/route_read_scope_invariant_test.go",
-        "internal/manifest/apply_kinds_cov2_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15162,13 +15214,13 @@
           "source_file": "internal/api/recipes_feedback_cov_test.go",
           "test_signals": [
             "cmd/crewship/cmd_parity_test.go",
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/connectors_routes_test.go",
             "internal/api/recipes_cov_test.go",
             "internal/api/recipes_feedback_cov_test.go",
             "internal/api/recipes_get_test.go",
             "internal/api/recipes_test.go",
             "internal/api/route_read_scope_invariant_test.go",
-            "internal/manifest/apply_kinds_cov2_test.go",
             "…"
           ]
         }
@@ -15188,11 +15240,12 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/manifest/kinds/recipe_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15204,6 +15257,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/manifest/kinds/recipe_test.go"
           ]
@@ -15227,8 +15281,8 @@
       "test_signals": [
         "internal/manifest/kinds/recipe_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15259,10 +15313,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15274,6 +15329,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "internal/api/route_read_scope_invariant_test.go"
           ]
         }
@@ -15647,8 +15703,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/runtime_capacity_handler_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16278,15 +16334,15 @@
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/admin_authz_floor_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/runtime_install_links_test.go",
         "internal/api/system_runtime_inventory_test.go",
-        "internal/api/unauth_reachability_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16302,11 +16358,11 @@
             "cmd/crewship/cmd_system_cov_test.go",
             "cmd/crewship/cmd_system_format_test.go",
             "cmd/crewship/cmd_system_runtime_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/admin_authz_floor_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/runtime_install_links_test.go",
             "internal/api/system_runtime_inventory_test.go",
-            "internal/api/unauth_reachability_test.go",
             "…"
           ]
         }
@@ -16845,13 +16901,14 @@
         "cmd/crewship/cmd_auth_test.go",
         "cmd/crewship/cmd_preferences_privacy_cov_test.go",
         "cmd/crewship/cmd_privacy_user_model_test.go",
+        "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/ratelimit_self_service_test.go",
         "internal/api/users_avatar_test.go",
         "internal/api/users_avatar_traversal_test.go",
         "internal/api/users_me_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16867,6 +16924,7 @@
             "cmd/crewship/cmd_auth_test.go",
             "cmd/crewship/cmd_preferences_privacy_cov_test.go",
             "cmd/crewship/cmd_privacy_user_model_test.go",
+            "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/ratelimit_self_service_test.go",
             "internal/api/users_avatar_test.go",
             "internal/api/users_avatar_traversal_test.go",
@@ -16968,8 +17026,8 @@
         "internal/api/ratelimit_self_service_test.go",
         "internal/api/users_me_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17737,6 +17795,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
@@ -17757,6 +17816,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_path_query_test.go",
             "internal/api/route_scope_invariant_test.go"
@@ -17789,6 +17849,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
@@ -17809,6 +17870,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_path_query_test.go",
             "internal/api/route_scope_invariant_test.go"
@@ -17841,6 +17903,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
@@ -17861,6 +17924,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_path_query_test.go",
             "internal/api/route_scope_invariant_test.go"
@@ -17882,8 +17946,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17943,8 +18007,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18002,8 +18066,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18119,8 +18183,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18246,8 +18310,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18274,8 +18338,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18697,10 +18761,11 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18713,6 +18778,7 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -18730,8 +18796,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18787,8 +18853,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19123,6 +19189,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
       "concrete_response_schema": false,
@@ -19140,6 +19207,7 @@
           "source_file": "internal/api/router_pipelines.go",
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -19162,10 +19230,11 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19179,6 +19248,7 @@
           "source_file": "internal/api/router_pipelines.go",
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -19227,8 +19297,11 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "test_signals": [
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19239,7 +19312,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_pipelines.go"
+          "source_file": "internal/api/router_pipelines.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go"
+          ]
         }
       }
     },
@@ -19256,6 +19332,9 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go"
+      ],
       "concrete_response_schema": false,
       "generic_response_schema": true,
       "contract": {
@@ -19268,7 +19347,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_pipelines.go"
+          "source_file": "internal/api/router_pipelines.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go"
+          ]
         }
       }
     },
@@ -19284,8 +19366,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19402,8 +19484,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19429,8 +19511,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19925,8 +20007,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19953,8 +20035,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20015,8 +20097,8 @@
       "test_signals": [
         "internal/api/cross_workspace_path_query_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
