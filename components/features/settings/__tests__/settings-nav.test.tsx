@@ -269,7 +269,7 @@ describe("SettingsLayout deep-link into a section that moved", () => {
 // The tab was read once, in a useState initializer. Standing on
 // /settings?tab=members and following another settings link — from ⌘K, from a
 // doc, from anywhere — changed the URL and nothing else, because this layout
-// does not unmount between them. Reported by CodeRabbit.
+// does not unmount between them.
 describe("SettingsLayout — a changed link on a mounted page", () => {
   beforeEach(() => cleanup())
 

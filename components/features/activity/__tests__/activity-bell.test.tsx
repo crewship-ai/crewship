@@ -341,8 +341,7 @@ describe("mock parity", () => {
 // makes a row a <button> when it has an onClick and no actions, so that row
 // put an <a> inside a <button>: invalid markup, a React validateDOMNesting
 // warning, and activation the browsers disagree about. The kit documents this
-// rule for `actions` and this row broke it two files away. Reported by
-// CodeRabbit.
+// rule for `actions` and this row broke it two files away.
 describe("<ActivityBell> recent rows — markup", () => {
   beforeEach(() => {
     h.runs = []

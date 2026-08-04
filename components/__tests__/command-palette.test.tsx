@@ -301,7 +301,7 @@ describe("CommandPalette — skills", () => {
   it("opens the skill, which has had a detail route all along", async () => {
     // This row landed on /skills for the whole PR, excused as "that surface is
     // being reworked" — but /skills/[skillId] exists and the detail panel
-    // already links to it. Reported by CodeRabbit.
+    // already links to it.
     FIXTURES["/skills"] = [
       { id: "sk1", name: "Routine Author", slug: "ra", display_name: null, category: "AUTOMATION" },
     ]

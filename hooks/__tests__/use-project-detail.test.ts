@@ -130,9 +130,9 @@ describe("useProjectDetail — initialProjectId", () => {
 // The "apply once" latch existed to survive the gap before the project list
 // arrives. It also swallowed every later link: on /issues?project=A, opening
 // ⌘K and picking project B changed the URL and nothing else, because the
-// component never unmounts and the latch was already set. Reported by
-// CodeRabbit; it is the more common path of the two, since the palette is
-// most reachable from a page you are already on.
+// component never unmounts and the latch was already set. It is the more
+// common path of the two, since the palette is most reachable from a page you
+// are already on.
 describe("useProjectDetail — a changed link on a mounted page", () => {
   it("follows a new id without a remount", () => {
     const { result, rerender } = renderHook(
