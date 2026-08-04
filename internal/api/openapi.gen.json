@@ -8816,6 +8816,700 @@
         },
         "type": "array"
       },
+      "WorkflowBatchRunRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "inputs": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "metadata": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "tags": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tier_override": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowBudgetRequest": {
+        "properties": {
+          "monthly_budget_usd": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowCheckpointRequest": {
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowEmptyRequest": {
+        "properties": {},
+        "type": "object"
+      },
+      "WorkflowEscalationResolveRequest": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "redirect_to": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowMilestoneCreateRequest": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowMilestoneUpdateRequest": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowMissionCreateRequest": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_agent_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workflow_template": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowMissionUpdateRequest": {
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "plan": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowPipelineImportRequest": {
+        "properties": {
+          "author_crew_id": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "pipeline": {
+            "properties": {
+              "definition": {},
+              "description": {
+                "type": "string"
+              },
+              "dsl_version": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowPipelineRunRequest": {
+        "properties": {
+          "debounce_key": {
+            "type": "string"
+          },
+          "debounce_max_seconds": {
+            "type": "integer"
+          },
+          "debounce_window_seconds": {
+            "type": "integer"
+          },
+          "delay_seconds": {
+            "type": "integer"
+          },
+          "idempotency_key_ttl_seconds": {
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tier_override": {
+            "type": "string"
+          },
+          "triggered_by_id": {
+            "type": "string"
+          },
+          "triggered_via": {
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowPipelineSaveRequest": {
+        "properties": {
+          "author_crew_id": {
+            "type": "string"
+          },
+          "change_summary": {
+            "type": "string"
+          },
+          "definition": {},
+          "description": {
+            "type": "string"
+          },
+          "last_test_run_at": {
+            "type": "string"
+          },
+          "last_test_run_passed": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "save_token": {
+            "type": "string"
+          },
+          "skip_governance_gate": {
+            "type": "boolean"
+          },
+          "skip_test_gate": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowRecurringIssueCreateRequest": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "cron_expression": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "labels_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowRecurringIssueUpdateRequest": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cron_expression": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "labels_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowReplayRequest": {
+        "properties": {
+          "pinned_version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowRollbackRequest": {
+        "properties": {
+          "target_version": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowRunMetadataRequest": {
+        "properties": {
+          "append": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "increment": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "set": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowScheduleRequest": {
+        "properties": {
+          "catchup_policy": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "max_consecutive_failures": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target_pipeline_id": {
+            "type": "string"
+          },
+          "target_pipeline_slug": {
+            "type": "string"
+          },
+          "target_pipeline_version": {
+            "type": "integer"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "wake_fail_closed": {
+            "type": "boolean"
+          },
+          "wake_inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "wake_pipeline_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "wake_pipeline_slug": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowSignalRequest": {
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowStepOverrideRequest": {
+        "properties": {
+          "model_override": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowStepRunRequest": {
+        "properties": {
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "step_outputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "tier_override": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowTagsRequest": {
+        "properties": {
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowTaskCreateRequest": {
+        "properties": {
+          "assigned_agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "max_iterations": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "task_order": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowTaskUpdateRequest": {
+        "properties": {
+          "assigned_agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "depends_on": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "estimated_cost": {
+            "nullable": true,
+            "type": "number"
+          },
+          "max_iterations": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "output_path": {
+            "nullable": true,
+            "type": "string"
+          },
+          "result_summary": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "token_count": {
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowTestRunRequest": {
+        "properties": {
+          "author_crew_id": {
+            "type": "string"
+          },
+          "definition": {},
+          "sample_inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowTriageRuleCreateRequest": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "labels_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "match_type": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowTriageRuleUpdateRequest": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "labels_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "match_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pattern": {
+            "nullable": true,
+            "type": "string"
+          },
+          "position": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowWaitpointApprovalRequest": {
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "comment": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkflowWaitpointCallbackRequest": {
+        "properties": {
+          "approved": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "payload": {}
+        },
+        "type": "object"
+      },
       "Workspace": {
         "properties": {
           "_count": {
@@ -40719,7 +41413,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowCheckpointRequest"
               }
             }
           }
@@ -40729,14 +41423,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "new_checkpoint_id": {
-                      "type": "string"
-                    },
-                    "new_mission_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -40747,14 +41433,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "new_checkpoint_id": {
-                      "type": "string"
-                    },
-                    "new_mission_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -40945,7 +41623,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -40955,79 +41633,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "checkpoint": {
-                      "properties": {
-                        "created_at": {
-                          "type": "string"
-                        },
-                        "created_by": {
-                          "type": "string"
-                        },
-                        "crew_id": {
-                          "type": "string"
-                        },
-                        "fork_of": {
-                          "type": "string"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "journal_cursor": {
-                          "type": "string"
-                        },
-                        "label": {
-                          "type": "string"
-                        },
-                        "mission_id": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "properties": {
-                            "agent_memory": {
-                              "additionalProperties": {
-                                "type": "string"
-                              },
-                              "type": "object"
-                            },
-                            "crew_container_id": {
-                              "type": "string"
-                            },
-                            "meta": {
-                              "additionalProperties": true,
-                              "type": "object"
-                            },
-                            "open_assignments": {
-                              "items": {
-                                "type": "string"
-                              },
-                              "type": "array"
-                            },
-                            "pending_tasks": {
-                              "items": {
-                                "type": "string"
-                              },
-                              "type": "array"
-                            }
-                          },
-                          "type": "object"
-                        },
-                        "workspace_id": {
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "journal_cursor": {
-                      "type": "string"
-                    },
-                    "warn_divergence": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -57205,7 +57810,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowMissionCreateRequest"
               }
             }
           }
@@ -57215,7 +57820,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -57225,7 +57830,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -57709,7 +58314,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowMissionUpdateRequest"
               }
             }
           }
@@ -57719,7 +58324,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionUpdatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -57887,7 +58492,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -57897,7 +58502,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionClonedV1"
+                  "type": "object"
                 }
               }
             },
@@ -57907,7 +58512,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionClonedV1"
+                  "type": "object"
                 }
               }
             },
@@ -58075,7 +58680,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -58085,7 +58690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionRestartedV1"
+                  "type": "object"
                 }
               }
             },
@@ -58283,7 +58888,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -58293,7 +58898,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionResumedV1"
+                  "type": "object"
                 }
               }
             },
@@ -58521,7 +59126,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -58531,7 +59136,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionStartedV1"
+                  "type": "object"
                 }
               }
             },
@@ -58759,7 +59364,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowTaskCreateRequest"
               }
             }
           }
@@ -58769,7 +59374,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionTaskCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -58779,7 +59384,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionTaskCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -58955,7 +59560,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowTaskUpdateRequest"
               }
             }
           }
@@ -58965,7 +59570,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionTaskUpdatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -62072,7 +62677,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEscalationResolveRequest"
               }
             }
           }
@@ -62082,17 +62687,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "action": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -76917,7 +77511,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowMilestoneUpdateRequest"
               }
             }
           }
@@ -76927,43 +77521,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "done_count": {
-                      "type": "integer"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "issue_count": {
-                      "type": "integer"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "position": {
-                      "type": "integer"
-                    },
-                    "project_id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "target_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -77900,7 +78457,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowCheckpointRequest"
               }
             }
           }
@@ -77910,65 +78467,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "created_by": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "type": "string"
-                    },
-                    "fork_of": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "journal_cursor": {
-                      "type": "string"
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "mission_id": {
-                      "type": "string"
-                    },
-                    "state": {
-                      "properties": {
-                        "agent_memory": {
-                          "additionalProperties": {
-                            "type": "string"
-                          },
-                          "type": "object"
-                        },
-                        "crew_container_id": {
-                          "type": "string"
-                        },
-                        "meta": {
-                          "additionalProperties": true,
-                          "type": "object"
-                        },
-                        "open_assignments": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        "pending_tasks": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "workspace_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -77979,65 +78477,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "created_by": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "type": "string"
-                    },
-                    "fork_of": {
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "journal_cursor": {
-                      "type": "string"
-                    },
-                    "label": {
-                      "type": "string"
-                    },
-                    "mission_id": {
-                      "type": "string"
-                    },
-                    "state": {
-                      "properties": {
-                        "agent_memory": {
-                          "additionalProperties": {
-                            "type": "string"
-                          },
-                          "type": "object"
-                        },
-                        "crew_container_id": {
-                          "type": "string"
-                        },
-                        "meta": {
-                          "additionalProperties": true,
-                          "type": "object"
-                        },
-                        "open_assignments": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        "pending_tasks": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "workspace_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -86091,7 +86530,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowMilestoneCreateRequest"
               }
             }
           }
@@ -86101,43 +86540,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "done_count": {
-                      "type": "integer"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "issue_count": {
-                      "type": "integer"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "position": {
-                      "type": "integer"
-                    },
-                    "project_id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "target_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -86148,43 +86550,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "done_count": {
-                      "type": "integer"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "issue_count": {
-                      "type": "integer"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "position": {
-                      "type": "integer"
-                    },
-                    "project_id": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "target_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -87501,7 +87866,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowRecurringIssueCreateRequest"
               }
             }
           }
@@ -87511,67 +87876,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "assignee_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "assignee_type": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "type": "string"
-                    },
-                    "crew_name": {
-                      "type": "string"
-                    },
-                    "cron_expression": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "labels_json": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "last_run": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "milestone_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "next_run": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "priority": {
-                      "type": "string"
-                    },
-                    "project_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "run_count": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -87582,67 +87886,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "assignee_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "assignee_type": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "type": "string"
-                    },
-                    "crew_name": {
-                      "type": "string"
-                    },
-                    "cron_expression": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "labels_json": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "last_run": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "milestone_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "next_run": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "priority": {
-                      "type": "string"
-                    },
-                    "project_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "run_count": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -87895,7 +88138,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowRecurringIssueUpdateRequest"
               }
             }
           }
@@ -87905,67 +88148,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "assignee_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "assignee_type": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "type": "string"
-                    },
-                    "crew_name": {
-                      "type": "string"
-                    },
-                    "cron_expression": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "labels_json": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "last_run": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "milestone_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "next_run": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "priority": {
-                      "type": "string"
-                    },
-                    "project_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "run_count": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -94071,7 +94253,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowTriageRuleCreateRequest"
               }
             }
           }
@@ -94081,52 +94263,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "assignee_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "labels_json": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "match_count": {
-                      "type": "integer"
-                    },
-                    "match_type": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "pattern": {
-                      "type": "string"
-                    },
-                    "position": {
-                      "type": "integer"
-                    },
-                    "priority": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "project_id": {
-                      "nullable": true,
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -94137,52 +94273,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "assignee_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "labels_json": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "match_count": {
-                      "type": "integer"
-                    },
-                    "match_type": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "pattern": {
-                      "type": "string"
-                    },
-                    "position": {
-                      "type": "integer"
-                    },
-                    "priority": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "project_id": {
-                      "nullable": true,
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -94435,7 +94525,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowTriageRuleUpdateRequest"
               }
             }
           }
@@ -94445,52 +94535,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "assignee_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "crew_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "labels_json": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "match_count": {
-                      "type": "integer"
-                    },
-                    "match_type": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "pattern": {
-                      "type": "string"
-                    },
-                    "position": {
-                      "type": "integer"
-                    },
-                    "priority": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "project_id": {
-                      "nullable": true,
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -94641,7 +94685,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -94651,14 +94695,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "matched": {
-                      "type": "integer"
-                    },
-                    "processed": {
-                      "type": "integer"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -96529,13 +96565,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "approved": {
-                    "type": "boolean"
-                  },
-                  "payload": {}
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowWaitpointCallbackRequest"
               }
             }
           }
@@ -96545,14 +96575,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "approved": {
-                      "type": "boolean"
-                    },
-                    "ok": {
-                      "type": "boolean"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -101792,7 +101814,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowRunMetadataRequest"
               }
             }
           }
@@ -101802,7 +101824,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -102030,7 +102052,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowSignalRequest"
               }
             }
           }
@@ -102040,7 +102062,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -102696,7 +102718,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ScheduleRequest"
+                "$ref": "#/components/schemas/WorkflowScheduleRequest"
               }
             }
           }
@@ -102706,7 +102728,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -102716,7 +102738,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -103144,7 +103166,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ScheduleRequest"
+                "$ref": "#/components/schemas/WorkflowScheduleRequest"
               }
             }
           }
@@ -103154,7 +103176,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -103382,7 +103404,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -103392,7 +103414,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -104880,7 +104902,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowPipelineImportRequest"
               }
             }
           }
@@ -104890,7 +104912,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -104900,7 +104922,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -105298,7 +105320,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -105308,7 +105330,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -106084,7 +106106,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -106094,7 +106116,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -106322,7 +106344,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReplayRequest"
+                "$ref": "#/components/schemas/WorkflowReplayRequest"
               }
             }
           }
@@ -106332,7 +106354,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -106462,7 +106484,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowPipelineSaveRequest"
               }
             }
           }
@@ -106472,7 +106494,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -106482,7 +106504,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -106672,7 +106694,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowTestRunRequest"
               }
             }
           }
@@ -106682,7 +106704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -107050,7 +107072,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WaitpointApprovalRequest"
+                "$ref": "#/components/schemas/WorkflowWaitpointApprovalRequest"
               }
             }
           }
@@ -107060,7 +107082,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -107666,7 +107688,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -107676,7 +107698,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -108110,7 +108132,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowBudgetRequest"
               }
             }
           }
@@ -108120,7 +108142,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -108572,7 +108594,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -108582,7 +108604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -108750,7 +108772,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowPipelineRunRequest"
               }
             }
           }
@@ -108760,7 +108782,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -108958,7 +108980,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -108968,7 +108990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -109560,7 +109582,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowEmptyRequest"
               }
             }
           }
@@ -109570,7 +109592,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -109768,7 +109790,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowRollbackRequest"
               }
             }
           }
@@ -109778,7 +109800,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -110000,7 +110022,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PipelineRunRequest"
+                "$ref": "#/components/schemas/WorkflowPipelineRunRequest"
               }
             }
           }
@@ -110010,7 +110032,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -110530,7 +110552,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PipelineRunRequest"
+                "$ref": "#/components/schemas/WorkflowBatchRunRequest"
               }
             }
           }
@@ -110540,7 +110562,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -111722,7 +111744,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowStepRunRequest"
               }
             }
           }
@@ -111732,7 +111754,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -112203,7 +112225,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowStepOverrideRequest"
               }
             }
           }
@@ -112213,7 +112235,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -112411,7 +112433,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkflowTagsRequest"
               }
             }
           }
@@ -112421,7 +112443,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
