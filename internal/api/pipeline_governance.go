@@ -109,7 +109,15 @@ func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID s
 		}
 	}
 
-	_ = inbox.Insert(ctx, h.db, h.logger, inbox.Item{
+	// Upsert, not Insert. The source id is the slug — deliberately
+	// stable, so a retried save does not pile up siblings — and
+	// Insert's INSERT OR IGNORE turned that stability into silence:
+	// once a routine had been through review the row existed forever,
+	// so every LATER proposal was dropped. The routine sat at
+	// 'proposed', unable to run, with nothing in anyone's inbox to
+	// approve it. Refreshing the row instead asks the question again,
+	// about the change actually on the table.
+	_ = inbox.Upsert(ctx, h.db, h.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindEscalation,
 		SourceID:    routineProposalInboxSource(workspaceID, saved.Slug),

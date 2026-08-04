@@ -339,7 +339,7 @@ export function RoutinesExplorer({
         <SidebarSection label="Routines" count={displayed.length} />
         <div className="flex-1 min-h-0 overflow-y-auto pb-1">
           <TooltipProvider delayDuration={400}>
-            {displayed.map((routine) => {
+            {displayed.map((routine, i) => {
               const isSelected = selectedSlug === routine.slug
               const lastStatus = routine.last_invocation_status?.toLowerCase()
               // Live run for this routine (shared workspace hook,
@@ -363,7 +363,21 @@ export function RoutinesExplorer({
               return (
                 <Tooltip key={routine.id}>
                   <TooltipTrigger asChild>
-                    <div>
+                    {/* Rows arrive in sequence rather than all at once,
+                        which is what makes a filter read as the list
+                        narrowing instead of the list being replaced. The
+                        delay is capped: past a dozen rows a per-row
+                        stagger stops being a cascade and starts being a
+                        wait. */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        duration: 0.22,
+                        ease: [0.22, 1, 0.36, 1],
+                        delay: Math.min(i, 12) * 0.018,
+                      }}
+                    >
                       <SidebarRow
                         selected={isSelected}
                         onSelect={() => onSelectRoutine(routine.slug)}
@@ -419,7 +433,7 @@ export function RoutinesExplorer({
                           />
                         )}
                       </SidebarRow>
-                    </div>
+                    </motion.div>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
                     <div className="space-y-0.5">

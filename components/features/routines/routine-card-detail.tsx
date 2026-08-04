@@ -27,6 +27,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import {
   ArrowUpRight,
   Bot,
@@ -95,6 +96,11 @@ interface Props {
 
 type SideTab = "triggers" | "versions"
 
+// The same curve the detail kit's Appear uses, so a pane opening and a
+// card arriving are visibly the same product rather than two people's
+// idea of a transition.
+const PANE_EASE = { duration: 0.34, ease: [0.22, 1, 0.36, 1] as const }
+
 export function RoutineCardDetail({
   routine,
   workspaceId,
@@ -103,6 +109,7 @@ export function RoutineCardDetail({
   statusPills,
   editRequest = 0,
 }: Props) {
+  const reduceMotion = useReducedMotion()
   const [editing, setEditing] = React.useState(false)
   React.useEffect(() => {
     if (editRequest > 0) setEditing(true)
@@ -330,7 +337,11 @@ export function RoutineCardDetail({
                 showing more code. Stacked, the same floors apply to
                 height. Whatever the window does, both halves survive. */}
             <div className="flex h-[56vh] min-h-[380px] flex-col md:flex-row">
-              <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
+              <motion.div
+                layout={reduceMotion ? false : "position"}
+                transition={PANE_EASE}
+                className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]"
+              >
                 <RoutineDefinitionCanvas
                   definition={routine.definition}
                   slug={routine.slug}
@@ -355,17 +366,33 @@ export function RoutineCardDetail({
                   <Code2 className="h-3.5 w-3.5" />
                   {editing ? "Close code" : "Edit code"}
                 </button>
-              </div>
-              {editing && (
-                <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t border-border/60 md:h-auto md:max-h-none md:w-[48%] md:max-w-[560px] md:border-l md:border-t-0">
-                  <RoutineEditorTab
-                    routine={routine}
-                    workspaceId={workspaceId}
-                    onSaved={onChanged}
-                    onStepAtCaret={handleCaret}
-                  />
-                </aside>
-              )}
+              </motion.div>
+              {/* The editor arrives from the side it will occupy, and
+                  the graph pane's `layout` animates it out of the way in
+                  the same beat — so the two read as one movement rather
+                  than a pane popping into existence. Opacity and offset
+                  only: animating the width itself fights the responsive
+                  floors above, which are the thing keeping the graph
+                  readable. */}
+              <AnimatePresence initial={false}>
+                {editing && (
+                  <motion.aside
+                    key="editor"
+                    initial={reduceMotion ? false : { opacity: 0, x: 28 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 28 }}
+                    transition={PANE_EASE}
+                    className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t border-border/60 md:h-auto md:max-h-none md:w-[48%] md:max-w-[560px] md:border-l md:border-t-0"
+                  >
+                    <RoutineEditorTab
+                      routine={routine}
+                      workspaceId={workspaceId}
+                      onSaved={onChanged}
+                      onStepAtCaret={handleCaret}
+                    />
+                  </motion.aside>
+                )}
+              </AnimatePresence>
             </div>
           </DetailCard>
         </Appear>

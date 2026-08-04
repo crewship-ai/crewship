@@ -123,3 +123,93 @@ func TestProposeRoutineInbox_FirstVersionHasNothingToCompare(t *testing.T) {
 		t.Fatalf("v1 should carry no from_version, got %v", payload["from_version"])
 	}
 }
+
+// inboxStateFor reads an inbox item's lifecycle state.
+func inboxStateFor(t *testing.T, h *PipelineHandler, wsID, sourceID string) string {
+	t.Helper()
+	var state string
+	err := h.db.QueryRowContext(context.Background(),
+		`SELECT state FROM inbox_items WHERE workspace_id = ? AND source_id = ?`,
+		wsID, sourceID).Scan(&state)
+	if err != nil {
+		t.Fatalf("read inbox state: %v", err)
+	}
+	return state
+}
+
+// addVersion advances a seeded routine by one version, the way a save
+// of a changed definition would.
+func addVersion(t *testing.T, h *PipelineHandler, pipelineID string, v int) {
+	t.Helper()
+	if _, err := h.db.Exec(`
+		INSERT INTO pipeline_versions
+		    (id, pipeline_id, version, definition_json, definition_hash,
+		     author_type, author_id, parent_version, change_summary, created_at)
+		VALUES (?, ?, ?, ?, ?, 'user', 'u1', ?, '', datetime('now'))`,
+		"plnv_"+pipelineID+"_"+pcrudItoa(v), pipelineID, v,
+		`{"name":"x","steps":[],"version":`+pcrudItoa(v)+`}`, "hash-"+pcrudItoa(v), v-1); err != nil {
+		t.Fatalf("add version %d: %v", v, err)
+	}
+	if _, err := h.db.Exec(`UPDATE pipelines SET head_version = ? WHERE id = ?`, v, pipelineID); err != nil {
+		t.Fatalf("bump head: %v", err)
+	}
+}
+
+// The SECOND time a routine is proposed, the reviewer must still be
+// told — and told about the CURRENT change.
+//
+// The inbox dedups on (kind, source_id), and a routine proposal's
+// source id is the slug: stable by design, so a retried save doesn't
+// pile up siblings. But INSERT OR IGNORE makes that dedup absolute. The
+// row for this slug already exists from the last time the routine went
+// for review, so the second proposal is silently dropped: the routine
+// sits at 'proposed' and no reviewer is ever asked.
+
+func TestProposeRoutineInbox_SecondProposalCarriesTheNewVersions(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-again", "again-routine", 2)
+	saved, _ := h.store.GetBySlug(context.Background(), wsID, "again-routine")
+	src := routineProposalInboxSource(wsID, "again-routine")
+
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"credentials_required"}, "test")
+
+	// A change lands: v3 is authored and goes for review too.
+	addVersion(t, h, saved.ID, 3)
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"http_egress"}, "test")
+
+	payload := inboxPayloadFor(t, h, wsID, src)
+	if to, ok := payload["to_version"].(float64); !ok || int(to) != 3 {
+		t.Fatalf("to_version = %v, want 3 — the item still describes the previous proposal", payload["to_version"])
+	}
+	if from, ok := payload["from_version"].(float64); !ok || int(from) != 2 {
+		t.Fatalf("from_version = %v, want 2", payload["from_version"])
+	}
+	reasons, _ := payload["risk_reasons"].([]any)
+	if len(reasons) != 1 || reasons[0] != "http_egress" {
+		t.Fatalf("risk_reasons = %v, want the current save's reasons", payload["risk_reasons"])
+	}
+}
+
+func TestProposeRoutineInbox_ReturnsToTheInboxAfterAnApproval(t *testing.T) {
+	h, _, wsID := newPipelineHandlerForCRUDTest(t)
+	seedPipelineWithVersions(t, h, wsID, "pln-cycle", "cycle-routine", 2)
+	saved, _ := h.store.GetBySlug(context.Background(), wsID, "cycle-routine")
+	src := routineProposalInboxSource(wsID, "cycle-routine")
+
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"credentials_required"}, "test")
+	// The reviewer approves. The row stays, resolved.
+	if _, err := h.db.Exec(
+		`UPDATE inbox_items SET state = 'resolved', resolved_action = 'approved' WHERE source_id = ?`, src); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// A later edit adds a NEW risk, so it goes for review again. If the
+	// item is not resurrected the routine is stuck at 'proposed' with
+	// nothing in anyone's inbox to approve it.
+	addVersion(t, h, saved.ID, 3)
+	h.proposeRoutineInbox(context.Background(), wsID, saved, []string{"http_egress"}, "test")
+
+	if got := inboxStateFor(t, h, wsID, src); got != "unread" {
+		t.Fatalf("inbox state = %q, want unread — the new proposal never surfaced", got)
+	}
+}

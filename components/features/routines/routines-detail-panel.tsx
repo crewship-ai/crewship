@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { AnimatePresence, motion } from "motion/react"
 import { Play, Square, Check, Ban } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -394,7 +395,20 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           needs a MANAGER+ to promote it before it can run. Approve →
           active; Reject → discarded. Only rendered for MANAGER+ when the
           routine is in the proposed state. */}
+      {/* Height, not just opacity: the banner pushes the whole surface
+          down when it arrives and pulls it back when the decision is
+          made, and animating that is what stops an approval from
+          feeling like the page jumped under the cursor. */}
+      <AnimatePresence initial={false}>
       {showApprovalBanner && (
+        <motion.div
+          key="approval-banner"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          className="overflow-hidden"
+        >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-warn">This routine is awaiting approval</div>
@@ -440,7 +454,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             </Button>
           </div>
         </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
 
       {/* Run activity — instant readable status for the just-triggered
@@ -486,6 +502,11 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           )}
           <div className="flex-1 overflow-auto">
             <RoutineCardDetail
+              // Keyed on the routine, so picking a different one replays
+              // the card entrance instead of swapping text in place.
+              // Without it the surface changes with no transition at all
+              // and it reads as a repaint rather than a navigation.
+              key={routine.slug}
               routine={routine}
               workspaceId={workspaceId}
               onChanged={() => {
