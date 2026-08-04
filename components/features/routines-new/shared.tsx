@@ -33,7 +33,7 @@ import { Progress } from "@/components/ui/progress"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
-import { convertDsl, parseDsl, type DslFormat } from "@/lib/routine-dsl-format"
+import { convertDsl, parseDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 import type { PipelineDSL, TraceStep } from "@/lib/trace/types"
@@ -568,8 +568,17 @@ export function OpacityMeter({ dsl }: { dsl: PipelineDSL }) {
  *  Step inspector — variant C's right rail                            *
  * ------------------------------------------------------------------ */
 
+/**
+ * One step, as YAML.
+ *
+ * The editor authors YAML, so the read-only fragment shows YAML too —
+ * two syntaxes on one screen means the reader holds both in their head
+ * to compare the panel against the buffer. A multiline prompt is the
+ * case that makes the difference obvious: `prompt: |` and real line
+ * breaks, rather than one long line of \n escapes.
+ */
 function stepFragment(step: TraceStep): string {
-  return JSON.stringify(step, null, 2)
+  return toYaml(step)
 }
 
 /** Prose describing what a step kind guarantees the operator. */
@@ -673,9 +682,12 @@ export function StepInspector({
 
         <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
           <div className="border-b border-border/60 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Fragment DSL
+            Fragment DSL · YAML
           </div>
-          <pre className="overflow-x-auto p-2.5 font-mono text-[10.5px] leading-relaxed text-foreground/85">
+          <pre
+            data-testid="step-fragment"
+            className="overflow-x-auto p-2.5 font-mono text-[10.5px] leading-relaxed text-foreground/85"
+          >
             {stepFragment(step)}
           </pre>
         </div>

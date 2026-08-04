@@ -51,6 +51,29 @@ describe("<StepInspector> with a step selected", () => {
     expect(screen.getByText("dohledat_doklad")).toBeInTheDocument()
   })
 
+  it("renders the fragment as YAML, like every other DSL surface", () => {
+    render(
+      <StepInspector dsl={DSL_BY_FIDELITY.granular} fidelity="granular" stepId="pojmenovat" />,
+    )
+    const fragment = screen.getByTestId("step-fragment").textContent ?? ""
+    expect(fragment).toContain("id: pojmenovat")
+    expect(fragment).toContain("type: agent_run")
+    // The JSON shape this replaced. One format across the product, or
+    // the reader has to hold two syntaxes at once on one screen.
+    expect(fragment).not.toContain('"id":')
+    expect(fragment).not.toContain('"type":')
+  })
+
+  it("keeps a multiline prompt readable in the fragment too", () => {
+    const dsl = {
+      steps: [{ id: "s", type: "agent_run" as const, prompt: "line one\nline two" }],
+    }
+    render(<StepInspector dsl={dsl} fidelity="granular" stepId="s" />)
+    const fragment = screen.getByTestId("step-fragment").textContent ?? ""
+    expect(fragment).toContain("prompt: |")
+    expect(fragment).not.toContain("\\n")
+  })
+
   it("falls back to the whole definition when the id is not in this fidelity", () => {
     // Selecting a granular-only id and then flipping to "today" must
     // not blank the rail — it degrades to the full definition.
