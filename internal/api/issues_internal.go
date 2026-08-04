@@ -534,14 +534,21 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		ub.Set("estimate", *req.Estimate)
 	}
 
-	// The column update and the label replacement go in ONE transaction, the
-	// same shape Create already uses. Label replacement is DELETE-then-INSERT:
-	// run outside a transaction, a failure between the two leaves the issue
-	// stripped of the labels it had and carrying only some of the requested
-	// ones, while the handler still answers 200 — a partial write the caller
-	// records as a success. Pairing it with the missions UPDATE also means a
-	// label failure cannot leave the status changed and the labels wrong.
-	if !ub.Empty() || req.Labels != nil {
+	hasComment := req.Comment != nil && *req.Comment != ""
+
+	// The column update, the label replacement and the comment go in ONE
+	// transaction, the same shape Create already uses. Label replacement is
+	// DELETE-then-INSERT: run outside a transaction, a failure between the two
+	// leaves the issue stripped of the labels it had and carrying only some of
+	// the requested ones, while the handler still answers 200 — a partial write
+	// the caller records as a success.
+	//
+	// The comment is in here for the same reason and one more. It used to be a
+	// bare Exec whose error was logged under that same 200 — the twin of the
+	// label bug, ten lines below it — and this PR makes the comment the agent's
+	// primary way of reporting progress to a human. "Moved to IN_PROGRESS" with
+	// the explanation silently dropped is worse than the whole call failing.
+	if !ub.Empty() || req.Labels != nil || hasComment {
 		tx, err := h.db.BeginTx(r.Context(), nil)
 		if err != nil {
 			internalError(w, r, h.logger, "begin issue update tx", err)
@@ -553,6 +560,27 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			query, args := ub.Build("missions", "id = ?", missionID)
 			if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 				internalError(w, r, h.logger, "update issue", err)
+				return
+			}
+		}
+
+		// Comment goes in before the labels, not after. Ordering inside a
+		// transaction is normally irrelevant — but the comment is the row that
+		// describes WHY the other changes happened, so if a later statement
+		// fails it must be the rollback that removes it, not the fact that it
+		// was never reached. Writing it last makes "no comment on failure" true
+		// by accident, which is unprovable and stops being true the moment
+		// another statement is appended below it.
+		//
+		// agent_id presence was validated above, so the author is always a real
+		// agent here.
+		if hasComment {
+			now := time.Now().UTC().Format(time.RFC3339)
+			if _, err := tx.ExecContext(r.Context(), `
+				INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
+				VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+				generateCUID(), missionID, req.AgentID, *req.Comment, now, now); err != nil {
+				internalError(w, r, h.logger, "insert internal comment", err)
 				return
 			}
 		}
@@ -605,20 +633,6 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if assigneeChanged {
 			h.logActivity(r.Context(), missionID, actorType, actorID,
 				"assignee_changed", "assignee_id: "+*req.AssigneeID)
-		}
-	}
-
-	// Add comment if provided. agent_id presence was validated above, so
-	// the author is always a real agent here.
-	if req.Comment != nil && *req.Comment != "" {
-		commentID := generateCUID()
-		now := time.Now().UTC().Format(time.RFC3339)
-		_, err := h.db.ExecContext(r.Context(), `
-			INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
-			VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-			commentID, missionID, req.AgentID, *req.Comment, now, now)
-		if err != nil {
-			h.logger.Error("insert internal comment", "error", err)
 		}
 	}
 

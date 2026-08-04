@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // internalRelationTypes are the mission_relations relation_type values an
@@ -141,9 +142,14 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 			internalError(w, r, h.logger, "check parent cycle", err)
 			return
 		}
+		// updated_at is formatted the way newUpdate() formats it. A bare
+		// datetime('now') would write SQLite's legacy "YYYY-MM-DD HH:MM:SS"
+		// into a column every other writer in this package fills with RFC
+		// 3339. That split already exists in older code and is tracked
+		// separately; a brand-new write path has no business widening it.
 		if _, err := h.db.ExecContext(r.Context(),
-			`UPDATE missions SET parent_issue_id = ?, updated_at = datetime('now') WHERE id = ?`,
-			targetID, sourceID); err != nil {
+			`UPDATE missions SET parent_issue_id = ?, updated_at = ? WHERE id = ?`,
+			targetID, time.Now().UTC().Format(time.RFC3339), sourceID); err != nil {
 			internalError(w, r, h.logger, "set parent issue", err)
 			return
 		}

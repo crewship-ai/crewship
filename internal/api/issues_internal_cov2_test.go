@@ -119,9 +119,18 @@ func TestCovII3_UpdateStatus_ExecError_500(t *testing.T) {
 	}
 }
 
-// TestCovII3_UpdateStatus_CommentInsertFailure_Warn_200 — the status
-// flip lands, the optional comment write fails silently.
-func TestCovII3_UpdateStatus_CommentInsertFailure_Warn_200(t *testing.T) {
+// TestCovII3_UpdateStatus_CommentInsertFailure_500 — a failed comment write
+// fails the whole request and takes the status change with it.
+//
+// This test previously asserted the opposite: 200, status flipped, comment
+// silently dropped. That was a description of the code rather than a decision
+// about it, and it stopped being defensible once the agent issue verbs shipped.
+// The comment is now the agent's primary way of telling a human WHY the status
+// moved, so "IN_PROGRESS, explanation lost, caller told it succeeded" is the
+// worst of the three possible outcomes — the human sees a state change with no
+// reason and the agent has no idea anything went wrong. Failing loudly lets the
+// agent retry; a silent drop cannot be retried because nothing reported it.
+func TestCovII3_UpdateStatus_CommentInsertFailure_500(t *testing.T) {
 	h, db, wsID, crewID, leadID := covII2NewIssueHandler(t)
 	missionID := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
 	execOrFatal(t, db, `CREATE TRIGGER covii3_block_mc BEFORE INSERT ON mission_comments
@@ -134,15 +143,18 @@ func TestCovII3_UpdateStatus_CommentInsertFailure_Warn_200(t *testing.T) {
 	req.SetPathValue("identifier", "ENG-1")
 	rr := httptest.NewRecorder()
 	h.UpdateStatus(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
 	}
 	if n := covII2CommentCount(t, db, missionID); n != 0 {
 		t.Errorf("comments = %d, want 0 (insert blocked)", n)
 	}
 	var status string
-	if err := db.QueryRow(`SELECT status FROM missions WHERE id = ?`, missionID).Scan(&status); err != nil || status != "IN_PROGRESS" {
-		t.Errorf("status = %q err=%v, want IN_PROGRESS", status, err)
+	if err := db.QueryRow(`SELECT status FROM missions WHERE id = ?`, missionID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "BACKLOG" {
+		t.Errorf("status = %q, want BACKLOG — the status change must roll back with the comment", status)
 	}
 }
 
