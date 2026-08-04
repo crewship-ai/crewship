@@ -41,7 +41,7 @@ func TestRemainingAuthIntegrationsCatalogIsWiredIntoDocument(t *testing.T) {
 	paths := doc["paths"].(map[string]any)
 	feedback := paths["/api/v1/feedback"].(map[string]any)["post"].(map[string]any)
 	body := feedback["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
-	if body["$ref"] != "#/components/schemas/RemainingFeedbackCreateRequest" {
+	if body["$ref"] != "#/components/schemas/FeedbackCreateRequest" {
 		t.Fatalf("feedback request schema = %#v", body)
 	}
 	view := paths["/api/v1/saved-views"].(map[string]any)["get"].(map[string]any)["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)

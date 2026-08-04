@@ -41,8 +41,8 @@ func TestRemainingExecutionDomainSchemaCatalogWiresThroughDocument(t *testing.T)
 	paths := doc["paths"].(map[string]any)
 	workflow := paths["/api/v1/workflow-templates"].(map[string]any)["post"].(map[string]any)
 	request := workflow["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
-	if request["type"] != "object" {
-		t.Fatalf("workflow template request schema = %#v, want concrete object", request)
+	if request["$ref"] != "#/components/schemas/WorkflowTemplateCreateRequest" {
+		t.Fatalf("workflow template request schema = %#v, want named concrete object", request)
 	}
 	mission := paths["/api/v1/missions"].(map[string]any)["get"].(map[string]any)
 	if got := responseSchemaFromOperation(t, mission)["type"]; got != "array" {

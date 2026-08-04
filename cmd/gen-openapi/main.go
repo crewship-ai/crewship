@@ -248,9 +248,11 @@ func buildDocument(routes []route) map[string]any {
 	_, finalComponents := finalIntegrationsConnectorsSchemaCatalog()
 	_, coreResourceRequestComponentsV2 := coreResourceRequestSchemaCatalogV2()
 	_, integrationsAuthRequestComponents := integrationsAuthRequestBodySchemaCatalog()
+	_, adminSpecialComponents := adminSpecialRequestSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
-		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents, coreResourceRequestComponentsV2, integrationsAuthRequestComponents,
+		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -470,6 +472,21 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	workflowRoutes, _ := workflowRequestSchemaCatalog()
 	for key, schema := range workflowRoutes {
+		result[key] = schema
+	}
+	adminSpecialRoutes, _ := adminSpecialRequestSchemaCatalog()
+	for key, schema := range adminSpecialRoutes {
+		if existing, ok := result[key]; ok {
+			if schema.Response == nil {
+				schema.Response = existing.Response
+			}
+			if len(schema.ResponseMedia) == 0 {
+				schema.ResponseMedia = existing.ResponseMedia
+			}
+			if schema.SuccessStatuses == nil {
+				schema.SuccessStatuses = existing.SuccessStatuses
+			}
+		}
 		result[key] = schema
 	}
 	return result
