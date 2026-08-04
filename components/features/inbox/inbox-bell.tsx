@@ -11,9 +11,11 @@ import { inboxBulk } from "@/lib/api/inbox"
 import { InboxBellView } from "./inbox-bell-new"
 import type { WorkspaceRole } from "./inbox-derive"
 
-// InboxBell — top-right actionable-items badge. Lives next to the
-// NotificationBell so the surfaces stay distinct: bell = informational
-// notifications, inbox = "you need to do something".
+// InboxBell — top-right actionable-items badge. It sits beside the
+// ActivityBell, and the split between them is who is waiting: Activity is
+// what the machines are doing, this is what a human is being asked for.
+// (A third "informational notifications" bell used to sit here; it read a
+// table nothing ever wrote to. See app-toolbar.tsx.)
 //
 // It reads the ACTIVE list, not the unread one. The list it used to read was
 // state=unread, so a blocking escalation that had merely been opened dropped

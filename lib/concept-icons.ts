@@ -47,10 +47,11 @@ export const CONCEPT_ICON = {
   sessions: MessageSquare,
   /** Messages from other agents. Opens the inbox. */
   peers: AtSign,
-  /** Where notifications go OUT. Bell, not Inbox: the app already uses Bell
-   *  for notifications (notification-bell.tsx), and Inbox is the opposite
-   *  direction — what arrives for you. One icon for both directions would be
-   *  worse than the inconsistency this file exists to fix. */
+  /** Where notifications go OUT — Slack, ntfy, email. Bell, not Inbox:
+   *  Inbox is the opposite direction, what arrives for you, and one icon for
+   *  both directions would be worse than the inconsistency this file exists
+   *  to fix. (The top bar's own Bell is gone — the in-app notification
+   *  dropdown was removed — so nothing competes for it here.) */
   channels: Bell,
   /** What the agent remembers between sessions. */
   memory: Brain,

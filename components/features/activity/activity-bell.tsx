@@ -4,14 +4,17 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Activity, Bot } from "lucide-react"
-import { motion, AnimatePresence } from "motion/react"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
+  BarMenu,
+  BarMenuBody,
+  BarMenuEmpty,
+  BarMenuFooter,
+  BarMenuFooterLink,
+  BarMenuHeader,
+  BarMenuRow,
+  BarMenuSection,
+} from "@/components/layout/bar-menu"
+import { Pill } from "@/components/ui/detail"
 import {
   LiveRunRow,
   MAX_LIVE_ROWS,
@@ -48,6 +51,11 @@ import { cn } from "@/lib/utils"
 // (one fetch/poll/WS stream for every live surface); the legacy
 // useActiveRuns feed still contributes agent runs — its routine rows
 // are dropped here to avoid duplicates.
+//
+// The chrome is the shared top-bar kit (components/layout/bar-menu.tsx). This
+// was a 400px Radix dropdown with its own uppercase text-[9px] section labels
+// and no header/footer contract, sitting one icon away from a 380px Inbox that
+// had all three. Same panel now, same rows, same footer.
 export function ActivityBell() {
   const router = useRouter()
   const { workspaceId } = useWorkspace()
@@ -65,12 +73,9 @@ export function ActivityBell() {
   const liveTotal = activeCount + agentRuns.length
 
   // Live-run semantics win the badge tone; the count merges both feeds.
-  const badgeClass =
-    awaitingApproval > 0
-      ? "bg-warn text-warn"
-      : activeCount > 0
-        ? "bg-primary text-white"
-        : "bg-success text-white"
+  // Amber the moment anything waits on a human approval, blue while routines
+  // run, emerald preserved for agent-only activity.
+  const badgeTone = awaitingApproval > 0 ? "urgent" : activeCount > 0 ? "active" : "live"
 
   const ariaLabel =
     liveTotal > 0
@@ -79,34 +84,15 @@ export function ActivityBell() {
       : "Activity"
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative h-8 w-8"
-          aria-label={ariaLabel}
-        >
-          <Activity className="h-4 w-4" />
-          <AnimatePresence>
-            {liveTotal > 0 && (
-              <motion.span
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                exit={{ scale: 0 }}
-                data-testid="activity-live-badge"
-                className={cn(
-                  "absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-semibold",
-                  badgeClass,
-                )}
-              >
-                {liveTotal > 99 ? "99+" : liveTotal}
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[400px] p-0">
+    <BarMenu
+      icon={Activity}
+      ariaLabel={ariaLabel}
+      badge={{ count: liveTotal, tone: badgeTone }}
+      open={open}
+      onOpenChange={setOpen}
+      testId="activity"
+    >
+      {open && (
         <ActivityDropdownBody
           workspaceId={workspaceId}
           liveRuns={liveRuns}
@@ -121,13 +107,13 @@ export function ActivityBell() {
             router.push(href)
           }}
         />
-      </DropdownMenuContent>
-    </DropdownMenu>
+      )}
+    </BarMenu>
   )
 }
 
-// Body is a separate component so the 1s elapsed tick only exists
-// while the dropdown is mounted (Radix unmounts closed content).
+// Body is a separate component, mounted only while the panel is open, so the
+// 1s elapsed tick does not run behind a closed popover.
 function ActivityDropdownBody({
   workspaceId,
   liveRuns,
@@ -159,110 +145,102 @@ function ActivityDropdownBody({
   const recent = recentRuns.slice(0, 3)
   const isEmpty = liveTotal === 0 && recent.length === 0
 
+  const hidden = Math.max(0, liveRuns.length + agentRuns.length - visibleRoutine.length - visibleAgents.length)
+
   return (
-    <div>
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Activity
-        </span>
-        {liveTotal > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-[10px] tabular-nums text-muted-foreground">
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full animate-pulse",
-                awaitingApproval > 0 ? "bg-warn" : "bg-primary",
-              )}
-            />
-            {liveTotal} live
-            {awaitingApproval > 0 ? ` · ${awaitingApproval} awaiting approval` : ""}
-          </span>
-        )}
-      </div>
-      <ScrollArea className="max-h-[420px]">
+    <>
+      <BarMenuHeader
+        title="Activity"
+        // The pill carries the one fact that changes what you do next: work is
+        // parked on a human. Same slot the Inbox uses for an expiring deadline.
+        pill={
+          awaitingApproval > 0 ? (
+            <Pill tone="warn">
+              {awaitingApproval} awaiting approval
+            </Pill>
+          ) : undefined
+        }
+        meta={liveTotal > 0 ? `${liveTotal} live` : "nothing live"}
+      />
+
+      <BarMenuBody>
         {isEmpty ? (
-          <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
-            <Activity className="h-6 w-6 text-muted-foreground/30" />
-            <span className="text-xs text-muted-foreground">Nothing running right now</span>
-          </div>
+          <BarMenuEmpty icon={Activity} message="Nothing running right now" />
         ) : (
           <>
             {liveTotal > 0 && (
-              <>
-                <div className="px-3 pb-0.5 pt-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-                  Live
-                </div>
-                <ul className="divide-y divide-white/[0.05]">
-                  {visibleRoutine.map((run) => (
-                    <LiveRunRow
-                      key={run.id}
-                      run={run}
-                      cancelling={cancellingRunId === run.id}
-                      onCancel={() => cancelRun(run.id)}
-                      onNavigate={onNavigate}
-                    />
-                  ))}
-                  {visibleAgents.map((item) => (
-                    <AgentRunRow key={item.id} item={item} onClick={() => onOpenItem(item.href)} />
-                  ))}
-                </ul>
-              </>
+              <BarMenuSection
+                label="Live"
+                count={liveTotal}
+                tone={awaitingApproval > 0 ? "warn" : undefined}
+                overflow={hidden > 0 ? `+${hidden} more running` : undefined}
+              >
+                {visibleRoutine.map((run) => (
+                  <LiveRunRow
+                    key={run.id}
+                    run={run}
+                    cancelling={cancellingRunId === run.id}
+                    onCancel={() => cancelRun(run.id)}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+                {visibleAgents.map((item) => (
+                  <AgentRunRow key={item.id} item={item} onClick={() => onOpenItem(item.href)} />
+                ))}
+              </BarMenuSection>
             )}
             {recent.length > 0 && (
-              <>
-                <div className="border-t border-white/[0.06] px-3 pb-0.5 pt-2 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-                  Recent
-                </div>
-                <ul className="divide-y divide-white/[0.04]">
-                  {recent.map((run) => (
-                    <RecentRunRow key={run.id} run={run} onClick={() => onOpenItem(`/activity?run=${encodeURIComponent(run.id)}`)} />
-                  ))}
-                </ul>
-              </>
+              <BarMenuSection label="Recent" count={recent.length}>
+                {recent.map((run) => (
+                  <RecentRunRow
+                    key={run.id}
+                    run={run}
+                    onClick={() => onOpenItem(`/activity?run=${encodeURIComponent(run.id)}`)}
+                  />
+                ))}
+              </BarMenuSection>
             )}
           </>
         )}
-      </ScrollArea>
-      <div className="border-t border-white/[0.06] p-2">
-        <Link
-          href={liveTotal > 0 ? "/activity?status=active" : "/activity"}
-          onClick={onNavigate}
-          className="block w-full rounded px-2 py-1.5 text-center text-xs text-success hover:bg-white/[0.04]"
-        >
-          View all activity →
-        </Link>
-      </div>
-    </div>
+      </BarMenuBody>
+
+      <BarMenuFooter>
+        <BarMenuFooterLink asChild onClick={onNavigate}>
+          <Link href={liveTotal > 0 ? "/activity?status=active" : "/activity"}>
+            View all activity →
+          </Link>
+        </BarMenuFooterLink>
+      </BarMenuFooter>
+    </>
   )
 }
 
-// AgentRunRow — an in-flight agent run from the legacy feed. Keeps
-// the pre-redesign row shape (icon + label + relative time); routine
-// runs get the richer LiveRunRow instead.
+// AgentRunRow — an in-flight agent run from the legacy feed. Same row
+// skeleton as everything else in the bar; routine runs get the richer
+// LiveRunRow (step, cost, actions) instead.
 function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => void }) {
   return (
-    <li
+    <BarMenuRow
       onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
-          onClick()
-        }
-      }}
-      className="flex cursor-pointer items-start gap-2 px-3 py-2 hover:bg-white/[0.04]"
-    >
-      <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium text-foreground">{item.label}</div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span className="h-1 w-1 rounded-full bg-success animate-pulse" />
-          Agent
-          {item.sublabel ? ` · ${item.sublabel}` : ""}
-          {item.startedAt ? ` · ${relTime(item.startedAt)}` : ""}
-        </div>
-      </div>
-    </li>
+      leading={
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/15">
+          <Bot className="h-3.5 w-3.5 text-primary" />
+        </span>
+      }
+      title={item.label}
+      meta={
+        <>
+          <span className="h-1 w-1 shrink-0 rounded-full bg-success animate-pulse" />
+          <span>Agent</span>
+          {item.sublabel && <span className="truncate">· {item.sublabel}</span>}
+        </>
+      }
+      trailing={
+        item.startedAt ? (
+          <span className="type-meta text-muted-foreground-soft">{relTime(item.startedAt)}</span>
+        ) : undefined
+      }
+    />
   )
 }
 
@@ -272,33 +250,31 @@ function AgentRunRow({ item, onClick }: { item: ActiveRunItem; onClick: () => vo
 function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void }) {
   const failed = run.status === "failed"
   return (
-    <li
+    <BarMenuRow
       onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
-          onClick()
-        }
-      }}
-      className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-white/[0.04]"
-    >
-      <span
-        className={cn(
-          "h-1.5 w-1.5 shrink-0 rounded-full",
-          failed ? "bg-destructive" : "bg-success",
-        )}
-      />
-      <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-        {run.pipeline_name || run.pipeline_slug}
-      </span>
-      <SourcePill run={run} />
-      <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-        {run.status} · {relTime(run.ended_at || run.started_at)}
-        {run.cost_usd > 0 ? ` · ${formatStepCost(run.cost_usd)}` : ""}
-      </span>
-    </li>
+      leading={
+        <span className="flex h-6 w-6 items-center justify-center">
+          <span
+            className={cn("h-2 w-2 rounded-full", failed ? "bg-destructive" : "bg-success")}
+          />
+        </span>
+      }
+      title={run.pipeline_name || run.pipeline_slug}
+      // Unlinked: this whole row is one control that opens the run's trace,
+      // and the kit renders such a row as a <button>. See source-pill.tsx.
+      meta={<SourcePill run={run} linked={false} />}
+      trailing={
+        <span
+          className={cn(
+            "type-meta font-mono tabular-nums",
+            failed ? "text-destructive" : "text-muted-foreground-soft",
+          )}
+        >
+          {run.status} · {relTime(run.ended_at || run.started_at)}
+          {run.cost_usd > 0 ? ` · ${formatStepCost(run.cost_usd)}` : ""}
+        </span>
+      }
+    />
   )
 }
 

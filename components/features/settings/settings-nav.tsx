@@ -122,6 +122,25 @@ export function isSettingsSectionVisible(key: string, role: string | null | unde
   return item?.visibleTo?.(role) ?? true
 }
 
+/**
+ * Every settings section `role` may see, flattened, in nav order.
+ *
+ * Exported for the ⌘K palette, which offers the same sections as deep links.
+ * It used to keep its own hardcoded copy of this list, and the copy drifted
+ * exactly as copies do: it advertised Privacy (enabled: false — nobody sees
+ * it, at any role), offered Audit Log to every role (MANAGER+ here, so the
+ * layout silently bounced a MEMBER to Profile) and had never heard of Access
+ * & Secrets. One list, one gate.
+ */
+export function visibleSettingsSections(
+  role: string | null | undefined,
+): Array<{ key: string; label: string; icon: LucideIcon }> {
+  return sections
+    .flatMap((s) => s.items)
+    .filter((i) => isSettingsSectionVisible(i.key, role))
+    .map(({ key, label, icon }) => ({ key, label, icon }))
+}
+
 interface SettingsNavProps {
   activeTab: string
   onTabChange: (tab: string) => void

@@ -23,7 +23,6 @@ vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }
 vi.mock("@/lib/store", () => ({
   useAppStore: (selector: (s: { breadcrumbs: unknown[] }) => unknown) => selector({ breadcrumbs: [] }),
 }))
-vi.mock("@/components/features/notifications/notification-bell", () => ({ NotificationBell: () => null }))
 vi.mock("@/components/features/inbox/inbox-bell", () => ({ InboxBell: () => null }))
 vi.mock("@/components/features/activity/activity-bell", () => ({ ActivityBell: () => null }))
 vi.mock("@/components/command-palette", () => ({ CommandPalette: () => null }))

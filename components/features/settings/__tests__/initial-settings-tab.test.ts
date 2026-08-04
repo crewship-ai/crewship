@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { initialSettingsTab, MOVED_SECTIONS } from "../settings-layout"
+import { initialFocusedMember, initialSettingsTab, MOVED_SECTIONS } from "../settings-layout"
 
 describe("initialSettingsTab", () => {
   it("returns the tab from a valid ?tab= param (deep-link lands on the right section)", () => {
@@ -41,5 +41,26 @@ describe("MOVED_SECTIONS", () => {
     // both to a bare /integrations would make the second bookmark lie.
     expect(MOVED_SECTIONS["notifications"].href).toContain("section=connections")
     expect(MOVED_SECTIONS["notification-prefs"].href).toContain("section=preferences")
+  })
+})
+
+describe("initialFocusedMember", () => {
+  it("returns the user a ?member= deep link names", () => {
+    expect(initialFocusedMember("?tab=members&member=u-fredy")).toBe("u-fredy")
+  })
+
+  it("returns nothing when the link names nobody", () => {
+    expect(initialFocusedMember("?tab=members")).toBe("")
+    expect(initialFocusedMember("")).toBe("")
+  })
+
+  // Both parsers take a query STRING, not window.location, so the layout can
+  // seed them from useSearchParams. It used to read window.location.search in
+  // a useState initializer, which during a client-side navigation still held
+  // the PREVIOUS url — so every settings deep link in the product opened
+  // Profile, while the same URL pasted into the address bar worked.
+  it("parses a bare param string, with or without the leading ?", () => {
+    expect(initialSettingsTab("tab=audit")).toBe("audit")
+    expect(initialFocusedMember("tab=members&member=u-1")).toBe("u-1")
   })
 })

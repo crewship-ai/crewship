@@ -758,7 +758,21 @@ jobs:
           # The shard is only coverage if the package it names still
           # exists. A rename would otherwise leave this job green and
           # testing nothing, while go-race keeps holding the old path back.
-          if ! go list ./... | grep -Fxq "$pkg"; then
+          #
+          # `go list` into a variable, NOT through a pipe into `grep -q`.
+          # `-q` exits at the first match, the producer then takes SIGPIPE,
+          # and under `pipefail` that makes the pipeline non-zero — so the
+          # guard fired precisely BECAUSE the package resolved, and early
+          # enough in the list that grep left while `go list` was still
+          # writing. It read as "this shard is testing nothing" on a tree
+          # where every other Go job compiled the same module, and it was
+          # timing-dependent, so a re-run usually buried it.
+          #
+          # Assigning first also makes a REAL `go list` failure abort the
+          # step through `set -e`, with go's own message, instead of being
+          # relabelled as a stale shard entry.
+          pkgs="$(go list ./...)"
+          if ! printf '%s\n' "$pkgs" | grep -Fxq "$pkg"; then
             echo "::error::$pkg does not resolve against 'go list ./...'. This shard is testing nothing — reconcile it and go-race's race-shard.txt together."
             exit 1
           fi
