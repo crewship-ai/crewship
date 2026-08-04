@@ -7,7 +7,7 @@ icon: "bot"
 An **agent** is an AI coding agent with a configurable role, CLI adapter, skills, and credentials. Agents belonging to the same crew share one Linux container. These endpoints cover the full agent lifecycle: creating and configuring permanent agents, hiring short-lived ephemeral "contractors", managing their skills and credentials, driving chats and runs, inspecting workspace files, and tuning the persona and self-learning layers that shape each agent's behavior.
 
 <Note>
-  All `/api/v1/agents/*` endpoints require authentication and workspace context (the `workspace_id` query parameter). The chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no `workspace_id`.
+  All `/api/v1/agents/*` endpoints require authentication and workspace context. Workspace context may be supplied as `workspace_id`, a `{workspaceId}` path value, or the `X-Workspace-ID` header; the chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no workspace context parameter.
 </Note>
 
 ## Endpoints
@@ -22,6 +22,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | GET | [/api/v1/agents/{agentId}](#get-agent) | Get a single agent |
 | PATCH | [/api/v1/agents/{agentId}](#update-agent) | Partially update an agent |
 | DELETE | [/api/v1/agents/{agentId}](#delete-agent) | Soft-delete an agent |
+| POST | [/api/v1/agents/{agentId}/webhook-secret/rotate](#rotate-webhook-secret) | Rotate and return an agent webhook secret once |
 | POST | [/api/v1/agents/hire](#hire-agent) | Spawn a new ephemeral agent under a crew |
 | POST | [/api/v1/agents/{agentId}/rehire](#rehire-agent) | Resurrect or extend an ephemeral agent |
 | POST | [/api/v1/agents/{agentId}/approve-hire](#approve-hire) | Approve a guided-autonomy pending hire |
@@ -44,7 +45,14 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | DELETE | [/api/v1/agents/{agentId}/credentials/{assignmentId}](#remove-credential) | Remove a credential |
 | GET | [/api/v1/agents/{agentId}/chats](#list-chats) | List chat sessions |
 | POST | [/api/v1/agents/{agentId}/chats](#create-chat) | Create a new chat session |
+| PUT | [/api/v1/agents/{agentId}/chats/{chatId}/read](#mark-chat-read) | Mark a chat read |
+| DELETE | [/api/v1/agents/{agentId}/chats/{chatId}](#delete-chat) | Delete a chat session |
+| POST | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#chat-attachments) | Upload a chat attachment |
 | GET | [/api/v1/agents/{agentId}/runs](#agent-runs) | List execution history |
+| GET | [/api/v1/agents/{agentId}/credential-bindings](#credential-bindings) | List MCP credential bindings |
+| GET, POST, PATCH, DELETE | [/api/v1/agents/{agentId}/integrations](#agent-integrations) | Manage agent MCP integrations |
+| GET | [/api/v1/agents/{agentId}/integrations/resolved](#agent-integrations) | Resolve effective MCP integrations |
+| GET | [/api/v1/agents/{agentId}/notification-channels](#agent-notification-channels) | List notification channels available to an agent |
 | GET | [/api/v1/agents/{agentId}/debug](#agent-proxy-endpoints) | Debug information for a running agent |
 | GET | [/api/v1/agents/{agentId}/files](#agent-proxy-endpoints) | List files in agent workspace |
 | GET | [/api/v1/agents/{agentId}/files/download](#agent-proxy-endpoints) | Download a file |
@@ -94,6 +102,13 @@ GET /api/v1/agent-load?workspace_id={workspaceId}
 ```
 
 Returns agent load metrics across the workspace.
+
+**Response:** `200 OK` — an array (never `null`) of entries with `agent_id`,
+`agent_name`, `agent_slug`, `agent_status`, `active_tasks`, `pending_tasks`,
+`completed_today`, `tokens_used_today`, and `token_budget`. Active tasks include
+`IN_PROGRESS`; pending tasks include `PENDING` and `BLOCKED`; token usage and
+completed counts are calculated over the current UTC day/24-hour reporting
+window used by the handler.
 
 ---
 
@@ -384,6 +399,31 @@ Soft-deletes the agent (sets `deleted_at`).
 ```json
 { "success": true }
 ```
+
+### Rotate Webhook Secret
+
+```
+POST /api/v1/agents/{agentId}/webhook-secret/rotate
+```
+
+Uses the same per-agent edit gate as Update. The new signing secret is
+returned exactly once; Crewship stores only its protected form and does not
+provide a read endpoint.
+
+**Response:** `200 OK`
+
+```json
+{
+  "webhook_secret": "whsec_…",
+  "rotated_at": "2026-06-04T12:00:00Z"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Caller lacks edit rights for this agent. |
+| `404` | Agent not found in this workspace. |
+| `500` | Secret storage is not configured or failed. |
 
 ---
 
@@ -1247,6 +1287,79 @@ POST /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 Creates a new interactive chat session with the agent.
 
 **Response:** `201 Created`
+
+The optional request body is `{ "session_id": "…", "origin": "UI" }`.
+`origin` may be `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`; unknown values are
+stored as empty. The response is `{ "id": "<chatId>" }`.
+
+### Mark Chat Read
+
+```
+PUT /api/v1/agents/{agentId}/chats/{chatId}/read
+```
+
+Advances the caller's read cursor and clears the paired agent-replied inbox
+notification. Returns `200 OK` with `{ "success": true }`; a chat that is
+not nested under the supplied agent or workspace returns `404`.
+
+### Delete Chat
+
+```
+DELETE /api/v1/agents/{agentId}/chats/{chatId}
+```
+
+The chat creator may delete their own chat; an agent editor may delete any
+chat for that agent. Chats with assignments cannot be deleted (`409`). A
+successful deletion returns `204 No Content`.
+
+### Chat Attachments
+
+```
+POST /api/v1/agents/{agentId}/chats/{chatId}/attachments
+```
+
+Uploads an attachment for the chat through the sidecar. The multipart/form
+data field is `file`; the agent and chat must belong to the caller's
+workspace. The endpoint returns the sidecar's attachment metadata and uses
+`400` for an invalid upload, `404` for an unknown or mis-nested chat, and
+`502` when the sidecar cannot be reached.
+
+### Credential Bindings
+
+```
+GET /api/v1/agents/{agentId}/credential-bindings?workspace_id={workspaceId}
+```
+
+Lists the agent's MCP server bindings. Each item includes `id`, `agent_id`,
+`mcp_server_id`, `mcp_server_scope` (`workspace` or `crew`), optional
+credential/type/header fields, `enabled`, optional `config_override_json`,
+timestamps, server names, and optional `credential_name`. Returns `404` when
+the agent is not in the workspace.
+
+### Agent Integrations
+
+```
+GET    /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
+POST   /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
+PATCH  /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
+DELETE /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
+GET    /api/v1/agents/{agentId}/integrations/resolved?workspace_id={workspaceId}
+```
+
+These are the agent MCP-binding routes. `POST` requires `mcp_server_id` and
+`mcp_server_scope` (`workspace` or `crew`); writes require MANAGER+ and reads
+require workspace membership. The resolved route returns the effective
+workspace → crew → agent integration cascade.
+
+### Agent Notification Channels
+
+```
+GET /api/v1/agents/{agentId}/notification-channels?workspace_id={workspaceId}
+```
+
+Returns `{ "channels": [...] }`, where each channel contains `id`, `type`,
+optional `provider`, and `enabled`. It is readable by any workspace member;
+unknown or cross-workspace agents return `404`.
 
 ---
 

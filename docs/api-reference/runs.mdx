@@ -100,8 +100,9 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 
 | Status | Condition |
 |---|---|
-| 400 | Invalid `status` value (must be one of the five enum values), or no `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| 400 | Invalid `status` value (must be one of the five enum values). |
 | 401 | Not authenticated. |
+| 401 | Authenticated request has no resolved workspace context. |
 | 403 | Authenticated, but not a member of the resolved workspace. |
 | 500 | DB error. |
 
@@ -153,8 +154,9 @@ crew rollup and a display-named top-agents leaderboard (one workspace-scoped
 
 | Status | Condition |
 |---|---|
-| `400` | `window` is not one of `24h` / `7d` / `30d`, or no `workspace_id` resolved (`RequireWorkspace` rejects before the handler runs). |
+| `400` | `window` is not one of `24h` / `7d` / `30d`. |
 | `401` | Not authenticated. |
+| `401` | Authenticated request has no resolved workspace context. |
 | `403` | Authenticated, but not a member of the resolved workspace. |
 | `500` | Journal aggregate query failed. |
 
@@ -202,8 +204,9 @@ The handler does not have a direct `journal.GetRunByID` primitive yet -- it scan
 
 | Status | Condition |
 |---|---|
-| `400` | Empty `id` path segment, or no `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| `400` | Empty `id` path segment. |
 | `401` | Not authenticated. |
+| `401` | Authenticated request has no resolved workspace context. |
 | `403` | Authenticated, but not a member of the resolved workspace. |
 | `404` | No run with that id in the caller's workspace (cross-workspace probes are masked as 404 -- the journal store filter never matches a foreign workspace's trace id). |
 | `500` | Journal page query failed, or enrichment returned an empty slice for a found row (data integrity issue). |

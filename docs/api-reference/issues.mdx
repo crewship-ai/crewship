@@ -42,6 +42,10 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `PATCH` | [`/api/v1/projects/{projectId}`](#update-project) | Update a project |
 | `DELETE` | [`/api/v1/projects/{projectId}`](#delete-project) | Delete a project |
 | `GET` | [`/api/v1/projects/{projectId}/stats`](#project-stats) | Project breakdown stats |
+| `GET` | [`/api/v1/projects/{projectId}/milestones`](#list-milestones) | List project milestones |
+| `POST` | [`/api/v1/projects/{projectId}/milestones`](#create-milestone) | Create a project milestone |
+| `PATCH` | [`/api/v1/milestones/{milestoneId}`](#update-milestone) | Update a project milestone |
+| `DELETE` | [`/api/v1/milestones/{milestoneId}`](#delete-milestone) | Delete a project milestone |
 
 ---
 
@@ -927,6 +931,58 @@ Returns breakdown data: counts by status, by assignee, by label, and crew list.
   "crews": ["crew_abc"]
 }
 ```
+
+---
+
+## Milestones
+
+Milestones belong to projects and expose progress counts for the issues linked
+to them. All routes are workspace-scoped through the project or milestone.
+
+### List Milestones
+
+```
+GET /api/v1/projects/{projectId}/milestones?workspace_id={workspaceId}
+```
+
+Returns `200 OK` with an array ordered by `position`, then creation time. Each
+item contains `id`, `project_id`, `name`, nullable `description` and
+`target_date`, `status`, `position`, `issue_count`, `done_count`,
+`created_at`, and `updated_at`. A project outside the workspace returns `404`.
+
+### Create Milestone
+
+```
+POST /api/v1/projects/{projectId}/milestones?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role.
+
+The request requires `name`; optional fields are `description`, `target_date`,
+and `status` (default `active`). The response is `201 Created` with the full
+milestone object and its next `position`.
+
+### Update Milestone
+
+```
+PATCH /api/v1/milestones/{milestoneId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role.
+
+Any of `name`, `description`, `target_date`, `status`, and `position` may be
+updated; at least one field is required. Returns `200 OK` with the updated
+milestone, or `400` for invalid JSON/no fields and `404` when it is not in the
+workspace.
+
+### Delete Milestone
+
+```
+DELETE /api/v1/milestones/{milestoneId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER` or `ADMIN` role. Returns `204 No Content`, or `404` when the
+milestone is not in the workspace.
 
 ---
 
