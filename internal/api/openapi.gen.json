@@ -1,6 +1,896 @@
 {
+  "components": {
+    "schemas": {
+      "Agent": {
+        "properties": {
+          "_count": {
+            "$ref": "#/components/schemas/AgentCounts"
+          },
+          "agent_role": {
+            "type": "string"
+          },
+          "avatar_seed": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cli_adapter": {
+            "type": "string"
+          },
+          "cli_tools": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "type": "string"
+          },
+          "crew": {
+            "$ref": "#/components/schemas/AgentCrew"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "ephemeral": {
+            "type": "boolean"
+          },
+          "expired_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "hire_reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lead_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_provider": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mcp_config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "memory_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "role_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_cron": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_enabled": {
+            "type": "boolean"
+          },
+          "schedule_last_run": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_next_run": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "tool_profile": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "webhook_require_timestamp": {
+            "type": "boolean"
+          },
+          "webhook_secret_set": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AgentCounts": {
+        "properties": {
+          "chats": {
+            "type": "integer"
+          },
+          "credentials": {
+            "type": "integer"
+          },
+          "skills": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "AgentCrew": {
+        "properties": {
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AgentList": {
+        "items": {
+          "$ref": "#/components/schemas/Agent"
+        },
+        "type": "array"
+      },
+      "Crew": {
+        "properties": {
+          "_count": {
+            "$ref": "#/components/schemas/CrewCounts"
+          },
+          "allow_private_endpoints": {
+            "type": "boolean"
+          },
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cached_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "config_hash": {
+            "nullable": true,
+            "type": "string"
+          },
+          "container_cpus": {
+            "type": "number"
+          },
+          "container_memory_mb": {
+            "type": "integer"
+          },
+          "container_ttl_hours": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "devcontainer_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "escalation_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issue_prefix": {
+            "nullable": true,
+            "type": "string"
+          },
+          "max_ephemeral_agents": {
+            "type": "integer"
+          },
+          "mcp_config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mise_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_mode": {
+            "type": "string"
+          },
+          "network_mode_enforced": {
+            "type": "boolean"
+          },
+          "network_mode_unenforced_reason": {
+            "type": "string"
+          },
+          "runtime_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "services_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CrewCounts": {
+        "properties": {
+          "agents": {
+            "type": "integer"
+          },
+          "members": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CrewList": {
+        "items": {
+          "$ref": "#/components/schemas/Crew"
+        },
+        "type": "array"
+      },
+      "InstalledSkillAgent": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "agent_slug": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "crew_avatar_style": {
+            "type": "string"
+          },
+          "crew_color": {
+            "type": "string"
+          },
+          "crew_icon": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "crew_name": {
+            "type": "string"
+          },
+          "crew_slug": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Issue": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "authored_via": {
+            "nullable": true,
+            "type": "string"
+          },
+          "comment_count": {
+            "type": "integer"
+          },
+          "completed_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "$ref": "#/components/schemas/IssueCreator"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "crew_name": {
+            "type": "string"
+          },
+          "crew_slug": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "estimate": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "nullable": true,
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "type": "array"
+          },
+          "lead_agent_id": {
+            "type": "string"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mission_type": {
+            "type": "string"
+          },
+          "number": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "parent_issue_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_slug": {
+            "nullable": true,
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          },
+          "sub_issues_count": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IssueCreator": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IssueList": {
+        "items": {
+          "$ref": "#/components/schemas/Issue"
+        },
+        "type": "array"
+      },
+      "Label": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Pagination": {
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "total_pages": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ProjectList": {
+        "items": {
+          "$ref": "#/components/schemas/ProjectListItem"
+        },
+        "type": "array"
+      },
+      "ProjectListItem": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "done_count": {
+            "type": "integer"
+          },
+          "health": {
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issue_count": {
+            "type": "integer"
+          },
+          "lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Run": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "agent_slug": {
+            "nullable": true,
+            "type": "string"
+          },
+          "chat_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "crew_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "error_message": {
+            "nullable": true,
+            "type": "string"
+          },
+          "exit_code": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "finished_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "started_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "trigger_type": {
+            "type": "string"
+          },
+          "triggered_by": {
+            "nullable": true,
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RunList": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            },
+            "type": "array"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/RunStats"
+          }
+        },
+        "type": "object"
+      },
+      "RunStats": {
+        "properties": {
+          "failed": {
+            "type": "integer"
+          },
+          "running": {
+            "type": "integer"
+          },
+          "today": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "Skill": {
+        "properties": {
+          "author": {
+            "nullable": true,
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description_quality": {
+            "nullable": true,
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "downloads": {
+            "type": "integer"
+          },
+          "featured": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installed_on": {
+            "items": {
+              "$ref": "#/components/schemas/InstalledSkillAgent"
+            },
+            "type": "array"
+          },
+          "maturity": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pricing_tier": {
+            "type": "string"
+          },
+          "rating_avg": {
+            "nullable": true,
+            "type": "number"
+          },
+          "rating_count": {
+            "type": "integer"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "scan_status": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "spdx_license": {
+            "nullable": true,
+            "type": "string"
+          },
+          "tags": {
+            "nullable": true,
+            "type": "string"
+          },
+          "tool_count": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "vendor": {
+            "nullable": true,
+            "type": "string"
+          },
+          "verification": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "SkillList": {
+        "items": {
+          "$ref": "#/components/schemas/Skill"
+        },
+        "type": "array"
+      },
+      "Workspace": {
+        "properties": {
+          "_count": {
+            "$ref": "#/components/schemas/WorkspaceCounts"
+          },
+          "_count_agents": {
+            "type": "integer"
+          },
+          "_count_crews": {
+            "type": "integer"
+          },
+          "_count_members": {
+            "type": "integer"
+          },
+          "allow_privileged_credentials": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "currentUserCapabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "currentUserRole": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "logo_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "preferred_language": {
+            "nullable": true,
+            "type": "string"
+          },
+          "run_retention_days": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspaceCounts": {
+        "properties": {
+          "agents": {
+            "type": "integer"
+          },
+          "crews": {
+            "type": "integer"
+          },
+          "members": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspaceList": {
+        "items": {
+          "$ref": "#/components/schemas/Workspace"
+        },
+        "type": "array"
+      }
+    }
+  },
   "info": {
-    "description": "Generated from internal/api/router_*.go route registrations (cmd/gen-openapi). Paths, methods, and path parameters are exact; request/response bodies are a generic object placeholder, not hand-authored per-endpoint schemas — see cmd/gen-openapi/main.go.",
+    "description": "Generated from internal/api/router_*.go route registrations (cmd/gen-openapi). Paths and methods are exact; audited read-only resource responses use component schemas and remaining bodies use a generic fallback — see cmd/gen-openapi/main.go.",
     "title": "Crewship API",
     "version": "generated"
   },
@@ -1663,7 +2553,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentList"
                 }
               }
             },
@@ -1797,7 +2687,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Agent"
                 }
               }
             },
@@ -5673,7 +6563,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewList"
                 }
               }
             },
@@ -5758,7 +6648,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Crew"
                 }
               }
             },
@@ -9736,7 +10626,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/IssueList"
                 }
               }
             },
@@ -9795,7 +10685,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Issue"
                 }
               }
             },
@@ -11714,7 +12604,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProjectList"
                 }
               }
             },
@@ -11799,7 +12689,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProjectListItem"
                 }
               }
             },
@@ -12216,7 +13106,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunList"
                 }
               }
             },
@@ -12266,7 +13156,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Run"
                 }
               }
             },
@@ -12440,7 +13330,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/SkillList"
                 }
               }
             },
@@ -12548,7 +13438,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Skill"
                 }
               }
             },
@@ -13568,7 +14458,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspaceList"
                 }
               }
             },
@@ -13653,7 +14543,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Workspace"
                 }
               }
             },
