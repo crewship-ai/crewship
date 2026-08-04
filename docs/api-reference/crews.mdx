@@ -915,6 +915,19 @@ Get standup summary for a crew.
 GET /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member; `workspace_id` must identify the
+caller’s workspace.
+
+**Path / query parameters:** `crewId` is the crew ID; `workspace_id` is the
+required workspace ID. Returns the crew’s escalation records.
+
+**Response:** `200 OK` with an array of escalation objects.
+
+| Status | Condition |
+|---|---|
+| `401` | Missing authentication or workspace context |
+| `500` | Database query or row scan failed |
+
 ### Resolve Escalation
 
 ```
@@ -928,6 +941,31 @@ GET /api/v1/escalations/pending-count?workspace_id={workspaceId}
 ```
 
 Returns count of pending escalations across the workspace.
+
+### Purge Crew Escalations
+
+```
+DELETE /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}
+```
+
+**Auth:** Authenticated workspace `OWNER` or `ADMIN` (`manage` role).
+
+**Path / query parameters:** `crewId` is the crew ID; `workspace_id` is the
+required workspace ID. The request has no body. The operation permanently
+deletes all escalation rows for that crew in that workspace.
+
+**Response:** `200 OK`
+
+```json
+{ "deleted": 2 }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `crewId` |
+| `401` | Missing workspace context or authentication |
+| `403` | Caller is not an `OWNER` or `ADMIN` |
+| `500` | Database purge failed |
 
 ---
 
