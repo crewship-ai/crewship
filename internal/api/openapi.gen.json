@@ -2133,6 +2133,33 @@
         },
         "type": "array"
       },
+      "CrewMemberResponseV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CrewMembersResponseV1": {
         "items": {
           "properties": {
@@ -3847,6 +3874,1087 @@
         },
         "type": "object"
       },
+      "RemainingAgentAttachmentV1": {
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentChatsV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentCreatedV1": {
+        "$ref": "#/components/schemas/Agent"
+      },
+      "RemainingAgentCredentialAddedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentCredentialBindingsV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentCredentialRemovedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentCredentialsV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentCrewsStatusV1": {
+        "properties": {
+          "agents": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "crews": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentDebugV1": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentFileSavedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "saved": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentGitLogV1": {
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "commits": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentHireApprovedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentHiredV1": {
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "approval_required": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentLearningRequestV1": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentLearningUpdatedV1": {
+        "$ref": "#/components/schemas/RemainingAgentLearningV1"
+      },
+      "RemainingAgentLearningV1": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentLoadV1": {
+        "properties": {
+          "agents": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "running": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentLogsV1": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "logs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentNotificationChannelsV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentPeerDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentPeerV1": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "consent": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "facts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentPeersV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentPersonaDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentPersonaHistoryV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentPersonaRequestV1": {
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentPersonaSuggestionV1": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentPersonaUpdatedV1": {
+        "$ref": "#/components/schemas/RemainingAgentPersonaV1"
+      },
+      "RemainingAgentPersonaV1": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentRehiredV1": {
+        "$ref": "#/components/schemas/Agent"
+      },
+      "RemainingAgentResolvedIntegrationsV1": {
+        "properties": {
+          "integrations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentRunsV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentSkillAddedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentSkillRemovedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentSkillsV1": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "RemainingAgentStoppedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingAgentUpdatedV1": {
+        "$ref": "#/components/schemas/Agent"
+      },
+      "RemainingAgentWebhookSecretV1": {
+        "properties": {
+          "rotated_at": {
+            "type": "string"
+          },
+          "webhook_secret": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewAgentsRestartedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewAvatarStyleAppliedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewCreatedV1": {
+        "$ref": "#/components/schemas/Crew"
+      },
+      "RemainingCrewDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewEscalationsDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewFileDeletedV1": {
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewFileSavedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "saved": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueCommentCreatedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueCreatedV1": {
+        "$ref": "#/components/schemas/Issue"
+      },
+      "RemainingCrewIssueDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueRelationCreatedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueReviewedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueStartedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueStoppedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewIssueUpdatedV1": {
+        "$ref": "#/components/schemas/Issue"
+      },
+      "RemainingCrewMemberCreatedV1": {
+        "$ref": "#/components/schemas/CrewMemberResponseV1"
+      },
+      "RemainingCrewMemberDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMemberUpdatedV1": {
+        "$ref": "#/components/schemas/CrewMemberResponseV1"
+      },
+      "RemainingCrewMissionClonedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionCreatedV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionRestartedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionResumedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionStartedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionTaskCreatedV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mission_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionTaskUpdatedV1": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "mission_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewMissionUpdatedV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewPersonaDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewPersonaRequestV1": {
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewPersonaUpdatedV1": {
+        "$ref": "#/components/schemas/CrewPersonaResponseV1"
+      },
+      "RemainingCrewPolicyRequestV1": {
+        "properties": {
+          "approval_required": {
+            "type": "boolean"
+          },
+          "autonomy": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewPolicyUpdatedV1": {
+        "$ref": "#/components/schemas/CrewPolicyResponseV1"
+      },
+      "RemainingCrewPortRevokedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewProvisionStatusV1": {
+        "properties": {
+          "crew_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewProvisionTriggeredV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewRebuildTriggeredV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewReplacedV1": {
+        "$ref": "#/components/schemas/Crew"
+      },
+      "RemainingCrewToolsRefreshedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewUpdatedV1": {
+        "$ref": "#/components/schemas/Crew"
+      },
+      "RemainingCrewshipdStatusV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceCreatedV1": {
+        "$ref": "#/components/schemas/Workspace"
+      },
+      "RemainingWorkspaceDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceInvitationCreatedV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceMemberCapabilitiesUpdatedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceMemberCreatedV1": {
+        "$ref": "#/components/schemas/WorkspaceMemberResponseV1"
+      },
+      "RemainingWorkspaceMemberDeletedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceMemberProvisionedV1": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "setup_token": {
+            "type": "string"
+          },
+          "setup_url": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceMemberRequestV1": {
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceMemberRoleUpdatedV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingWorkspaceUpdatedV1": {
+        "$ref": "#/components/schemas/Workspace"
+      },
+      "RemainingworkspacesV1": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "ReplayOutcome": {
         "properties": {
           "error": {
@@ -4886,6 +5994,33 @@
             "type": "string"
           },
           "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspaceMemberResponseV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "user": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "workspace_id": {
             "type": "string"
           }
         },
@@ -19261,7 +20396,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentLoadV1"
                 }
               }
             },
@@ -19559,7 +20694,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCreatedV1"
                 }
               }
             },
@@ -19569,7 +20704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCreatedV1"
                 }
               }
             },
@@ -19761,7 +20896,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCrewsStatusV1"
                 }
               }
             },
@@ -19921,7 +21056,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentHiredV1"
                 }
               }
             },
@@ -20112,7 +21247,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentDeletedV1"
                 }
               }
             },
@@ -20448,7 +21583,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentUpdatedV1"
                 }
               }
             },
@@ -20648,7 +21783,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentHireApprovedV1"
                 }
               }
             },
@@ -21389,54 +22524,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "properties": {
-                      "agent_id": {
-                        "type": "string"
-                      },
-                      "created_at": {
-                        "type": "string"
-                      },
-                      "ended_at": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "last_activity_at": {
-                        "type": "string"
-                      },
-                      "message_count": {
-                        "type": "integer"
-                      },
-                      "mode": {
-                        "type": "string"
-                      },
-                      "origin": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "started_at": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "unread_count": {
-                        "type": "integer"
-                      },
-                      "workspace_id": {
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/RemainingAgentChatsV1"
                 }
               }
             },
@@ -22025,8 +23113,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "format": "binary",
-                "type": "string"
+                "type": "object"
               }
             }
           }
@@ -22036,8 +23123,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentAttachmentV1"
                 }
               }
             },
@@ -22047,8 +23133,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentAttachmentV1"
                 }
               }
             },
@@ -22616,7 +23701,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCredentialBindingsV1"
                 }
               }
             },
@@ -22816,7 +23901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCredentialsV1"
                 }
               }
             },
@@ -22984,7 +24069,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCredentialAddedV1"
                 }
               }
             },
@@ -22994,7 +24079,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCredentialAddedV1"
                 }
               }
             },
@@ -23193,7 +24278,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentCredentialRemovedV1"
                 }
               }
             },
@@ -23333,7 +24418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentDebugV1"
                 }
               }
             },
@@ -23916,14 +25001,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "content": {
-                    "type": "string"
-                  },
-                  "path": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -23934,8 +25011,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentFileSavedV1"
                 }
               }
             },
@@ -24135,7 +25211,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentGitLogV1"
                 }
               }
             },
@@ -24943,7 +26019,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentResolvedIntegrationsV1"
                 }
               }
             },
@@ -25458,7 +26534,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentLearningV1"
                 }
               }
             },
@@ -25646,7 +26722,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingAgentLearningRequestV1"
               }
             }
           }
@@ -25656,7 +26732,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentLearningUpdatedV1"
                 }
               }
             },
@@ -25856,7 +26932,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentLogsV1"
                 }
               }
             },
@@ -26026,7 +27102,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentNotificationChannelsV1"
                 }
               }
             },
@@ -26196,7 +27272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPeersV1"
                 }
               }
             },
@@ -26425,7 +27501,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPeerDeletedV1"
                 }
               }
             },
@@ -26435,7 +27511,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPeerDeletedV1"
                 }
               }
             },
@@ -26641,7 +27717,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPeerV1"
                 }
               }
             },
@@ -26862,7 +27938,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPersonaDeletedV1"
                 }
               }
             },
@@ -26872,7 +27948,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPersonaDeletedV1"
                 }
               }
             },
@@ -27010,7 +28086,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPersonaV1"
                 }
               }
             },
@@ -27168,7 +28244,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingAgentPersonaRequestV1"
               }
             }
           }
@@ -27178,7 +28254,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPersonaUpdatedV1"
                 }
               }
             },
@@ -27356,7 +28432,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPersonaHistoryV1"
                 }
               }
             },
@@ -27526,7 +28602,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentPersonaSuggestionV1"
                 }
               }
             },
@@ -27696,7 +28772,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentRehiredV1"
                 }
               }
             },
@@ -27926,7 +29002,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentRunsV1"
                 }
               }
             },
@@ -28066,7 +29142,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentSkillsV1"
                 }
               }
             },
@@ -28234,7 +29310,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentSkillAddedV1"
                 }
               }
             },
@@ -28244,7 +29320,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentSkillAddedV1"
                 }
               }
             },
@@ -28443,7 +29519,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentSkillRemovedV1"
                 }
               }
             },
@@ -28453,7 +29529,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentSkillRemovedV1"
                 }
               }
             },
@@ -28593,7 +29669,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentStoppedV1"
                 }
               }
             },
@@ -28733,7 +29809,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingAgentWebhookSecretV1"
                 }
               }
             },
@@ -44536,7 +45612,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewCreatedV1"
                 }
               }
             },
@@ -44546,7 +45622,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewCreatedV1"
                 }
               }
             },
@@ -44737,7 +45813,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewDeletedV1"
                 }
               }
             },
@@ -45073,7 +46149,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewUpdatedV1"
                 }
               }
             },
@@ -45271,7 +46347,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewReplacedV1"
                 }
               }
             },
@@ -45471,7 +46547,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewAvatarStyleAppliedV1"
                 }
               }
             },
@@ -46342,7 +47418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewEscalationsDeletedV1"
                 }
               }
             },
@@ -46877,7 +47953,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewFileDeletedV1"
                 }
               }
             },
@@ -47270,14 +48346,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "content": {
-                    "type": "string"
-                  },
-                  "path": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -47288,8 +48356,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewFileSavedV1"
                 }
               }
             },
@@ -48754,7 +49821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewToolsRefreshedV1"
                 }
               }
             },
@@ -49050,7 +50117,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueCreatedV1"
                 }
               }
             },
@@ -49060,7 +50127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueCreatedV1"
                 }
               }
             },
@@ -49229,7 +50296,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueDeletedV1"
                 }
               }
             },
@@ -49239,7 +50306,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueDeletedV1"
                 }
               }
             },
@@ -49591,7 +50658,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueUpdatedV1"
                 }
               }
             },
@@ -50123,7 +51190,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueCommentCreatedV1"
                 }
               }
             },
@@ -50133,7 +51200,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueCommentCreatedV1"
                 }
               }
             },
@@ -50487,7 +51554,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueRelationCreatedV1"
                 }
               }
             },
@@ -50497,7 +51564,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueRelationCreatedV1"
                 }
               }
             },
@@ -50705,7 +51772,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueReviewedV1"
                 }
               }
             },
@@ -51061,7 +52128,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueStartedV1"
                 }
               }
             },
@@ -51299,7 +52366,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewIssueStoppedV1"
                 }
               }
             },
@@ -51815,7 +52882,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMemberCreatedV1"
                 }
               }
             },
@@ -51825,7 +52892,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMemberCreatedV1"
                 }
               }
             },
@@ -52024,7 +53091,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMemberDeletedV1"
                 }
               }
             },
@@ -52200,7 +53267,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMemberUpdatedV1"
                 }
               }
             },
@@ -52516,7 +53583,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionCreatedV1"
                 }
               }
             },
@@ -52526,7 +53593,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionCreatedV1"
                 }
               }
             },
@@ -52665,7 +53732,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionDeletedV1"
                 }
               }
             },
@@ -52675,7 +53742,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionDeletedV1"
                 }
               }
             },
@@ -53027,7 +54094,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionUpdatedV1"
                 }
               }
             },
@@ -53205,7 +54272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionClonedV1"
                 }
               }
             },
@@ -53215,7 +54282,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionClonedV1"
                 }
               }
             },
@@ -53393,7 +54460,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionRestartedV1"
                 }
               }
             },
@@ -53601,7 +54668,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionResumedV1"
                 }
               }
             },
@@ -53839,7 +54906,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionStartedV1"
                 }
               }
             },
@@ -54077,7 +55144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionTaskCreatedV1"
                 }
               }
             },
@@ -54087,7 +55154,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionTaskCreatedV1"
                 }
               }
             },
@@ -54273,7 +55340,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewMissionTaskUpdatedV1"
                 }
               }
             },
@@ -54574,7 +55641,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewPersonaDeletedV1"
                 }
               }
             },
@@ -54584,7 +55651,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewPersonaDeletedV1"
                 }
               }
             },
@@ -54940,7 +56007,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingCrewPersonaRequestV1"
               }
             }
           }
@@ -54950,7 +56017,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewPersonaUpdatedV1"
                 }
               }
             },
@@ -55338,7 +56405,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingCrewPolicyRequestV1"
               }
             }
           }
@@ -55348,7 +56415,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewPolicyUpdatedV1"
                 }
               }
             },
@@ -55704,7 +56771,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewPortRevokedV1"
                 }
               }
             },
@@ -55874,7 +56941,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewProvisionResponseV1"
+                  "$ref": "#/components/schemas/RemainingCrewProvisionStatusV1"
                 }
               }
             },
@@ -56042,7 +57109,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewProvisionTriggeredV1"
                 }
               }
             },
@@ -56052,7 +57119,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewProvisionTriggeredV1"
                 }
               }
             },
@@ -56342,7 +57409,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewRebuildTriggeredV1"
                 }
               }
             },
@@ -56482,7 +57549,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewAgentsRestartedV1"
                 }
               }
             },
@@ -57060,8 +58127,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCrewshipdStatusV1"
                 }
               }
             },
@@ -92749,7 +93815,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceCreatedV1"
                 }
               }
             },
@@ -92759,7 +93825,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceCreatedV1"
                 }
               }
             },
@@ -92920,7 +93986,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceDeletedV1"
                 }
               }
             },
@@ -93316,7 +94382,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceUpdatedV1"
                 }
               }
             },
@@ -93624,7 +94690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceInvitationCreatedV1"
                 }
               }
             },
@@ -93634,7 +94700,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceInvitationCreatedV1"
                 }
               }
             },
@@ -93932,7 +94998,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingWorkspaceMemberRequestV1"
               }
             }
           }
@@ -93942,7 +95008,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberCreatedV1"
                 }
               }
             },
@@ -93952,7 +95018,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberCreatedV1"
                 }
               }
             },
@@ -94322,7 +95388,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberProvisionedV1"
                 }
               }
             },
@@ -94332,7 +95398,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberProvisionedV1"
                 }
               }
             },
@@ -94531,7 +95597,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberDeletedV1"
                 }
               }
             },
@@ -94707,7 +95773,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberRoleUpdatedV1"
                 }
               }
             },
@@ -95151,7 +96217,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingWorkspaceMemberCapabilitiesUpdatedV1"
                 }
               }
             },
@@ -96423,7 +97489,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -96661,7 +97727,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -97327,7 +98393,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -97337,7 +98403,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -97536,7 +98602,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -97546,7 +98612,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -97782,7 +98848,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -98020,7 +99086,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -98867,7 +99933,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -98877,7 +99943,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -99525,7 +100591,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -99535,7 +100601,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -99943,7 +101009,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -100313,7 +101379,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -100729,7 +101795,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -100967,7 +102033,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -101107,7 +102173,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -101117,7 +102183,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -101317,7 +102383,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -101695,7 +102761,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -101924,7 +102990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -101934,7 +103000,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -102318,7 +103384,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -102762,7 +103828,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -103224,7 +104290,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -103402,7 +104468,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -103610,7 +104676,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -104212,7 +105278,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -104420,7 +105486,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -104652,7 +105718,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -105182,7 +106248,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -105643,7 +106709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -105982,7 +107048,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -106196,7 +107262,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -106374,7 +107440,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -106671,7 +107737,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -106855,7 +107921,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -107063,7 +108129,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -107270,7 +108336,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -107862,29 +108928,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "allow_unsafe_license": {
-                    "type": "boolean"
-                  },
-                  "dry_run": {
-                    "type": "boolean"
-                  },
-                  "git_ref": {
-                    "type": "string"
-                  },
-                  "git_url": {
-                    "type": "string"
-                  },
-                  "paths": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "vendor": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -107895,7 +108938,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -108414,18 +109457,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "allow_unsafe_license": {
-                    "type": "boolean"
-                  },
-                  "content": {
-                    "type": "string"
-                  },
-                  "url": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/SkillImportRequest"
               }
             }
           }
@@ -108435,7 +109467,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -108445,7 +109477,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
@@ -108614,7 +109646,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
                 }
               }
             },
