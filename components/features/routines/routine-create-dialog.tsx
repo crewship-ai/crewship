@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { useRouter } from "next/navigation"
+import { motion } from "motion/react"
 import {
   X,
   FlaskConical,
@@ -33,7 +34,7 @@ import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 //
 // The dialog is a small router over four modes:
 //   • entry    — three cards: Describe it (★) / Fork an existing routine /
-//                Build step by step (advanced).
+//                write it yourself (advanced editor).
 //   • describe — pick crew → its Lead agent → a goal, then hand off into a
 //                chat with that Lead which auto-sends an authoring prompt.
 //                The backend Routine-Author skill drafts from there.
@@ -520,7 +521,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       : mode === "fork"
         ? "Start from an existing routine"
         : mode === "advanced"
-          ? "Build step by step"
+          ? "Write it yourself"
           : "New routine"
   const headerSub =
     mode === "describe"
@@ -532,8 +533,20 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
           : undefined
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-md p-4" onClick={onClose}>
-      <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      {/* Dim, do not blur. The shared DialogOverlay every other modal
+          in the product uses is a plain bg-black/50 — a blur here made
+          this one dialog look like a different application. */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
         className={cn(
           "flex w-full flex-col rounded-lg border border-white/10 bg-card shadow-2xl",
           mode === "advanced"
@@ -950,8 +963,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             </div>
           </>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
