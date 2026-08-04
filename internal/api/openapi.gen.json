@@ -5400,6 +5400,551 @@
         },
         "type": "object"
       },
+      "IntegrationsAuthCLITokenRequest": {
+        "properties": {
+          "expires_in_seconds": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tier": {
+            "enum": [
+              "STANDARD",
+              "ADMIN"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IntegrationsAuthComposioAppScope": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "full",
+              "read",
+              "custom"
+            ],
+            "type": "string"
+          },
+          "toolkit": {
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "toolkit",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthComposioBindRequest": {
+        "properties": {
+          "apps": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationsAuthComposioAppScope"
+            },
+            "type": "array"
+          },
+          "toolkits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthComposioConnectRequest": {
+        "properties": {
+          "toolkit": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "toolkit",
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthComposioDefaultRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IntegrationsAuthComposioSettingsRequest": {
+        "properties": {
+          "api_key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthComposioTriggerRequest": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthCrewCreateRequest": {
+        "properties": {
+          "args_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "command": {
+            "nullable": true,
+            "type": "string"
+          },
+          "config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "endpoint": {
+            "nullable": true,
+            "type": "string"
+          },
+          "env_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "enum": [
+              "streamable-http",
+              "stdio"
+            ],
+            "type": "string"
+          },
+          "workspace_mcp_server_id": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthEmptyRequest": {
+        "properties": {},
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationChannelCreateRequest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "min_priority": {
+            "type": "string"
+          },
+          "personal": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "shoutrrr_url": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "email",
+              "webhook",
+              "shoutrrr"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationChannelPatchRequest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "min_priority": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationChannelTestRequest": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "min_priority": {
+            "type": "string"
+          },
+          "personal": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "shoutrrr_url": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "email",
+              "webhook",
+              "shoutrrr"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationPairAgentRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationPreferenceCell": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "off",
+              "immediate"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "channel_id",
+          "state"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationPreferencesRequest": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationsAuthNotificationPreferenceCell"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "IntegrationsAuthNotificationTemplateRequest": {
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "channel_id",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthOAuthAutoConnectRequest": {
+        "properties": {
+          "mcp_url": {
+            "type": "string"
+          },
+          "provider_hint": {
+            "type": "string"
+          },
+          "server_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mcp_url"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthOAuthDiscoveryRequest": {
+        "properties": {
+          "mcp_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mcp_url"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthOAuthExchangeRequest": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "code_verifier": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "code"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthOAuthInitiateRequest": {
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthOAuthLoopbackRequest": {
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id"
+        ],
+        "type": "object"
+      },
+      "IntegrationsAuthUpdateRequest": {
+        "properties": {
+          "args_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "command": {
+            "nullable": true,
+            "type": "string"
+          },
+          "config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "display_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "nullable": true,
+            "type": "string"
+          },
+          "env_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "transport": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "IntegrationsAuthWorkspaceCreateRequest": {
+        "properties": {
+          "args_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "command": {
+            "nullable": true,
+            "type": "string"
+          },
+          "config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "endpoint": {
+            "nullable": true,
+            "type": "string"
+          },
+          "env_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "enum": [
+              "streamable-http",
+              "stdio"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
       "Issue": {
         "properties": {
           "assignee_id": {
@@ -6054,6 +6599,41 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "PipelineWebhookCreateRequest": {
+        "properties": {
+          "enabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "inputs_template": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "rate_limit_per_min": {
+            "type": "integer"
+          },
+          "signing_secret": {
+            "type": "string"
+          },
+          "target_pipeline_id": {
+            "type": "string"
+          },
+          "target_pipeline_slug": {
+            "type": "string"
+          },
+          "target_pipeline_version": {
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
       },
       "Profile": {
         "properties": {
@@ -35136,7 +35716,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CLITokenCreateRequest"
+                "$ref": "#/components/schemas/IntegrationsAuthCLITokenRequest"
               }
             }
           }
@@ -52979,7 +53559,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntegrationCreateRequest"
+                "$ref": "#/components/schemas/IntegrationsAuthCrewCreateRequest"
               }
             }
           }
@@ -53364,7 +53944,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntegrationUpdateRequest"
+                "$ref": "#/components/schemas/IntegrationsAuthUpdateRequest"
               }
             }
           }
@@ -67817,7 +68397,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntegrationCreateRequest"
+                "$ref": "#/components/schemas/IntegrationsAuthWorkspaceCreateRequest"
               }
             }
           }
@@ -68667,7 +69247,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthComposioBindRequest"
               }
             }
           }
@@ -68857,15 +69437,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "toolkit": {
-                    "type": "string"
-                  },
-                  "user_id": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthComposioConnectRequest"
               }
             }
           }
@@ -69136,7 +69708,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthComposioDefaultRequest"
               }
             }
           }
@@ -69647,7 +70219,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthComposioSettingsRequest"
               }
             }
           }
@@ -70273,7 +70845,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthComposioTriggerRequest"
               }
             }
           }
@@ -71034,7 +71606,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntegrationUpdateRequest"
+                "$ref": "#/components/schemas/IntegrationsAuthUpdateRequest"
               }
             }
           }
@@ -74971,30 +75543,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "cells": {
-                    "items": {
-                      "properties": {
-                        "category": {
-                          "type": "string"
-                        },
-                        "channel_id": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "enum": [
-                            "off",
-                            "immediate"
-                          ],
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "type": "array"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthNotificationPreferencesRequest"
               }
             }
           }
@@ -79009,7 +79558,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthNotificationChannelCreateRequest"
               }
             }
           }
@@ -79179,33 +79728,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "fields": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
-                    "type": "object"
-                  },
-                  "provider": {
-                    "type": "string"
-                  },
-                  "secret": {
-                    "type": "string"
-                  },
-                  "shoutrrr_url": {
-                    "type": "string"
-                  },
-                  "to": {
-                    "type": "string"
-                  },
-                  "type": {
-                    "type": "string"
-                  },
-                  "url": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthNotificationChannelTestRequest"
               }
             }
           }
@@ -79604,27 +80127,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "categories": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "events": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "min_priority": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthNotificationChannelPatchRequest"
               }
             }
           }
@@ -79967,7 +80470,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthNotificationPairAgentRequest"
               }
             }
           }
@@ -80347,7 +80850,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthEmptyRequest"
               }
             }
           }
@@ -81589,7 +82092,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthNotificationTemplateRequest"
               }
             }
           }
@@ -82446,7 +82949,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthOAuthAutoConnectRequest"
               }
             }
           }
@@ -82773,7 +83276,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthOAuthDiscoveryRequest"
               }
             }
           }
@@ -82933,7 +83436,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthOAuthExchangeRequest"
               }
             }
           }
@@ -83171,7 +83674,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthOAuthInitiateRequest"
               }
             }
           }
@@ -83361,7 +83864,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/IntegrationsAuthOAuthLoopbackRequest"
               }
             }
           }
@@ -103892,39 +104395,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "enabled": {
-                    "nullable": true,
-                    "type": "boolean"
-                  },
-                  "inputs_template": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "rate_limit_per_min": {
-                    "type": "integer"
-                  },
-                  "signing_secret": {
-                    "type": "string"
-                  },
-                  "target_pipeline_id": {
-                    "type": "string"
-                  },
-                  "target_pipeline_slug": {
-                    "type": "string"
-                  },
-                  "target_pipeline_version": {
-                    "nullable": true,
-                    "type": "integer"
-                  }
-                },
-                "required": [
-                  "name"
-                ],
-                "type": "object"
+                "$ref": "#/components/schemas/PipelineWebhookCreateRequest"
               }
             }
           }

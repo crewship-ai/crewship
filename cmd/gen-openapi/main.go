@@ -247,9 +247,10 @@ func buildDocument(routes []route) map[string]any {
 	_, finalAdminPlatformComponents := finalAdminPlatformSchemaCatalog()
 	_, finalComponents := finalIntegrationsConnectorsSchemaCatalog()
 	_, coreResourceRequestComponentsV2 := coreResourceRequestSchemaCatalogV2()
+	_, integrationsAuthRequestComponents := integrationsAuthRequestBodySchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
-		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents, coreResourceRequestComponentsV2,
+		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents, coreResourceRequestComponentsV2, integrationsAuthRequestComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -426,6 +427,25 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	finalCatalog, _ := finalIntegrationsConnectorsSchemaCatalog()
 	for key, schema := range finalCatalog {
 		result[key] = schema
+	}
+	integrationAuthRequests, _ := integrationsAuthRequestBodySchemaCatalog()
+	for key, schema := range integrationAuthRequests {
+		// This catalog owns request bodies only. Preserve the response contract
+		// supplied by the response-domain catalog for the same operation.
+		merged := result[key]
+		if schema.Request != nil {
+			merged.Request = schema.Request
+		}
+		if schema.Response != nil {
+			merged.Response = schema.Response
+		}
+		if schema.ResponseMedia != nil {
+			merged.ResponseMedia = schema.ResponseMedia
+		}
+		if schema.SuccessStatuses != nil {
+			merged.SuccessStatuses = schema.SuccessStatuses
+		}
+		result[key] = merged
 	}
 	for key, schema := range finalWorkflowIssueSchemaCatalog() {
 		result[key] = schema
