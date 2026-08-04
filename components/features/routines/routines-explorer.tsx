@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
+  Activity,
+  PauseCircle,
   ScrollText,
   CheckCircle2,
   XCircle,
@@ -23,6 +25,8 @@ import {
 } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { routineIcon, routineColor } from "@/lib/routine-identity"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { useTick } from "@/hooks/use-tick"
@@ -60,6 +64,11 @@ type StatusBucket = RoutineFilters["status"]
 
 const STATUS_BUCKETS: { id: StatusBucket; label: string; icon: typeof ScrollText; tone: string }[] = [
   { id: "all", label: "All", icon: ScrollText, tone: "text-foreground/70" },
+  // Live buckets first. A routine parked on a human is the only state on
+  // this page that is waiting for the person reading it — burying that
+  // under three historical outcomes gets it found last.
+  { id: "awaiting", label: "Awaiting approval", icon: PauseCircle, tone: "text-warn" },
+  { id: "running", label: "Running", icon: Activity, tone: "text-primary" },
   { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-success" },
   { id: "failed", label: "Failed", icon: XCircle, tone: "text-destructive" },
   { id: "never", label: "Never invoked", icon: CircleDashed, tone: "text-muted-foreground" },
@@ -86,15 +95,31 @@ export function RoutinesExplorer({
   // not the post-status-filter view — otherwise switching to "Failed"
   // would make every other bucket show 0).
   const statusCounts = useMemo(() => {
-    const c: Record<StatusBucket, number> = { all: routines.length, completed: 0, failed: 0, never: 0 }
+    const c: Record<StatusBucket, number> = {
+      all: routines.length,
+      awaiting: 0,
+      running: 0,
+      completed: 0,
+      failed: 0,
+      never: 0,
+    }
     for (const p of routines) {
       const s = p.last_invocation_status?.toLowerCase()
+      // Live state comes from the workspace run feed, not from the
+      // routine row: last_invocation_status still reads "running" while
+      // a run is parked on a human, so the row alone cannot tell the two
+      // apart — which is the distinction the bucket exists to make.
+      const live = liveBySlug.get(p.slug)
+      if (live) {
+        if (isAwaitingApproval(live.status)) c.awaiting++
+        else c.running++
+      }
       if (p.invocation_count === 0) c.never++
       if (s === "completed") c.completed++
       if (s === "failed") c.failed++
     }
     return c
-  }, [routines])
+  }, [routines, liveBySlug])
 
   // Author agents derived from loaded routines — same as Issues' agents
   // facet but using author_agent_id/name instead of assignee.
@@ -343,11 +368,29 @@ export function RoutinesExplorer({
                         selected={isSelected}
                         onSelect={() => onSelectRoutine(routine.slug)}
                       >
-                        <span
-                          aria-hidden
-                          title={liveRun ? liveRun.status : (lastStatus ?? "never invoked")}
-                          className={cn("h-2 w-2 shrink-0 rounded-full", statusTone)}
-                        />
+                        {/* Icon first, then the status dot. Thirty rows
+                            of identical text was the problem; the icon is
+                            what makes one findable at a glance, and the
+                            dot still carries the state. Same derivation
+                            the detail header uses — two surfaces showing
+                            a different icon for one routine would be
+                            worse than showing none. */}
+                        <span className="relative shrink-0">
+                          <CrewIcon
+                            icon={routineIcon(routine.slug)}
+                            color={routineColor(routine.slug)}
+                            size="sm"
+                            className="!h-5 !w-5 !rounded-md"
+                          />
+                          <span
+                            aria-hidden
+                            title={liveRun ? liveRun.status : (lastStatus ?? "never invoked")}
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                              statusTone,
+                            )}
+                          />
+                        </span>
                         <span className="text-foreground/80 truncate flex-1">
                           {routine.name || routine.slug}
                           {liveRun && (

@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
+import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import { matchesRoutineFilters } from "@/lib/routine-filters"
 import { RoutinesListView } from "./routines-list-view"
 import { RoutinesSchedulesView } from "./routines-schedules-view"
 import { RoutinesInsightsView } from "./routines-insights-view"
@@ -118,23 +120,28 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     setSelectedSlug((prev) => (prev === slug ? null : slug))
   }
 
-  const filteredRoutines = pipelines.filter((p) => {
-    if (search) {
-      const q = search.toLowerCase()
-      const haystack = `${p.slug} ${p.name} ${p.description ?? ""} ${p.author_agent_name ?? ""}`.toLowerCase()
-      if (!haystack.includes(q)) return false
-    }
-    if (filters.status !== "all") {
-      if (filters.status === "never" && p.invocation_count !== 0) return false
-      if (filters.status !== "never" && p.last_invocation_status?.toLowerCase() !== filters.status)
-        return false
-    }
-    if (filters.invocations === "popular" && p.invocation_count < 10) return false
-    if (filters.invocations === "fresh" && p.invocation_count > 0) return false
-    if (filters.authorAgentId !== null && p.author_agent_id !== filters.authorAgentId) return false
-    if (!filters.showEphemeral && p.ephemeral) return false
-    return true
-  })
+  // Live runs, for the two status buckets a routine row cannot answer:
+  // last_invocation_status reads "running" while a run is parked on a
+  // human, so Running and Awaiting approval are the same value there.
+  const { bySlug: liveBySlug } = useActiveRoutineRuns()
+
+  const filteredRoutines = pipelines.filter((p) =>
+    matchesRoutineFilters(
+      {
+        slug: p.slug,
+        name: p.name,
+        description: p.description,
+        authorAgentId: p.author_agent_id,
+        authorAgentName: p.author_agent_name,
+        invocationCount: p.invocation_count,
+        lastStatus: p.last_invocation_status,
+        ephemeral: p.ephemeral,
+      },
+      filters,
+      liveBySlug,
+      search,
+    ),
+  )
 
   // Selected routine — looked up from the loaded pipeline list so the
   // toolbar breadcrumb can show the human name without a second fetch.

@@ -53,6 +53,7 @@ import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import { routineIcon, routineColor } from "@/lib/routine-identity"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineEditorTab } from "./routine-editor-tab"
@@ -425,39 +426,6 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged, actions, st
 /* ------------------------------------------------------------------ *
  *  Pieces                                                             *
  * ------------------------------------------------------------------ */
-
-/**
- * A routine's icon and colour, derived from its slug.
- *
- * The mockup let you PICK these. That needs somewhere to store them,
- * and the routine API has no icon or colour field — so a picker here
- * would take the user's choice and drop it on the floor, which is the
- * same class of lie as a save button that saves nothing.
- *
- * Deriving from the slug gets the real benefit today: every routine
- * looks different, the same routine always looks the same, and a list
- * of thirty stops being thirty identical rows. Swap this for the stored
- * value the moment the field exists; nothing else has to change.
- */
-const ICON_POOL = [
-  "workflow", "zap", "cog", "database", "mail", "calendar", "chart",
-  "shield", "rocket", "brain", "code", "receipt", "file-text", "search",
-] as const
-const COLOR_POOL = ["blue", "emerald", "violet", "amber", "rose", "cyan", "lime", "fuchsia"] as const
-
-function hashSlug(slug: string): number {
-  let h = 0
-  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0
-  return h
-}
-
-function routineIcon(slug: string): string {
-  return ICON_POOL[hashSlug(slug) % ICON_POOL.length]
-}
-
-function routineColor(slug: string): string {
-  return COLOR_POOL[hashSlug(slug) % COLOR_POOL.length]
-}
 
 function toneOf(status?: string): "success" | "destructive" | "default" {
   const s = status?.toLowerCase()
