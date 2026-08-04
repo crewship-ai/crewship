@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-08-04T10:55:38Z",
-  "git_ref": "906ad896",
+  "generated_at": "2026-08-04T11:05:18Z",
+  "git_ref": "75c5828d",
   "summary": {
     "api_operations": 539,
-    "api_exact_docs": 508,
-    "api_resource_docs": 31,
+    "api_exact_docs": 514,
+    "api_resource_docs": 25,
     "api_missing_docs": 0,
     "cli_operations": 723,
-    "cli_exact_docs": 655,
+    "cli_exact_docs": 670,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 357,
@@ -1109,10 +1109,13 @@
       "operation_id": "post_api_v1_admin_prune-legacy-resources",
       "tag": "admin",
       "source_file": "internal/api/admin_prune_test.go",
+      "exact_docs": [
+        "docs/api-reference/admin.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_prune_test.go",
         "cmd/crewship/cmd_admin_prune_test.go"
@@ -1169,10 +1172,13 @@
       "operation_id": "post_api_v1_admin_reap-orphan-containers",
       "tag": "admin",
       "source_file": "internal/api/admin_reap_orphan_containers_test.go",
+      "exact_docs": [
+        "docs/api-reference/admin.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_reap_orphan_containers_test.go",
         "cmd/crewship/cmd_admin_reap_orphan_test.go"
@@ -1184,10 +1190,13 @@
       "operation_id": "post_api_v1_admin_reencrypt",
       "tag": "admin",
       "source_file": "internal/api/admin_reencrypt_test.go",
+      "exact_docs": [
+        "docs/api-reference/admin.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_reencrypt_test.go",
         "cmd/crewship/cmd_admin_reencrypt_test.go"
@@ -1199,10 +1208,13 @@
       "operation_id": "get_api_v1_admin_security-posture",
       "tag": "admin",
       "source_file": "internal/api/admin_security_posture_test.go",
+      "exact_docs": [
+        "docs/api-reference/admin.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_security_posture_test.go",
         "cmd/crewship/cmd_admin_security_posture_test.go"
@@ -3494,10 +3506,13 @@
       "operation_id": "delete_api_v1_credentials_credentialId_fields_fieldKey",
       "tag": "credentials",
       "source_file": "internal/api/router_crews.go",
+      "exact_docs": [
+        "docs/api-reference/credentials.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/credentials.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/credential_fields_test.go"
       ]
@@ -3508,10 +3523,13 @@
       "operation_id": "put_api_v1_credentials_credentialId_fields_fieldKey",
       "tag": "credentials",
       "source_file": "internal/api/router_crews.go",
+      "exact_docs": [
+        "docs/api-reference/credentials.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/credentials.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/credential_fields_test.go"
       ]
@@ -5684,7 +5702,6 @@
       "exact_docs": [
         "docs/api-reference/connectors.mdx",
         "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx",
         "docs/guides/integrations.mdx",
         "docs/manifest/integration.md",
         "docs/manifest/workspace.md"
@@ -5714,7 +5731,6 @@
       "exact_docs": [
         "docs/api-reference/connectors.mdx",
         "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx",
         "docs/guides/integrations.mdx",
         "docs/manifest/integration.md",
         "docs/manifest/workspace.md"
@@ -5784,8 +5800,7 @@
       "tag": "integrations",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
-        "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx"
+        "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/integrations.mdx"
@@ -5799,8 +5814,7 @@
       "tag": "integrations",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
-        "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx"
+        "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/integrations.mdx"
@@ -5814,8 +5828,7 @@
       "tag": "integrations",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
-        "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx"
+        "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/integrations.mdx"
@@ -5829,8 +5842,7 @@
       "tag": "integrations",
       "source_file": "internal/api/composio_handler_test.go",
       "exact_docs": [
-        "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx"
+        "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/integrations.mdx"
@@ -5848,7 +5860,6 @@
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
         "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx",
         "docs/guides/integrations.mdx"
       ],
       "resource_docs": [
@@ -5867,7 +5878,6 @@
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
         "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx",
         "docs/guides/integrations.mdx"
       ],
       "resource_docs": [
@@ -5886,7 +5896,6 @@
       "source_file": "internal/api/composio_handler_test.go",
       "exact_docs": [
         "docs/api-reference/integrations.mdx",
-        "docs/cli/integration.mdx",
         "docs/guides/integrations.mdx"
       ],
       "resource_docs": [
@@ -10541,10 +10550,13 @@
       "use": "reencrypt",
       "short": "Re-encrypt all stored secrets to the current master key version (admin)",
       "root": "admin",
+      "exact_docs": [
+        "docs/cli/admin.mdx"
+      ],
       "root_docs": [
         "docs/cli/admin.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_admin_extras_cov2_test.go",
@@ -11979,10 +11991,13 @@
       "use": "delete \u003cchat-id\u003e",
       "short": "Delete a chat session and its message history (irreversible)",
       "root": "chat",
+      "exact_docs": [
+        "docs/cli/chat.mdx"
+      ],
       "root_docs": [
         "docs/cli/chat.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_chat_cov_test.go",
@@ -12167,10 +12182,13 @@
         "delete"
       ],
       "root": "chat",
+      "exact_docs": [
+        "docs/cli/chat.mdx"
+      ],
       "root_docs": [
         "docs/cli/chat.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_chat_cov_test.go",
@@ -12343,6 +12361,7 @@
       "root": "commands",
       "exact_docs": [
         "docs/cli/commands.mdx",
+        "docs/cli/integration.mdx",
         "docs/cli/keeper.mdx",
         "docs/cli/overview.mdx"
       ],
@@ -13338,7 +13357,6 @@
         "docs/cli/capacity.mdx",
         "docs/cli/credential.mdx",
         "docs/cli/crew.mdx",
-        "docs/cli/integration.mdx",
         "docs/cli/mcp.mdx",
         "docs/cli/recipe.mdx",
         "docs/cli/routine.mdx",
@@ -15784,13 +15802,10 @@
       "use": "update-binding \u003cagent-slug\u003e \u003cbinding-id\u003e",
       "short": "Update an agent's integration binding (credential, type, env var, enabled)",
       "root": "integration",
-      "exact_docs": [
-        "docs/cli/integration.mdx"
-      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_exact",
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15805,10 +15820,13 @@
       "use": "agent-bindings \u003cagent-slug\u003e",
       "short": "List integration bindings for an agent",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15939,10 +15957,13 @@
       "use": "bind \u003cagent-slug-or-id\u003e",
       "short": "Assign a Composio user's apps (with per-app tool scope) to an agent",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16393,10 +16414,13 @@
       "use": "test \u003ccrew-slug\u003e \u003cintegration-id\u003e",
       "short": "Test the connection for a crew-scoped integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16643,13 +16667,10 @@
       "use": "list \u003ccrew-slug\u003e \u003cintegration-id\u003e",
       "short": "List tool bindings for a crew-scoped integration",
       "root": "integration",
-      "exact_docs": [
-        "docs/cli/integration.mdx"
-      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_exact",
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -19883,10 +19904,13 @@
       "use": "templates",
       "short": "Set what Crewship's own notifications say",
       "root": "notify",
+      "exact_docs": [
+        "docs/cli/notify.mdx"
+      ],
       "root_docs": [
         "docs/cli/notify.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
@@ -19901,10 +19925,13 @@
       "use": "list",
       "short": "Show the workspace's notification templates",
       "root": "notify",
+      "exact_docs": [
+        "docs/cli/notify.mdx"
+      ],
       "root_docs": [
         "docs/cli/notify.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -19922,10 +19949,13 @@
       "use": "rm",
       "short": "Remove a template, restoring Crewship's own wording",
       "root": "notify",
+      "exact_docs": [
+        "docs/cli/notify.mdx"
+      ],
       "root_docs": [
         "docs/cli/notify.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_label_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
@@ -19941,10 +19971,13 @@
       "use": "set",
       "short": "Set the wording for one notification category",
       "root": "notify",
+      "exact_docs": [
+        "docs/cli/notify.mdx"
+      ],
       "root_docs": [
         "docs/cli/notify.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
@@ -22845,10 +22878,13 @@
       "use": "enable \u003cschedule_id\u003e",
       "short": "Enable a schedule (next tick will fire)",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -23602,10 +23638,13 @@
       "use": "url \u003cwebhook_id\u003e",
       "short": "Print the public URL for a webhook (no secret reveal)",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -25618,10 +25657,13 @@
       "use": "get [slug-or-id]",
       "short": "Show workspace details",
       "root": "workspace",
+      "exact_docs": [
+        "docs/cli/workspace.mdx"
+      ],
       "root_docs": [
         "docs/cli/workspace.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_workspace_cov_test.go",
         "cmd/crewship/cmd_workspace_delete_test.go",
@@ -25661,10 +25703,13 @@
       "use": "create \u003cemail\u003e",
       "short": "Invite a user to the workspace by email",
       "root": "workspace",
+      "exact_docs": [
+        "docs/cli/workspace.mdx"
+      ],
       "root_docs": [
         "docs/cli/workspace.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_workspace_cov_test.go",
         "cmd/crewship/cmd_workspace_delete_test.go",
@@ -25797,10 +25842,13 @@
       "use": "grant \u003cuser-id\u003e \u003ccapability\u003e [\u003ccapability\u003e...]",
       "short": "Grant one or more capabilities to a member",
       "root": "workspace",
+      "exact_docs": [
+        "docs/cli/workspace.mdx"
+      ],
       "root_docs": [
         "docs/cli/workspace.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_workspace_cov_test.go",
         "cmd/crewship/cmd_workspace_delete_test.go",
@@ -25836,10 +25884,13 @@
       "use": "preset \u003cuser-id\u003e \u003cchat|power|admin\u003e",
       "short": "Apply a named capability bundle to a member",
       "root": "workspace",
+      "exact_docs": [
+        "docs/cli/workspace.mdx"
+      ],
       "root_docs": [
         "docs/cli/workspace.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_workspace_cov_test.go",
         "cmd/crewship/cmd_workspace_delete_test.go",
@@ -25854,10 +25905,13 @@
       "use": "revoke \u003cuser-id\u003e \u003ccapability\u003e [\u003ccapability\u003e...]",
       "short": "Revoke one or more capabilities from a member",
       "root": "workspace",
+      "exact_docs": [
+        "docs/cli/workspace.mdx"
+      ],
       "root_docs": [
         "docs/cli/workspace.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_workspace_cov_test.go",
         "cmd/crewship/cmd_workspace_delete_test.go",
