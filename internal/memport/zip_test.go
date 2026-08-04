@@ -84,10 +84,11 @@ func TestWriteOKFZipIsDeterministic(t *testing.T) {
 	if err := WriteOKFZip(&b, docs, "crew eng"); err != nil {
 		t.Fatal(err)
 	}
-	fa, fb := readZip(t, a.Bytes()), readZip(t, b.Bytes())
-	for name, body := range fa {
-		if fb[name] != body {
-			t.Errorf("%s differs between two exports of the same memory", name)
-		}
+	// Whole-archive comparison, not per-file: entry ORDER and the
+	// headers are part of what a git-tracked bundle diffs on, and
+	// comparing contents alone would pass while the archive churned.
+	if !bytes.Equal(a.Bytes(), b.Bytes()) {
+		fa, fb := readZip(t, a.Bytes()), readZip(t, b.Bytes())
+		t.Errorf("two exports of the same memory differ: %v vs %v", fa, fb)
 	}
 }

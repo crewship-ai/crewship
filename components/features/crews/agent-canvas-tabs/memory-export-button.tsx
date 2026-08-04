@@ -76,11 +76,17 @@ export function MemoryExportButton({ crewId, agentSlug, workspaceId }: MemoryExp
         <Download className="h-3.5 w-3.5" />
         {busy ? "Exporting…" : "Export"}
       </Button>
-      {error && (
-        <span className="text-[11px] text-muted-foreground" data-testid="memory-export-error">
-          {error}
-        </span>
-      )}
+      {/* role=status + aria-live: the outcome of a download is otherwise
+          invisible to a screen reader, which sees only a button that
+          did nothing. */}
+      <span
+        role="status"
+        aria-live="polite"
+        className="text-[11px] text-muted-foreground"
+        data-testid="memory-export-error"
+      >
+        {error}
+      </span>
     </div>
   )
 }

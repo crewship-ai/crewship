@@ -7,6 +7,11 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => apiFetch(...a
 
 describe("MemoryExportButton", () => {
   let clicked: HTMLAnchorElement | null
+  // Direct assignment is not undone by restoreAllMocks, so the originals
+  // are captured and put back — otherwise this file quietly changes URL
+  // for every test that runs after it.
+  const realCreate = global.URL.createObjectURL
+  const realRevoke = global.URL.revokeObjectURL
 
   beforeEach(() => {
     apiFetch.mockReset()
@@ -18,7 +23,11 @@ describe("MemoryExportButton", () => {
       clicked = this
     })
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    global.URL.createObjectURL = realCreate
+    global.URL.revokeObjectURL = realRevoke
+  })
 
   it("asks the SERVER for the bundle rather than building one", async () => {
     apiFetch.mockResolvedValue({ ok: true, blob: async () => new Blob(["zip"]) })
@@ -58,8 +67,10 @@ describe("MemoryExportButton", () => {
     render(<MemoryExportButton crewId="crew-1" agentSlug="alex" />)
     fireEvent.click(screen.getByTestId("memory-export-button"))
 
-    await waitFor(() => expect(screen.getByTestId("memory-export-error")).toBeInTheDocument())
-    expect(screen.getByTestId("memory-export-error").textContent).toMatch(/no memory/i)
+    await waitFor(() =>
+      expect(screen.getByTestId("memory-export-error").textContent).toMatch(/no memory/i),
+    )
+    expect(screen.getByTestId("memory-export-error")).toHaveAttribute("aria-live", "polite")
     expect(clicked).toBeNull()
   })
 
@@ -68,8 +79,9 @@ describe("MemoryExportButton", () => {
     render(<MemoryExportButton crewId="crew-1" agentSlug="alex" />)
     fireEvent.click(screen.getByTestId("memory-export-button"))
 
-    await waitFor(() => expect(screen.getByTestId("memory-export-error")).toBeInTheDocument())
-    expect(screen.getByTestId("memory-export-error").textContent).toMatch(/500/)
+    await waitFor(() =>
+      expect(screen.getByTestId("memory-export-error").textContent).toMatch(/500/),
+    )
     expect(clicked).toBeNull()
   })
 })

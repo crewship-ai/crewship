@@ -128,13 +128,20 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
             {SUBTAB_LABEL[s]}
           </button>
         ))}
-        <div className="ml-auto pb-1.5">
-          <MemoryExportButton
-            crewId={crewId ?? ""}
-            agentSlug={agentSlug}
-            workspaceId={workspaceId}
-          />
-        </div>
+        {/* Export follows the SELECTED sub-tab: on CREW the operator is
+            looking at the crew-shared tier, and sending agent_slug would
+            have handed them the agent's memory under a crew label.
+            Without a crew there is nothing to scope on — the export API
+            keys on crew_id — so the button is not offered at all. */}
+        {crewId && (
+          <div className="ml-auto pb-1.5">
+            <MemoryExportButton
+              crewId={crewId}
+              agentSlug={sub === "crew" ? undefined : agentSlug}
+              workspaceId={workspaceId}
+            />
+          </div>
+        )}
       </div>
 
       {sub === "agent" && (

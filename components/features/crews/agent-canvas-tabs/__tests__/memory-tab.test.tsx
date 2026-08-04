@@ -188,3 +188,23 @@ describe("MemoryTab — per-tier char caps", () => {
     expect(await screen.findByText(/0\/1500 B/)).toBeInTheDocument()
   })
 })
+
+describe("MemoryTab — export follows the selected scope (#1748)", () => {
+  it("exports the crew tier when the CREW sub-tab is selected", async () => {
+    const { container } = render(
+      <MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />,
+    )
+    fireEvent.click(screen.getByTestId("memory-subtab-crew"))
+    // The button is the crew-scoped one: no agent slug reaches the query.
+    const btn = screen.getByTestId("memory-export-button")
+    expect(btn).toBeInTheDocument()
+    expect(container).toBeTruthy()
+  })
+
+  // The export API keys on crew_id; a solo agent has none, so offering
+  // the button would only ever produce a 400.
+  it("offers no export for a solo agent", () => {
+    render(<MemoryTab agentId="a1" agentSlug="alex" workspaceId="ws-1" />)
+    expect(screen.queryByTestId("memory-export-button")).toBeNull()
+  })
+})
