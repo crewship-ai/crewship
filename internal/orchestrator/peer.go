@@ -60,6 +60,9 @@ header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
 AUTH
 Then poll: curl -s http://localhost:9119/results/<assignment_id>
 (until status is COMPLETED or FAILED).
+If the connection is refused, this crew has no sidecar running right now —
+that is not a refusal to answer, there is simply nobody to ask. Do the work
+yourself and say that you could not delegate.
 ` + delegationLimitsNote
 
 // delegationLimitsNote states the cap. It is appended to BOTH the lead
