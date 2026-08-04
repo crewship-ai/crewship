@@ -20,8 +20,8 @@ func TestBuildDocumentUsesAuditedReadSchemas(t *testing.T) {
 
 	post := paths["/api/v1/agents"].(map[string]any)["post"].(map[string]any)
 	request := post["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"]
-	if request.(map[string]any)["$ref"] != "#/components/schemas/AgentCreateRequest" {
-		t.Fatalf("request schema = %#v, want AgentCreateRequest", request)
+	if request.(map[string]any)["$ref"] != "#/components/schemas/CoreAgentCreateRequestV2" {
+		t.Fatalf("request schema = %#v, want CoreAgentCreateRequestV2", request)
 	}
 }
 

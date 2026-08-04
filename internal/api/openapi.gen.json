@@ -1058,6 +1058,1093 @@
         },
         "type": "object"
       },
+      "CoreAgentCreateRequestV2": {
+        "properties": {
+          "agent_role": {
+            "enum": [
+              "AGENT",
+              "LEAD"
+            ],
+            "type": "string"
+          },
+          "avatar_seed": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cli_adapter": {
+            "enum": [
+              "CLAUDE_CODE",
+              "OPENCODE",
+              "CODEX_CLI",
+              "GEMINI_CLI",
+              "CURSOR_CLI",
+              "FACTORY_DROID"
+            ],
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_mode": {
+            "enum": [
+              "active",
+              "passive"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_provider": {
+            "enum": [
+              "ANTHROPIC",
+              "OPENAI",
+              "GOOGLE",
+              "CURSOR",
+              "FACTORY",
+              "OLLAMA"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "memory_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "tool_profile": {
+            "enum": [
+              "MINIMAL",
+              "CODING",
+              "FULL"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "agent_role",
+          "cli_adapter",
+          "timeout_seconds",
+          "tool_profile",
+          "memory_enabled"
+        ],
+        "type": "object"
+      },
+      "CoreAgentCredentialRequestV2": {
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "env_var_name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "ttl_seconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential_id",
+          "env_var_name"
+        ],
+        "type": "object"
+      },
+      "CoreAgentSkillRequestV2": {
+        "properties": {
+          "config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "skill_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id"
+        ],
+        "type": "object"
+      },
+      "CoreAgentUpdateRequestV2": {
+        "properties": {
+          "agent_role": {
+            "enum": [
+              "AGENT",
+              "LEAD"
+            ],
+            "type": "string"
+          },
+          "avatar_seed": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cli_adapter": {
+            "enum": [
+              "CLAUDE_CODE",
+              "OPENCODE",
+              "CODEX_CLI",
+              "GEMINI_CLI",
+              "CURSOR_CLI",
+              "FACTORY_DROID"
+            ],
+            "type": "string"
+          },
+          "cli_tools": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_mode": {
+            "enum": [
+              "active",
+              "passive"
+            ],
+            "type": "string"
+          },
+          "llm_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_provider": {
+            "enum": [
+              "ANTHROPIC",
+              "OPENAI",
+              "GOOGLE",
+              "CURSOR",
+              "FACTORY",
+              "OLLAMA"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "mcp_config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "memory_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_cron": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_enabled": {
+            "type": "boolean"
+          },
+          "schedule_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "tool_profile": {
+            "enum": [
+              "MINIMAL",
+              "CODING",
+              "FULL"
+            ],
+            "type": "string"
+          },
+          "webhook_require_timestamp": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "CoreCredentialBindingRequestV2": {
+        "properties": {
+          "agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "slot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "scope",
+          "slot"
+        ],
+        "type": "object"
+      },
+      "CoreCredentialCreateRequestV2": {
+        "properties": {
+          "account_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "account_label": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_by_actor_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_by_actor_type": {
+            "enum": [
+              "user",
+              "agent",
+              "system"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "oauth_auth_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_client_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_client_secret": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_scopes": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_token_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provisioned_for_service": {
+            "nullable": true,
+            "type": "string"
+          },
+          "refresh_token": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "security_level": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "token_expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "username": {
+            "nullable": true,
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "CoreCredentialFieldRequestV2": {
+        "properties": {
+          "is_secret": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "ordinal": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "CoreCredentialRotationRequestV2": {
+        "properties": {
+          "endpoint_auth_token": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endpoint_base_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endpoint_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "object"
+          },
+          "grace_seconds": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "CoreCredentialUpdateRequestV2": {
+        "properties": {
+          "account_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "account_label": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_ids": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "provider": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scope": {
+            "nullable": true,
+            "type": "string"
+          },
+          "security_level": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "token_expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "username": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreCrewCreateRequestV2": {
+        "properties": {
+          "allow_private_endpoints": {
+            "type": "boolean"
+          },
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "container_cpus": {
+            "nullable": true,
+            "type": "number"
+          },
+          "container_memory_mb": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "container_ttl_hours": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "devcontainer_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mise_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "runtime_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "services_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "CoreCrewUpdateRequestV2": {
+        "properties": {
+          "allow_private_endpoints": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "container_cpus": {
+            "nullable": true,
+            "type": "number"
+          },
+          "container_memory_mb": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "container_ttl_hours": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "devcontainer_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "escalation_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "issue_prefix": {
+            "nullable": true,
+            "type": "string"
+          },
+          "max_ephemeral_agents": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "mcp_config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mise_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "network_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "runtime_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "services_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreIssueBulkUpdateRequestV2": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updates": {
+            "properties": {
+              "assignee_id": {
+                "nullable": true,
+                "type": "string"
+              },
+              "assignee_type": {
+                "enum": [
+                  "user",
+                  "agent"
+                ],
+                "nullable": true,
+                "type": "string"
+              },
+              "labels": {
+                "items": {
+                  "type": "string"
+                },
+                "nullable": true,
+                "type": "array"
+              },
+              "priority": {
+                "nullable": true,
+                "type": "string"
+              },
+              "project_id": {
+                "nullable": true,
+                "type": "string"
+              },
+              "status": {
+                "nullable": true,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "ids",
+          "updates"
+        ],
+        "type": "object"
+      },
+      "CoreIssueCreateRequestV2": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "estimate": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "parent_issue_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "CoreIssueUpdateRequestV2": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "estimate": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "parent_issue_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_inputs": {
+            "additionalProperties": true,
+            "nullable": true,
+            "type": "object"
+          },
+          "sort_order": {
+            "nullable": true,
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "BACKLOG",
+              "TODO",
+              "IN_PROGRESS",
+              "REVIEW",
+              "DONE",
+              "CANCELLED",
+              "DUPLICATE",
+              "FAILED"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreLabelCreateRequestV2": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "type": "object"
+      },
+      "CoreLabelUpdateRequestV2": {
+        "properties": {
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreProjectCreateRequestV2": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CoreProjectUpdateRequestV2": {
+        "properties": {
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "health": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreSkillBulkImportRequestV2": {
+        "properties": {
+          "allow_unsafe_license": {
+            "type": "boolean"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "git_ref": {
+            "type": "string"
+          },
+          "git_url": {
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "git_url"
+        ],
+        "type": "object"
+      },
+      "CoreSkillGenerateRequestV2": {
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "CoreSkillImportRequestV2": {
+        "properties": {
+          "allow_unsafe_license": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CoreWorkspaceCreateRequestV2": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "preferred_language": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "CoreWorkspaceUpdateRequestV2": {
+        "properties": {
+          "allow_privileged_credentials": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "preferred_language": {
+            "nullable": true,
+            "type": "string"
+          },
+          "run_retention_days": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "slug": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "Credential": {
         "properties": {
           "_count_agent_credentials": {
@@ -22658,7 +23745,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentCreateRequest"
+                "$ref": "#/components/schemas/CoreAgentCreateRequestV2"
               }
             }
           }
@@ -22668,7 +23755,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -22678,7 +23765,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -23547,7 +24634,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentUpdateRequest"
+                "$ref": "#/components/schemas/CoreAgentUpdateRequestV2"
               }
             }
           }
@@ -23557,7 +24644,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentUpdatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -26010,7 +27097,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CoreAgentCredentialRequestV2"
               }
             }
           }
@@ -26020,7 +27107,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentCredentialAddedV1"
+                  "type": "object"
                 }
               }
             },
@@ -26030,7 +27117,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentCredentialAddedV1"
+                  "type": "object"
                 }
               }
             },
@@ -31237,7 +32324,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CoreAgentSkillRequestV2"
               }
             }
           }
@@ -31247,7 +32334,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentSkillAddedV1"
+                  "type": "object"
                 }
               }
             },
@@ -31257,7 +32344,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentSkillAddedV1"
+                  "type": "object"
                 }
               }
             },
@@ -42390,7 +43477,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialCreateRequest"
+                "$ref": "#/components/schemas/CoreCredentialCreateRequestV2"
               }
             }
           }
@@ -42400,7 +43487,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Credential"
+                  "type": "object"
                 }
               }
             },
@@ -42410,7 +43497,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Credential"
+                  "type": "object"
                 }
               }
             },
@@ -42750,7 +43837,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialBindingRequest"
+                "$ref": "#/components/schemas/CoreCredentialBindingRequestV2"
               }
             }
           }
@@ -42760,7 +43847,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialBinding"
+                  "type": "object"
                 }
               }
             },
@@ -42770,7 +43857,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialBinding"
+                  "type": "object"
                 }
               }
             },
@@ -43612,7 +44699,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialCreateRequest"
+                "$ref": "#/components/schemas/CoreCredentialCreateRequestV2"
               }
             }
           }
@@ -43622,7 +44709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialProbeResponse"
+                  "type": "object"
                 }
               }
             },
@@ -44049,7 +45136,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialCreateRequest"
+                "$ref": "#/components/schemas/CoreCredentialUpdateRequestV2"
               }
             }
           }
@@ -44059,7 +45146,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Credential"
+                  "type": "object"
                 }
               }
             },
@@ -44247,7 +45334,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialCreateRequest"
+                "$ref": "#/components/schemas/CoreCredentialUpdateRequestV2"
               }
             }
           }
@@ -44257,7 +45344,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Credential"
+                  "type": "object"
                 }
               }
             },
@@ -44766,7 +45853,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialFieldRequest"
+                "$ref": "#/components/schemas/CoreCredentialFieldRequestV2"
               }
             }
           }
@@ -44776,7 +45863,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialField"
+                  "type": "object"
                 }
               }
             },
@@ -44786,7 +45873,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialField"
+                  "type": "object"
                 }
               }
             },
@@ -45096,7 +46183,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RemainingCredentialFieldRequest"
+                "$ref": "#/components/schemas/CoreCredentialFieldRequestV2"
               }
             }
           }
@@ -45106,7 +46193,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCredentialField"
+                  "type": "object"
                 }
               }
             },
@@ -45466,7 +46553,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialRotationRequest"
+                "$ref": "#/components/schemas/CoreCredentialRotationRequestV2"
               }
             }
           }
@@ -45476,7 +46563,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialRotation"
+                  "type": "object"
                 }
               }
             },
@@ -47858,7 +48945,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CrewCreateRequest"
+                "$ref": "#/components/schemas/CoreCrewCreateRequestV2"
               }
             }
           }
@@ -47868,7 +48955,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -47878,7 +48965,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -48395,7 +49482,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CrewUpdateRequest"
+                "$ref": "#/components/schemas/CoreCrewUpdateRequestV2"
               }
             }
           }
@@ -48405,7 +49492,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewUpdatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -48593,7 +49680,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CrewUpdateRequest"
+                "$ref": "#/components/schemas/CoreCrewUpdateRequestV2"
               }
             }
           }
@@ -48603,7 +49690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewReplacedV1"
+                  "type": "object"
                 }
               }
             },
@@ -52442,7 +53529,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CoreIssueCreateRequestV2"
               }
             }
           }
@@ -52452,7 +53539,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Issue"
+                  "type": "object"
                 }
               }
             },
@@ -52462,7 +53549,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Issue"
+                  "type": "object"
                 }
               }
             },
@@ -52976,7 +54063,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CoreIssueUpdateRequestV2"
               }
             }
           }
@@ -52986,7 +54073,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Issue"
+                  "type": "object"
                 }
               }
             },
@@ -69843,7 +70930,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CoreIssueBulkUpdateRequestV2"
               }
             }
           }
@@ -69853,11 +70940,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "updated": {
-                      "type": "integer"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -71889,7 +72971,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RemainingLabelCreateRequest"
+                "$ref": "#/components/schemas/CoreLabelCreateRequestV2"
               }
             }
           }
@@ -71899,7 +72981,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingLabel"
+                  "type": "object"
                 }
               }
             },
@@ -71909,7 +72991,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingLabel"
+                  "type": "object"
                 }
               }
             },
@@ -72172,7 +73254,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RemainingLabelUpdateRequest"
+                "$ref": "#/components/schemas/CoreLabelUpdateRequestV2"
               }
             }
           }
@@ -72182,7 +73264,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingLabel"
+                  "type": "object"
                 }
               }
             },
@@ -84191,45 +85273,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "color": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "icon": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "lead_id": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "lead_type": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "priority": {
-                    "type": "string"
-                  },
-                  "start_date": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "target_date": {
-                    "nullable": true,
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/CoreProjectCreateRequestV2"
               }
             }
           }
@@ -84239,75 +85283,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "color": {
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "done_count": {
-                      "type": "integer"
-                    },
-                    "health": {
-                      "type": "string"
-                    },
-                    "icon": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "issue_count": {
-                      "type": "integer"
-                    },
-                    "lead_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "lead_name": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "lead_type": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "priority": {
-                      "type": "string"
-                    },
-                    "progress": {
-                      "type": "integer"
-                    },
-                    "slug": {
-                      "type": "string"
-                    },
-                    "start_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "target_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
-                    },
-                    "workspace_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -84318,75 +85293,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "color": {
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "done_count": {
-                      "type": "integer"
-                    },
-                    "health": {
-                      "type": "string"
-                    },
-                    "icon": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "issue_count": {
-                      "type": "integer"
-                    },
-                    "lead_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "lead_name": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "lead_type": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "priority": {
-                      "type": "string"
-                    },
-                    "progress": {
-                      "type": "integer"
-                    },
-                    "slug": {
-                      "type": "string"
-                    },
-                    "start_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "target_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
-                    },
-                    "workspace_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -84807,53 +85713,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "color": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "description": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "health": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "icon": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "lead_id": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "lead_type": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "name": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "priority": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "start_date": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "status": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "target_date": {
-                    "nullable": true,
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/CoreProjectUpdateRequestV2"
               }
             }
           }
@@ -84863,75 +85723,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "color": {
-                      "type": "string"
-                    },
-                    "created_at": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "done_count": {
-                      "type": "integer"
-                    },
-                    "health": {
-                      "type": "string"
-                    },
-                    "icon": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "issue_count": {
-                      "type": "integer"
-                    },
-                    "lead_id": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "lead_name": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "lead_type": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "priority": {
-                      "type": "string"
-                    },
-                    "progress": {
-                      "type": "integer"
-                    },
-                    "slug": {
-                      "type": "string"
-                    },
-                    "start_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string"
-                    },
-                    "target_date": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "updated_at": {
-                      "type": "string"
-                    },
-                    "workspace_id": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -97327,7 +98118,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceCreateRequest"
+                "$ref": "#/components/schemas/CoreWorkspaceCreateRequestV2"
               }
             }
           }
@@ -97337,7 +98128,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingWorkspaceCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -97347,7 +98138,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingWorkspaceCreatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -97894,7 +98685,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceUpdateRequest"
+                "$ref": "#/components/schemas/CoreWorkspaceUpdateRequestV2"
               }
             }
           }
@@ -97904,7 +98695,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingWorkspaceUpdatedV1"
+                  "type": "object"
                 }
               }
             },
@@ -112429,7 +113220,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CoreSkillBulkImportRequestV2"
               }
             }
           }
@@ -112439,7 +113230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -112599,18 +113390,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "model": {
-                    "type": "string"
-                  },
-                  "prompt": {
-                    "type": "string"
-                  },
-                  "slug": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/CoreSkillGenerateRequestV2"
               }
             }
           }
@@ -112620,28 +113400,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "content": {
-                      "type": "string"
-                    },
-                    "description_quality": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "scan_reason": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "scan_status": {
-                      "type": "string"
-                    },
-                    "skill_id": {
-                      "type": "string"
-                    },
-                    "slug": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -112652,28 +113410,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "content": {
-                      "type": "string"
-                    },
-                    "description_quality": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "scan_reason": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "scan_status": {
-                      "type": "string"
-                    },
-                    "skill_id": {
-                      "type": "string"
-                    },
-                    "slug": {
-                      "type": "string"
-                    }
-                  },
                   "type": "object"
                 }
               }
@@ -112958,7 +113694,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SkillImportRequest"
+                "$ref": "#/components/schemas/CoreSkillImportRequestV2"
               }
             }
           }
@@ -112968,7 +113704,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
@@ -112978,7 +113714,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "type": "object"
                 }
               }
             },
