@@ -4320,6 +4320,120 @@
         },
         "type": "object"
       },
+      "RemainingCredentialAudit": {
+        "properties": {
+          "agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ip_address": {
+            "nullable": true,
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "occurred_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCredentialBinding": {
+        "properties": {
+          "agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_name": {
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "slot": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCredentialField": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "is_secret": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "value": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCredentialFieldRequest": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value"
+        ],
+        "type": "object"
+      },
+      "RemainingCredentialSensitivityRequest": {
+        "properties": {
+          "sensitivity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sensitivity"
+        ],
+        "type": "object"
+      },
       "RemainingCrewAgentsRestartedV1": {
         "properties": {
           "message": {
@@ -4820,6 +4934,395 @@
             "type": "string"
           },
           "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingFeedback": {
+        "properties": {
+          "chat_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "signal": {
+            "enum": [
+              "helpful",
+              "not_helpful",
+              "inaccurate",
+              "unsafe",
+              "edit",
+              "regenerate"
+            ],
+            "type": "string"
+          },
+          "trace_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "user_id": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingFeedbackCreateRequest": {
+        "properties": {
+          "chat_id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "signal": {
+            "enum": [
+              "helpful",
+              "not_helpful",
+              "inaccurate",
+              "unsafe",
+              "edit",
+              "regenerate"
+            ],
+            "type": "string"
+          },
+          "trace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "signal"
+        ],
+        "type": "object"
+      },
+      "RemainingHook": {
+        "properties": {
+          "blocking": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "event": {
+            "type": "string"
+          },
+          "handler_config": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "handler_kind": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "matcher": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingLabel": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingLabelCreateRequest": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "type": "object"
+      },
+      "RemainingLabelUpdateRequest": {
+        "properties": {
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingNotification": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "actor_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "actor_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "entity_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "entity_type": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "read_at": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingPairPoll": {
+        "properties": {
+          "adapter_hint": {
+            "nullable": true,
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingPairRedeemRequest": {
+        "properties": {
+          "adapter_hint": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "RemainingPairRedeemResponse": {
+        "properties": {
+          "cli_token": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingPairStart": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingPairStartRequest": {
+        "properties": {
+          "adapter_hint": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingRevealPolicyRequest": {
+        "properties": {
+          "enabled": {
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingSavedView": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "filters_json": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "sort_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "view_type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingSavedViewCreateRequest": {
+        "properties": {
+          "filters_json": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean"
+          },
+          "sort_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "view_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "filters_json"
+        ],
+        "type": "object"
+      },
+      "RemainingSavedViewUpdateRequest": {
+        "properties": {
+          "filters_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "is_default": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "shared": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "sort_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "view_type": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingSession": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "is_current": {
+            "type": "boolean"
+          },
+          "last_used_at": {
+            "type": "string"
+          },
+          "user_agent": {
             "type": "string"
           }
         },
@@ -33320,7 +33823,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingPairPoll"
                 }
               }
             },
@@ -33410,7 +33913,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingPairRedeemRequest"
               }
             }
           }
@@ -33420,7 +33923,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingPairRedeemResponse"
                 }
               }
             },
@@ -33470,7 +33973,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingPairStartRequest"
               }
             }
           }
@@ -33480,7 +33983,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingPairStart"
                 }
               }
             },
@@ -33670,7 +34173,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "$ref": "#/components/schemas/RemainingSession"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -33750,6 +34256,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -37631,34 +38142,7 @@
                       "type": "string"
                     },
                     "state": {
-                      "properties": {
-                        "agent_memory": {
-                          "additionalProperties": {
-                            "type": "string"
-                          },
-                          "type": "object"
-                        },
-                        "crew_container_id": {
-                          "nullable": true,
-                          "type": "string"
-                        },
-                        "meta": {
-                          "additionalProperties": true,
-                          "type": "object"
-                        },
-                        "open_assignments": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        "pending_tasks": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        }
-                      },
+                      "additionalProperties": true,
                       "type": "object"
                     },
                     "workspace_id": {
@@ -38128,34 +38612,7 @@
                           "type": "string"
                         },
                         "state": {
-                          "properties": {
-                            "agent_memory": {
-                              "additionalProperties": {
-                                "type": "string"
-                              },
-                              "type": "object"
-                            },
-                            "crew_container_id": {
-                              "nullable": true,
-                              "type": "string"
-                            },
-                            "meta": {
-                              "additionalProperties": true,
-                              "type": "object"
-                            },
-                            "open_assignments": {
-                              "items": {
-                                "type": "string"
-                              },
-                              "type": "array"
-                            },
-                            "pending_tasks": {
-                              "items": {
-                                "type": "string"
-                              },
-                              "type": "array"
-                            }
-                          },
+                          "additionalProperties": true,
                           "type": "object"
                         },
                         "workspace_id": {
@@ -40187,6 +40644,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -41032,6 +41494,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -41042,6 +41509,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -41250,6 +41722,15 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "env_var": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "testable": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -41382,6 +41863,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -41500,7 +41989,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingRevealPolicyRequest"
               }
             }
           }
@@ -41510,6 +41999,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -42513,7 +43010,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "$ref": "#/components/schemas/RemainingCredentialAudit"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -43000,6 +43500,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -43136,7 +43641,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingCredentialFieldRequest"
               }
             }
           }
@@ -43146,7 +43651,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingCredentialField"
                 }
               }
             },
@@ -43909,7 +44414,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingCredentialSensitivityRequest"
               }
             }
           }
@@ -43919,6 +44424,17 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "credential_id": {
+                      "type": "string"
+                    },
+                    "previous": {
+                      "type": "string"
+                    },
+                    "sensitivity": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -60674,6 +61190,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -60684,6 +61201,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -60851,6 +61369,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "feedback": {
+                      "items": {
+                        "$ref": "#/components/schemas/RemainingFeedback"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -60969,7 +61495,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingFeedbackCreateRequest"
               }
             }
           }
@@ -60979,6 +61505,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -60989,6 +61520,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -61189,6 +61725,17 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "rows": {
+                      "items": {
+                        "$ref": "#/components/schemas/RemainingHook"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -61389,6 +61936,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -61499,6 +62054,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -69490,7 +70053,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "$ref": "#/components/schemas/RemainingLabel"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -69608,7 +70174,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LabelCreateRequest"
+                "$ref": "#/components/schemas/RemainingLabelCreateRequest"
               }
             }
           }
@@ -69618,7 +70184,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingLabel"
                 }
               }
             },
@@ -69628,7 +70194,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingLabel"
                 }
               }
             },
@@ -69759,6 +70325,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -69769,6 +70336,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -69897,7 +70465,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LabelUpdateRequest"
+                "$ref": "#/components/schemas/RemainingLabelUpdateRequest"
               }
             }
           }
@@ -69907,7 +70475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingLabel"
                 }
               }
             },
@@ -71427,6 +71995,65 @@
         "responses": {
           "200": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "documents": {
+                      "items": {
+                        "properties": {
+                          "body": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "sources": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "tags": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "tier": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "format": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "items": {
+                        "properties": {
+                          "reason": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
               "application/zip": {
                 "schema": {
                   "format": "binary",
@@ -71828,7 +72455,35 @@
                   },
                   "documents": {
                     "items": {
-                      "additionalProperties": true,
+                      "properties": {
+                        "body": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "scope": {
+                          "type": "string"
+                        },
+                        "sources": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "tags": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "tier": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
                       "type": "object"
                     },
                     "type": "array"
@@ -71996,10 +72651,16 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "crew_id": {
+                    "type": "string"
+                  },
                   "limit": {
                     "type": "integer"
                   },
                   "query": {
+                    "type": "string"
+                  },
+                  "scope": {
                     "type": "string"
                   }
                 },
@@ -72013,11 +72674,22 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "hits": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "query": {
+                      "type": "string"
+                    }
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -72196,53 +72868,17 @@
               "application/json": {
                 "schema": {
                   "properties": {
-                    "filters_applied": {
-                      "additionalProperties": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
-                    "limit": {
+                    "count": {
                       "type": "integer"
                     },
-                    "next_cursor": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "rows": {
+                    "entries": {
                       "items": {
-                        "properties": {
-                          "bytes": {
-                            "type": "integer"
-                          },
-                          "id": {
-                            "type": "string"
-                          },
-                          "parent_sha": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "path": {
-                            "type": "string"
-                          },
-                          "sha256": {
-                            "type": "string"
-                          },
-                          "tier": {
-                            "type": "string"
-                          },
-                          "written_at": {
-                            "type": "string"
-                          },
-                          "written_by": {
-                            "type": "string"
-                          }
-                        },
+                        "additionalProperties": true,
                         "type": "object"
                       },
                       "type": "array"
                     },
-                    "workspace_id": {
+                    "path": {
                       "type": "string"
                     }
                   },
@@ -72636,6 +73272,29 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "canonical_path": {
+                      "type": "string"
+                    },
+                    "new_version_id": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "restored_by": {
+                      "type": "string"
+                    },
+                    "restored_sha": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73566,7 +74225,225 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "completed_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "crew_id": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "lead_agent_id": {
+                        "type": "string"
+                      },
+                      "lead_agent_name": {
+                        "type": "string"
+                      },
+                      "lead_agent_slug": {
+                        "type": "string"
+                      },
+                      "plan": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "task_stats": {
+                        "nullable": true,
+                        "properties": {
+                          "awaiting_approval": {
+                            "type": "integer"
+                          },
+                          "blocked": {
+                            "type": "integer"
+                          },
+                          "completed": {
+                            "type": "integer"
+                          },
+                          "failed": {
+                            "type": "integer"
+                          },
+                          "in_progress": {
+                            "type": "integer"
+                          },
+                          "pending": {
+                            "type": "integer"
+                          },
+                          "skipped": {
+                            "type": "integer"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "tasks": {
+                        "items": {
+                          "properties": {
+                            "agent_name": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "agent_slug": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "approval_required": {
+                              "type": "boolean"
+                            },
+                            "approval_status": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "approved_at": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "approved_by": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "assigned_agent_id": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "assignment_id": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "completed_at": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "confidence": {
+                              "nullable": true,
+                              "type": "number"
+                            },
+                            "created_at": {
+                              "type": "string"
+                            },
+                            "depends_on": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "duration_ms": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "error_message": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "estimated_cost": {
+                              "nullable": true,
+                              "type": "number"
+                            },
+                            "evaluation_notes": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "evaluation_status": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "handoff_context": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "iteration": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "max_iterations": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "mission_id": {
+                              "type": "string"
+                            },
+                            "needs_review": {
+                              "type": "boolean"
+                            },
+                            "output_path": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "result_summary": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "started_at": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "task_order": {
+                              "type": "integer"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "token_count": {
+                              "nullable": true,
+                              "type": "integer"
+                            },
+                            "updated_at": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "total_estimated_cost": {
+                        "nullable": true,
+                        "type": "number"
+                      },
+                      "total_token_count": {
+                        "nullable": true,
+                        "type": "integer"
+                      },
+                      "trace_id": {
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      },
+                      "workflow_template": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "workspace_id": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -73747,34 +74624,7 @@
                             "type": "string"
                           },
                           "state": {
-                            "properties": {
-                              "agent_memory": {
-                                "additionalProperties": {
-                                  "type": "string"
-                                },
-                                "type": "object"
-                              },
-                              "crew_container_id": {
-                                "nullable": true,
-                                "type": "string"
-                              },
-                              "meta": {
-                                "additionalProperties": true,
-                                "type": "object"
-                              },
-                              "open_assignments": {
-                                "items": {
-                                  "type": "string"
-                                },
-                                "type": "array"
-                              },
-                              "pending_tasks": {
-                                "items": {
-                                  "type": "string"
-                                },
-                                "type": "array"
-                              }
-                            },
+                            "additionalProperties": true,
                             "type": "object"
                           },
                           "workspace_id": {
@@ -77649,44 +78499,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "properties": {
-                      "action": {
-                        "type": "string"
-                      },
-                      "actor_id": {
-                        "type": "string"
-                      },
-                      "actor_name": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "actor_type": {
-                        "type": "string"
-                      },
-                      "created_at": {
-                        "format": "date-time",
-                        "type": "string"
-                      },
-                      "entity_id": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "entity_title": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "entity_type": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "read_at": {
-                        "nullable": true,
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
+                    "$ref": "#/components/schemas/RemainingNotification"
                   },
                   "type": "array"
                 }
@@ -78061,6 +78874,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -78071,6 +78885,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -83048,24 +83863,7 @@
                       },
                       "credentials": {
                         "items": {
-                          "properties": {
-                            "env_var_name": {
-                              "type": "string"
-                            },
-                            "help_url": {
-                              "nullable": true,
-                              "type": "string"
-                            },
-                            "label": {
-                              "type": "string"
-                            },
-                            "provider": {
-                              "type": "string"
-                            },
-                            "type": {
-                              "type": "string"
-                            }
-                          },
+                          "additionalProperties": true,
                           "type": "object"
                         },
                         "type": "array"
@@ -83081,41 +83879,7 @@
                       },
                       "mcp_servers": {
                         "items": {
-                          "properties": {
-                            "args": {
-                              "items": {
-                                "type": "string"
-                              },
-                              "type": "array"
-                            },
-                            "command": {
-                              "nullable": true,
-                              "type": "string"
-                            },
-                            "display_name": {
-                              "type": "string"
-                            },
-                            "endpoint": {
-                              "nullable": true,
-                              "type": "string"
-                            },
-                            "env_mapping": {
-                              "additionalProperties": {
-                                "type": "string"
-                              },
-                              "type": "object"
-                            },
-                            "icon": {
-                              "nullable": true,
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "transport": {
-                              "type": "string"
-                            }
-                          },
+                          "additionalProperties": true,
                           "type": "object"
                         },
                         "type": "array"
@@ -83206,24 +83970,7 @@
                     },
                     "credentials": {
                       "items": {
-                        "properties": {
-                          "env_var_name": {
-                            "type": "string"
-                          },
-                          "help_url": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "provider": {
-                            "type": "string"
-                          },
-                          "type": {
-                            "type": "string"
-                          }
-                        },
+                        "additionalProperties": true,
                         "type": "object"
                       },
                       "type": "array"
@@ -83239,41 +83986,7 @@
                     },
                     "mcp_servers": {
                       "items": {
-                        "properties": {
-                          "args": {
-                            "items": {
-                              "type": "string"
-                            },
-                            "type": "array"
-                          },
-                          "command": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "display_name": {
-                            "type": "string"
-                          },
-                          "endpoint": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "env_mapping": {
-                            "additionalProperties": {
-                              "type": "string"
-                            },
-                            "type": "object"
-                          },
-                          "icon": {
-                            "nullable": true,
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "transport": {
-                            "type": "string"
-                          }
-                        },
+                        "additionalProperties": true,
                         "type": "object"
                       },
                       "type": "array"
@@ -83387,15 +84100,11 @@
               "schema": {
                 "properties": {
                   "account_labels": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
+                    "additionalProperties": true,
                     "type": "object"
                   },
                   "credential_values": {
-                    "additionalProperties": {
-                      "type": "string"
-                    },
+                    "additionalProperties": true,
                     "type": "object"
                   }
                 },
@@ -83676,9 +84385,7 @@
                       "type": "boolean"
                     },
                     "existing_credentials": {
-                      "additionalProperties": {
-                        "type": "boolean"
-                      },
+                      "additionalProperties": true,
                       "type": "object"
                     },
                     "needed_credentials": {
@@ -83694,24 +84401,7 @@
                         },
                         "credentials": {
                           "items": {
-                            "properties": {
-                              "env_var_name": {
-                                "type": "string"
-                              },
-                              "help_url": {
-                                "nullable": true,
-                                "type": "string"
-                              },
-                              "label": {
-                                "type": "string"
-                              },
-                              "provider": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "type": "string"
-                              }
-                            },
+                            "additionalProperties": true,
                             "type": "object"
                           },
                           "type": "array"
@@ -83727,41 +84417,7 @@
                         },
                         "mcp_servers": {
                           "items": {
-                            "properties": {
-                              "args": {
-                                "items": {
-                                  "type": "string"
-                                },
-                                "type": "array"
-                              },
-                              "command": {
-                                "nullable": true,
-                                "type": "string"
-                              },
-                              "display_name": {
-                                "type": "string"
-                              },
-                              "endpoint": {
-                                "nullable": true,
-                                "type": "string"
-                              },
-                              "env_mapping": {
-                                "additionalProperties": {
-                                  "type": "string"
-                                },
-                                "type": "object"
-                              },
-                              "icon": {
-                                "nullable": true,
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "transport": {
-                                "type": "string"
-                              }
-                            },
+                            "additionalProperties": true,
                             "type": "object"
                           },
                           "type": "array"
@@ -85445,7 +86101,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "$ref": "#/components/schemas/RemainingSavedView"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -85563,7 +86222,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingSavedViewCreateRequest"
               }
             }
           }
@@ -85573,7 +86232,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingSavedView"
                 }
               }
             },
@@ -85583,7 +86242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingSavedView"
                 }
               }
             },
@@ -85714,6 +86373,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -85724,6 +86384,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -85852,7 +86513,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/RemainingSavedViewUpdateRequest"
               }
             }
           }
@@ -85862,7 +86523,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RemainingSavedView"
                 }
               }
             },
@@ -86408,6 +87069,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "file_name": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -86418,6 +87087,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "skill_id": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -86598,6 +87281,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "file_name": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -86608,6 +87299,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "file_name": {
+                      "type": "string"
+                    },
+                    "removed": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -89269,7 +89968,43 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "color": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "icon": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "is_builtin": {
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "template_json": {},
+                      "updated_at": {
+                        "type": "string"
+                      },
+                      "workspace_id": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -89387,6 +90122,24 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "color": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "description": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "icon": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "template_json": {}
+                },
                 "type": "object"
               }
             }
@@ -89397,6 +90150,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -89407,6 +90165,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -89716,6 +90479,39 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "color": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "icon": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template_json": {},
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -89874,6 +90670,25 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "color": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "description": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "icon": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "template_json": {}
+                },
                 "type": "object"
               }
             }
@@ -89884,6 +90699,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91230,6 +92050,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "purged": {
+                      "type": "integer"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91330,6 +92158,18 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "peers": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91492,6 +92332,21 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "opted_out": {
+                      "type": "boolean"
+                    },
+                    "opted_out_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91640,6 +92495,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "opted_out": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "opted_out"
+                ],
                 "type": "object"
               }
             }
@@ -91650,6 +92513,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -91801,6 +92665,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "purged": {
+                      "type": "integer"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91931,6 +92803,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -92092,6 +92965,24 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "exists": {
+                      "type": "boolean"
+                    },
+                    "forgot": {
+                      "type": "string"
+                    },
+                    "remaining": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -92951,7 +93842,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "color": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "icon": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "is_builtin": {
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "template_json": {
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -93069,6 +93995,26 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "color": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "description": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "icon": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "template_json": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -93079,6 +94025,38 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "color": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "icon": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template_json": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -93089,6 +94067,38 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "color": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "icon": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template_json": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -93398,6 +94408,38 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "color": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "icon": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template_json": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -93556,6 +94598,28 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "color": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "description": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "icon": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "name": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "template_json": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -93566,6 +94630,38 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "color": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "icon": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "is_builtin": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "template_json": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
