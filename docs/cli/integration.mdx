@@ -1,317 +1,268 @@
 ---
 title: "Integration"
-description: "Manage MCP server integrations at workspace, crew, and agent scope — plus per-tool toggles."
+description: "Manage MCP server integrations at workspace, crew, and agent scope."
 icon: "plug-zap"
 ---
 
 # crewship integration
 
-Integrations are MCP servers Crewship can call into. They exist at three scopes:
-
-- **Workspace** — declared once, shared across crews. Workspace-level integrations live at `/api/v1/integrations`.
-- **Crew** — declared inside one crew. May optionally link to a workspace-level template (`--link-workspace-server`).
-- **Agent binding** — links an agent to a server with a specific credential.
-
-Plus a fourth layer for crew-scoped servers: per-tool enable/disable (`mcp_tool_bindings`), so an agent that imports a 30-tool server doesn't see all 30 in its tool list by default.
-
-Aliases: `intg`. Defined in `cmd/crewship/cmd_integration.go`, with the crew/tools/agent subtrees in companion files.
+Manage MCP server integrations at workspace scope, crew scope, and through
+agent bindings. The alias is `intg`.
 
 ```bash
 crewship integration <subcommand> [flags]
 crewship intg <subcommand> [flags]
 ```
 
-<Note>
-**Auth:** every subcommand requires `crewship login` plus an active workspace.
-</Note>
+Every integration command requires `crewship login` and an active workspace.
+Arguments named `id-or-name` accept either the integration ID or its name;
+crew and agent arguments accept slugs (and the Composio agent commands also
+accept agent IDs).
 
-## Subcommands
+All commands also inherit the global `--server`/`-s`, `--workspace`/`-w`,
+`--profile`, `--format`/`-f`, `--verbose`/`-v`, `--no-color`, and
+`--server-allow-mismatch` flags. `--format` defaults to `table`; it is honored
+by commands that use the formatter, while commands whose output is explicitly
+described as text or JSON below keep that output shape.
 
-### Managed integrations (Composio)
+## Command reference
 
-| Command | Purpose |
-| --- | --- |
-| `integration composio inventory` | Show configured connectors (auth configs) and connected accounts grouped by `user_id`. |
-| `integration composio toolkits` | Browse the Composio app catalog (1000+ apps). Filters: `--search`, `--category`, `--limit`. |
-| `integration composio tools <toolkit>` | List the tools a toolkit exposes (e.g. `github` has 846). Filters: `--search`, `--limit`. |
-| `integration composio triggers types` | List available trigger types (event subscriptions like `GMAIL_NEW_MESSAGE`). Filters: `--toolkit`, `--search`, `--limit`. |
-| `integration composio triggers active` | List active trigger instances across all users. |
-| `integration composio triggers enable <slug>` | Create/enable a trigger instance for a user. Requires `--user <id>`. |
-| `integration composio key show` | Show whether/how Composio is configured (never prints the key). |
-| `integration composio key set` | Set & validate the workspace API key (`--key`, `--label`); stored encrypted. |
-| `integration composio key remove` | Remove the workspace key (revert to the server env, if any). |
-| `integration composio default show` | Show the default-connector state: the `COMPOSIO_DEFAULT_CONNECTOR` flag, the default user/server, and the connected-user count. |
-| `integration composio default enable` | Provision the default connector, auto-deriving the Composio `user_id` when exactly one is connected (errors on zero/multiple). |
-| `integration composio default set <user_id>` | Pin the default connector's Composio `user_id` and (re)provision the default server. |
-| `integration composio connect <toolkit>` | Start an OAuth Connect Link to authorize an app for a Composio user. Requires `--user <id>`. Prints a redirect URL the end-user opens to grant access. |
-| `integration composio bind <agent>` | Bind a Composio `user_id` to an agent with **per-app tool scope**. Requires `--user <id>`; repeatable `--app toolkit[:mode[:t1,t2]]` (mode = `full`\|`read`\|`custom`), e.g. `--app gmail:read --app github:full --app gmail:custom:GMAIL_FETCH_EMAILS,GMAIL_LIST_THREADS`. `--toolkits a,b` is a shorthand for each app at `full`. Re-binding replaces the app set. |
-| `integration composio unbind <agent>` | Remove an agent's Composio access. `--app <toolkit>` removes one app; omit it to remove all. |
-| `integration composio bindings <agent>` | Show an agent's per-app Composio bindings (toolkit, mode, user, endpoint). |
-| `integration composio account revoke <account-id>` | De-authorize a connected account at the provider (must be re-connected to use again). |
-| `integration composio account refresh <account-id>` | Refresh a connected account's credentials. |
-| `integration composio account remove <account-id>` | Permanently delete a connected account at the provider. |
+### Workspace scope
 
-`connect` maps to `POST /api/v1/integrations/composio/connect` (workspace
-manage). Flag: `--user <id>` (required) — the Composio `user_id` to connect the
-account under. `<toolkit>` is a single positional arg.
+| Command | Human output | Structured output |
+| --- | --- | --- |
+| `integration list` | Table: `NAME`, `DISPLAY`, `TRANSPORT`, `ENDPOINT`, `ENABLED`, `AGENTS`, `CREWS`. Long endpoints are shortened. | The API list. |
+| `integration add` | `Integration created: <name> (<id>)` | No structured output; the success line is always printed. |
+| `integration get <id-or-name>` | Detail fields: ID, name, display, transport, endpoint, command, enabled, icon, created, updated. Empty optional fields show `-`. | The integration object. |
+| `integration remove <id-or-name>` | Confirmation prompt, then `Integration <arg> deleted.` | No structured output. |
+| `integration enable <id-or-name>` | `Integration <arg> enabled.` | No structured output. |
+| `integration disable <id-or-name>` | `Integration <arg> disabled.` | No structured output. |
+| `integration test <id-or-name>` | The server result is printed as JSON. | The server result object. |
+| `integration crews-overview` | The server result is printed as JSON. | The server result array. |
 
-`bind`/`unbind` map to `POST`/`DELETE /api/v1/integrations/composio/agents/{agentId}/bind`
-(workspace manage); `bindings` to the matching `GET` (read). The agent argument
-accepts a slug or id. `account revoke`/`refresh`/`remove` map to
-`POST .../accounts/{accountId}/revoke`, `POST .../accounts/{accountId}/refresh`,
-and `DELETE .../accounts/{accountId}` (all workspace manage); the `account-id` is
-the Composio account id shown by `integration composio inventory --format json`.
-
-`default show` maps to `GET /api/v1/integrations/composio/default` (read);
-`default enable`/`default set` map to the matching `PUT` (workspace manage).
-When the server's `COMPOSIO_DEFAULT_CONNECTOR` flag is **on**, every agent
-without an explicit `bind` inherits the default connector (full access to all
-connected apps) and legacy non-Composio MCP servers are turned off at resolve
-time; a per-agent `bind` overrides the default for that agent. See the
-[Integrations guide](/guides/integrations#default-connector-composio_default_connector).
-
-Maps to `GET /api/v1/integrations/composio/inventory`. Requires a Composio API key
-for the active workspace — set one per-workspace with `integration composio key set`
-(or from the Integrations UI), or fall back to a server-level `COMPOSIO_API_KEY`.
-Prints a "not configured" notice when neither is present. Add `--format json`
-(or `yaml`/`ndjson`) for the raw payload — all read-only `composio` subcommands
-(`inventory`, `toolkits`, `tools`, `triggers types`, `triggers active`,
-`default show`, `key show`, `bindings`) honour the global `--format` flag.
-See the [Integrations guide](/guides/integrations#managed-integrations-composio).
-
-When a command that reaches Composio's live API fails, the `API error (502)`
-message classifies the failure — rejected API key (HTTP 401/403), rate limit
-(429), Composio outage (5xx), rejected request (other 4xx, with Composio's own
-message), or `Composio API unreachable` for network-level failures. See
-[Troubleshooting Composio errors](/guides/integrations#troubleshooting-composio-errors).
-
-### Workspace-scoped
-
-| Command | Purpose |
-| --- | --- |
-| `integration list` | List workspace integrations with agent/crew reference counts. |
-| `integration add` | Add a workspace integration. |
-| `integration get <id-or-name>` | Show detail (transport, endpoint/command, enabled). |
-| `integration remove <id-or-name>` | Delete a workspace integration. |
-| `integration enable <id-or-name>` | Enable. |
-| `integration disable <id-or-name>` | Disable. |
-| `integration test <id-or-name>` | Hit `POST /integrations/{id}/test` and print the result. For `streamable-http`/`sse` it probes the endpoint; for `stdio` it statically validates the command config (the live launch happens at runtime inside the container). |
-| `integration crews-overview` | Cross-crew integrations table (which crews reference which servers). |
+`remove` accepts `-y`/`--yes` to skip its confirmation prompt. `add` requires
+`--name`; `--display` defaults to the name, and `--transport` defaults to
+`streamable-http`. For `stdio`, `--command` is split into an executable and
+arguments before it is sent to the server; no shell is run.
 
 ### Agent bindings
 
-| Command | Purpose |
+| Command | Human output | Structured output |
+| --- | --- | --- |
+| `integration bind` | `Agent <agent> bound to integration <server>.` | No structured output. |
+| `integration unbind` | `Binding <binding-id> removed from agent <agent>.` | No structured output. |
+| `integration agent-bindings <agent-slug>` | Table: `BINDING ID`, `SERVER`, `SCOPE`, `CREDENTIAL`, `TYPE`, `ENABLED`. Missing credentials show `-`; missing types display `bearer`. | The binding list. |
+| `integration resolve <agent-slug>` | Table: `NAME`, `DISPLAY`, `SCOPE`, `TRANSPORT`, `CREDENTIAL`. Missing credentials show `-`. | The resolved integration list. |
+| `integration agent update-binding <agent-slug> <binding-id>` | `Binding <binding-id> on agent <agent> updated.` | No structured output. |
+
+`bind` requires `--agent` and `--server`; `unbind` requires `--agent` and
+`--binding-id`. The binding ID is the value in the `BINDING ID` column, not the
+workspace integration ID.
+
+### Crew scope
+
+| Command | Human output | Structured output |
+| --- | --- | --- |
+| `integration crew list <crew-slug>` | Table: `ID`, `NAME`, `DISPLAY`, `TRANSPORT`, `ENDPOINT`, `ENABLED`. Long endpoints are shortened. | The crew integration list. |
+| `integration crew create <crew-slug>` | `Crew integration created: <name> (<id>)` | No structured output. |
+| `integration crew update <crew-slug> <integration-id>` | `Crew integration <id> updated.` | No structured output. |
+| `integration crew delete <crew-slug> <integration-id>` | Confirmation prompt, then `Crew integration <id> deleted.` | No structured output. |
+| `integration crew test <crew-slug> <integration-id>` | The server result is printed as JSON. | The server result object. |
+
+`crew delete` accepts `-y`/`--yes`. `crew create` requires `--name`; its
+`--display` and `--transport` defaults match workspace `add`. `--link-workspace-server`
+links the new crew integration to a workspace integration by ID.
+
+### Per-tool controls
+
+These commands apply only to crew-scoped integrations.
+
+| Command | Human output | Structured output |
+| --- | --- | --- |
+| `integration tools list <crew-slug> <integration-id>` | Table: `TOOL`, `ENABLED`, `DESCRIPTION`, `UPDATED`; missing descriptions show `-`, and long descriptions are shortened. | The tool-binding list. |
+| `integration tools enable <crew-slug> <integration-id> <tool-name>` | `Tool <tool> on <crew>/<integration-id> enabled.` | No structured output. |
+| `integration tools disable <crew-slug> <integration-id> <tool-name>` | `Tool <tool> on <crew>/<integration-id> disabled.` | No structured output. |
+| `integration tools refresh <crew-slug> <integration-id>` | If the server returns an empty body: `Tool bindings refresh requested for <crew>/<integration-id>.`; otherwise the server result is printed as JSON. | The server result when it returns one. |
+
+`tools refresh` currently sends an empty tool list. The server treats that as a
+no-op; it does not perform live MCP discovery from the CLI.
+
+### Composio managed integrations
+
+The `integration composio` group contains `inventory`, `toolkits`,
+`tools <toolkit>`, `triggers types`, `triggers active`, `triggers enable <slug>`,
+`key show`, `key set`, `key remove`, `default show`, `default enable`,
+`default set <user_id>`, `connect <toolkit>`, `bind <agent-slug-or-id>`,
+`unbind <agent-slug-or-id>`, `bindings <agent-slug-or-id>`, and the account
+commands `account revoke <account-id>`, `account refresh <account-id>`, and
+`account remove <account-id>`.
+
+Read commands (`inventory`, `toolkits`, `tools`, `triggers types`,
+`triggers active`, `default show`, `key show`, and `bindings`) use human tables
+or notices by default and honor `--format json`, `yaml`, or `ndjson` for the
+raw API response. Mutation commands print the text shown below.
+
+| Command | Human output / behavior |
 | --- | --- |
-| `integration bind` | Bind an agent to an integration with a credential. |
-| `integration unbind` | Remove an agent binding (by binding id). |
-| `integration agent-bindings <agent-slug>` | List bindings for an agent. |
-| `integration resolve <agent-slug>` | Show effective integrations after cascade resolution (workspace ↘ crew ↘ agent). |
-| `integration agent update-binding <agent-slug> <binding-id>` | Patch a binding (credential, type, env var, enabled). |
+| `composio inventory` | Connector catalog table (`TOOLKIT`, `NAME`, `STATUS`) and connected-users table (`USER_ID`, `APPS`, `ACCOUNTS`). If unconfigured, prints a configuration notice. |
+| `composio toolkits` | Table `SLUG`, `NAME`, `CATEGORY`, `TOOLS`, followed by the number shown and total. |
+| `composio tools <toolkit>` | Table `SLUG`, `NAME`, `DESCRIPTION`, followed by the number shown and total. |
+| `composio triggers types` | Table `SLUG`, `TOOLKIT`, `TYPE`, `DESCRIPTION`, followed by the number shown and total. |
+| `composio triggers active` | Table `ID`, `TRIGGER`, `USER_ID`, `STATE`. |
+| `composio triggers enable <slug>` | `Trigger <slug> enabled for user "<user>" (id: <id>).` Requires `--user`. |
+| `composio key show` | Prints whether the key is configured, its source, and optional label; never prints the key. |
+| `composio key set` | `Composio key saved & validated (source: <source>).` Requires `--key`. |
+| `composio key remove` | `Composio workspace key removed.` |
+| `composio default show` | Table `FLAG`, `DEFAULT_USER`, `DEFAULT_SERVER`, `CONNECTED_USERS`; when the flag is off, also prints a note. |
+| `composio default enable` | `Default Composio connector provisioned for user "<user>" (server <id>).` |
+| `composio default set <user_id>` | `Default Composio connector set to user "<user>" (server <id>).` |
+| `composio connect <toolkit>` | Prints an OAuth URL to open. Requires `--user`. |
+| `composio bind <agent-slug-or-id>` | Prints the bound user and one indented line per provisioned app (toolkit, mode, endpoint). Requires `--user`. |
+| `composio unbind <agent-slug-or-id>` | Removes one app with `--app`, or all apps when omitted, and prints the result. |
+| `composio bindings <agent-slug-or-id>` | Table `TOOLKIT`, `MODE`, `USER_ID`, `ENDPOINT`; an agent with none gets a no-bindings message. |
+| `composio account revoke <account-id>` | `Connected account <id> revoked.` The account row survives. |
+| `composio account refresh <account-id>` | `Connected account <id> refreshed.` |
+| `composio account remove <account-id>` | `Connected account <id> deleted.` |
 
-### Crew-scoped CRUD
-
-| Command | Purpose |
-| --- | --- |
-| `integration crew list <crew-slug>` | List crew integrations. |
-| `integration crew create <crew-slug>` | Create a crew-scoped integration. |
-| `integration crew update <crew-slug> <integration-id>` | Patch fields. |
-| `integration crew delete <crew-slug> <integration-id>` | Delete (prompts unless `-y`). |
-| `integration crew test <crew-slug> <integration-id>` | Test the connection. |
-
-### Per-tool toggles (crew-scoped only)
-
-| Command | Purpose |
-| --- | --- |
-| `integration tools list <crew-slug> <integration-id>` | List discovered tools + their enabled state. |
-| `integration tools enable <crew-slug> <integration-id> <tool-name>` | Enable one tool. |
-| `integration tools disable <crew-slug> <integration-id> <tool-name>` | Disable one tool. |
-| `integration tools refresh <crew-slug> <integration-id>` | Reconcile bindings with live MCP discovery (today: scaffolding, server treats empty payload as no-op). |
+When Composio is unconfigured, the catalog read commands print a notice and
+return successfully in human mode. Set a workspace key with `key set`, or use
+the server-level `COMPOSIO_API_KEY` fallback.
 
 ## Flags
 
-### `integration add`
+### Workspace `add`
 
-| Flag | Default | Effect |
+| Flag | Default | Meaning |
 | --- | --- | --- |
-| `--name <slug>` | (required) | Integration name (slug). |
-| `--display <string>` | (= `--name`) | Display name. |
-| `--transport <enum>` | `streamable-http` | `streamable-http` or `stdio`. |
-| `--endpoint <url>` | (unset) | MCP server URL (streamable-http). |
-| `--command <string>` | (unset) | Command line (stdio). |
-| `--icon <name>` | (unset) | Lucide icon name. |
+| `--name <slug>` | empty; required by the command | Integration name. |
+| `--display <string>` | empty; becomes `--name` | Display name. |
+| `--transport <string>` | `streamable-http` | `streamable-http` or `stdio`. |
+| `--endpoint <url>` | empty | MCP endpoint URL. |
+| `--command <string>` | empty | Stdio launch line. |
+| `--icon <name>` | empty | Lucide icon name. |
 
-### `integration bind`
+### Workspace `bind`
 
-| Flag | Default | Effect |
+| Flag | Default | Meaning |
 | --- | --- | --- |
-| `--agent <slug>` | (required) | Agent slug. |
-| `--server <name>` | (required) | Integration name. |
-| `--credential <name>` | (unset) | Credential to attach. |
-| `--cred-type <enum>` | `bearer` | `bearer`, `api_key`, `basic`. |
-| `--cred-header <name>` | (unset) | Custom header name (for `api_key`). |
+| `--agent <slug>` | empty; required | Agent slug. |
+| `--server <name>` | empty; required | Integration name. |
+| `--credential <name>` | empty | Credential to bind. |
+| `--cred-type <string>` | `bearer` | `bearer`, `api_key`, or `basic`. |
+| `--cred-header <name>` | empty | Custom header for `api_key`. |
 
-### `integration unbind`
+### Workspace `unbind`
 
-| Flag | Effect |
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--agent <slug>` | empty; required | Agent slug. |
+| `--binding-id <id>` | empty; required | Agent binding row ID. |
+
+### Deletes
+
+`integration remove` and `integration crew delete` each support `-y` or
+`--yes`, default `false`, to skip confirmation.
+
+### Crew `create`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--name <slug>` | empty; required | Integration name. |
+| `--display <string>` | empty; becomes `--name` | Display name. |
+| `--transport <string>` | `streamable-http` | `streamable-http` or `stdio`. |
+| `--endpoint <url>` | empty | MCP endpoint URL. |
+| `--command <string>` | empty | Stdio launch line. |
+| `--icon <name>` | empty | Lucide icon name. |
+| `--link-workspace-server <id>` | empty | Workspace integration ID to link. |
+
+### Crew `update`
+
+All flags default to empty/unset except `--enabled`, whose default is `true`.
+Only flags explicitly supplied are patched.
+
+| Flag | Meaning |
 | --- | --- |
-| `--agent <slug>` | Agent slug. Required. |
-| `--binding-id <id>` | Binding ID to remove. Required. |
-
-### `integration crew create`
-
-| Flag | Default | Effect |
-| --- | --- | --- |
-| `--name <slug>` | (required) | Integration name. |
-| `--display <string>` | (= `--name`) | Display name. |
-| `--transport <enum>` | `streamable-http` | `streamable-http` or `stdio`. |
-| `--endpoint <url>` | (unset) | MCP server URL. |
-| `--command <string>` | (unset) | stdio command. |
-| `--icon <name>` | (unset) | Lucide icon. |
-| `--link-workspace-server <id>` | (unset) | Reference an existing workspace integration. |
-
-### `integration crew update`
-
-| Flag | Effect |
-| --- | --- |
-| `--display` | New display name. |
-| `--transport` | `streamable-http` or `stdio`. |
-| `--endpoint` | New URL. |
-| `--command` | New stdio command. |
-| `--icon` | Lucide icon. |
-| `--enabled` | Enable/disable (default `true`). |
-
-### `integration crew delete`
-
-| Flag | Default | Effect |
-| --- | --- | --- |
-| `-y`, `--yes` | `false` | Skip the confirmation prompt. |
-
-### `integration agent update-binding`
-
-| Flag | Effect |
-| --- | --- |
-| `--credential <name>` | New credential name. Empty string clears the binding. |
-| `--cred-type <enum>` | `bearer`, `api_key`, `basic`. |
-| `--cred-header <name>` | Custom header for `api_key`. |
-| `--env-var-name <name>` | Env-var name; empty string clears it. |
+| `--display <string>` | New display name. |
+| `--transport <string>` | New transport: `streamable-http` or `stdio`. |
+| `--endpoint <url>` | New endpoint URL. |
+| `--command <string>` | New stdio launch line. |
+| `--icon <name>` | New Lucide icon name. |
 | `--enabled <bool>` | Set enabled state. |
 
-`<binding-id>` here is the `agent_mcp_bindings.id` printed under the `BINDING ID` column by `integration agent-bindings`. It is **not** the workspace integration's id.
+### Agent `update-binding`
+
+All string flags default to empty/unset. `--enabled` defaults to `true`; only
+changed flags are sent.
+
+| Flag | Meaning |
+| --- | --- |
+| `--credential <name>` | Credential name; an explicitly empty value clears it. |
+| `--cred-type <string>` | Credential type: `bearer`, `api_key`, or `basic`. |
+| `--cred-header <name>` | Custom header for `api_key`. |
+| `--env-var-name <name>` | Environment variable name; an explicitly empty value clears it. |
+| `--enabled <bool>` | Set enabled state. |
+
+### Composio filters and options
+
+| Command | Flag | Default |
+| --- | --- | --- |
+| `toolkits` | `--search`, `--category` | empty/unset |
+| `toolkits` | `--limit` | `0` (server-side default) |
+| `tools <toolkit>` | `--search` | empty/unset |
+| `tools <toolkit>` | `--limit` | `0` (server-side default) |
+| `triggers types` | `--toolkit`, `--search` | empty/unset |
+| `triggers types` | `--limit` | `0` (server-side default) |
+| `triggers enable <slug>` | `--user <id>` | empty; required |
+| `connect <toolkit>` | `--user <id>` | empty; required |
+| `key set` | `--key <ak_…>` | empty; required |
+| `key set` | `--label <string>` | empty; optional |
+| `bind <agent>` | `--user <id>` | empty; required |
+| `bind <agent>` | repeatable `--app toolkit[:mode[:tool1,tool2]]` | `[]`; mode defaults to `full` |
+| `bind <agent>` | `--toolkits a,b` | empty; each listed toolkit gets `full` scope |
+| `unbind <agent>` | `--app <toolkit>` | empty; empty removes all apps |
+
+For `--app`, mode is `full`, `read`, or `custom`; `custom` requires a
+comma-separated tool list. Rebinding replaces the agent's Composio app set.
 
 ## Examples
 
-### Connect a Composio account
-
 ```bash
-crewship integration composio connect gmail --user user-42
-# Open this URL to authorize gmail for user "user-42":
-#   <redirect_url>   (the backend-issued Connect Link; exact host varies)
-```
+# Add a workspace HTTP integration.
+crewship integration add --name gmail --display "Google Gmail" \
+  --transport streamable-http --endpoint https://mcp.example.com/gmail
 
-### Add a workspace integration
-
-```bash
-crewship integration add \
-  --name gmail \
-  --display "Google Gmail" \
-  --transport streamable-http \
-  --endpoint https://mcp.example.com/gmail
-```
-
-stdio:
-
-```bash
-crewship integration add \
-  --name local-tools \
-  --transport stdio \
+# Add a local stdio integration. The CLI splits this into command + args.
+crewship integration add --name local-tools --transport stdio \
   --command "npx @modelcontextprotocol/server-github"
-```
 
-<Note>
-Pass the whole launch line to `--command` — the CLI splits it into the bare
-executable (`npx`) and its arguments (stored in `args_json`) for you. Storing
-the full line verbatim would make the runtime look for an executable literally
-named `npx @modelcontextprotocol/server-github`, which never exists, and the
-server would silently never start. `integration test` catches that same mistake
-statically for stdio servers before you wonder why no tools appeared.
-
-The split is quote-aware, not a naive whitespace split: quoted substrings stay
-one token, so an executable path that contains spaces must be quoted —
-`--command '"/opt/my app/bin/server" --port 3000'` yields the executable
-`/opt/my app/bin/server` plus one argument. Single quotes are fully literal
-inside; inside double quotes a backslash escapes only `"` and `\`, so Windows
-paths like `"C:\Program Files\nodejs\npx.exe"` survive intact. There is no
-shell involved — no variable expansion, globbing, or `|`/`&&` operators. See
-the [MCP guide](/guides/mcp-multi-cli#stdio-servers-local-subprocess) for the full
-tokenizer rules.
-</Note>
-
-### Bind an agent to it
-
-```bash
-crewship integration bind \
-  --agent daniel \
-  --server gmail \
+# Bind, inspect, and resolve an agent integration.
+crewship integration bind --agent daniel --server gmail \
   --credential daniel-gmail-token
+crewship integration agent-bindings daniel
+crewship integration resolve daniel --format json
+
+# Create and test a crew integration, then toggle a discovered tool.
+crewship integration crew create engineering --name linear \
+  --transport streamable-http --endpoint https://mcp.linear.app/sse
+crewship integration crew test engineering intg_abc123
+crewship integration tools disable engineering intg_abc123 delete_issue
+
+# Connect an app and bind selected Composio tools.
+crewship integration composio connect gmail --user user-42
+crewship integration composio bind daniel --user user-42 \
+  --app gmail:read --app github:full
 ```
 
-### Inspect an agent's effective integrations
+`integration test` and `integration crew test` return whatever JSON result the
+server provides. For workspace HTTP integrations the server probes the
+endpoint; for stdio integrations it validates the configured command. The CLI
+does not launch a stdio server during this check.
 
-```bash
-crewship integration resolve daniel
-# NAME      DISPLAY        SCOPE      TRANSPORT          CREDENTIAL
-# gmail     Google Gmail   workspace  streamable-http    daniel-gmail-token
-# linear    Linear         crew       streamable-http    crew-linear-token
-```
-
-The cascade is workspace ↘ crew ↘ agent — closer scopes win.
-
-### Crew-scoped integration
-
-```bash
-crewship integration crew create acme-engineering \
-  --name linear \
-  --transport streamable-http \
-  --endpoint https://mcp.linear.app/sse
-```
-
-### Toggle a single tool
-
-```bash
-crewship integration tools list acme-engineering intg_abc123
-# TOOL              ENABLED  DESCRIPTION                              UPDATED
-# list_issues       yes      List issues in a Linear team             2026-05-19T…
-# create_issue      yes      Create a new issue                       2026-05-19T…
-# delete_issue      no       Delete an issue (irreversible)           2026-05-19T…
-
-crewship integration tools disable acme-engineering intg_abc123 delete_issue
-```
-
-### Patch a binding
-
-```bash
-crewship integration agent update-binding daniel bind_xyz \
-  --credential daniel-gmail-token-v2 \
-  --cred-type bearer
-```
-
-Pass `--credential ""` to clear the binding's credential link.
-
-## Common errors
-
-<Accordion title="Common errors and what they mean">
-
-- **`--name is required`** — `integration add` or `integration crew create` was called without a name.
-- **`--agent and --server are required`** — `integration bind` needs both flags.
-- **`--agent and --binding-id are required`** — `integration unbind`.
-- **`no fields to update`** — crew `update` or agent `update-binding` was called with no `Changed()` flags.
-- **`no fields to update (use --credential, --cred-type, --cred-header, --env-var-name, or --enabled)`** — explicit guidance from `agent update-binding`.
-
-</Accordion>
+For the complete command tree as emitted by the running binary, use
+`crewship commands --format json`.
 
 ## See also
 
-- [`crewship mcp`](/cli/mcp) — MCP registry, audit log, and raw `mcp_config_json` editing.
-- [`crewship credential`](/cli/credential) — the credentials bound to integrations.
-- [`crewship crew`](/cli/crew) — crew CRUD; integrations are crew-scoped by default.
-- [Integrations API](/api-reference/integrations) — `GET /api/v1/integrations`.
+- [`crewship mcp`](/cli/mcp) — MCP registry and raw configuration.
+- [`crewship credential`](/cli/credential) — credentials bound to integrations.
+- [Integrations API](/api-reference/integrations) — HTTP integration endpoints.
