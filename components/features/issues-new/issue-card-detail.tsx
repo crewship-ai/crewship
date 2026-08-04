@@ -49,6 +49,15 @@ import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui
 import { TintedCard, TintedFacts, type TintTone } from "./tinted-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { MentionChip } from "@/components/features/issues/mention-chip"
+import { CommentComposer } from "./comment-composer"
+import {
+  isMentionActivity,
+  mentionDirectory,
+  mentionTargetFromActivityDetails,
+  type MentionAgent,
+  type MentionDirectory,
+} from "@/lib/mentions"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
@@ -91,6 +100,20 @@ interface Props {
    * that wiring is a second thing to keep correct.
    */
   actions?: React.ReactNode
+  /**
+   * Agents that may be mentioned here, and that mentions already in the
+   * comments resolve against. Without it a mention is just the text somebody
+   * typed — see lib/mentions.ts.
+   */
+  agents?: readonly MentionAgent[]
+  /**
+   * Posts a comment. Absent, the card stays read-only and no composer is
+   * drawn: the endpoint, the workspace and the refetch belong to the host,
+   * the same way the action buttons do.
+   */
+  onSubmitComment?: (body: string) => boolean | Promise<boolean>
+  /** Initial for the composer's author bubble. */
+  viewerInitial?: string
 }
 
 type FootTab = "comments" | "history"
@@ -103,8 +126,13 @@ export function IssueCardDetail({
   runs = [],
   project,
   actions,
+  agents,
+  onSubmitComment,
+  viewerInitial,
 }: Props) {
   const [footTab, setFootTab] = React.useState<FootTab>("comments")
+
+  const mentions = React.useMemo(() => mentionDirectory(agents ?? []), [agents])
 
   const labels = issue.labels ?? []
   const facts = React.useMemo(
@@ -402,7 +430,8 @@ export function IssueCardDetail({
           }
         >
           {footTab === "comments" ? (
-            comments.length === 0 ? (
+            <div className="space-y-4">
+            {comments.length === 0 ? (
               <p className="text-[12px] text-muted-foreground">
                 Nobody has said anything about this issue yet.
               </p>
@@ -431,13 +460,28 @@ export function IssueCardDetail({
                         </span>
                       </div>
                       <div className="mt-1 text-[13px] leading-relaxed text-foreground/85">
-                        <MarkdownContent compact>{c.body}</MarkdownContent>
+                        <MarkdownContent compact mentions={mentions}>
+                          {c.body}
+                        </MarkdownContent>
                       </div>
                     </div>
                   </li>
                 ))}
               </ul>
-            )
+            )}
+
+            {/* The composer is the whole point of the next step: an agent
+                becomes a participant when it is @mentioned here. */}
+            {onSubmitComment && (
+              <div className="border-t border-border/60 pt-4">
+                <CommentComposer
+                  agents={agents ?? []}
+                  onSubmit={onSubmitComment}
+                  authorInitial={viewerInitial ?? "U"}
+                />
+              </div>
+            )}
+            </div>
           ) : activities.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
               No recorded changes since this issue was opened.
@@ -445,20 +489,7 @@ export function IssueCardDetail({
           ) : (
             <ul className="space-y-2 text-[12px]">
               {activities.map((a) => (
-                <li key={a.id} className="flex items-baseline gap-2">
-                  <span className="text-foreground/85">
-                    <span className="font-medium">{a.actor_name ?? a.actor_type}</span>{" "}
-                    {a.action.replace(/_/g, " ")}
-                  </span>
-                  {a.details && (
-                    <span className="truncate font-mono text-[10px] text-muted-foreground">
-                      {a.details}
-                    </span>
-                  )}
-                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground-soft">
-                    {timeAgo(a.created_at)}
-                  </span>
-                </li>
+                <ActivityRow key={a.id} activity={a} mentions={mentions} />
               ))}
             </ul>
           )}
@@ -553,6 +584,70 @@ function runTint(status: string): TintTone {
 /* ------------------------------------------------------------------ *
  *  Pieces                                                             *
  * ------------------------------------------------------------------ */
+
+/**
+ * One line of history.
+ *
+ * `mentioned` is rendered specially — "Pavel mentioned @Robin", with the chip
+ * — and everything else keeps the generic shape it already had.
+ *
+ * **The backend does not emit a `mentioned` activity today.** Nothing in
+ * `internal/api` logs one; the kinds that exist are `created`,
+ * `status_changed`, `assignee_changed`, `priority_changed`,
+ * `review_approved`, `review_changes_requested`. This renderer is written
+ * ahead of it so the row does not have to be designed twice, and it accepts
+ * every plausible `details` shape (see `mentionTargetFromActivityDetails`)
+ * rather than betting on one. Until then it is dead code that costs nothing;
+ * the day the activity lands, the row is already right.
+ */
+function ActivityRow({
+  activity: a,
+  mentions,
+}: {
+  activity: IssueActivity
+  mentions: MentionDirectory
+}) {
+  const actor = <span className="font-medium">{a.actor_name ?? a.actor_type}</span>
+  const when = (
+    <span className="ml-auto shrink-0 text-[10px] text-muted-foreground-soft">
+      {timeAgo(a.created_at)}
+    </span>
+  )
+
+  if (isMentionActivity(a.action)) {
+    const targetId = mentionTargetFromActivityDetails(a.details)
+    const agent = targetId ? mentions.get(targetId) : undefined
+    return (
+      <li className="flex items-baseline gap-2">
+        <span className="flex flex-wrap items-baseline gap-1.5 text-foreground/85">
+          {actor} <span>mentioned</span>{" "}
+          {agent ? (
+            <MentionChip agent={agent} />
+          ) : (
+            // An id nothing resolves is still worth showing: it says the
+            // mention happened, and names what it pointed at.
+            <span className="font-mono text-[10px] text-muted-foreground">
+              @{targetId ?? a.details ?? "someone"}
+            </span>
+          )}
+        </span>
+        {when}
+      </li>
+    )
+  }
+
+  return (
+    <li className="flex items-baseline gap-2">
+      <span className="text-foreground/85">
+        {actor} {a.action.replace(/_/g, " ")}
+      </span>
+      {a.details && (
+        <span className="truncate font-mono text-[10px] text-muted-foreground">{a.details}</span>
+      )}
+      {when}
+    </li>
+  )
+}
 
 /** A property row: label left, value right, no border ladder. */
 function Row({

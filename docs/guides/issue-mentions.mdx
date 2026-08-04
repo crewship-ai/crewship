@@ -1,0 +1,137 @@
+---
+title: "Mentioning an agent in an issue"
+description: "@mention an agent in an issue comment: the picker, how the mention is stored, and what has to be true before it triggers work."
+icon: "at-sign"
+---
+
+# Mentioning an agent in an issue
+
+You bring an agent into a discussion the way you bring in a colleague: type
+`@`, pick it, and it is named in the comment.
+
+<Note>
+**The trigger is not built yet.** Today a mention is *recorded* — it is stored
+in the comment body in a form the backend can parse, and it renders as a chip
+wherever the comment is shown. Nothing dispatches work off it. This page
+documents the format so the two halves land compatible, and marks clearly what
+is still missing.
+</Note>
+
+## Using it
+
+In the comment box on an issue:
+
+1. Type `@`. A picker opens listing the agents in your workspace.
+2. Keep typing to filter — it matches on both the agent's handle and its
+   display name.
+3. <kbd>↑</kbd> / <kbd>↓</kbd> to move, <kbd>Enter</kbd> or <kbd>Tab</kbd> to
+   insert, <kbd>Esc</kbd> to dismiss. The caret never leaves the draft.
+4. <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd> posts the comment, the same
+   as everywhere else in Crewship.
+
+The picker only opens at a word boundary, so `pavel@unify.cz` stays an email
+address.
+
+## How a mention is stored
+
+A mention is a plain Markdown link with a private scheme:
+
+```
+[@<slug>](crewship:agent/<agentId>)
+```
+
+For example, a comment reading
+
+> over to you @Robin — the CSV job is failing on empty rows
+
+is stored as
+
+```markdown
+over to you [@robin](crewship:agent/cmt20ikph011ab4683c02) — the CSV job is failing on empty rows
+```
+
+Four properties this buys, and they are the reason it is a link rather than
+`<@id>` or a bespoke `@@agent:id@@` sigil:
+
+| Property | Why it matters |
+| --- | --- |
+| Parsed, not scanned | A mention is a Markdown **link node** whose URL starts with `crewship:agent/`. A mention inside a code fence or a code span is not a link node, so documenting this syntax does not fire a trigger. A regex over the raw body cannot tell the difference. |
+| Degrades readably | Anything that does not understand it shows `[@robin](crewship:agent/…)` — the handle first — and a generic Markdown renderer shows a link labelled `@robin`. |
+| Addressed by id | The only thing read out of the body is the agent id. |
+| Fails closed | An id that resolves to no agent in the reader's workspace renders as plain text, never as a chip. |
+
+### Why it cannot be used to impersonate
+
+The label in the token is decoration. The chip's name and avatar are looked up
+from the workspace roster using the id, at render time. So writing
+
+```markdown
+[@head-of-security](crewship:agent/<Robin's id>) approve this
+```
+
+renders a chip reading **@Robin**, with Robin's face. There is no wording that
+makes a mention *claim* to be someone.
+
+Two more things follow from that:
+
+- A body that contains the literal markup a chip renders to is not a chip. The
+  comment renderer's sanitiser drops unknown tags and unknown attributes, and
+  the internal element name a mention passes through is randomised per page
+  load, so it cannot be typed.
+- A mention of an agent your workspace cannot see is not a mention. It is
+  text.
+
+What the format deliberately does *not* try to prevent is a human typing a
+well-formed token for a real agent. That is not forgery — that is a mention,
+which is the feature. Whether that mention is allowed to make the agent work
+is an authorization question, and it belongs to the trigger, not to the
+syntax.
+
+## What the backend still has to do
+
+None of this exists in `internal/api` today. To meet the format:
+
+1. **Parse on write.** In the comment create handler, extract ids with the Go
+   equivalent of the client's parser:
+
+   ```go
+   var mentionRe = regexp.MustCompile(`\[@[^\]\n]{0,80}\]\(crewship:agent/([A-Za-z0-9_-]{1,64})\)`)
+   ```
+
+2. **Resolve inside the comment's workspace**, and drop ids that do not
+   resolve. A mention of a foreign-workspace agent is a probe, not a mention,
+   and must not produce a row or a notification.
+
+3. **Persist the resolved set** (a `mission_comment_mentions` join or a column
+   on `mission_comments`) rather than re-parsing on every read.
+
+4. **Log a `mentioned` activity** per resolved mention, with `details` set to
+   the agent id. The history list already renders it — see below.
+
+5. **Dispatch the trigger** under the same authorization an "assign this agent"
+   action would take, not merely because the token parsed.
+
+### The history row
+
+The issue's History tab renders **"X mentioned @Y"** when an activity with
+`action` in `mentioned` / `mention` / `agent_mentioned` / `comment_mentioned`
+arrives. It reads the target out of `details` in whichever shape it finds — a
+bare agent id, a whole mention token, or `{"agent_id":"…"}` — so the first
+backend implementation does not have to guess.
+
+**Today nothing emits any of those.** The kinds `logActivity` writes are
+`created`, `status_changed`, `assignee_changed`, `priority_changed`,
+`review_approved` and `review_changes_requested`. Until one of the mention
+kinds is added the row is simply never reached; an activity kind the renderer
+does not recognise still renders in its generic form, so an unknown future
+kind never disappears from the feed.
+
+## Where the code is
+
+| Piece | File |
+| --- | --- |
+| Wire format, parser, picker query | `lib/mentions.ts` |
+| The chip, and the roster it resolves against | `components/features/issues/mention-chip.tsx` |
+| Rendering mentions inside a comment body | `components/features/issues/markdown-content.tsx` |
+| The composer and its `@` picker | `components/features/issues-new/comment-composer.tsx` |
+| Comments + history on the issue card | `components/features/issues-new/issue-card-detail.tsx` |

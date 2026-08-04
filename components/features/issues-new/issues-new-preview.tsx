@@ -6,9 +6,14 @@
 //
 // It reads REAL data from the workspace — every issue and project you
 // actually have — because a layout that only looks right against invented
-// fixtures is a layout that has not been tested. Nothing here writes: there
-// is no PATCH, no composer and no action wired up. The action slot renders
-// disabled buttons so the identity card is argued at its real width.
+// fixtures is a layout that has not been tested. There is no PATCH and no
+// action wired up; the action slot renders disabled buttons so the identity
+// card is argued at its real width.
+//
+// One thing does write: the comment composer, which posts through the same
+// endpoint the shipped issue page uses. A composer whose `@` picker has never
+// stored a token is a composer nobody has tested, and the token is the whole
+// contract with the backend (lib/mentions.ts).
 
 import * as React from "react"
 import { CircleDot, FolderKanban } from "lucide-react"
@@ -18,8 +23,10 @@ import { SubBar } from "@/components/layout/sub-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiFetch } from "@/lib/api-fetch"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { toast } from "sonner"
 import { IssueCardDetail, type IssueRun } from "./issue-card-detail"
 import { ProjectCardDetail } from "./project-card-detail"
+import type { MentionAgent } from "@/lib/mentions"
 import type {
   IssueActivity,
   IssueComment,
@@ -37,6 +44,11 @@ export function IssuesNewPreview() {
 
   const [issues, setIssues] = React.useState<Mission[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
+  // The workspace roster, for the composer's `@` picker and for resolving
+  // mentions already stored in comment bodies. Scoped to the workspace like
+  // everything else here: a mention that resolves against another
+  // workspace's agents is not a mention, it is a leak.
+  const [agents, setAgents] = React.useState<MentionAgent[]>([])
   const [loading, setLoading] = React.useState(true)
   // Which workspace the lists above actually came from. Resetting state in
   // the effect is not enough on its own: React runs the detail effect below
@@ -66,6 +78,7 @@ export function IssuesNewPreview() {
     // under the new workspace, and the page goes permanently blank.
     setIssues([])
     setProjects([])
+    setAgents([])
     setIssue(null)
     setComments([])
     setActivities([])
@@ -83,11 +96,13 @@ export function IssuesNewPreview() {
     Promise.all([
       apiFetch(`/api/v1/issues?${qs}&limit=100`).then((r) => (r.ok ? r.json() : [])),
       apiFetch(`/api/v1/projects?${qs}`).then((r) => (r.ok ? r.json() : [])),
+      apiFetch(`/api/v1/agents?${qs}`).then((r) => (r.ok ? r.json() : [])),
     ])
-      .then(([is, ps]: [Mission[], Project[]]) => {
+      .then(([is, ps, ags]: [Mission[], Project[], MentionAgent[]]) => {
         if (cancelled) return
         setIssues(Array.isArray(is) ? is : [])
         setProjects(Array.isArray(ps) ? ps : [])
+        setAgents(Array.isArray(ags) ? ags : [])
         setIssueId(Array.isArray(is) && is[0] ? is[0].id : null)
         setProjectId(Array.isArray(ps) && ps[0] ? ps[0].id : null)
         setLoadedWorkspace(workspaceId)
@@ -104,6 +119,42 @@ export function IssuesNewPreview() {
   const crewId = listRow?.crew_id
 
   const ready = loadedWorkspace !== null && loadedWorkspace === workspaceId
+
+  /**
+   * The one thing on this page that writes.
+   *
+   * It goes through the endpoint the real issue page already uses
+   * (`POST …/comments`), because the point of the composer is the mention
+   * inside it: the body it sends is what the backend will one day parse into
+   * an agent id and a trigger. Re-reads the list rather than appending
+   * locally — the server owns ids and timestamps.
+   */
+  const postComment = React.useCallback(
+    async (body: string): Promise<boolean> => {
+      if (!workspaceId || !identifier || !crewId) return false
+      const qs = `workspace_id=${encodeURIComponent(workspaceId)}`
+      const base = `/api/v1/crews/${encodeURIComponent(crewId)}/issues/${encodeURIComponent(identifier)}`
+      try {
+        const res = await apiFetch(`${base}/comments?${qs}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body }),
+        })
+        if (!res.ok) {
+          const detail = await res.json().catch(() => null)
+          toast.error(detail?.detail ?? "Failed to add comment")
+          return false
+        }
+        const fresh = await apiFetch(`${base}/comments?${qs}`).then((r) => (r.ok ? r.json() : null))
+        if (Array.isArray(fresh)) setComments(fresh)
+        return true
+      } catch {
+        toast.error("Failed to add comment")
+        return false
+      }
+    },
+    [workspaceId, identifier, crewId],
+  )
 
   React.useEffect(() => {
     if (!ready || !workspaceId || !identifier || !crewId) {
@@ -221,7 +272,8 @@ export function IssuesNewPreview() {
           columns → one card at the foot.
         </span>
         <span className="text-[11px] text-muted-foreground">
-          Real workspace data, read-only. Nothing on this page saves.
+          Real workspace data. Only the comment box writes — @mention an agent and the comment
+          is stored with the token that will trigger it once the backend reads them.
         </span>
       </div>
 
@@ -237,6 +289,8 @@ export function IssuesNewPreview() {
               relations={relations}
               runs={runs}
               project={issueProject}
+              agents={agents}
+              onSubmitComment={postComment}
               actions={<DisabledActions labels={["Start work", "⋯"]} />}
             />
           ) : (
