@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -197,10 +199,21 @@ func (h *MemoryPortabilityHandler) Export(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	wantsZip := r.URL.Query().Get("format") == "zip"
+
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		// An agent that has never written memory is not an error; it
 		// is an empty export, and saying so beats a 404 the operator
 		// has to interpret.
+		//
+		// A zip request gets 404 rather than an empty archive: a
+		// downloaded file the browser cannot distinguish from a real
+		// bundle is worse than a status the caller can act on. The
+		// dashboard turns it into "No memory to export yet".
+		if wantsZip {
+			replyError(w, http.StatusNotFound, "this scope holds no memory yet")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"format":    string(memport.FormatCrewship),
 			"documents": []memoryDocPayload{},
@@ -221,6 +234,41 @@ func (h *MemoryPortabilityHandler) Export(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		h.logger.Error("memory portability: read", "err", err)
 		replyError(w, http.StatusInternalServerError, "could not read memory")
+		return
+	}
+
+	// ?format=zip hands over a finished OKF bundle. The dashboard uses
+	// it so the browser never has to know what the format is: the
+	// frontmatter and the manifest live in memport, and a TypeScript
+	// copy would drift the first time either changes.
+	if wantsZip {
+		if len(plan.Docs) == 0 {
+			replyError(w, http.StatusNotFound, "this scope holds no memory yet")
+			return
+		}
+		name := "crewship-memory-" + r.URL.Query().Get("crew_id")
+		scopeLabel := "crew " + r.URL.Query().Get("crew_id")
+		if a := r.URL.Query().Get("agent_slug"); a != "" {
+			name = "crewship-memory-" + a
+			scopeLabel = "agent " + a
+		}
+		// Built in full BEFORE a header goes out. Streaming straight to
+		// the ResponseWriter meant a failure partway left the client
+		// with a truncated file and a 200 — an archive that looks real
+		// and is not. Bundles are bounded by the per-file caps, so
+		// holding one in memory costs nothing.
+		var buf bytes.Buffer
+		if err := memport.WriteOKFZip(&buf, plan.Docs, scopeLabel); err != nil {
+			h.logger.Error("memory portability: building bundle", "err", err)
+			replyError(w, http.StatusInternalServerError, "could not build the bundle")
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.zip"`)
+		w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+		if _, err := w.Write(buf.Bytes()); err != nil {
+			h.logger.Error("memory portability: writing bundle", "err", err)
+		}
 		return
 	}
 

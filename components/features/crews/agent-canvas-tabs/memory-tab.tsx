@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MarkdownEditor } from "@/components/shared/markdown-editor"
 import { apiFetch } from "@/lib/api-fetch"
+import { MemoryExportButton } from "./memory-export-button"
 
 // Char caps — must match server-side enforcement.
 //   AGENT.md / CREW.md: 4000 B (PR-A F1)
@@ -109,8 +110,10 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
 
   return (
     <div className="space-y-6">
-      {/* Linear-style underline tab bar (PRD §9 UI guidelines). */}
-      <div className="flex gap-2 border-b border-white/10">
+      {/* Linear-style underline tab bar (PRD §9 UI guidelines). The
+          export sits on the bar rather than inside a pane: it takes the
+          whole scope, not the sub-tab being viewed. */}
+      <div className="flex items-center gap-2 border-b border-white/10">
         {tabs.map((s) => (
           <button
             key={s}
@@ -125,6 +128,20 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
             {SUBTAB_LABEL[s]}
           </button>
         ))}
+        {/* Export follows the SELECTED sub-tab: on CREW the operator is
+            looking at the crew-shared tier, and sending agent_slug would
+            have handed them the agent's memory under a crew label.
+            Without a crew there is nothing to scope on — the export API
+            keys on crew_id — so the button is not offered at all. */}
+        {crewId && (
+          <div className="ml-auto pb-1.5">
+            <MemoryExportButton
+              crewId={crewId}
+              agentSlug={sub === "crew" ? undefined : agentSlug}
+              workspaceId={workspaceId}
+            />
+          </div>
+        )}
       </div>
 
       {sub === "agent" && (

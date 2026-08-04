@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -11,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -461,5 +463,106 @@ func TestPlacerUsesTheRunningContainer(t *testing.T) {
 	}
 	if cp.dest != "/crew/agents/alex/.memory" {
 		t.Errorf("dest = %q", cp.dest)
+	}
+}
+
+// The dashboard downloads a finished bundle so the browser never has to
+// know the format. It must be the SAME bundle the CLI writes.
+func TestMemoryExport_ZipFormatReturnsABundle(t *testing.T) {
+	h, db, userID, wsID, crewID, base := newMemPortHandlerTest(t)
+	seedTestAgentInCrew(t, db, wsID, crewID, "alex")
+	seedAgentMemory(t, base, crewID, "alex", "AGENT.md", "knowledge\n")
+	seedAgentMemory(t, base, crewID, "alex", "daily/2026-08-01.md", "today\n")
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/memory/export?format=zip&crew_id="+crewID+"&agent_slug=alex", nil)
+	req = withWorkspaceUser(req, userID, wsID, "ADMIN")
+	rr := httptest.NewRecorder()
+	h.Export(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/zip" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if cd := rr.Header().Get("Content-Disposition"); !strings.Contains(cd, "alex") {
+		t.Errorf("Content-Disposition = %q, want the scope in the filename", cd)
+	}
+
+	body := rr.Body.Bytes()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("response is not a zip: %v", err)
+	}
+	names := map[string]bool{}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	for _, want := range []string{"AGENT.md", "daily/2026-08-01.md", "okf.yaml"} {
+		if !names[want] {
+			t.Errorf("bundle missing %q; has %v", want, names)
+		}
+	}
+}
+
+// The zip path must answer to the same fence as the JSON one.
+func TestMemoryExport_ZipHonoursTheWorkspaceFence(t *testing.T) {
+	h, db, userID, wsID, _, _ := newMemPortHandlerTest(t)
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO workspaces (id, name, slug) VALUES ('ws-far', 'Far', 'far')`); err != nil {
+		t.Fatal(err)
+	}
+	foreign := seedTestCrew(t, db, "ws-far")
+
+	req := httptest.NewRequest("GET", "/api/v1/memory/export?format=zip&crew_id="+foreign, nil)
+	req = withWorkspaceUser(req, userID, wsID, "ADMIN")
+	rr := httptest.NewRecorder()
+	h.Export(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+// A zip request for a scope with no memory must NOT hand back a
+// downloadable file: a browser cannot tell an empty archive from a real
+// one, and the JSON body the non-zip path returns is not a zip at all.
+func TestMemoryExport_ZipOnEmptyScopeIs404(t *testing.T) {
+	h, db, userID, wsID, crewID, _ := newMemPortHandlerTest(t)
+	seedTestAgentInCrew(t, db, wsID, crewID, "newbie")
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/memory/export?format=zip&crew_id="+crewID+"&agent_slug=newbie", nil)
+	req = withWorkspaceUser(req, userID, wsID, "ADMIN")
+	rr := httptest.NewRecorder()
+	h.Export(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body = %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); strings.Contains(ct, "zip") {
+		t.Errorf("Content-Type = %q — an error must not look like an archive", ct)
+	}
+}
+
+// The archive is built before any header goes out, so the response
+// carries a length and cannot be a truncated file with a 200.
+func TestMemoryExport_ZipDeclaresItsLength(t *testing.T) {
+	h, db, userID, wsID, crewID, base := newMemPortHandlerTest(t)
+	seedTestAgentInCrew(t, db, wsID, crewID, "alex")
+	seedAgentMemory(t, base, crewID, "alex", "AGENT.md", "knowledge\n")
+
+	req := httptest.NewRequest("GET",
+		"/api/v1/memory/export?format=zip&crew_id="+crewID+"&agent_slug=alex", nil)
+	req = withWorkspaceUser(req, userID, wsID, "ADMIN")
+	rr := httptest.NewRecorder()
+	h.Export(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if got := rr.Header().Get("Content-Length"); got != strconv.Itoa(rr.Body.Len()) {
+		t.Errorf("Content-Length = %q, body is %d bytes", got, rr.Body.Len())
 	}
 }
