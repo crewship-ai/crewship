@@ -13,7 +13,10 @@ Per-user activity feed. Other handlers create rows by calling the internal `Crea
 Every endpoint also returns `401 Unauthorized` when there is no authenticated
 user. Successful responses are `200 OK` except delete, which is `204 No
 Content`; database/query failures are `500`. These endpoints do not accept a
-request body.
+request body. The workspace middleware returns `400 Bad Request` when
+`workspace_id` is missing and `403 Forbidden` when the authenticated user is
+not a member; the notification handlers then scope every operation to the
+authenticated user's ID.
 
 ## Endpoints
 
@@ -58,6 +61,9 @@ An omitted or unrecognised `read` value applies no read-state filter. The
 `offset` is zero-based and negative pagination values are normalised by the
 server.
 
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `500` for a query or row-scan failure.
+
 ```bash
 curl -H "Cookie: <session>" \
   "https://crewship.example.com/api/v1/notifications?read=false&limit=20"
@@ -92,6 +98,9 @@ Returns `200 OK`; the count is scoped to the authenticated user.
 The count is scoped to the authenticated user in the current workspace; it
 does not include notifications belonging to other users.
 
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `500` for a database failure.
+
 ## `POST /api/v1/notifications/{notificationId}/read`
 
 Mark a single notification read. Idempotent — re-reading an already-read notification still returns `200`. Returns `404` only when the notification does not exist (or belongs to a different user, which is indistinguishable on purpose).
@@ -104,6 +113,10 @@ Returns `200 OK` and is idempotent for an already-read notification.
 The response is always the same for a notification that is already read. A
 notification owned by another user is treated as not found.
 
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `404` when the notification is absent or belongs to another
+user; `500` for a database failure.
+
 ## `POST /api/v1/notifications/read-all`
 
 Mark every currently-unread notification read for the calling user. Returns the row count.
@@ -113,9 +126,16 @@ Mark every currently-unread notification read for the calling user. Returns the 
 ```
 Returns `200 OK`; `updated` may be zero.
 
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `500` for a database failure.
+
 ## `DELETE /api/v1/notifications/{notificationId}`
 
 Hard delete. Returns `204 No Content` on success, `404` when the row doesn't exist or doesn't belong to the calling user.
+
+**Statuses:** `204 No Content`; `400`/`403` from workspace resolution; `401`
+without authentication; `404` when the notification is absent or belongs to
+another user; `500` for a database failure.
 
 ## WebSocket event
 

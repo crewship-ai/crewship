@@ -13,7 +13,8 @@ subsystem via the shared policy resolver, so a `PUT` takes effect immediately
 
 All endpoints require authentication and workspace context. Reads require
 workspace membership; setting a policy requires `MANAGER`, `ADMIN`, or
-`OWNER`.
+`OWNER`. Workspace context is supplied as `workspace_id` query, path context,
+or `X-Workspace-ID` and is always checked for membership.
 
 | Field | Values | Meaning |
 |---|---|---|
@@ -62,6 +63,11 @@ crew name. Used by `crewship policy list` to render the overview table.
 | `set_at` | string? | ISO 8601 timestamp of the last change |
 | `reason` | string? | Audit reason recorded with the last change |
 
+**Request:** no body. **Statuses:** `200 OK`; `400 Bad Request` when workspace
+context is missing; `401 Unauthorized` without authentication; `403 Forbidden`
+when the caller is not a workspace member; `500 Internal Server Error` for a
+database failure. The response is always a JSON array, including when empty.
+
 ---
 
 ## Get Crew Policy
@@ -98,6 +104,11 @@ matches the seed defaults (no operator has ever flipped it).
 | `400` | Missing crew ID |
 | `404` | Crew not found in this workspace |
 
+**Request:** no body. In addition to the statuses above, the route returns
+`400` when workspace context or the crew path value is missing, `401` without
+authentication, `403` for a non-member, and `500` for a lookup or resolver
+failure.
+
 ---
 
 ## Set Crew Policy
@@ -133,5 +144,10 @@ so the next decision sees the new state.
 |---|---|
 | `400` | Invalid JSON, invalid enum value, the forbidden `full` + `block` combination, or missing `reason` when `autonomy_level=full` |
 | `404` | Crew not found in this workspace |
+
+The route-level role check returns `403` before the handler for a workspace
+member below `MANAGER`; `400` means missing workspace context, `401` means no
+authenticated user, and `500` means the update failed. The success response is
+the policy object above, including the newly recorded audit fields.
 
 **Journal event:** `policy.changed` (workspace audit feed)
