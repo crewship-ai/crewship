@@ -545,6 +545,26 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/issue/create":
 				s.handleIssueCreate(w, r)
 				return
+			// Issue verbs (issue_verbs.go). /issue/create is matched above,
+			// so the prefix arms below never see it. Each one resolves the
+			// ACTING agent from the per-agent bearer token before forwarding
+			// — reads included, since the board is crew data and a token-less
+			// sibling must not fall back to the boot identity.
+			case r.Method == http.MethodGet && r.URL.Path == "/issues":
+				s.handleIssuesList(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/comment"):
+				s.handleIssueComment(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/link"):
+				s.handleIssueLink(w, r)
+				return
+			case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/issue/"):
+				s.handleIssueUpdate(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/issue/"):
+				s.handleIssueGet(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/manifest":
 				s.handleGetManifest(w, r)
 				return
