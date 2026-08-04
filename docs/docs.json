@@ -312,6 +312,7 @@
               "cli/inbox",
               "cli/notification",
               "cli/notify",
+              "cli/notifychannel",
               "cli/digest"
             ]
           },
