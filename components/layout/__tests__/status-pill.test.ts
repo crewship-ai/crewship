@@ -30,14 +30,15 @@ describe("describeSystemStatus — connection", () => {
 })
 
 describe("describeSystemStatus — fleet", () => {
-  it("states the census when everything is healthy", () => {
-    // Not "idle": a claim about right now, on a column that flips for the six
-    // seconds an agent takes to answer, is wrong more often than it is right.
-    // How many agents exist is true whenever anyone looks.
-    expect(describeSystemStatus("connected", "connected", OK).fleet).toEqual({
-      label: "7 agents",
-      tone: "muted",
-    })
+  it("says nothing at all when everything is healthy", () => {
+    // The pill first said "Crews idle" — a claim about right now, on a column
+    // that flips for the six seconds an agent takes to answer. Then it said
+    // "7 agents", true but not news: on a healthy workspace it is a number
+    // that never changes and never asks for anything. A status strip earns
+    // its place by being quiet until it has something to say.
+    //
+    // The count is not lost — the tooltip still carries the full breakdown.
+    expect(describeSystemStatus("connected", "connected", OK).fleet).toBeNull()
   })
 
   it("says so when the workspace has no agents at all", () => {
@@ -62,7 +63,7 @@ describe("describeSystemStatus — fleet", () => {
 
   it("does not report what is running — Activity says that, with a name", () => {
     const s = describeSystemStatus("connected", "connected", { ...OK, running: 3, idle: 4 })
-    expect(s.fleet?.label).toBe("7 agents")
+    expect(s.fleet).toBeNull()
   })
 
   it("caps a runaway count so the pill cannot widen the bar", () => {
@@ -72,7 +73,8 @@ describe("describeSystemStatus — fleet", () => {
 
   it("pluralises honestly", () => {
     expect(describeSystemStatus("connected", "connected", { ...OK, error: 1 }).fleet?.label).toBe("1 error")
-    expect(describeSystemStatus("connected", "connected", { ...OK, total: 1, idle: 1 }).fleet?.label).toBe("1 agent")
+    expect(describeSystemStatus("connected", "connected", { ...OK, error: 2 }).fleet?.label).toBe("2 errors")
+    expect(describeSystemStatus("connected", "connected", { ...OK, queued: 1 }).fleet?.label).toBe("1 queued")
   })
 })
 
@@ -96,7 +98,32 @@ describe("describeSystemStatus — screen readers", () => {
     expect(s.ariaLabel).toBe("System online, 2 errors")
   })
 
+  it("says just the connection when the fleet has nothing to report", () => {
+    expect(describeSystemStatus("connected", "connected", OK).ariaLabel).toBe("System online")
+  })
+
   it("says only what it knows when disconnected", () => {
     expect(describeSystemStatus("offline", "disconnected", OK).ariaLabel).toBe("System offline")
+  })
+})
+
+describe("describeSystemStatus — what the tooltip may recite", () => {
+  // The pill's fleet segment and the tooltip's breakdown answer different
+  // questions, so they cannot share a condition. Gating the tooltip on the
+  // segment would have hidden the counts exactly when the pill stopped
+  // showing them — which is when the tooltip became their only home.
+  it("knows the fleet on a healthy workspace, even with nothing to display", () => {
+    const s = describeSystemStatus("connected", "connected", OK)
+    expect(s.fleet).toBeNull()
+    expect(s.fleetKnown).toBe(true)
+  })
+
+  it("does not know it while the link is down", () => {
+    expect(describeSystemStatus("offline", "disconnected", OK).fleetKnown).toBe(false)
+    expect(describeSystemStatus("degraded", "connected", OK).fleetKnown).toBe(false)
+  })
+
+  it("does not know it before the counts arrive", () => {
+    expect(describeSystemStatus("connected", "connected", null).fleetKnown).toBe(false)
   })
 })

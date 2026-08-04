@@ -196,26 +196,27 @@ test.describe("⌘K — the panel itself", () => {
 })
 
 test.describe("top bar — one status pill, two bells", () => {
-  test("states the connection and the fleet in one pill", async ({ page }) => {
+  test("states the connection, and the fleet only when it matters", async ({ page }) => {
     await page.goto("/")
     const pill = page.getByTestId("system-status-pill")
     await expect(pill).toBeVisible({ timeout: TIMEOUT })
-    // "Crews idle" was a claim about right now on a column that flips for the
-    // six seconds an agent takes to answer. The census is true whenever
-    // anyone looks.
+
     // NOT specifically "Online": that depends on the websocket connecting on
     // the runner, and this PR deliberately hides the fleet half when it has
     // not — so pinning the connected state would fail for the very behaviour
     // it is meant to check. Assert the pill states A known one.
     await expect(pill).toContainText(/Online|Connecting|Reconnecting|Offline/)
+
     const text = (await pill.innerText()).replace(/\s+/g, " ")
-    if (/Online/.test(text)) {
-      // Connected: the fleet half has to be there and has to say something.
-      expect(text).toMatch(/agents?|errors?|queued|No agents/)
-    } else {
+    if (!/Online/.test(text)) {
       // Not connected: the counts are last-known, so the pill must not recite
       // them. That is the whole reason the two pills became one.
       expect(text).not.toMatch(/agents?|errors?|queued/)
+    } else {
+      // Connected and healthy, the pill says nothing beyond "Online" — it
+      // speaks for errors, a queue, or an empty workspace, and otherwise
+      // stays quiet. So a plain census is the thing that must never appear.
+      expect(text).not.toMatch(/\d+ agents?\b/)
     }
   })
 

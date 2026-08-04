@@ -20,11 +20,17 @@ import { cn } from "@/lib/utils"
 // it was right.
 //
 // So the fleet half stops competing on "what is happening" (Activity owns
-// that, with better data) and says the thing only it knows:
+// that, with better data) and speaks only when it has something to act on:
 //
-//     Online · 7 agents      the census — true whenever anyone looks
+//     Online                 healthy — the bar says nothing it does not have to
 //     Online · 3 queued      the admission queue, surfaced nowhere else
 //     Online · 2 errors      a broken agent, surfaced nowhere else
+//     Online · No agents     the one count worth a word: nothing can run
+//
+// A census ("7 agents") was the first attempt and went the way of "Crews idle"
+// before it — true, unchanging, and never asking for anything, so it spent a
+// permanent slot saying nothing. The breakdown lives in the tooltip, which is
+// where a number you look UP belongs rather than one you are shown.
 //
 // Connection and fleet keep SEPARATE tones, so "the link is fine, the fleet is
 // broken" reads in one glance rather than one colour having to mean both.
@@ -44,8 +50,21 @@ export type StatusTone = "success" | "warn" | "destructive" | "muted"
 
 export interface SystemStatusDescription {
   connection: { label: string; tone: StatusTone }
-  /** Null when the connection is not up, or the counts have not arrived. */
+  /**
+   * The fleet segment, or null — which means EITHER "nothing to report" or
+   * "not knowable right now". Use `fleetKnown` to tell those apart.
+   */
   fleet: { label: string; tone: StatusTone } | null
+  /**
+   * Whether the counts are current: the link is up and they have arrived.
+   *
+   * Separate from `fleet` because the pill and the tooltip answer different
+   * questions. The pill shows only what wants acting on, so it is silent on a
+   * healthy workspace; the tooltip is where you LOOK UP the numbers, so it
+   * still recites them. Sharing one condition hid the breakdown exactly when
+   * the tooltip had become its only home.
+   */
+  fleetKnown: boolean
   ariaLabel: string
 }
 
@@ -82,11 +101,16 @@ export function describeSystemStatus(
     return {
       connection,
       fleet: null,
+      fleetKnown: false,
       ariaLabel: `System ${connection.label.toLowerCase()}`,
     }
   }
 
-  let fleet: { label: string; tone: StatusTone }
+  // Exceptions only. The census went the way of "Crews idle" before it: on a
+  // healthy workspace "7 agents" is true, unchanging and never asks for
+  // anything, so it spends a permanent slot in the bar saying nothing. It is
+  // in the tooltip, where a number you look up belongs.
+  let fleet: { label: string; tone: StatusTone } | null = null
   if (crews.error > 0) {
     // A broken agent outranks a deep queue: a queue is the system working as
     // designed, an error is not.
@@ -94,15 +118,19 @@ export function describeSystemStatus(
   } else if (crews.queued > 0) {
     fleet = { label: `${cap99(crews.queued)} queued`, tone: "warn" }
   } else if (crews.total === 0) {
+    // Not a census — the one state where the count IS the thing to act on.
+    // A workspace with no agents cannot do anything, and that is worth a word
+    // in the bar rather than a hover.
     fleet = { label: "No agents", tone: "muted" }
-  } else {
-    fleet = { label: plural(crews.total, "agent"), tone: "muted" }
   }
 
   return {
     connection,
     fleet,
-    ariaLabel: `System ${connection.label.toLowerCase()}, ${fleet.label}`,
+    fleetKnown: true,
+    ariaLabel: fleet
+      ? `System ${connection.label.toLowerCase()}, ${fleet.label}`
+      : `System ${connection.label.toLowerCase()}`,
   }
 }
 
@@ -128,7 +156,7 @@ export interface SystemStatusPillProps {
 
 export function SystemStatusPill({ engineStatus, wsStatus, crews }: SystemStatusPillProps) {
   const wifiRef = React.useRef<WifiIconHandle>(null)
-  const { connection, fleet, ariaLabel } = describeSystemStatus(engineStatus, wsStatus, crews)
+  const { connection, fleet, fleetKnown, ariaLabel } = describeSystemStatus(engineStatus, wsStatus, crews)
 
   React.useEffect(() => {
     if (wsStatus !== "connected") return
@@ -180,11 +208,13 @@ export function SystemStatusPill({ engineStatus, wsStatus, crews }: SystemStatus
                 : "Offline"}{" "}
           / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
         </span>
-        {fleet && crews && (
+        {fleetKnown && crews && (
           <span className="block">
-            {/* Gated on `fleet`, not on `crews`: while the link is down these
-                counts are last-known, and the pill drops them for exactly that
-                reason. A tooltip that still recited them would undo it. */}
+            {/* Gated on `fleetKnown`, not on `fleet`: the pill is silent on a
+                healthy workspace, and that is exactly when this line is the
+                only place the counts exist. Not on `crews` either — while the
+                link is down they are last-known, and the pill drops them for
+                that reason; a tooltip still reciting them would undo it. */}
             {crews.total} agents: {crews.running} running
             {crews.queued > 0 ? `, ${crews.queued} queued` : ""}, {crews.idle} idle
             {crews.error > 0 ? `, ${crews.error} error${crews.error > 1 ? "s" : ""}` : ""}
