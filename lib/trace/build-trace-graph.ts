@@ -1,4 +1,4 @@
-import type { Node, Edge } from "@xyflow/react"
+import { MarkerType, type Node, type Edge } from "@xyflow/react"
 import { Graph as DagreGraph, layout as dagreLayout } from "@dagrejs/dagre"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type {
@@ -10,6 +10,8 @@ import type {
   TraceTriggerNodeData,
 } from "./types"
 import { formatEdgeLabel, parseDataFlowEdges } from "./parse-data-flow"
+import type { Pt } from "./edge-path"
+import { BRAND } from "@/lib/colors"
 import { mapSubSpans, pickModel } from "./sub-spans"
 import type { HeatmapBucket } from "./percentile-heatmap"
 import type { StepMetric } from "@/hooks/use-step-metrics"
@@ -236,6 +238,15 @@ export function buildTraceGraph(
       source: dfe.from,
       target: dfe.to,
       type: "traceDataFlow",
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 16,
+        height: 16,
+        // var(--primary) — resolves in the marker <defs> like any other
+        // SVG fill, so the arrowhead follows the theme instead of pinning
+        // one palette's blue.
+        color: BRAND.primary,
+      },
       data: data as unknown as Record<string, unknown>,
     })
   }
@@ -255,7 +266,7 @@ export function buildTraceGraph(
   // routine on screen, while cramping siblings would make a fan-out
   // read as one blob.
   const g = new DagreGraph({ multigraph: false, compound: false })
-  g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 56, marginx: 24, marginy: 24 })
+  g.setGraph({ rankdir: "TB", nodesep: 36, ranksep: 56, edgesep: 6, marginx: 24, marginy: 24 })
   g.setDefaultEdgeLabel(() => ({}))
 
   for (const n of nodes) {
@@ -273,6 +284,25 @@ export function buildTraceGraph(
       const w = n.id === "__trigger__" ? TRIGGER_WIDTH : NODE_WIDTH
       n.position = { x: pos.x - w / 2, y: pos.y - NODE_HEIGHT / 2 }
     }
+  }
+
+  // ---- Edge routes ----
+  //
+  // dagre routes edges as well as ranking nodes: each edge carries a
+  // polyline that steps around whatever sits between its endpoints.
+  // We used to discard it and draw a bezier from handle to handle,
+  // which looks identical for a one-rank hop and sweeps diagonally
+  // across the whole graph for a skip edge.
+  //
+  // Node positions are set from dagre centres above, so dagre's
+  // coordinate space and React Flow's are the same space — the points
+  // need no transform. The renderers drop the first and last point and
+  // substitute the real handle coordinates, because those two are
+  // dagre's approximation of the node border and are visibly off it.
+  for (const e of edges) {
+    const routed = g.edge(e.source, e.target) as { points?: Pt[] } | undefined
+    if (!routed?.points || routed.points.length < 2) continue
+    e.data = { ...(e.data ?? {}), points: routed.points.map((p) => ({ x: p.x, y: p.y })) }
   }
 
   return { nodes, edges }
@@ -366,8 +396,17 @@ function makeSequencingEdge(
     id: `seq:${source}->${target}`,
     source,
     target,
-    type: "default",
+    type: "traceRouted",
     animated,
+    // An arrowhead is the only thing on the canvas that says which way
+    // the work flows. Without it a fan-in and a fan-out are the same
+    // picture, and the reader has to infer direction from the layout.
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color: "rgba(148, 163, 184, 0.75)",
+    },
     style: {
       stroke: "rgba(148, 163, 184, 0.4)",
       strokeWidth: 1.5,

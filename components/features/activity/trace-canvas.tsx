@@ -29,6 +29,7 @@ import {
   OverviewRunNode,
 } from "./overview-nodes"
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
+import { TraceRoutedEdge } from "./trace-routed-edge"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 
 // TraceCanvas — ReactFlow surface for the /activity trace view.
@@ -51,6 +52,7 @@ const nodeTypes: NodeTypes = {
 
 const edgeTypes: EdgeTypes = {
   traceDataFlow: TraceDataFlowEdge,
+  traceRouted: TraceRoutedEdge,
 }
 
 // fitView's job is "show everything", which for a long routine means

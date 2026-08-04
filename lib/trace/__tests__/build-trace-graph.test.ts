@@ -186,3 +186,56 @@ describe("buildTraceGraph — vertical tree layout", () => {
     expect(posOf(g, "__trigger__").y).toBeLessThan(posOf(g, "a").y)
   })
 })
+
+// ── Edge routes + direction ─────────────────────────────────────────
+//
+// dagre routes every edge around the nodes between its endpoints. That
+// route was computed and discarded on every layout, and the canvas drew
+// a bezier corner to corner instead — fine for a one-rank hop, and a
+// diagonal sweep across the whole graph for a skip edge.
+
+describe("buildTraceGraph — edge routing", () => {
+  const skip: PipelineDSL = {
+    steps: [
+      { id: "a", type: "http" },
+      { id: "b", type: "http", needs: ["a"] },
+      { id: "c", type: "http", needs: ["b"] },
+      { id: "d", type: "http", needs: ["c"] },
+      // The skip edge: five ranks from a, past b and c.
+      { id: "e", type: "http", needs: ["d", "a"] },
+    ],
+  }
+
+  it("carries dagre's route on every edge", () => {
+    const g = buildTraceGraph(makeRun({ step_outputs: {} }), skip)
+    for (const edge of g.edges) {
+      const pts = (edge.data as { points?: { x: number; y: number }[] } | undefined)?.points
+      expect(pts, `edge ${edge.id} has no route`).toBeDefined()
+      expect(pts!.length).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  it("routes a skip edge through waypoints rather than corner to corner", () => {
+    const g = buildTraceGraph(makeRun({ step_outputs: {} }), skip)
+    const skipEdge = g.edges.find((e) => e.source === "a" && e.target === "e")
+    expect(skipEdge).toBeDefined()
+    const pts = (skipEdge!.data as { points: { x: number; y: number }[] }).points
+    // A straight-line edge is two points. A routed one bends around
+    // every rank it passes, which is the entire fix.
+    expect(pts.length).toBeGreaterThan(2)
+  })
+
+  it("gives every edge an arrowhead so direction is readable", () => {
+    const g = buildTraceGraph(makeRun({ step_outputs: {} }), skip)
+    for (const edge of g.edges) {
+      expect(edge.markerEnd, `edge ${edge.id} has no arrowhead`).toBeDefined()
+    }
+  })
+
+  it("draws sequencing edges with the routed renderer", () => {
+    const g = buildTraceGraph(makeRun({ step_outputs: {} }), skip)
+    const seq = g.edges.filter((e) => e.id.startsWith("seq:"))
+    expect(seq.length).toBeGreaterThan(0)
+    for (const edge of seq) expect(edge.type).toBe("traceRouted")
+  })
+})
