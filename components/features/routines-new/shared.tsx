@@ -128,11 +128,24 @@ export function CodePane({ fidelity, footnote }: CodePaneProps) {
   const [dirty, setDirty] = React.useState(false)
   const [saved, setSaved] = React.useState(false)
 
+  // The confirmation is transient, so it needs a timer — but the
+  // timer must outlive neither the next save nor the component.
+  // Returning a cleanup from useCallback does nothing: both callers
+  // (onClick, FileEditor.onSave) discard the return value, so every
+  // save would leak a timer that can setSaved after unmount.
+  const savedTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  React.useEffect(
+    () => () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+    },
+    [],
+  )
+
   const handleSave = React.useCallback(() => {
     setSaved(true)
     setDirty(false)
-    const t = setTimeout(() => setSaved(false), 2400)
-    return () => clearTimeout(t)
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSaved(false), 2400)
   }, [])
 
   return (
@@ -275,11 +288,20 @@ function formatDuration(ms: number): string {
   return `${hrs} h ${mins % 60} min`
 }
 
+// Locale AND time zone are pinned. This is a client component that
+// Next prerenders on the server, so an unpinned zone lets the server
+// string and the browser string disagree — a hydration mismatch on a
+// page whose only job is to look right.
 function formatWhen(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime())
     ? "—"
-    : d.toLocaleDateString("cs-CZ", { day: "numeric", month: "short", year: "numeric" })
+    : d.toLocaleDateString("cs-CZ", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
 }
 
 /**
@@ -419,9 +441,15 @@ const KIND_CONTRACT: Record<string, string> = {
 
 export function StepInspector({
   dsl,
+  fidelity,
   stepId,
 }: {
   dsl: PipelineDSL
+  // Threaded, never re-derived. The empty-selection branch prints the
+  // whole definition, and printing a different fidelity than the one
+  // the canvas is drawing would have the two halves contradict each
+  // other — the exact failure this design exists to prevent.
+  fidelity: Fidelity
   stepId: string | null
 }) {
   const step = (dsl.steps ?? []).find((s) => s.id === stepId) ?? null
@@ -436,7 +464,7 @@ export function StepInspector({
           </p>
         </header>
         <div className="min-h-0 flex-1">
-          <CodePane fidelity="granular" footnote="Nic není vybráno — editujeme celý recept." />
+          <CodePane fidelity={fidelity} footnote="Nic není vybráno — editujeme celý recept." />
         </div>
       </div>
     )

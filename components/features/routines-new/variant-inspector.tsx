@@ -7,9 +7,9 @@
 //
 // Thesis: the question an operator actually has is never "show me the
 // whole YAML", it is "what does THIS box do, and what breaks if it
-// fails". This is the n8n / Trigger.dev reading, and it is the variant
-// that gets better the more the routine is granulated — which is the
-// direction we want the routines to go anyway.
+// fails". It is also the variant that gets better the more a routine
+// is granulated — which is the direction we want routines to go
+// anyway, so the layout and the roadmap pull the same way.
 //
 // Cost: the full definition is one click away rather than always
 // present, so "just show me the file" costs a deselect.
@@ -47,7 +47,7 @@ export function VariantInspector({ fidelity }: { fidelity: Fidelity }) {
           />
         </div>
         <div className="min-h-[300px] bg-card/30">
-          <StepInspector dsl={dsl} stepId={selected} />
+          <StepInspector dsl={dsl} fidelity={fidelity} stepId={selected} />
         </div>
       </div>
 

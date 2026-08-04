@@ -175,13 +175,13 @@ function subtitleFor(step: TraceStep): ReactNode {
     case "query":
       return (
         <span className="truncate font-mono text-foreground/80">
-          {step.query?.datastore ?? "datastore"}
+          {step.query?.source ?? "datastore"}
         </span>
       )
     case "foreach":
       return (
         <span className="truncate font-mono text-foreground/80">
-          {step.foreach?.over ? `over ${step.foreach.over}` : "loop"}
+          {step.foreach?.items ? `over ${step.foreach.items}` : "loop"}
         </span>
       )
     default:

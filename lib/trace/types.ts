@@ -74,16 +74,26 @@ export interface TraceStep {
     approval_prompt?: string
     until?: string
   }
+  // Field names mirror the Go payloads exactly (QueryStep,
+  // ForeachStep in internal/pipeline/types.go). A name invented on
+  // this side renders a blank subtitle on every real run of that kind,
+  // which is how a renderer quietly stops describing the routine.
   query?: {
-    datastore?: string
-    statement?: string
+    source?: string
+    window_hours?: number
   }
   foreach?: {
-    // Template expression the loop iterates over, e.g.
-    // "{{ steps.worklist.output }}". Rendered as the node subtitle so
-    // "this runs once per invoice" is readable off the canvas.
-    over?: string
+    // Template rendering to a JSON array — what the loop iterates
+    // over. Surfaced as the node subtitle so "this runs once per
+    // invoice" is readable off the canvas.
+    items?: string
     as?: string
+    parallelism?: number
+    // The per-item body. buildTraceGraph walks dsl.steps flat and does
+    // NOT descend into this, so a foreach currently draws as one node
+    // with its body invisible. Typed here so the gap is legible rather
+    // than a surprise; drawing nested bodies is its own change.
+    steps?: TraceStep[]
   }
   pipeline_slug?: string
   inputs?: Record<string, unknown>

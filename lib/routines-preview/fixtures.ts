@@ -160,7 +160,7 @@ const GRANULAR_STEPS: TraceStep[] = [
     id: "sbirat",
     type: "foreach",
     needs: ["worklist", "obdobi"],
-    foreach: { over: "{{ steps.worklist.output }}", as: "polozka" },
+    foreach: { items: "{{ steps.worklist.output }}", as: "polozka" },
   },
   {
     // Body of the loop — still an agent, because finding the right PDF
