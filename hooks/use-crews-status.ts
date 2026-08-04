@@ -32,6 +32,10 @@ export interface CrewsStatus {
  * Lightweight hook for toolbar crews status.
  * Fetches agent counts by status and auto-refreshes on real-time events.
  */
+/** Matches use-active-runs' POLL_MS so the toolbar's two live surfaces
+ *  cannot fall more than one tick out of step. */
+const CREWS_STATUS_POLL_MS = 6000
+
 export function useCrewsStatus(workspaceId: string | null): CrewsStatus | null {
   const [status, setStatus] = useState<CrewsStatus | null>(null)
 
@@ -57,6 +61,25 @@ export function useCrewsStatus(workspaceId: string | null): CrewsStatus | null {
   }, [workspaceId])
 
   useEffect(() => { refresh() }, [refresh])
+
+  // Poll as well as listen.
+  //
+  // Events alone were the whole refresh story here, and they are not a
+  // guarantee: a reconnect, a dropped frame or a tab backgrounded across a
+  // short run all cost one, and the pill then reported "Crews idle" through an
+  // agent that was working — indefinitely, because nothing else would correct
+  // it. The Activity panel a few pixels away polls on top of the same events
+  // and so healed itself, which is exactly how the two came to disagree on
+  // screen while the SERVER agreed with itself the whole time.
+  //
+  // Same interval as that panel (hooks/use-active-runs.ts), so the two cannot
+  // drift by more than one tick. Events still drive the immediate update; this
+  // is the floor, not the mechanism.
+  useEffect(() => {
+    if (!workspaceId) return
+    const t = setInterval(() => { void refresh() }, CREWS_STATUS_POLL_MS)
+    return () => clearInterval(t)
+  }, [workspaceId, refresh])
 
   // Real-time: debounced refresh on agent lifecycle events
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)

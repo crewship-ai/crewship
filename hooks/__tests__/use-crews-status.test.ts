@@ -204,3 +204,74 @@ describe("useCrewsStatus", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 })
+
+// ── Self-healing ───────────────────────────────────────────────────────────
+//
+// The toolbar pill used to fetch once on mount and then rely ENTIRELY on
+// WebSocket events. Miss one — a reconnect, a dropped frame, a tab that was
+// backgrounded while a run started and finished — and it reported "Crews
+// idle" through an agent actually working, indefinitely, until something else
+// happened to nudge it.
+//
+// That was observable next to the Activity panel, which polls every 6s on top
+// of the same events and so corrects itself. Verified against a dev server:
+// while an agent ran, crews-status reported running=1 and the runs feed
+// reported one running run — the SERVER agreed with itself the whole time, so
+// the disagreement on screen was the pill going stale in the browser.
+describe("useCrewsStatus — staying true without an event", () => {
+  // Own setup: the fake timers and fetch stub above belong to the sibling
+  // describe, and this block advances the clock.
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+    for (const k of Object.keys(realtimeCallbacks)) delete realtimeCallbacks[k]
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const ok = (payload: Record<string, number>) => ({ ok: true, json: async () => payload })
+
+  it("re-fetches on an interval, so a missed event self-corrects", async () => {
+    fetchMock.mockResolvedValue(ok({ total: 7, running: 0, error: 0, idle: 7, queued: 0 }))
+    const { result } = renderHook(() => useCrewsStatus("ws-1"))
+    await act(async () => { await flushAsync() })
+    expect(result.current?.running).toBe(0)
+
+    // An agent starts, and the event never arrives.
+    fetchMock.mockResolvedValue(ok({ total: 7, running: 1, error: 0, idle: 6, queued: 0 }))
+    await act(async () => {
+      vi.advanceTimersByTime(6000)
+      await flushAsync()
+    })
+    expect(result.current?.running).toBe(1)
+  })
+
+  it("stops polling once unmounted", async () => {
+    fetchMock.mockResolvedValue(ok({ total: 1, running: 0, error: 0, idle: 1, queued: 0 }))
+    const { unmount } = renderHook(() => useCrewsStatus("ws-1"))
+    await act(async () => { await flushAsync() })
+    const afterMount = fetchMock.mock.calls.length
+
+    unmount()
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+      await flushAsync()
+    })
+    expect(fetchMock.mock.calls.length).toBe(afterMount)
+  })
+
+  it("never polls without a workspace", async () => {
+    renderHook(() => useCrewsStatus(null))
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+      await flushAsync()
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
