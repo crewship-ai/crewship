@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -183,16 +184,34 @@ func (c *Client) Fetch(ctx context.Context, ref Ref, token string) (Details, err
 	// Layer 1: cheap, no-network reject. Catches a literal private IP, a
 	// wrong scheme, and embedded userinfo before any DNS or TCP happens.
 	//
-	// The request is built from the value ValidateURLForEndpoint RETURNS, not
-	// from `endpoint`. Behaviourally the two are the same string; the
-	// difference is that the sanitiser's output is what reaches http.NewRequest,
-	// so the guarantee is visible to a reader — and to CodeQL's
-	// go/request-forgery taint tracking, which flagged the discard-the-result
-	// form as an unsanitised user-controlled request URL and was right to: with
-	// `endpoint` flowing into the request directly, deleting the check above
-	// would compile, keep the tests passing that do not exercise it, and leave
-	// nothing in the dataflow saying a check was ever required.
-	validated, err := httpsafe.ValidateURLForEndpoint(endpoint, c.allowPrivate, c.schemes...)
+	// The two postures are separate branches rather than one call with a bool,
+	// and the request is built from what the check RETURNS rather than from
+	// `endpoint`. Both are for the reader first and the analyser second:
+	//
+	//   - The strict default goes through httpsafe.ValidateURL — the same
+	//     entry point every other outbound-fetch site in this repo uses, and
+	//     the one CodeQL's go/request-forgery model recognises as a barrier.
+	//     ValidateURLForEndpoint(…, false, …) is documented as byte-for-byte
+	//     identical to it, so this branch changes no behaviour; what it changes
+	//     is that the SHIPPED posture is provably sanitised rather than
+	//     sanitised-if-a-flag-happens-to-be-false.
+	//   - The opt-in branch is the one an operator turned on to reach an
+	//     intranet forge. It is deliberately the narrower-looking path: it is
+	//     the only place private addresses become reachable at all, and
+	//     anything added here weakens a boundary rather than widening a feature.
+	//
+	// Passing the returned URL into http.NewRequest (rather than re-passing
+	// `endpoint`) means deleting either check would not merely be a missing
+	// guard — the request would have nothing to be built from.
+	var (
+		validated *url.URL
+		err       error
+	)
+	if c.allowPrivate {
+		validated, err = httpsafe.ValidateURLForEndpoint(endpoint, true, c.schemes...)
+	} else {
+		validated, err = httpsafe.ValidateURL(endpoint, c.schemes...)
+	}
 	if err != nil {
 		return Details{}, &FetchError{
 			Err:      ErrBlockedHost,
