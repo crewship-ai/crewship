@@ -35,6 +35,7 @@ crewship crew <subcommand> [flags]
 | `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
 | `credential-readiness` | Report credentials whose CLI is missing from the crew's container |
 | `container-status` | Show the crew's runtime container state and whether its configuration is current |
+| `services` | Show the live sidecar service inventory |
 | `provision` | Trigger devcontainer provisioning |
 | `provision status` | Check provisioning status |
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
@@ -506,6 +507,23 @@ This command only **reports**. It never edits the crew's devcontainer config and
 A provider with no known CLI (Notion, Stripe, anything unrecognised) reports nothing rather than guessing. Matching is on the tool name, not the feature ref, so an equivalent feature counts: `docker-outside-of-docker` satisfies a `DOCKER` credential and a mise `nodejs` satisfies an `NPM` one.
 
 Credentials are considered when they are workspace-scoped, scoped to this crew, or assigned to one of its agents with a live lease. Revoked and deleted credentials are ignored.
+
+---
+
+## `crewship crew services`
+
+Show the crew's live sidecar service inventory, including status, image, inferred
+type, and published ports. This is the running-container view, not a snapshot of
+the services declared in the last configuration.
+
+```bash
+crewship crew services backend-team
+crewship crew services backend-team --format json
+```
+
+**Output columns:** NAME, TYPE, STATUS, IMAGE, PORTS
+
+Backed by `GET /api/v1/crews/{crewId}/services`.
 
 ---
 
