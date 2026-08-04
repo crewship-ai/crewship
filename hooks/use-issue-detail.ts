@@ -55,7 +55,7 @@ export function useUrlSelection(key: string) {
   }, [key])
 
   const select = useCallback(
-    (next: string | null) => {
+    (next: string | null, opts?: { replace?: boolean }) => {
       applied.current = next
       setValue(next)
       if (typeof window === "undefined") return
@@ -66,9 +66,13 @@ export function useUrlSelection(key: string) {
       else params.delete(key)
       const qs = params.toString()
       const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname
-      if (window.location.pathname + window.location.search !== url) {
-        window.history.pushState(null, "", url)
-      }
+      if (window.location.pathname + window.location.search === url) return
+      // `replace` is for corrections rather than navigations — an id nothing
+      // matches, say. Pushing one would put the bad URL behind the good one,
+      // so Back returns to it, the correction fires again, and the reader is
+      // bounced forward every time they try to leave.
+      if (opts?.replace) window.history.replaceState(null, "", url)
+      else window.history.pushState(null, "", url)
     },
     [key],
   )

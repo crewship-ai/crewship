@@ -31,7 +31,13 @@ export function useProjectDetail({ projects }: { projects: Project[] }) {
   // once-ever latch existed to work around.
   useEffect(() => {
     if (!selectedProjectId || projects.length === 0) return
-    if (!projects.some((p) => p.id === selectedProjectId)) setSelectedProjectId(null)
+    // `replace`: this is a correction, not a navigation. Pushing would put the
+    // dead ?project= behind the clean URL, so Back would return to it, this
+    // effect would fire again, and the reader would be bounced forward every
+    // time they tried to leave.
+    if (!projects.some((p) => p.id === selectedProjectId)) {
+      setSelectedProjectId(null, { replace: true })
+    }
   }, [selectedProjectId, projects, setSelectedProjectId])
 
   const handleProjectClose = useCallback(() => {

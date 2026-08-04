@@ -129,6 +129,42 @@ describe("useProjectDetail — arriving on a link", () => {
     expect(result.current.selectedProjectId).toBeNull()
   })
 
+  it("corrects a dead id in place rather than pushing over it", () => {
+    // Pushed, the dead URL would sit behind the clean one: Back returns to
+    // ?project=ghost, this effect fires again, and the reader is thrown
+    // forward every time they try to leave the page.
+    //
+    // Asserted on the History call rather than on a Back, because both
+    // outcomes settle on "/issues" and only the number of entries between
+    // them differs — which jsdom/happy-dom will not let a test observe. Push
+    // versus replace IS the behaviour here, so it is what gets asserted.
+    const push = vi.spyOn(window.history, "pushState")
+    const replace = vi.spyOn(window.history, "replaceState")
+    arriveAt("/issues?project=ghost")
+    push.mockClear()
+    replace.mockClear()
+
+    renderHook(() => useProjectDetail({ projects: [project("a")] }))
+
+    expect(window.location.search).toBe("")
+    expect(replace).toHaveBeenCalledWith(null, "", "/issues")
+    expect(push).not.toHaveBeenCalled()
+    push.mockRestore()
+    replace.mockRestore()
+  })
+
+  it("an ordinary selection IS pushed, so Back closes it", () => {
+    const push = vi.spyOn(window.history, "pushState")
+    arriveAt("/issues")
+    push.mockClear()
+
+    const { result } = renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    act(() => result.current.setSelectedProjectId("a"))
+
+    expect(push).toHaveBeenCalledWith(null, "", "/issues?project=a")
+    push.mockRestore()
+  })
+
   it("never fights the user afterwards", () => {
     arriveAt("/issues?project=b")
     const { result, rerender } = renderHook(
