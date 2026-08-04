@@ -39,8 +39,17 @@ type openAPIDocument struct {
 }
 
 type openAPIOperation struct {
-	OperationID string   `json:"operationId"`
-	Tags        []string `json:"tags"`
+	OperationID string                     `json:"operationId"`
+	Tags        []string                   `json:"tags"`
+	Responses   map[string]openAPIResponse `json:"responses"`
+}
+
+type openAPIResponse struct {
+	Content map[string]openAPIMediaType `json:"content"`
+}
+
+type openAPIMediaType struct {
+	Schema map[string]json.RawMessage `json:"schema"`
 }
 
 type contractChecks struct {
@@ -85,16 +94,18 @@ type docFile struct {
 }
 
 type apiRecord struct {
-	Method       string         `json:"method"`
-	Path         string         `json:"path"`
-	OperationID  string         `json:"operation_id"`
-	Tag          string         `json:"tag"`
-	SourceFile   string         `json:"source_file,omitempty"`
-	ExactDocs    []string       `json:"exact_docs,omitempty"`
-	ResourceDocs []string       `json:"resource_docs,omitempty"`
-	Status       string         `json:"status"`
-	TestSignals  []string       `json:"test_signals,omitempty"`
-	Contract     contractChecks `json:"contract"`
+	Method                 string         `json:"method"`
+	Path                   string         `json:"path"`
+	OperationID            string         `json:"operation_id"`
+	Tag                    string         `json:"tag"`
+	SourceFile             string         `json:"source_file,omitempty"`
+	ExactDocs              []string       `json:"exact_docs,omitempty"`
+	ResourceDocs           []string       `json:"resource_docs,omitempty"`
+	Status                 string         `json:"status"`
+	TestSignals            []string       `json:"test_signals,omitempty"`
+	ConcreteResponseSchema bool           `json:"concrete_response_schema"`
+	GenericResponseSchema  bool           `json:"generic_response_schema"`
+	Contract               contractChecks `json:"contract"`
 }
 
 type cliRecord struct {
@@ -256,16 +267,18 @@ func statusMarkerPresent(text string) bool {
 }
 
 type summary struct {
-	APIOperations      int `json:"api_operations"`
-	APIExactDocs       int `json:"api_exact_docs"`
-	APIResourceDocs    int `json:"api_resource_docs"`
-	APIMissingDocs     int `json:"api_missing_docs"`
-	CLIOperations      int `json:"cli_operations"`
-	CLIExactDocs       int `json:"cli_exact_docs"`
-	CLIRootDocsPresent int `json:"cli_root_docs_present"`
-	CLIRootDocsMissing int `json:"cli_root_docs_missing"`
-	APIWithTestSignals int `json:"api_with_test_signals"`
-	CLIWithTestSignals int `json:"cli_with_test_signals"`
+	APIOperations                  int `json:"api_operations"`
+	APIExactDocs                   int `json:"api_exact_docs"`
+	APIResourceDocs                int `json:"api_resource_docs"`
+	APIMissingDocs                 int `json:"api_missing_docs"`
+	CLIOperations                  int `json:"cli_operations"`
+	CLIExactDocs                   int `json:"cli_exact_docs"`
+	CLIRootDocsPresent             int `json:"cli_root_docs_present"`
+	CLIRootDocsMissing             int `json:"cli_root_docs_missing"`
+	APIWithTestSignals             int `json:"api_with_test_signals"`
+	APIWithConcreteResponseSchemas int `json:"api_with_concrete_response_schemas"`
+	APIGenericResponseSchemas      int `json:"api_generic_response_schemas"`
+	CLIWithTestSignals             int `json:"cli_with_test_signals"`
 }
 
 func main() {
@@ -332,6 +345,9 @@ func run(openAPIFile, commandsFile string) error {
 			rec.TestSignals = testContaining(path, tests)
 			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals)
 			r.API = append(r.API, rec)
+			rec.ConcreteResponseSchema = hasConcreteSuccessSchema(op.Responses)
+			rec.GenericResponseSchema = !rec.ConcreteResponseSchema && hasSuccessSchema(op.Responses)
+			r.API[len(r.API)-1] = rec
 		}
 	}
 	sort.Slice(r.API, func(i, j int) bool {
@@ -393,6 +409,53 @@ func run(openAPIFile, commandsFile string) error {
 	fmt.Printf("docs-inventory: %d API operations, %d CLI commands\n", len(r.API), len(r.CLI))
 	fmt.Printf("docs-inventory: wrote %s and %s\n", jsonReport, markdownReport)
 	return nil
+}
+
+func hasSuccessSchema(responses map[string]openAPIResponse) bool {
+	for status, response := range responses {
+		if !strings.HasPrefix(status, "2") {
+			continue
+		}
+		for _, media := range response.Content {
+			if len(media.Schema) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasConcreteSuccessSchema(responses map[string]openAPIResponse) bool {
+	for status, response := range responses {
+		if !strings.HasPrefix(status, "2") {
+			continue
+		}
+		for _, media := range response.Content {
+			if len(media.Schema) == 0 {
+				continue
+			}
+			if _, generic := media.Schema["$ref"]; generic {
+				return true
+			}
+			if typ, ok := rawString(media.Schema["type"]); ok && typ != "object" {
+				return true
+			}
+			for _, key := range []string{"properties", "items", "oneOf", "anyOf", "allOf", "enum", "format"} {
+				if _, ok := media.Schema[key]; ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func rawString(raw json.RawMessage) (string, bool) {
+	var value string
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return "", false
+	}
+	return value, true
 }
 
 func readOpenAPI(name string) (openAPIDocument, error) {
@@ -622,6 +685,12 @@ func summarize(r report) summary {
 		if len(rec.TestSignals) > 0 {
 			s.APIWithTestSignals++
 		}
+		if rec.ConcreteResponseSchema {
+			s.APIWithConcreteResponseSchemas++
+		}
+		if rec.GenericResponseSchema {
+			s.APIGenericResponseSchemas++
+		}
 	}
 	for _, rec := range r.CLI {
 		if rec.Status == "documented_exact" || rec.Status == "documented_root" || rec.Status == "documented_exact_no_root" {
@@ -649,6 +718,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "| Surface | Count | Documentation signal | Test signal |\n|---|---:|---|---|\n")
 	fmt.Fprintf(&b, "| API operations | %d | %d exact, %d resource-level, %d missing | %d with a test signal |\n", r.Summary.APIOperations, r.Summary.APIExactDocs, r.Summary.APIResourceDocs, r.Summary.APIMissingDocs, r.Summary.APIWithTestSignals)
 	fmt.Fprintf(&b, "| CLI commands | %d | %d exact mentions, %d root pages present, %d root pages missing | %d with a test signal |\n\n", r.Summary.CLIOperations, r.Summary.CLIExactDocs, r.Summary.CLIRootDocsPresent, r.Summary.CLIRootDocsMissing, r.Summary.CLIWithTestSignals)
+	fmt.Fprintf(&b, "Response schema quality: %d API operations have a concrete 2xx schema; %d still use the generic object fallback.\n\n", r.Summary.APIWithConcreteResponseSchemas, r.Summary.APIGenericResponseSchemas)
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
 	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")

@@ -20,9 +20,10 @@ and a workspace slug or ID.
   routes accept `X-Workspace-ID` (a slug is resolved by the server).
 
 The generated document is a route catalog: paths, methods, and path
-parameters are exact, while request and response bodies are generic object
-placeholders. Treat failures as a useful live smoke/route contract signal,
-not as complete payload validation.
+parameters are exact. Audited domains also provide concrete request and
+response schemas; routes that have not been audited yet retain an explicit
+generic-object fallback. Treat failures as a useful live smoke/route contract
+signal, not as complete payload validation for every route.
 
 ## Quick start
 
@@ -75,8 +76,8 @@ The generated catalog is broader than this safe probe. The runner always
 excludes `/api/auth/**` (NextAuth UI/session endpoints) and these non-JSON
 operations: backup/file downloads, avatars, pipeline and memory exports,
 memory-version content, and the journal stream. These are stable path
-exclusions because the generator currently gives every response a generic JSON
-placeholder. The exclusions are reported separately from the method deny-list,
+exclusions because they return binary or streaming data and are not suitable
+for this JSON-focused probe. The exclusions are reported separately from the method deny-list,
 so a lower selected count is visible rather than silently looking like route
 coverage.
 

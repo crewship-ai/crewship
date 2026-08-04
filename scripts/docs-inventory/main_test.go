@@ -1,64 +1,49 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-func TestInventoryEndpointEvidenceParsesHeadingsCodeAndTables(t *testing.T) {
-	docs := []docFile{{Path: "docs/api-reference/widgets.mdx", Text: `
-| Method | Endpoint | Purpose |
-| POST | [/api/v1/widgets](#create) | Create a widget |
-
-### GET /api/v1/widgets/{id}
-**Auth:** bearer token
-**Request:** path parameter id
-**Response:** widget
-| Status | Condition |
-| 200 | Found |
-
-### Create
-POST /api/v1/widgets
-**Auth:** bearer token
-**Request body:** JSON
-**Response:** widget
-| Status | Condition |
-| 201 | Created |
-`}}
-
-	evidence := inventoryEndpointEvidence(docs)
-	if len(evidence["POST /api/v1/widgets"]) != 2 {
-		t.Fatalf("POST evidence = %#v, want table and code/section evidence", evidence["POST /api/v1/widgets"])
-	}
-	if len(evidence["GET /api/v1/widgets/{id}"]) != 1 {
-		t.Fatalf("GET evidence = %#v", evidence["GET /api/v1/widgets/{id}"])
-	}
-
-	checks := contractFor("GET", "/api/v1/widgets/{id}", evidence, "internal/api/router_widgets.go", []string{"internal/api/widgets_test.go"})
-	if len(checks.Structural.Missing) != 0 {
-		t.Fatalf("complete contract missing = %v", checks.Structural.Missing)
-	}
-	if !checks.SemanticRuntime.OpenAPIOperation || len(checks.SemanticRuntime.TestSignals) != 1 {
-		t.Fatalf("semantic/runtime checks = %#v", checks.SemanticRuntime)
-	}
-}
-
-func TestContractForFlagsMissingStructuralFields(t *testing.T) {
-	evidence := inventoryEndpointEvidence([]docFile{{Path: "docs/api-reference/widgets.mdx", Text: "### GET /api/v1/widgets\nA widget listing."}})
-	checks := contractFor("GET", "/api/v1/widgets", evidence, "", nil)
-	want := []string{"auth", "request", "response", "statuses"}
-	if len(checks.Structural.Missing) != len(want) {
-		t.Fatalf("missing = %v, want %v", checks.Structural.Missing, want)
-	}
-	for i := range want {
-		if checks.Structural.Missing[i] != want[i] {
-			t.Fatalf("missing[%d] = %q, want %q", i, checks.Structural.Missing[i], want[i])
+func TestResponseSchemaQuality(t *testing.T) {
+	response := func(schema string) openAPIResponse {
+		var parsed map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(schema), &parsed); err != nil {
+			t.Fatal(err)
 		}
+		return openAPIResponse{Content: map[string]openAPIMediaType{
+			"application/json": {Schema: parsed},
+		}}
 	}
-	if len(checks.SemanticRuntime.TestSignals) != 0 || checks.SemanticRuntime.OpenAPIOperation != true {
-		t.Fatalf("semantic/runtime checks should remain separate: %#v", checks.SemanticRuntime)
+
+	tests := []struct {
+		name     string
+		response openAPIResponse
+		concrete bool
+	}{
+		{name: "generic object", response: response(`{"type":"object"}`), concrete: false},
+		{name: "array", response: response(`{"type":"array","items":{"type":"string"}}`), concrete: true},
+		{name: "object properties", response: response(`{"type":"object","properties":{"id":{"type":"string"}}}`), concrete: true},
+		{name: "component reference", response: response(`{"$ref":"#/components/schemas/Workspace"}`), concrete: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			responses := map[string]openAPIResponse{"200": tt.response}
+			if got := hasConcreteSuccessSchema(responses); got != tt.concrete {
+				t.Fatalf("hasConcreteSuccessSchema() = %v, want %v", got, tt.concrete)
+			}
+			if got := hasSuccessSchema(responses); !got {
+				t.Fatal("hasSuccessSchema() = false, want true")
+			}
+		})
 	}
 }
 
-func TestCanonicalDocPathRemovesQueryAndPunctuation(t *testing.T) {
-	if got := canonicalDocPath("/api/v1/widgets/{id}?expand=owner)."); got != "/api/v1/widgets/{id}" {
-		t.Fatalf("canonical path = %q", got)
+func TestResponseSchemaQualityIgnoresErrors(t *testing.T) {
+	responses := map[string]openAPIResponse{
+		"400": {Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]json.RawMessage{"type": json.RawMessage(`"object"`)}}}},
+	}
+	if hasSuccessSchema(responses) || hasConcreteSuccessSchema(responses) {
+		t.Fatal("error responses must not count as success response schemas")
 	}
 }

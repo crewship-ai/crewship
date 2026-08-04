@@ -9,6 +9,8 @@
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 364,
+    "api_with_concrete_response_schemas": 72,
+    "api_generic_response_schemas": 459,
     "cli_with_test_signals": 709
   },
   "api": [
@@ -27,6 +29,8 @@
         "internal/api/middleware_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -70,6 +74,8 @@
         "internal/api/backup_admin_cov2_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -120,6 +126,8 @@
         "internal/api/backup_admin_cov2_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -170,6 +178,8 @@
         "internal/api/backup_admin_cov2_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -219,6 +229,8 @@
         "internal/api/openapi_conformance_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -263,6 +275,8 @@
         "internal/api/backup_extra_cov_test.go",
         "internal/api/backup_query_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -301,6 +315,8 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "internal/api/backup_metrics_redact_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -341,6 +357,8 @@
         "internal/api/backup_mutation_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -384,6 +402,8 @@
         "internal/api/backup_admin_test.go",
         "internal/api/backup_extra_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -426,6 +446,8 @@
         "internal/api/backup_admin_test.go",
         "internal/api/backup_extra_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -469,6 +491,8 @@
         "internal/api/backup_extra_cov_test.go",
         "internal/api/backup_query_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -511,6 +535,8 @@
         "internal/api/backup_extra_cov_test.go",
         "internal/api/backup_query_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -551,6 +577,8 @@
         "internal/api/backup_extra_cov_test.go",
         "internal/api/backup_query_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -593,6 +621,8 @@
         "internal/api/admin_observability_keysource_test.go",
         "internal/api/admin_observability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -633,6 +663,8 @@
         "cmd/crewship/cmd_journal_verify_test.go",
         "internal/api/admin_journal_integrity_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -668,6 +700,8 @@
         "internal/api/keeper_ask_test.go",
         "internal/api/keeper_resolve_route_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -705,6 +739,8 @@
         "internal/api/admin_keeper_aux_test.go",
         "internal/api/admin_keeper_judge_format_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -744,6 +780,8 @@
         "internal/api/admin_keeper_aux_test.go",
         "internal/api/admin_keeper_judge_format_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -780,6 +818,8 @@
       "test_signals": [
         "internal/api/admin_keeper_aux_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -810,6 +850,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -837,6 +879,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -864,6 +908,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -900,6 +946,8 @@
         "internal/api/admin_keeper_config_profile_test.go",
         "internal/api/admin_keeper_config_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -944,6 +992,8 @@
         "internal/api/admin_keeper_config_profile_test.go",
         "internal/api/admin_keeper_config_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -988,6 +1038,8 @@
         "internal/api/admin_keeper_config_profile_test.go",
         "internal/api/admin_keeper_config_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1026,6 +1078,8 @@
       "test_signals": [
         "internal/api/admin_keeper_findings_routing_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1064,6 +1118,8 @@
         "internal/api/keeper_governance_govmodel_test.go",
         "internal/api/keeper_governance_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1105,6 +1161,8 @@
         "internal/api/keeper_governance_govmodel_test.go",
         "internal/api/keeper_governance_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1142,6 +1200,8 @@
       "test_signals": [
         "internal/api/admin_keeper_health_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1176,6 +1236,8 @@
         "internal/api/admin_keeper_judge_hosted_test.go",
         "internal/api/admin_keeper_judge_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1213,6 +1275,8 @@
         "internal/api/admin_keeper_judge_hosted_test.go",
         "internal/api/admin_keeper_judge_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1250,6 +1314,8 @@
         "internal/api/admin_keeper_judge_format_test.go",
         "internal/api/admin_keeper_judge_hosted_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1297,6 +1363,8 @@
         "internal/api/keeper_log_events_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1351,6 +1419,8 @@
         "internal/api/keeper_log_events_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1393,6 +1463,8 @@
       "test_signals": [
         "internal/api/keeper_log_events_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1426,6 +1498,8 @@
       "test_signals": [
         "internal/api/inbox_target_role_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1461,6 +1535,8 @@
       "test_signals": [
         "cmd/crewship/cmd_keeper_review_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1498,6 +1574,8 @@
         "cmd/crewship/cmd_doctor_legacy_test.go",
         "internal/api/admin_prune_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1535,6 +1613,8 @@
         "cmd/crewship/cmd_system_observability_test.go",
         "internal/api/admin_observability_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1572,6 +1652,8 @@
         "cmd/crewship/cmd_system_observability_test.go",
         "internal/api/admin_observability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1611,6 +1693,8 @@
         "internal/api/memory_config_handler_cov_test.go",
         "internal/api/memory_config_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1652,6 +1736,8 @@
         "internal/api/memory_config_handler_cov_test.go",
         "internal/api/memory_config_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1690,6 +1776,8 @@
         "internal/api/memory_pipeline_e2e_test.go",
         "internal/api/memory_stats_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1727,6 +1815,8 @@
         "internal/api/memory_versions_content_handler_test.go",
         "internal/api/memory_versions_list_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1759,6 +1849,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1792,6 +1884,8 @@
         "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
         "internal/api/admin_crew_runtime_prune_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1828,6 +1922,8 @@
         "cmd/crewship/cmd_admin_prune_test.go",
         "internal/api/admin_prune_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1864,6 +1960,8 @@
       "test_signals": [
         "internal/api/admin_ratelimits_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1896,6 +1994,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1925,6 +2025,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1956,6 +2058,8 @@
         "cmd/crewship/cmd_admin_reap_orphan_test.go",
         "internal/api/admin_reap_orphan_containers_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1991,6 +2095,8 @@
         "cmd/crewship/cmd_admin_reencrypt_test.go",
         "internal/api/admin_reencrypt_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2026,6 +2132,8 @@
         "cmd/crewship/cmd_admin_security_posture_test.go",
         "internal/api/admin_security_posture_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2067,6 +2175,8 @@
         "internal/api/admin_stats_crews_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2113,6 +2223,8 @@
         "internal/api/admin_authz_floor_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2147,6 +2259,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2175,6 +2289,8 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2207,6 +2323,8 @@
         "internal/api/admin_authz_floor_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2239,6 +2357,8 @@
         "internal/api/agents_query_delete_load_test.go",
         "internal/api/dberr_crews_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2312,6 +2432,8 @@
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2392,6 +2514,8 @@
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2429,6 +2553,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2467,6 +2593,8 @@
         "internal/api/openapi_conformance_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2529,6 +2657,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2591,6 +2721,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2653,6 +2785,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2694,6 +2828,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2724,6 +2860,8 @@
       "test_signals": [
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2757,6 +2895,8 @@
       "test_signals": [
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2790,6 +2930,8 @@
       "test_signals": [
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2831,6 +2973,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2877,6 +3021,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2923,6 +3069,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2964,6 +3112,8 @@
       "test_signals": [
         "internal/api/proxy_attachments_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3000,6 +3150,8 @@
         "cmd/crewship/cmd_chat_read_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3030,6 +3182,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3056,6 +3210,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3088,6 +3244,8 @@
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3126,6 +3284,8 @@
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3159,6 +3319,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3185,6 +3347,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3211,6 +3375,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3237,6 +3403,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3264,6 +3432,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3290,6 +3460,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3318,6 +3490,8 @@
       "test_signals": [
         "internal/api/agent_inbox_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3348,6 +3522,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3376,6 +3552,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3402,6 +3580,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3429,6 +3609,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3457,6 +3639,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3485,6 +3669,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3513,6 +3699,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3540,6 +3728,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3565,6 +3755,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3590,6 +3782,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3616,6 +3810,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3643,6 +3839,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3674,6 +3872,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3709,6 +3909,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3744,6 +3946,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3774,6 +3978,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3800,6 +4006,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3827,6 +4035,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3858,6 +4068,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3893,6 +4105,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3929,6 +4143,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3961,6 +4177,8 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3991,6 +4209,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4025,6 +4245,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4069,6 +4291,8 @@
         "internal/api/approvals_handler_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4112,6 +4336,8 @@
         "cmd/crewship/cmd_approvals_cov_test.go",
         "internal/api/approvals_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4148,6 +4374,8 @@
         "internal/api/agents_hire_recovery_test.go",
         "internal/harbormaster/decide_tx_reload_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4179,6 +4407,8 @@
         "docs/api-reference/approvals.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4212,6 +4442,8 @@
         "internal/api/agents_hire_recovery_test.go",
         "internal/harbormaster/decide_tx_reload_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4254,6 +4486,8 @@
         "internal/api/audit_entity_name_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4307,6 +4541,8 @@
         "internal/api/ratelimit_self_service_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4356,6 +4592,8 @@
         "cmd/crewship/cmd_token_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4401,6 +4639,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4438,6 +4678,8 @@
         "docs/api-reference/auth.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4473,6 +4715,8 @@
         "internal/api/auth_recovery_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4514,6 +4758,8 @@
         "internal/api/openapi_google_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4553,6 +4799,8 @@
         "internal/api/cli_pair_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4589,6 +4837,8 @@
         "cmd/crewship/cmd_login_cov_test.go",
         "internal/api/cli_pair_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4625,6 +4875,8 @@
       "test_signals": [
         "internal/api/cli_pair_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4664,6 +4916,8 @@
         "internal/api/auth_recovery_test.go",
         "internal/api/provision_takeover_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4711,6 +4965,8 @@
         "internal/api/auth_recovery_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4750,6 +5006,8 @@
         "docs/api-reference/auth.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4792,6 +5050,8 @@
         "internal/api/auth_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4846,6 +5106,8 @@
         "internal/api/ratelimit_cli_exemption_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4884,6 +5146,8 @@
       "test_signals": [
         "cmd/crewship/cmd_crew_cache_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4910,6 +5174,8 @@
         "docs/api-reference/provisioning.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4943,6 +5209,8 @@
         "internal/api/proxy_chatmessages_route_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4977,6 +5245,8 @@
       "test_signals": [
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5008,6 +5278,8 @@
       "test_signals": [
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5036,6 +5308,8 @@
         "docs/guides/chat-sessions.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5064,6 +5338,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5096,6 +5372,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5124,6 +5402,8 @@
         "docs/guides/chat-sessions.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5153,6 +5433,8 @@
         "internal/api/chat_steer_route_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5188,6 +5470,8 @@
       "test_signals": [
         "internal/api/cartographer_fork_delete_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5222,6 +5506,8 @@
       "test_signals": [
         "internal/api/cartographer_fork_delete_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5256,6 +5542,8 @@
       "test_signals": [
         "internal/api/cartographer_fork_delete_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5287,6 +5575,8 @@
         "docs/api-reference/checkpoints.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5326,6 +5616,8 @@
         "internal/connectors/manifest_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5367,6 +5659,8 @@
         "internal/api/connectors_routes_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5400,6 +5694,8 @@
       "test_signals": [
         "internal/api/connectors_routes_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5433,6 +5729,8 @@
       "test_signals": [
         "internal/api/connectors_routes_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5466,6 +5764,8 @@
       "test_signals": [
         "internal/api/inbox_target_role_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5498,6 +5798,8 @@
       "test_signals": [
         "internal/api/memory_pipeline_e2e_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5526,6 +5828,8 @@
         "docs/api-reference/consolidate.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5552,6 +5856,8 @@
         "docs/api-reference/consolidate.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5588,6 +5894,8 @@
         "internal/api/flags_templates_consolidate_cov_test.go",
         "internal/api/gdpr_task_consolidate_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5630,6 +5938,8 @@
         "cmd/crewship/cmd_format_sweep_batch1_test.go",
         "internal/api/conversation_search_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5663,6 +5973,8 @@
       "test_signals": [
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5709,6 +6021,8 @@
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5763,6 +6077,8 @@
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5811,6 +6127,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5857,6 +6175,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5893,6 +6213,8 @@
         "docs/api-reference/credentials.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5925,6 +6247,8 @@
         "internal/api/credentials_probe_support_test.go",
         "internal/api/credentials_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5962,6 +6286,8 @@
         "internal/api/credentials_reveal_policy_test.go",
         "internal/api/credentials_reveal_route_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5999,6 +6325,8 @@
         "internal/api/credentials_reveal_policy_test.go",
         "internal/api/credentials_reveal_route_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6043,6 +6371,8 @@
         "internal/api/ratelimit_cli_exemption_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6087,6 +6417,8 @@
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6126,6 +6458,8 @@
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6165,6 +6499,8 @@
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6204,6 +6540,8 @@
         "internal/api/credentials_test_stored_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6240,6 +6578,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6274,6 +6614,8 @@
         "internal/api/credential_fields_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6309,6 +6651,8 @@
         "internal/api/credential_fields_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6343,6 +6687,8 @@
       "test_signals": [
         "internal/api/credential_fields_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6376,6 +6722,8 @@
       "test_signals": [
         "internal/api/credential_fields_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6409,6 +6757,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6442,6 +6792,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6475,6 +6827,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6505,6 +6859,8 @@
         "docs/api-reference/credentials.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6535,6 +6891,8 @@
       "test_signals": [
         "internal/api/credentials_test_stored_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6566,6 +6924,8 @@
         "cmd/crewship/cmd_crew_manage_cov_test.go",
         "internal/api/core_handlers_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6605,6 +6965,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6651,6 +7013,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6689,6 +7053,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6729,6 +7095,8 @@
         "internal/manifest/apply_kinds_cov_test.go",
         "internal/manifest/kinds/crew_template_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6767,6 +7135,8 @@
       "test_signals": [
         "internal/manifest/kinds/crew_template_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6798,6 +7168,8 @@
       "test_signals": [
         "internal/manifest/kinds/crew_template_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6878,6 +7250,8 @@
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6966,6 +7340,8 @@
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7043,6 +7419,8 @@
         "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7120,6 +7498,8 @@
         "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7197,6 +7577,8 @@
         "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7274,6 +7656,8 @@
         "internal/api/crew_provisioning_durable_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7317,6 +7701,8 @@
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7347,6 +7733,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7373,6 +7761,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7402,6 +7792,8 @@
       "test_signals": [
         "internal/api/crew_container_status_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7431,6 +7823,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7463,6 +7857,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7499,6 +7895,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7531,6 +7929,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7558,6 +7958,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7585,6 +7987,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7614,6 +8018,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7641,6 +8047,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7668,6 +8076,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7696,6 +8106,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7723,6 +8135,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7750,6 +8164,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7777,6 +8193,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7803,6 +8221,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7829,6 +8249,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7856,6 +8278,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7889,6 +8313,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7921,6 +8347,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7949,6 +8377,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7977,6 +8407,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8003,6 +8435,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8029,6 +8463,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8056,6 +8492,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8083,6 +8521,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8110,6 +8550,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8137,6 +8579,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8163,6 +8607,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8189,6 +8635,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8216,6 +8664,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8242,6 +8692,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8272,6 +8724,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8307,6 +8761,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8338,6 +8794,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8365,6 +8823,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8399,6 +8859,8 @@
         "internal/api/missions_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8438,6 +8900,8 @@
         "internal/api/missions_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8476,6 +8940,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8513,6 +8979,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8550,6 +9018,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8584,6 +9054,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8614,6 +9086,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8641,6 +9115,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8672,6 +9148,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8703,6 +9181,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8730,6 +9210,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8756,6 +9238,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8787,6 +9271,8 @@
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8823,6 +9309,8 @@
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8859,6 +9347,8 @@
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8896,6 +9386,8 @@
         "internal/api/crew_policy_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8933,6 +9425,8 @@
         "internal/api/crew_policy_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8964,6 +9458,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8991,6 +9487,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9026,6 +9524,8 @@
         "internal/api/crew_provisioning_progress_test.go",
         "internal/api/crew_provisioning_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9066,6 +9566,8 @@
         "internal/api/crew_provisioning_progress_test.go",
         "internal/api/crew_provisioning_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9099,6 +9601,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9130,6 +9634,8 @@
       "test_signals": [
         "internal/api/agents_restart_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9165,6 +9671,8 @@
         "internal/api/crew_service_inventory_test.go",
         "internal/provider/docker/service_inventory_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9194,6 +9702,8 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9219,6 +9729,8 @@
       "test_signals": [
         "internal/sidecar/mcp_gateway_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9249,6 +9761,8 @@
         "cmd/crewship/cmd_escalation_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9279,6 +9793,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9318,6 +9834,8 @@
         "internal/api/eval_handler_cov_test.go",
         "internal/api/eval_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9362,6 +9880,8 @@
         "internal/api/eval_handler_cov_test.go",
         "internal/api/eval_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9406,6 +9926,8 @@
         "internal/api/eval_handler_cov_test.go",
         "internal/api/eval_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9443,6 +9965,8 @@
       "test_signals": [
         "internal/api/eval_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9482,6 +10006,8 @@
         "internal/api/unauth_reachability_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9527,6 +10053,8 @@
         "internal/api/unauth_reachability_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9568,6 +10096,8 @@
         "cmd/crewship/cmd_feature_flag_cov_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9605,6 +10135,8 @@
         "cmd/crewship/cmd_feature_flag_cov_test.go",
         "internal/manifest/kinds/feature_flag_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9641,6 +10173,8 @@
       "test_signals": [
         "internal/manifest/kinds/feature_flag_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9676,6 +10210,8 @@
       "test_signals": [
         "internal/manifest/kinds/feature_flag_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9711,6 +10247,8 @@
         "internal/api/crew_provisioning_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9752,6 +10290,8 @@
         "internal/api/recipes_feedback_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9796,6 +10336,8 @@
         "internal/api/recipes_feedback_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9840,6 +10382,8 @@
         "internal/api/recipes_feedback_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9888,6 +10432,8 @@
         "internal/api/agent_notification_channels_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9928,6 +10474,8 @@
         "docs/api-reference/hooks.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9960,6 +10508,8 @@
       "test_signals": [
         "internal/manifest/kinds/hook_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10004,6 +10554,8 @@
         "cmd/crewship/cmd_open_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10056,6 +10608,8 @@
         "cmd/crewship/cmd_open_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10101,6 +10655,8 @@
         "internal/api/inbox_handler_test.go",
         "internal/api/middleware_auth_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10141,6 +10697,8 @@
         "internal/api/inbox_handler_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10180,6 +10738,8 @@
         "internal/api/inbox_foureyes_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10216,6 +10776,8 @@
         "internal/api/inbox_foureyes_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10255,6 +10817,8 @@
         "internal/manifest/kinds/instance_setting_cov_test.go",
         "internal/manifest/kinds/instance_setting_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10290,6 +10854,8 @@
         "docs/manifest/instance_setting.md"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10316,6 +10882,8 @@
         "docs/manifest/instance_setting.md"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10342,6 +10910,8 @@
         "docs/manifest/instance_setting.md"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10384,6 +10954,8 @@
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10437,6 +11009,8 @@
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10475,6 +11049,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10502,6 +11078,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10529,6 +11107,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10556,6 +11136,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10583,6 +11165,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10610,6 +11194,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10640,6 +11226,8 @@
       "test_signals": [
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10674,6 +11262,8 @@
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10708,6 +11298,8 @@
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10743,6 +11335,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10778,6 +11372,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10813,6 +11409,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10848,6 +11446,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10883,6 +11483,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10918,6 +11520,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10953,6 +11557,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10988,6 +11594,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11023,6 +11631,8 @@
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "internal/api/composio_handler_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11063,6 +11673,8 @@
         "internal/api/crew_integrations_cov_test.go",
         "internal/api/internal_creds_integrations_cov_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11099,6 +11711,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11126,6 +11740,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11153,6 +11769,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11180,6 +11798,8 @@
         "docs/api-reference/integrations.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11220,6 +11840,8 @@
         "cmd/crewship/cmd_open_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11263,6 +11885,8 @@
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11296,6 +11920,8 @@
       "test_signals": [
         "cmd/gen-openapi/schema_contract_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11351,6 +11977,8 @@
         "cmd/crewship/cmd_inspect_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11396,6 +12024,8 @@
         "internal/api/journal_handler_cov2_test.go",
         "internal/api/journal_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11442,6 +12072,8 @@
         "internal/api/journal_lookup_cov_test.go",
         "internal/api/journal_lookup_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11483,6 +12115,8 @@
         "cmd/crewship/cmd_spend_test.go",
         "internal/api/journal_handler_spend_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11526,6 +12160,8 @@
         "internal/api/openapi_conformance_test.go",
         "internal/cli/tui/app_cov_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11562,6 +12198,8 @@
         "docs/api-reference/journal.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11590,6 +12228,8 @@
         "docs/api-reference/journal.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11631,6 +12271,8 @@
         "internal/api/issue_labels_update_regression_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11683,6 +12325,8 @@
         "internal/api/issue_labels_update_regression_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11727,6 +12371,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/issue_labels_update_regression_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11764,6 +12410,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/issue_labels_update_regression_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11799,6 +12447,8 @@
         "internal/api/mcp_registry_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11834,6 +12484,8 @@
         "internal/api/mcp_registry_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11868,6 +12520,8 @@
         "cmd/crewship/cmd_mcp_cov_test.go",
         "internal/api/mcp_registry_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11906,6 +12560,8 @@
         "internal/api/internal_status_cov_test.go",
         "internal/sidecar/mcp_gateway_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11941,6 +12597,8 @@
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "internal/api/notification_prefs_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11973,6 +12631,8 @@
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "internal/api/notification_prefs_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12007,6 +12667,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/user_preferences_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12037,6 +12699,8 @@
         "docs/cli/preferences.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12062,6 +12726,8 @@
         "docs/cli/preferences.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12095,6 +12761,8 @@
         "internal/api/memory_portability_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12134,6 +12802,8 @@
         "cmd/crewship/cmd_memory_health_test.go",
         "internal/api/memory_health_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12170,6 +12840,8 @@
       "test_signals": [
         "internal/api/memory_portability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12209,6 +12881,8 @@
         "internal/sidecar/memory_hybrid_identity_test.go",
         "internal/sidecar/memory_hybrid_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12256,6 +12930,8 @@
         "internal/api/memory_versions_list_handler_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12293,6 +12969,8 @@
         "docs/api-reference/memory.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12319,6 +12997,8 @@
         "docs/api-reference/memory.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12349,6 +13029,8 @@
         "internal/api/metrics_fillers_cov_test.go",
         "internal/api/metrics_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12386,6 +13068,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12421,6 +13105,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12457,6 +13143,8 @@
         "internal/api/missions_test.go",
         "internal/api/query_messaging_mission_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12507,6 +13195,8 @@
         "cmd/crewship/cmd_open_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12550,6 +13240,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12585,6 +13277,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12626,6 +13320,8 @@
         "internal/llm/endpoint/endpoint_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12676,6 +13372,8 @@
         "internal/api/notification_channels_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12726,6 +13424,8 @@
         "internal/api/notification_channels_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12768,6 +13468,8 @@
       "test_signals": [
         "internal/api/notification_testdraft_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12802,6 +13504,8 @@
       "test_signals": [
         "internal/api/agent_notification_channels_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12836,6 +13540,8 @@
       "test_signals": [
         "internal/api/agent_notification_channels_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12870,6 +13576,8 @@
       "test_signals": [
         "internal/api/agent_notification_channels_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12904,6 +13612,8 @@
       "test_signals": [
         "internal/api/agent_notification_channels_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12935,6 +13645,8 @@
         "docs/api-reference/notification-channels.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12963,6 +13675,8 @@
         "docs/api-reference/notification-channels.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12993,6 +13707,8 @@
         "internal/api/notification_deliveries_test.go",
         "internal/api/notification_deliveries_wire_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13029,6 +13745,8 @@
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
         "internal/api/notification_providers_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13060,6 +13778,8 @@
         "docs/guides/notifications.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13088,6 +13808,8 @@
       "test_signals": [
         "internal/api/notification_outbound_handlers_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13119,6 +13841,8 @@
       "test_signals": [
         "internal/api/notification_outbound_handlers_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13150,6 +13874,8 @@
       "test_signals": [
         "internal/api/notification_outbound_handlers_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13192,6 +13918,8 @@
         "internal/api/notification_savedview_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13236,6 +13964,8 @@
         "internal/api/notif_savedview_standup_cov_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13274,6 +14004,8 @@
         "internal/api/dberr_issues_cov_test.go",
         "internal/api/notif_savedview_standup_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13310,6 +14042,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/notification_savedview_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13345,6 +14079,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/notification_savedview_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13378,6 +14114,8 @@
         "internal/api/oauth_creds_cov_test.go",
         "internal/api/oauth_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13417,6 +14155,8 @@
         "internal/api/unauth_reachability_test.go",
         "internal/connectors/manifest_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13455,6 +14195,8 @@
         "internal/api/oauth_creds_cov2_test.go",
         "internal/api/oauth_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13489,6 +14231,8 @@
         "internal/api/oauth_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13525,6 +14269,8 @@
         "internal/api/oauth_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13559,6 +14305,8 @@
         "internal/api/oauth_flow_cov_test.go",
         "internal/api/oauth_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13592,6 +14340,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13626,6 +14376,8 @@
         "cmd/crewship/cmd_system_cov_test.go",
         "internal/api/onboarding_hire_config_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13663,6 +14415,8 @@
         "internal/api/onboarding_cov2_test.go",
         "internal/api/onboarding_hire_config_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13701,6 +14455,8 @@
         "internal/api/onboarding_hire_config_cov_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13734,6 +14490,8 @@
         "docs/api-reference/paymaster.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13771,6 +14529,8 @@
         "internal/api/paymaster_handler_cov_test.go",
         "internal/api/paymaster_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13807,6 +14567,8 @@
         "docs/api-reference/paymaster.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13843,6 +14605,8 @@
         "internal/api/paymaster_handler_cov_test.go",
         "internal/api/paymaster_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13891,6 +14655,8 @@
         "internal/api/paymaster_handler_cov_test.go",
         "internal/api/paymaster_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13933,6 +14699,8 @@
         "cmd/crewship/cmd_policy_test.go",
         "internal/api/crew_policy_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13971,6 +14739,8 @@
         "cmd/crewship/cmd_presence_cov_test.go",
         "internal/api/presence_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14020,6 +14790,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14075,6 +14847,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14121,6 +14895,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14161,6 +14937,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14201,6 +14979,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14238,6 +15018,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14273,6 +15055,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14307,6 +15091,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14349,6 +15135,8 @@
         "internal/manifest/apply_kinds_cov2_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14391,6 +15179,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/manifest/kinds/recipe_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14425,6 +15215,8 @@
       "test_signals": [
         "internal/manifest/kinds/recipe_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14457,6 +15249,8 @@
       "test_signals": [
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14499,6 +15293,8 @@
         "internal/api/recurring_triage_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14550,6 +15346,8 @@
         "internal/api/recurring_triage_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14593,6 +15391,8 @@
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/recurring_triage_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14630,6 +15430,8 @@
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/recurring_triage_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14659,6 +15461,8 @@
         "docs/api-reference/issues.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14706,6 +15510,8 @@
         "cmd/crewship/cmd_explain_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14751,6 +15557,8 @@
         "cmd/crewship/cmd_run_insights_test.go",
         "internal/api/runs_insights_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14788,6 +15596,8 @@
         "internal/api/eval_handler_test.go",
         "internal/cli/runs_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14825,6 +15635,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/runtime_capacity_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14862,6 +15674,8 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/runtime_catalog_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14906,6 +15720,8 @@
         "internal/api/saved_view_handler_cov_test.go",
         "internal/manifest/kinds/saved_view_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14953,6 +15769,8 @@
         "internal/api/saved_view_handler_cov_test.go",
         "internal/manifest/kinds/saved_view_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14993,6 +15811,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15027,6 +15847,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15072,6 +15894,8 @@
         "cmd/crewship/cmd_skill_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15118,6 +15942,8 @@
         "internal/api/skills_extra_cov_test.go",
         "internal/api/skills_proposed_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15160,6 +15986,8 @@
         "internal/api/skills_extra_cov_test.go",
         "internal/api/skills_proposed_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15200,6 +16028,8 @@
         "internal/api/skills_extra_cov_test.go",
         "internal/api/skills_proposed_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15235,6 +16065,8 @@
       "test_signals": [
         "cmd/gen-openapi/schema_contract_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15268,6 +16100,8 @@
       "test_signals": [
         "internal/api/slash_commands_handler_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15305,6 +16139,8 @@
         "internal/api/system_aux_test.go",
         "internal/keepercfg/aux_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15349,6 +16185,8 @@
         "internal/api/keeper_execute_cov_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15388,6 +16226,8 @@
         "cmd/crewship/cmd_system_runtime_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15433,6 +16273,8 @@
         "internal/api/unauth_reachability_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15474,6 +16316,8 @@
         "internal/api/setup_status_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15510,6 +16354,8 @@
         "internal/api/system_telemetry_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15548,6 +16394,8 @@
         "internal/api/system_version_test.go",
         "internal/update/nightly_upgrade_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15587,6 +16435,8 @@
         "internal/sidecar/mission_test.go",
         "internal/sidecar/server_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15629,6 +16479,8 @@
         "internal/sidecar/mission_test.go",
         "internal/sidecar/server_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15665,6 +16517,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15695,6 +16549,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15725,6 +16581,8 @@
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15764,6 +16622,8 @@
         "internal/manifest/kinds/triage_rule_cov_test.go",
         "internal/manifest/kinds/triage_rule_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15810,6 +16670,8 @@
         "internal/manifest/kinds/triage_rule_cov_test.go",
         "internal/manifest/kinds/triage_rule_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15849,6 +16711,8 @@
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/recurring_triage_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15883,6 +16747,8 @@
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/recurring_triage_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15923,6 +16789,8 @@
         "internal/api/triage_handler_cov2_test.go",
         "internal/api/triage_handler_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15970,6 +16838,8 @@
         "internal/api/users_avatar_traversal_test.go",
         "internal/api/users_me_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16010,6 +16880,8 @@
         "internal/api/users_avatar_test.go",
         "internal/api/users_avatar_traversal_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16046,6 +16918,8 @@
         "internal/api/users_avatar_test.go",
         "internal/api/users_avatar_traversal_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16082,6 +16956,8 @@
         "internal/api/ratelimit_self_service_test.go",
         "internal/api/users_me_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16116,6 +16992,8 @@
       "test_signals": [
         "cmd/crewship/cmd_preferences_privacy_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16148,6 +17026,8 @@
       "test_signals": [
         "cmd/crewship/cmd_preferences_privacy_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16179,6 +17059,8 @@
       "test_signals": [
         "cmd/crewship/cmd_preferences_privacy_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16210,6 +17092,8 @@
       "test_signals": [
         "cmd/crewship/cmd_preferences_privacy_cov_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16242,6 +17126,8 @@
       "test_signals": [
         "cmd/crewship/cmd_privacy_user_model_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16274,6 +17160,8 @@
       "test_signals": [
         "cmd/crewship/cmd_privacy_user_model_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16303,6 +17191,8 @@
         "docs/guides/agent-memory.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16330,6 +17220,8 @@
         "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16359,6 +17251,8 @@
         "docs/manifest/routine.md"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16389,6 +17283,8 @@
       "test_signals": [
         "internal/api/openapi_conformance_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16427,6 +17323,8 @@
       "test_signals": [
         "internal/api/pipeline_webhooks_async_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16467,6 +17365,8 @@
         "internal/database/seed_loaders_edge_test.go",
         "internal/manifest/kinds/workflow_template_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16514,6 +17414,8 @@
         "internal/database/seed_loaders_edge_test.go",
         "internal/manifest/kinds/workflow_template_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16555,6 +17457,8 @@
       "test_signals": [
         "cmd/crewship/cmd_workflow_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16590,6 +17494,8 @@
       "test_signals": [
         "cmd/crewship/cmd_workflow_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16625,6 +17531,8 @@
       "test_signals": [
         "cmd/crewship/cmd_workflow_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16690,6 +17598,8 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16763,6 +17673,8 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16816,6 +17728,8 @@
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16864,6 +17778,8 @@
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16912,6 +17828,8 @@
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16946,6 +17864,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16974,6 +17894,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17003,6 +17925,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17032,6 +17956,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17058,6 +17984,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17084,6 +18012,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17112,6 +18042,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17140,6 +18072,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17167,6 +18101,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17194,6 +18130,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17225,6 +18163,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17258,6 +18198,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17286,6 +18228,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17312,6 +18256,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17337,6 +18283,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17363,6 +18311,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17390,6 +18340,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17416,6 +18368,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17447,6 +18401,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17482,6 +18438,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17514,6 +18472,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17543,6 +18503,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17571,6 +18533,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17604,6 +18568,8 @@
       "test_signals": [
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17640,6 +18606,8 @@
       "test_signals": [
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17673,6 +18641,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17707,6 +18677,8 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17736,6 +18708,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17763,6 +18737,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17789,6 +18765,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17815,6 +18793,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17842,6 +18822,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17871,6 +18853,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17900,6 +18884,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17927,6 +18913,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17954,6 +18942,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17982,6 +18972,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18010,6 +19002,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18041,6 +19035,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18072,6 +19068,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18105,6 +19103,8 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18142,6 +19142,8 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18174,6 +19176,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18201,6 +19205,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18228,6 +19234,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18254,6 +19262,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18281,6 +19291,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18309,6 +19321,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18337,6 +19351,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18364,6 +19380,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18389,6 +19407,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18416,6 +19436,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18444,6 +19466,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18476,6 +19500,8 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18507,6 +19533,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18533,6 +19561,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18560,6 +19590,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18589,6 +19621,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18622,6 +19656,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18655,6 +19691,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18688,6 +19726,8 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18718,6 +19758,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18745,6 +19787,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18772,6 +19816,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18799,6 +19845,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18826,6 +19874,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18853,6 +19903,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18879,6 +19931,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18906,6 +19960,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18937,6 +19993,8 @@
       "test_signals": [
         "internal/api/cross_workspace_path_query_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18972,6 +20030,8 @@
       "test_signals": [
         "internal/api/route_scope_invariant_test.go"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19004,6 +20064,8 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19042,6 +20104,8 @@
         "internal/api/auth_recovery_cov_test.go",
         "…"
       ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
       "contract": {
         "structural": {
           "canonical_method_path": true,
