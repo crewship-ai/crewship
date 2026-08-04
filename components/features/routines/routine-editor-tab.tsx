@@ -1,13 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, Copy, RotateCcw, Save, Wand2 } from "lucide-react"
+import { AlertCircle, RotateCcw, Save, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
-import { convertDsl, parseDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
+import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
+import { parseRoutineBuffer } from "@/lib/routine-buffer"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { RoutineDetail } from "./routines-detail-panel"
 
@@ -32,32 +33,6 @@ interface Props {
   onSaved: () => void
 }
 
-interface ValidationResult {
-  ok: boolean
-  message?: string
-  parsed?: Record<string, unknown>
-}
-
-function validate(text: string): ValidationResult {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : "invalid JSON" }
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, message: "definition must be a JSON object" }
-  }
-  const obj = parsed as Record<string, unknown>
-  if (typeof obj.name !== "string" || obj.name === "") {
-    return { ok: false, message: "missing or empty `name` field" }
-  }
-  if (!Array.isArray(obj.steps) || obj.steps.length === 0) {
-    return { ok: false, message: "missing or empty `steps` array" }
-  }
-  return { ok: true, parsed: obj }
-}
-
 export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   const [format, setFormat] = useState<DslFormat>("yaml")
   const initial = useMemo(() => {
@@ -74,7 +49,6 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   const [text, setText] = useState(initial)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [copied, setCopied] = useState(false)
   const saveRef = useRef<(() => void) | null>(null)
   // bufferRef mirrors the editor's latest doc. FileEditor only hands
   // its buffer back through onSave (⌘S or a saveRef flush), and
@@ -100,17 +74,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     setEditorKey((k) => k + 1)
   }, [initial, routine.slug])
 
-  const validation = useMemo(() => {
-    const r = parseDsl(text, format)
-    if (!r.ok) {
-      return { ok: false, message: r.line ? `${r.message} (line ${r.line})` : r.message }
-    }
-    const v = r.value as Record<string, unknown>
-    if (!v.name || !Array.isArray(v.steps)) {
-      return { ok: false, message: "definition needs a `name` and a `steps` array" }
-    }
-    return { ok: true, parsed: v }
-  }, [text, format])
+  const validation = useMemo(() => parseRoutineBuffer(text, format), [text, format])
 
   // Schema completion + inline diagnostics. Memoized on the format
   // because FileEditor rebuilds its EditorState when this identity
@@ -162,16 +126,6 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     toast.success("Reverted")
   }
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      toast.error("Copy failed")
-    }
-  }
-
   const handleSave = async () => {
     // Always pull the latest doc from CodeMirror. FileEditor's
     // saveRef invokes onSave(doc) synchronously, which lands in
@@ -180,9 +134,12 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     // saving a stale definition when the user types and clicks Save
     // without pressing ⌘S first.
     saveRef.current?.()
-    const v = validate(bufferRef.current)
-    if (!v.ok || !v.parsed) {
-      toast.error(v.message ?? "definition is not valid")
+    // The SAME parse the header's validity indicator ran. It used to be
+    // a second, JSON-only function, so a valid YAML buffer showed
+    // "syntax ok" and then failed on Save with a JSON parser error.
+    const v = parseRoutineBuffer(bufferRef.current, format)
+    if (!v.ok) {
+      toast.error(v.message)
       return
     }
     setSaving(true)
@@ -261,9 +218,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
             ))}
           </div>
           <span className="opacity-60">·</span>
-          <span className="tabular-nums">{text.length.toLocaleString()} chars</span>
-          <span className="opacity-60">·</span>
-          <span className="font-mono">v{routine.dsl_version}</span>
+          <span className="font-mono">DSL v{routine.dsl_version}</span>
           {dirty && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/20 px-2.5 py-0.5 text-[11px] font-medium text-warn">
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -275,20 +230,10 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
           <Button
             size="sm"
             variant="ghost"
-            onClick={handleCopy}
-            className="h-8 gap-1.5 px-2.5 text-xs"
-            title="Copy current buffer"
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied ? "Copied" : "Copy"}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
             onClick={handleFormat}
             disabled={!validation.ok}
             className="h-8 gap-1.5 px-2.5 text-xs"
-            title="Re-pretty-print the buffer"
+            title="Re-indent the buffer from the parsed definition — sorts nothing, changes no values"
           >
             <Wand2 className="h-3.5 w-3.5" />
             Format
