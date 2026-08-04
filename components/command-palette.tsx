@@ -581,8 +581,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 value={`${cred.name} credential`}
                 keywords={[cred.provider, cred.type]}
                 className={PALETTE_ITEM_CLASS}
-                data-href="/credentials"
-                onSelect={() => go("/credentials", cred.name, "Credentials")}
+                data-href={`/credentials?id=${encodeURIComponent(cred.id)}`}
+                onSelect={() => go(`/credentials?id=${encodeURIComponent(cred.id)}`, cred.name, "Credentials")}
               >
                 {/* Same brand registry /credentials draws from, so a GitHub
                     token wears the GitHub mark here too. */}

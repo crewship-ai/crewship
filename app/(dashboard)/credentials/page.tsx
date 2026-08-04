@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
@@ -182,6 +183,26 @@ export default function CredentialsPage() {
   const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
   const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
+
+  // /credentials?id=<id> — the ⌘K palette's Credentials rows, and any
+  // bookmark. Landing on the list and leaving the caller to find the secret
+  // they had just searched for is the same second-search-by-eye the members
+  // roster had.
+  //
+  // Applied ONCE, and only after the list has arrived: on the first render
+  // `credentials` is still empty, and the id is dropped rather than left
+  // half-open if no credential has it (deleted since, or another workspace).
+  // Once, so a later refresh cannot reopen the sheet the user just closed.
+  const linkedCredentialId = useSearchParams().get("id")
+  const linkApplied = React.useRef(false)
+  React.useEffect(() => {
+    if (linkApplied.current || !linkedCredentialId || credentials.length === 0) return
+    linkApplied.current = true
+    const hit = credentials.find((c) => c.id === linkedCredentialId)
+    if (!hit) return
+    setDetailCredential(hit)
+    setDetailOpen(true)
+  }, [linkedCredentialId, credentials])
   const [rotateCredential, setRotateCredential] = React.useState<Credential | null>(null)
   const [rotateOpen, setRotateOpen] = React.useState(false)
   const [deleteCredential, setDeleteCredential] = React.useState<Credential | null>(null)

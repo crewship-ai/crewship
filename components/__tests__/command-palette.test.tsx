@@ -289,3 +289,26 @@ describe("CommandPalette — ranking", () => {
     expect(paletteFilter("Ops ops crew", "crew")).toBeGreaterThan(0)
   })
 })
+
+describe("CommandPalette — every row opens the thing, not its index", () => {
+  it("names the credential, the project, the routine and the person in the link", async () => {
+    FIXTURES["/credentials"] = [{ id: "cr1", name: "Prod GitHub token", provider: "GITHUB", type: "API_KEY" }]
+    FIXTURES["/projects"] = [{ id: "p1", name: "Harborlight", slug: "h", color: "blue", icon: "rocket", status: "active", issue_count: 1 }]
+    FIXTURES["/pipelines"] = [{ id: "r1", slug: "classify-ticket", name: "Classify", description: "", status: "active" }]
+    FIXTURES["/members"] = [{ id: "m1", role: "ADMIN", user: { id: "u1", email: "a@x.io", full_name: "A", avatar_url: null } }]
+    openPalette()
+    await group(/credentials/i)
+
+    const hrefOf = (label: string) =>
+      [...document.body.querySelectorAll("[data-href]")]
+        .find((el) => el.textContent?.includes(label))
+        ?.getAttribute("data-href")
+
+    // A row that lands on the index leaves the caller to repeat, by eye, the
+    // search they just did.
+    expect(hrefOf("Prod GitHub token")).toBe("/credentials?id=cr1")
+    expect(hrefOf("Harborlight")).toBe("/issues?project=p1")
+    expect(hrefOf("Classify")).toBe("/routines?slug=classify-ticket")
+    expect(hrefOf("A")).toBe("/settings?tab=members&member=u1")
+  })
+})
