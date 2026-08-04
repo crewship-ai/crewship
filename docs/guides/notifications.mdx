@@ -492,12 +492,18 @@ All routes are workspace-scoped (the workspace comes from your auth context).
 | `PATCH` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Update `enabled`/`categories`/`min_priority`/`events` |
 | `POST` | `/api/v1/notification-channels/{id}/test` | ADMIN/OWNER, or owner for a personal channel | Send a test event |
 | `DELETE` | `/api/v1/notification-channels/{id}` | ADMIN/OWNER, or owner for a personal channel | Delete a channel |
+| `GET` | `/api/v1/notification-channels/{id}/agents` | ADMIN/OWNER, or owner for a personal channel | List agents allowed to send to this channel |
+| `POST` | `/api/v1/notification-channels/{id}/agents` | ADMIN/OWNER, or owner for a personal channel | Allow an agent to send to this channel |
+| `DELETE` | `/api/v1/notification-channels/{id}/agents/{agentId}` | ADMIN/OWNER, or owner for a personal channel | Revoke an agent's access |
 | `GET` | `/api/v1/notification-providers` | member | Chat/push providers, their form fields, and enabled state |
 | `POST` | `/api/v1/notification-channels/test` | member | Test an **unsaved** draft; persists nothing |
 | `PATCH` | `/api/v1/notification-providers/{provider}` | ADMIN/OWNER | Enable/disable a provider instance-wide |
 | `GET` | `/api/v1/me/notification-prefs` | self | Your category x channel matrix |
 | `PUT` | `/api/v1/me/notification-prefs` | self | Upsert one or more cells in your matrix |
 | `GET` | `/api/v1/notification-deliveries` | ADMIN/OWNER | Delivery log, filterable by `status`/`channel_id`/`category` |
+| `GET` | `/api/v1/notification-templates` | ADMIN/OWNER | List workspace notification wording overrides |
+| `PUT` | `/api/v1/notification-templates` | ADMIN/OWNER | Create or replace one wording override |
+| `DELETE` | `/api/v1/notification-templates?category=...&channel_id=...` | ADMIN/OWNER | Remove one wording override; `channel_id` is optional |
 
 <Note>
 A **workspace-scoped** channel write (the default; `personal` omitted or `false`) requires **ADMIN/OWNER** — tightened from MANAGER+ as part of #1412, since a workspace channel is now a shared delivery target for the whole category-preference system, not just a run-terminal broadcast target. A **personal** channel (`personal: true`) is self-service: any authenticated member may create their own, and only its owner (never another member, regardless of role) may update, test, or delete it. `owner_user_id` is always forced to the authenticated caller server-side — never trust a client-supplied owner.

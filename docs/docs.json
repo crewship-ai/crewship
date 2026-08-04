@@ -244,6 +244,7 @@
               "cli/agent",
               "cli/ask",
               "cli/chat",
+              "cli/conversation",
               "cli/feedback",
               "cli/run",
               "cli/resume",
@@ -378,6 +379,7 @@
               "cli/credential",
               "cli/seed",
               "cli/nuke"
+              ,"cli/db"
             ]
           },
           {
@@ -432,6 +434,7 @@
               "api-reference/preferences",
               "api-reference/privacy",
               "api-reference/notifications",
+              "api-reference/notification-channels",
               "api-reference/inbox",
               "api-reference/webhooks",
               "api-reference/websocket",

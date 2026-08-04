@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover lint security mutation sbom notices e2e e2e\:ui validate smoke-cli
+.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover docs-inventory lint security mutation sbom notices e2e e2e\:ui validate smoke-cli
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -127,6 +127,13 @@ cover:
 	go test $(COVER_PKGS) -coverprofile=$(COVERPROFILE) -covermode=atomic -timeout 40m
 	@echo "→ Total coverage:"
 	@go tool cover -func=$(COVERPROFILE) | tail -1
+
+# API/CLI documentation truth inventory. Regenerates the public OpenAPI route
+# catalog, obtains the CLI's own command manifest, and writes the full
+# machine-readable + review-friendly reports under docs/prd/reports/.
+docs-inventory:
+	go run ./cmd/gen-openapi
+	go run ./scripts/docs-inventory
 
 # Regenerates internal/orchestrator/testdata/cli-fixtures/*.ndjson from the
 # REAL upstream CLI binaries — internal/orchestrator/e2e_multi_cli_test.go has
