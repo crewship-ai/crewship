@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import { Menu, Settings as SettingsIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -104,14 +104,23 @@ export function SettingsLayout() {
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
 
   const isMobile = useIsMobile()
-  const [requestedTab, _setActiveTab] = useState(() =>
-    typeof window === "undefined" ? "profile" : initialSettingsTab(window.location.search),
-  )
-  // Read once, on mount, exactly like the tab: this addresses the arrival,
-  // not the state of the page afterwards.
-  const [focusedMember] = useState(() =>
-    typeof window === "undefined" ? "" : initialFocusedMember(window.location.search),
-  )
+
+  // Seeded from useSearchParams, NOT window.location.search.
+  //
+  // The two disagree during a client-side navigation: the App Router renders
+  // the new route before window.location has been updated, so a useState
+  // initializer reading window.location.search on arrival from /crews or the
+  // ⌘K palette saw the OLD url and fell through to "profile". Every settings
+  // deep link in the product landed on Profile — /settings?tab=audit,
+  // ?tab=members, all of them — while a full page load at the same URL worked,
+  // which is what made it look like the links were fine.
+  //
+  // Still read ONCE, in an initializer: after mount the tab is local state and
+  // setActiveTab keeps the URL in step with history.replaceState (which
+  // deliberately does not re-run this).
+  const searchParams = useSearchParams()
+  const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(searchParams.toString()))
+  const [focusedMember] = useState(() => initialFocusedMember(searchParams.toString()))
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // A deep link can name a section this role cannot see (/settings?tab=audit

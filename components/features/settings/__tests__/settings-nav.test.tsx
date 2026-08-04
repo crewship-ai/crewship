@@ -169,7 +169,10 @@ vi.mock("next/navigation", () => ({
     forward: vi.fn(),
     refresh: vi.fn(),
   }),
-  useSearchParams: () => new URLSearchParams(),
+  // Reads the real location, so the history.replaceState calls below still
+  // set the URL under test — and so this models the browser, where
+  // useSearchParams reflects the current url rather than an empty set.
+  useSearchParams: () => new URLSearchParams(window.location.search),
   usePathname: () => "/settings",
 }))
 
