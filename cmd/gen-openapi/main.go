@@ -57,6 +57,8 @@ type route struct {
 	start  int
 	call   string
 	annot  string
+	auth   bool
+	ws     bool
 }
 
 type handlerInfo struct {
@@ -144,11 +146,15 @@ func run() error {
 //     effect of #1308's internal-detail scrub for no benefit to a real API
 //     consumer (who has no use for endpoints they can't call anyway).
 func addRoute(seen map[route]bool, routes *[]route, method, path, file string, start int, src string) {
-	if strings.HasPrefix(path, "/exposed/") || strings.HasPrefix(path, "/api/v1/internal/") {
+	if strings.HasPrefix(path, "/exposed/") || strings.HasPrefix(path, "/api/v1/internal/") || strings.HasPrefix(path, "/api/auth/") {
 		return
 	}
 	call := registrationCall(src, start)
-	rt := route{method: method, path: path, source: file, start: start, call: call, annot: routeAnnotation(src, start)}
+	rt := route{
+		method: method, path: path, source: file, start: start, call: call,
+		annot: routeAnnotation(src, start), auth: strings.Contains(call, "authed"),
+		ws: strings.Contains(call, "wsCtx") || strings.Contains(call, "RequireWorkspace"),
+	}
 	key := route{method: method, path: path}
 	if seen[key] {
 		return
@@ -234,6 +240,11 @@ func buildDocument(routes []route) map[string]any {
 	genericSchema := map[string]any{"type": "object"}
 	paths := map[string]any{}
 	components := responseComponents()
+	components["securitySchemes"] = map[string]any{
+		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
+		"sessionCookie":       map[string]any{"type": "apiKey", "in": "cookie", "name": "next-auth.session-token"},
+		"secureSessionCookie": map[string]any{"type": "apiKey", "in": "cookie", "name": "__Secure-authjs.session-token"},
+	}
 
 	for _, rt := range routes {
 		opPath := openAPIPath(rt.path)
@@ -288,6 +299,17 @@ func buildDocument(routes []route) map[string]any {
 			"operationId": operationID(rt.method, rt.path),
 			"tags":        []string{tagFor(rt.path)},
 			"responses":   responses,
+		}
+		if rt.auth {
+			op["security"] = []map[string][]string{{"bearerAuth": {}}, {"sessionCookie": {}}, {"secureSessionCookie": {}}}
+		} else {
+			op["security"] = []map[string][]string{}
+		}
+		if rt.ws {
+			params = append(params, map[string]any{
+				"name": "X-Workspace-ID", "in": "header", "required": false,
+				"description": "Workspace ID or slug.", "schema": map[string]any{"type": "string"},
+			})
 		}
 		if len(params) > 0 {
 			op["parameters"] = params
