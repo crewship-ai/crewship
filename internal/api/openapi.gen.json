@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "ActiveRunList": {
+        "items": {
+          "properties": {
+            "cancel_requested": {
+              "type": "boolean"
+            },
+            "concurrency_key": {
+              "type": "string"
+            },
+            "pipeline_id": {
+              "type": "string"
+            },
+            "pipeline_slug": {
+              "type": "string"
+            },
+            "run_id": {
+              "type": "string"
+            },
+            "started_at": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
       "Agent": {
         "properties": {
           "_count": {
@@ -123,6 +153,7 @@
             "type": "string"
           },
           "timeout_seconds": {
+            "format": "int32",
             "type": "integer"
           },
           "tool_profile": {
@@ -142,21 +173,203 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "slug",
+          "agent_role",
+          "status",
+          "cli_adapter",
+          "timeout_seconds",
+          "tool_profile",
+          "memory_enabled",
+          "schedule_enabled",
+          "webhook_require_timestamp",
+          "created_at",
+          "updated_at",
+          "crew",
+          "_count",
+          "ephemeral"
+        ],
         "type": "object"
       },
       "AgentCounts": {
         "properties": {
           "chats": {
+            "format": "int32",
             "type": "integer"
           },
           "credentials": {
+            "format": "int32",
             "type": "integer"
           },
           "skills": {
+            "format": "int32",
             "type": "integer"
           }
         },
+        "required": [
+          "skills",
+          "credentials",
+          "chats"
+        ],
         "type": "object"
+      },
+      "AgentCreateRequest": {
+        "properties": {
+          "agent_role": {
+            "enum": [
+              "AGENT",
+              "LEAD"
+            ],
+            "type": "string"
+          },
+          "avatar_seed": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cli_adapter": {
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_mode": {
+            "enum": [
+              "active",
+              "passive"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_provider": {
+            "nullable": true,
+            "type": "string"
+          },
+          "memory_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tool_profile": {
+            "enum": [
+              "MINIMAL",
+              "CODING",
+              "FULL"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug",
+          "agent_role",
+          "cli_adapter",
+          "timeout_seconds",
+          "tool_profile",
+          "memory_enabled"
+        ],
+        "type": "object"
+      },
+      "AgentCredential": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_name": {
+            "type": "string"
+          },
+          "credential_provider": {
+            "type": "string"
+          },
+          "credential_status": {
+            "type": "string"
+          },
+          "credential_type": {
+            "type": "string"
+          },
+          "env_var_name": {
+            "type": "string"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "grant_source": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lease_issued_at": {
+            "type": "string"
+          },
+          "lease_source": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "credential_id",
+          "credential_name",
+          "credential_type",
+          "credential_provider",
+          "credential_status",
+          "env_var_name",
+          "priority",
+          "created_at",
+          "expired",
+          "grant_source"
+        ],
+        "type": "object"
+      },
+      "AgentCredentialList": {
+        "items": {
+          "$ref": "#/components/schemas/AgentCredential"
+        },
+        "type": "array"
       },
       "AgentCrew": {
         "properties": {
@@ -175,6 +388,10 @@
             "type": "string"
           }
         },
+        "required": [
+          "name",
+          "slug"
+        ],
         "type": "object"
       },
       "AgentList": {
@@ -182,6 +399,612 @@
           "$ref": "#/components/schemas/Agent"
         },
         "type": "array"
+      },
+      "AgentSubSpan": {
+        "properties": {
+          "detail": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "input_truncated": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "output": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "output_truncated": {
+            "type": "boolean"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AgentUpdateRequest": {
+        "properties": {
+          "agent_role": {
+            "enum": [
+              "AGENT",
+              "LEAD"
+            ],
+            "type": "string"
+          },
+          "avatar_seed": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cli_adapter": {
+            "type": "string"
+          },
+          "cli_tools": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_mode": {
+            "enum": [
+              "active",
+              "passive"
+            ],
+            "type": "string"
+          },
+          "llm_model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "llm_provider": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mcp_config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "memory_enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role_title": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_cron": {
+            "nullable": true,
+            "type": "string"
+          },
+          "schedule_enabled": {
+            "type": "boolean"
+          },
+          "schedule_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "system_prompt": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tool_profile": {
+            "enum": [
+              "MINIMAL",
+              "CODING",
+              "FULL"
+            ],
+            "type": "string"
+          },
+          "webhook_require_timestamp": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "BulkReplayRequest": {
+        "properties": {
+          "fingerprint": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "BulkReplayResult": {
+        "properties": {
+          "replayed": {
+            "type": "integer"
+          },
+          "requested": {
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayOutcome"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Credential": {
+        "properties": {
+          "_count_agent_credentials": {
+            "type": "integer"
+          },
+          "account_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "account_label": {
+            "nullable": true,
+            "type": "string"
+          },
+          "agent_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "created_by_actor_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_by_actor_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endpoint_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_checked_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "last_error": {
+            "nullable": true,
+            "type": "string"
+          },
+          "last_used_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "last_used_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mcp_used": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provisioned_for_service": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "security_level": {
+            "type": "integer"
+          },
+          "security_level_label": {
+            "type": "string"
+          },
+          "sensitivity": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "testable": {
+            "type": "boolean"
+          },
+          "token_expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "username": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "provider",
+          "status",
+          "scope",
+          "crew_ids",
+          "testable",
+          "sensitivity",
+          "security_level",
+          "security_level_label",
+          "last_used_ips",
+          "tags",
+          "created_at",
+          "updated_at",
+          "_count_agent_credentials",
+          "agent_names",
+          "mcp_used"
+        ],
+        "type": "object"
+      },
+      "CredentialBinding": {
+        "properties": {
+          "agent_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_name": {
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "slot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "credential_id",
+          "credential_name",
+          "scope",
+          "slot",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CredentialBindingList": {
+        "properties": {
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialBinding"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "CredentialBindingRequest": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "slot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "scope",
+          "slot"
+        ],
+        "type": "object"
+      },
+      "CredentialCreateRequest": {
+        "properties": {
+          "account_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "account_label": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_by_actor_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_by_actor_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "oauth_auth_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_client_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_client_secret": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_scopes": {
+            "nullable": true,
+            "type": "string"
+          },
+          "oauth_token_url": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provisioned_for_service": {
+            "nullable": true,
+            "type": "string"
+          },
+          "refresh_token": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "security_level": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "token_expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "username": {
+            "nullable": true,
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "CredentialField": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "is_secret": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "value": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "is_secret",
+          "ordinal"
+        ],
+        "type": "object"
+      },
+      "CredentialFieldList": {
+        "items": {
+          "$ref": "#/components/schemas/CredentialField"
+        },
+        "type": "array"
+      },
+      "CredentialFieldRequest": {
+        "properties": {
+          "is_secret": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "CredentialList": {
+        "items": {
+          "$ref": "#/components/schemas/Credential"
+        },
+        "type": "array"
+      },
+      "CredentialPage": {
+        "properties": {
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/Credential"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "credentials",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "CredentialRotationRequest": {
+        "properties": {
+          "endpoint_auth_token": {
+            "type": "string"
+          },
+          "endpoint_base_url": {
+            "type": "string"
+          },
+          "endpoint_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "grace_seconds": {
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
       },
       "Crew": {
         "properties": {
@@ -214,12 +1037,15 @@
             "type": "string"
           },
           "container_cpus": {
+            "format": "double",
             "type": "number"
           },
           "container_memory_mb": {
+            "format": "int32",
             "type": "integer"
           },
           "container_ttl_hours": {
+            "format": "int32",
             "nullable": true,
             "type": "integer"
           },
@@ -250,6 +1076,7 @@
             "type": "string"
           },
           "max_ephemeral_agents": {
+            "format": "int32",
             "type": "integer"
           },
           "mcp_config_json": {
@@ -290,17 +1117,109 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "slug",
+          "container_memory_mb",
+          "container_cpus",
+          "network_mode",
+          "network_mode_enforced",
+          "allowed_domains",
+          "allow_private_endpoints",
+          "max_ephemeral_agents",
+          "created_at",
+          "updated_at",
+          "_count"
+        ],
         "type": "object"
       },
       "CrewCounts": {
         "properties": {
           "agents": {
+            "format": "int32",
             "type": "integer"
           },
           "members": {
+            "format": "int32",
             "type": "integer"
           }
         },
+        "required": [
+          "agents",
+          "members"
+        ],
+        "type": "object"
+      },
+      "CrewCreateRequest": {
+        "properties": {
+          "allow_private_endpoints": {
+            "type": "boolean"
+          },
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "container_cpus": {
+            "format": "double",
+            "type": "number"
+          },
+          "container_memory_mb": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "container_ttl_hours": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "devcontainer_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mise_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "runtime_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "services_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
         "type": "object"
       },
       "CrewList": {
@@ -308,6 +1227,245 @@
           "$ref": "#/components/schemas/Crew"
         },
         "type": "array"
+      },
+      "CrewUpdateRequest": {
+        "properties": {
+          "allow_private_endpoints": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "container_cpus": {
+            "format": "double",
+            "type": "number"
+          },
+          "container_memory_mb": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "container_ttl_hours": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "devcontainer_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "escalation_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "issue_prefix": {
+            "nullable": true,
+            "type": "string"
+          },
+          "max_ephemeral_agents": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "mcp_config_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mise_config": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "network_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "runtime_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "services_json": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DryRunStep": {
+        "properties": {
+          "agent_slug": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "tier": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FailureGroup": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "failed_at_step": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sample_error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FailureGroupList": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/FailureGroup"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "HireRequest": {
+        "properties": {
+          "crew_id": {
+            "type": "string"
+          },
+          "crew_slug": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "parent_lead_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "template_slug": {
+            "type": "string"
+          },
+          "ttl_minutes": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "HireResponse": {
+        "properties": {
+          "approval_id": {
+            "type": "string"
+          },
+          "crew_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "ephemeral": {
+            "type": "boolean"
+          },
+          "expired_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "hire_reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inbox_item_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pending_review": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "slug",
+          "name",
+          "status",
+          "ephemeral",
+          "pending_review",
+          "decision"
+        ],
+        "type": "object"
       },
       "InstalledSkillAgent": {
         "properties": {
@@ -320,28 +1478,48 @@
           "agent_slug": {
             "type": "string"
           },
+          "avatar_seed": {
+            "nullable": true,
+            "type": "string"
+          },
+          "avatar_style": {
+            "nullable": true,
+            "type": "string"
+          },
           "avatar_url": {
+            "nullable": true,
             "type": "string"
           },
           "crew_avatar_style": {
+            "nullable": true,
             "type": "string"
           },
           "crew_color": {
+            "nullable": true,
             "type": "string"
           },
           "crew_icon": {
+            "nullable": true,
             "type": "string"
           },
           "crew_id": {
+            "nullable": true,
             "type": "string"
           },
           "crew_name": {
+            "nullable": true,
             "type": "string"
           },
           "crew_slug": {
+            "nullable": true,
             "type": "string"
           }
         },
+        "required": [
+          "agent_id",
+          "agent_slug",
+          "agent_name"
+        ],
         "type": "object"
       },
       "Issue": {
@@ -469,6 +1647,136 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "workspace_id",
+          "crew_id",
+          "title",
+          "status",
+          "priority",
+          "sort_order",
+          "mission_type",
+          "lead_agent_id",
+          "created_at",
+          "updated_at",
+          "labels"
+        ],
+        "type": "object"
+      },
+      "IssueBulkUpdateRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updates": {
+            "properties": {
+              "assignee_id": {
+                "nullable": true,
+                "type": "string"
+              },
+              "assignee_type": {
+                "nullable": true,
+                "type": "string"
+              },
+              "labels": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "priority": {
+                "nullable": true,
+                "type": "string"
+              },
+              "project_id": {
+                "nullable": true,
+                "type": "string"
+              },
+              "status": {
+                "nullable": true,
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "priority",
+              "assignee_type",
+              "assignee_id",
+              "project_id",
+              "labels"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "ids",
+          "updates"
+        ],
+        "type": "object"
+      },
+      "IssueCreateRequest": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "estimate": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "parent_issue_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_inputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
         "type": "object"
       },
       "IssueCreator": {
@@ -483,6 +1791,10 @@
             "type": "string"
           }
         },
+        "required": [
+          "type",
+          "id"
+        ],
         "type": "object"
       },
       "IssueList": {
@@ -490,6 +1802,75 @@
           "$ref": "#/components/schemas/Issue"
         },
         "type": "array"
+      },
+      "IssueUpdateRequest": {
+        "properties": {
+          "assignee_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "assignee_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "due_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "estimate": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "milestone_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "parent_issue_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "project_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "routine_inputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "sort_order": {
+            "nullable": true,
+            "type": "number"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "title": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
       },
       "Label": {
         "properties": {
@@ -504,6 +1885,53 @@
             "type": "string"
           },
           "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "color"
+        ],
+        "type": "object"
+      },
+      "LabelCreateRequest": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color"
+        ],
+        "type": "object"
+      },
+      "LabelList": {
+        "items": {
+          "$ref": "#/components/schemas/Label"
+        },
+        "type": "array"
+      },
+      "LabelUpdateRequest": {
+        "properties": {
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "label_group": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
             "type": "string"
           }
         },
@@ -526,13 +1954,204 @@
         },
         "type": "object"
       },
-      "ProjectList": {
+      "PipelineRun": {
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "current_step_id": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "failed_at_step": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "is_replay": {
+            "type": "boolean"
+          },
+          "issue_identifier": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_name": {
+            "type": "string"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "replay_of": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "step_outputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "sub_spans": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/AgentSubSpan"
+              },
+              "type": "array"
+            },
+            "type": "object"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "triggered_by_id": {
+            "type": "string"
+          },
+          "triggered_via": {
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/RunWarning"
+            },
+            "type": "array"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PipelineRunList": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineRun"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "PipelineRunRequest": {
+        "properties": {
+          "debounce_key": {
+            "type": "string"
+          },
+          "debounce_max_seconds": {
+            "type": "integer"
+          },
+          "debounce_window_seconds": {
+            "type": "integer"
+          },
+          "delay_seconds": {
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "idempotency_key_ttl_seconds": {
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tier_override": {
+            "type": "string"
+          },
+          "triggered_by_id": {
+            "type": "string"
+          },
+          "triggered_via": {
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "PipelineRunTree": {
         "items": {
-          "$ref": "#/components/schemas/ProjectListItem"
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "id": {
+              "type": "string"
+            },
+            "parent_id": {
+              "type": "string"
+            },
+            "pipeline_slug": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "triggered_via": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
         "type": "array"
       },
-      "ProjectListItem": {
+      "Project": {
         "properties": {
           "color": {
             "type": "string"
@@ -545,6 +2164,7 @@
             "type": "string"
           },
           "done_count": {
+            "format": "int32",
             "type": "integer"
           },
           "health": {
@@ -558,6 +2178,7 @@
             "type": "string"
           },
           "issue_count": {
+            "format": "int32",
             "type": "integer"
           },
           "lead_id": {
@@ -579,6 +2200,7 @@
             "type": "string"
           },
           "progress": {
+            "format": "int32",
             "type": "integer"
           },
           "slug": {
@@ -599,6 +2221,257 @@
             "type": "string"
           },
           "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "slug",
+          "color",
+          "status",
+          "priority",
+          "health",
+          "created_at",
+          "updated_at",
+          "issue_count",
+          "done_count",
+          "progress"
+        ],
+        "type": "object"
+      },
+      "ProjectCreateRequest": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ProjectList": {
+        "items": {
+          "$ref": "#/components/schemas/Project"
+        },
+        "type": "array"
+      },
+      "ProjectListItem": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "done_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "health": {
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "issue_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_type": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "progress": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "slug",
+          "color",
+          "status",
+          "priority",
+          "health",
+          "created_at",
+          "updated_at",
+          "issue_count",
+          "done_count",
+          "progress"
+        ],
+        "type": "object"
+      },
+      "ProjectUpdateRequest": {
+        "properties": {
+          "color": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "health": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "lead_type": {
+            "enum": [
+              "user",
+              "agent"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "priority": {
+            "nullable": true,
+            "type": "string"
+          },
+          "start_date": {
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "nullable": true,
+            "type": "string"
+          },
+          "target_date": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReplayOutcome": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "new_run_id": {
+            "type": "string"
+          },
+          "source_run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ReplayRequest": {
+        "properties": {
+          "pinned_version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RoutineState": {
+        "properties": {
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/StateBucket"
+            },
+            "type": "array"
+          },
+          "slug": {
             "type": "string"
           }
         },
@@ -688,6 +2561,155 @@
         },
         "type": "object"
       },
+      "RunLogEntry": {
+        "properties": {
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ts": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RunLogList": {
+        "items": {
+          "$ref": "#/components/schemas/RunLogEntry"
+        },
+        "type": "array"
+      },
+      "RunRecord": {
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "current_step_id": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error_fingerprint": {
+            "type": "string"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "failed_at_step": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "triggered_by_id": {
+            "type": "string"
+          },
+          "triggered_via": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RunRecordList": {
+        "items": {
+          "$ref": "#/components/schemas/RunRecord"
+        },
+        "type": "array"
+      },
+      "RunResult": {
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "current_step": {
+            "type": "string"
+          },
+          "deduped": {
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "error_message": {
+            "type": "string"
+          },
+          "failed_at_step": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "pipeline_id": {
+            "type": "string"
+          },
+          "pipeline_slug": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "COMPLETED",
+              "FAILED",
+              "CANCELLED",
+              "DEDUPED",
+              "WAITING",
+              "DRY_RUN_OK"
+            ],
+            "type": "string"
+          },
+          "step_outputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "waitpoint_token": {
+            "type": "string"
+          },
+          "would_execute": {
+            "items": {
+              "$ref": "#/components/schemas/DryRunStep"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "RunStats": {
         "properties": {
           "failed": {
@@ -698,6 +2720,175 @@
           },
           "today": {
             "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "RunWarning": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Schedule": {
+        "properties": {
+          "catchup_policy": {
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "disabled_reason": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "last_missed_count": {
+            "type": "integer"
+          },
+          "last_run_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_run_id": {
+            "type": "string"
+          },
+          "last_status": {
+            "type": "string"
+          },
+          "last_wake_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_wake_status": {
+            "type": "string"
+          },
+          "max_consecutive_failures": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_run_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "target_pipeline_id": {
+            "type": "string"
+          },
+          "target_pipeline_slug": {
+            "type": "string"
+          },
+          "target_pipeline_version": {
+            "type": "integer"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "wake_check_count": {
+            "type": "integer"
+          },
+          "wake_fail_closed": {
+            "type": "boolean"
+          },
+          "wake_fire_count": {
+            "type": "integer"
+          },
+          "wake_inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "wake_pipeline_id": {
+            "type": "string"
+          },
+          "wake_pipeline_slug": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "ScheduleList": {
+        "items": {
+          "$ref": "#/components/schemas/Schedule"
+        },
+        "type": "array"
+      },
+      "ScheduleRequest": {
+        "properties": {
+          "catchup_policy": {
+            "type": "string"
+          },
+          "cron_expr": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "max_consecutive_failures": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target_pipeline_id": {
+            "type": "string"
+          },
+          "target_pipeline_slug": {
+            "type": "string"
+          },
+          "target_pipeline_version": {
+            "type": "integer"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "wake_fail_closed": {
+            "type": "boolean"
+          },
+          "wake_inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "wake_pipeline_id": {
+            "type": "string"
+          },
+          "wake_pipeline_slug": {
+            "type": "string"
           }
         },
         "type": "object"
@@ -802,11 +2993,300 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "display_name",
+          "version",
+          "category",
+          "source",
+          "verification",
+          "downloads",
+          "rating_count",
+          "featured",
+          "pricing_tier",
+          "runtime",
+          "maturity",
+          "scan_status",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "SkillDetail": {
+        "properties": {
+          "agent_count": {
+            "type": "integer"
+          },
+          "allowed_domains": {
+            "nullable": true,
+            "type": "string"
+          },
+          "author": {
+            "nullable": true,
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "changelog": {
+            "nullable": true,
+            "type": "string"
+          },
+          "content": {
+            "nullable": true,
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "credential_requirements": {
+            "nullable": true,
+            "type": "string"
+          },
+          "dependencies": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "description_quality": {
+            "nullable": true,
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "downloads": {
+            "type": "integer"
+          },
+          "featured": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "nullable": true,
+            "type": "string"
+          },
+          "icon": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "installed_on": {
+            "items": {
+              "$ref": "#/components/schemas/InstalledSkillAgent"
+            },
+            "type": "array"
+          },
+          "license": {
+            "nullable": true,
+            "type": "string"
+          },
+          "maturity": {
+            "type": "string"
+          },
+          "mcp_server_command": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mcp_server_image": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mcp_transport": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pricing_tier": {
+            "type": "string"
+          },
+          "rating_avg": {
+            "nullable": true,
+            "type": "number"
+          },
+          "rating_count": {
+            "type": "integer"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "scan_status": {
+            "type": "string"
+          },
+          "security_score": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "spdx_license": {
+            "nullable": true,
+            "type": "string"
+          },
+          "tags": {
+            "nullable": true,
+            "type": "string"
+          },
+          "tool_count": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "vendor": {
+            "nullable": true,
+            "type": "string"
+          },
+          "verification": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "display_name",
+          "version",
+          "category",
+          "source",
+          "verification",
+          "downloads",
+          "rating_count",
+          "featured",
+          "pricing_tier",
+          "runtime",
+          "maturity",
+          "scan_status",
+          "created_at",
+          "updated_at",
+          "agent_count"
+        ],
+        "type": "object"
+      },
+      "SkillImportRequest": {
+        "properties": {
+          "allow_unsafe_license": {
+            "type": "boolean"
+          },
+          "content": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "SkillList": {
         "items": {
           "$ref": "#/components/schemas/Skill"
+        },
+        "type": "array"
+      },
+      "StateBucket": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/StateEntry"
+            },
+            "type": "array"
+          },
+          "schedule_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateEntry": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StateWriteRequest": {
+        "properties": {
+          "schedule_id": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Waitpoint": {
+        "properties": {
+          "callback_url": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "invoking_crew_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "pipeline_run_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "timeout_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WaitpointApprovalRequest": {
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "comment": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WaitpointList": {
+        "items": {
+          "$ref": "#/components/schemas/Waitpoint"
         },
         "type": "array"
       },
@@ -816,12 +3296,15 @@
             "$ref": "#/components/schemas/WorkspaceCounts"
           },
           "_count_agents": {
+            "format": "int32",
             "type": "integer"
           },
           "_count_crews": {
+            "format": "int32",
             "type": "integer"
           },
           "_count_members": {
+            "format": "int32",
             "type": "integer"
           },
           "allow_privileged_credentials": {
@@ -855,6 +3338,7 @@
             "type": "string"
           },
           "run_retention_days": {
+            "format": "int32",
             "nullable": true,
             "type": "integer"
           },
@@ -865,20 +3349,55 @@
             "type": "string"
           }
         },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "created_at",
+          "updated_at",
+          "allow_privileged_credentials"
+        ],
         "type": "object"
       },
       "WorkspaceCounts": {
         "properties": {
           "agents": {
+            "format": "int32",
             "type": "integer"
           },
           "crews": {
+            "format": "int32",
             "type": "integer"
           },
           "members": {
+            "format": "int32",
             "type": "integer"
           }
         },
+        "required": [
+          "crews",
+          "agents",
+          "members"
+        ],
+        "type": "object"
+      },
+      "WorkspaceCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "preferred_language": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
         "type": "object"
       },
       "WorkspaceList": {
@@ -886,6 +3405,32 @@
           "$ref": "#/components/schemas/Workspace"
         },
         "type": "array"
+      },
+      "WorkspaceUpdateRequest": {
+        "properties": {
+          "allow_privileged_credentials": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "preferred_language": {
+            "nullable": true,
+            "type": "string"
+          },
+          "run_retention_days": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "slug": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -1954,6 +4499,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -1964,6 +4514,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -1974,6 +4529,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -1984,6 +4544,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -2504,7 +5069,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -2622,6 +5191,29 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "no_encrypt": {
+                    "type": "boolean"
+                  },
+                  "output_dir": {
+                    "type": "string"
+                  },
+                  "passphrase": {
+                    "type": "string"
+                  },
+                  "recipient": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scope_level": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -2632,6 +5224,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -2642,6 +5235,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -2965,6 +5559,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -3116,6 +5711,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -3206,6 +5802,32 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "as_crew": {
+                    "type": "string"
+                  },
+                  "as_workspace": {
+                    "type": "string"
+                  },
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "files_only": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "type": "string"
+                  },
+                  "passphrase": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "replace": {
+                    "type": "boolean"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -3216,6 +5838,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -3406,6 +6029,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -3566,6 +6190,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -3906,6 +6531,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -4067,6 +6693,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -4248,6 +6875,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -4739,6 +7367,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -5578,6 +8207,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -5696,6 +8326,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -6017,6 +8648,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -6135,6 +8767,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -7330,6 +9963,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -7340,6 +9974,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -7350,6 +9985,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -7360,6 +9996,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -9142,6 +11779,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "level": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9230,6 +11872,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "level": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -9361,6 +12008,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "versions_retention_days": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9509,6 +12161,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "versions_retention_days": {
+                    "type": "integer"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -9519,6 +12176,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "versions_retention_days": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9670,6 +12332,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -9879,7 +12542,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -10040,13 +12707,11 @@
             "content": {
               "application/octet-stream": {
                 "schema": {
-                  "format": "binary",
                   "type": "string"
                 }
               },
               "text/markdown": {
                 "schema": {
-                  "format": "binary",
                   "type": "string"
                 }
               }
@@ -10578,7 +13243,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -10867,6 +13536,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "window_seconds": {
+                    "type": "integer"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -11237,6 +13914,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "rewritten": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -11358,6 +14043,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -11531,6 +14217,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -11764,7 +14451,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -12094,6 +14785,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -12215,7 +14907,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -12605,7 +15301,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/AgentCreateRequest"
               }
             }
           }
@@ -12967,7 +15663,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/HireRequest"
               }
             }
           }
@@ -13494,7 +16190,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/AgentUpdateRequest"
               }
             }
           }
@@ -15000,7 +17696,8 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "format": "binary",
+                "type": "string"
               }
             }
           }
@@ -15010,6 +17707,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -15020,6 +17718,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -15376,7 +18075,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -16479,7 +19182,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -16872,6 +19579,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -16882,6 +19597,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -23474,6 +26190,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -23484,6 +26205,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -24539,6 +27261,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -24549,6 +27276,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -24559,6 +27291,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -24569,6 +27306,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -25150,6 +27892,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "new_password": {
+                    "type": "string"
+                  },
+                  "token": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -25160,6 +27910,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -25471,6 +28222,17 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "full_name": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -25481,6 +28243,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -25571,6 +28334,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -25581,6 +28345,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -25591,6 +28356,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -31496,7 +34262,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CredentialList"
                 }
               }
             },
@@ -31614,7 +34380,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CredentialCreateRequest"
               }
             }
           }
@@ -31826,7 +34592,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CredentialBindingList"
                 }
               }
             },
@@ -31974,7 +34740,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CredentialBindingRequest"
               }
             }
           }
@@ -33092,7 +35858,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/Credential"
                 }
               }
             },
@@ -33836,7 +36602,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CredentialFieldList"
                 }
               }
             },
@@ -36752,7 +39518,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CrewCreateRequest"
               }
             }
           }
@@ -37289,7 +40055,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CrewUpdateRequest"
               }
             }
           }
@@ -37487,7 +40253,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/CrewUpdateRequest"
               }
             }
           }
@@ -38900,7 +41666,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -39492,6 +42262,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -39502,6 +42280,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -49273,6 +52052,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -54374,7 +57154,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -55260,7 +58044,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -55388,6 +58176,24 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "apps": {
+                    "items": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "toolkits": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -55398,6 +58204,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -55578,6 +58385,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "toolkit": {
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -55588,6 +58403,17 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "connected_account_id": {
+                      "type": "string"
+                    },
+                    "redirect_url": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -55720,6 +58546,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -55838,6 +58665,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -55848,6 +58680,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -55980,6 +58813,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -56545,7 +59379,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -56701,7 +59539,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -56857,7 +59699,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -56975,6 +59821,18 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "config": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "slug": {
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -56985,6 +59843,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -57117,7 +59976,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -57249,7 +60112,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -59907,7 +62774,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/LabelCreateRequest"
               }
             }
           }
@@ -60196,7 +63063,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/LabelUpdateRequest"
               }
             }
           }
@@ -60932,6 +63799,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -61080,6 +63948,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -61090,6 +63959,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -61675,11 +64545,6 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              },
               "application/zip": {
                 "schema": {
                   "format": "binary",
@@ -61853,6 +64718,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -62033,6 +64899,21 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "agent_slug": {
+                    "type": "string"
+                  },
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "documents": {
+                    "items": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -62043,6 +64924,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -62193,6 +65075,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "limit": {
+                    "type": "integer"
+                  },
+                  "query": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -62203,7 +65093,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -62381,7 +65275,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -62559,6 +65457,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -62759,6 +65658,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -64296,7 +67196,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -64444,6 +67348,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -64454,6 +67359,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -64464,6 +67370,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -65974,7 +68881,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -66136,7 +69047,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -66675,7 +69590,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -67003,7 +69922,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -67135,6 +70058,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -67841,6 +70769,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -68141,6 +71070,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -68151,6 +71088,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -68379,6 +71317,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -68389,6 +71335,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -68760,7 +71707,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -70643,7 +73594,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/ProjectCreateRequest"
               }
             }
           }
@@ -71100,7 +74051,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/ProjectUpdateRequest"
               }
             }
           }
@@ -73619,6 +76570,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -75472,6 +78424,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -75563,6 +78516,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -75684,6 +78638,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -75745,6 +78700,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -75806,6 +78762,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -75827,6 +78784,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -76882,6 +79840,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -76892,6 +79851,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -76902,6 +79862,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -76912,6 +79873,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "additionalProperties": true,
                   "type": "object"
                 }
               }
@@ -78918,7 +81880,8 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "format": "binary",
+                "type": "string"
               }
             }
           }
@@ -81750,7 +84713,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkspaceCreateRequest"
               }
             }
           }
@@ -82317,7 +85280,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WorkspaceUpdateRequest"
               }
             }
           }
@@ -84386,7 +87349,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/PipelineRunList"
                 }
               }
             },
@@ -84564,7 +87527,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/PipelineRun"
                 }
               }
             },
@@ -85226,7 +88189,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunLogList"
                 }
               }
             },
@@ -85910,7 +88873,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/PipelineRunTree"
                 }
               }
             },
@@ -86140,7 +89103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ScheduleList"
                 }
               }
             },
@@ -86328,7 +89291,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/ScheduleRequest"
               }
             }
           }
@@ -86783,7 +89746,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/ScheduleRequest"
               }
             }
           }
@@ -89034,7 +91997,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ActiveRunList"
                 }
               }
             },
@@ -89164,7 +92127,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/BulkReplayRequest"
               }
             }
           }
@@ -89382,7 +92345,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FailureGroupList"
                 }
               }
             },
@@ -89818,7 +92781,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/ReplayRequest"
               }
             }
           }
@@ -90378,7 +93341,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WaitpointList"
                 }
               }
             },
@@ -90546,7 +93509,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/WaitpointApprovalRequest"
               }
             }
           }
@@ -93503,7 +96466,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/PipelineRunRequest"
               }
             }
           }
@@ -93805,7 +96768,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunRecordList"
                 }
               }
             },
@@ -94033,7 +96996,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/PipelineRunRequest"
               }
             }
           }
@@ -94297,7 +97260,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RunRecordList"
                 }
               }
             },
@@ -94658,7 +97621,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/RoutineState"
                 }
               }
             },
@@ -95047,7 +98010,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/StateWriteRequest"
               }
             }
           }
@@ -97197,7 +100160,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/SkillImportRequest"
               }
             }
           }

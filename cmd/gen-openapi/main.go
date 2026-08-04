@@ -237,9 +237,18 @@ func pathParams(p string) []string {
 }
 
 func buildDocument(routes []route) map[string]any {
-	genericSchema := map[string]any{"type": "object"}
 	paths := map[string]any{}
 	components := responseComponents()
+	schemas := components["schemas"].(map[string]any)
+	for _, catalog := range []map[string]any{
+		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(),
+	} {
+		for name, schema := range catalog {
+			// Domain catalogs are the audited source of truth.  They intentionally
+			// replace the older fallback entries with the same component name.
+			schemas[name] = schema
+		}
+	}
 	components["securitySchemes"] = map[string]any{
 		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
 		"sessionCookie":       map[string]any{"type": "apiKey", "in": "cookie", "name": "next-auth.session-token"},
@@ -292,7 +301,7 @@ func buildDocument(routes []route) map[string]any {
 				response.(map[string]any)["content"] = map[string]any{"application/problem+json": map[string]any{"schema": problemSchema()}}
 			}
 			if status[0] == '2' {
-				response.(map[string]any)["content"] = responseContent(rt.path, responseSchema(rt))
+				response.(map[string]any)["content"] = responseContentForRoute(rt)
 			}
 		}
 		op := map[string]any{
@@ -316,9 +325,10 @@ func buildDocument(routes []route) map[string]any {
 		}
 		switch rt.method {
 		case "POST", "PUT", "PATCH":
+			request := requestSchema(rt)
 			op["requestBody"] = map[string]any{
 				"content": map[string]any{
-					"application/json": map[string]any{"schema": genericSchema},
+					"application/json": map[string]any{"schema": request},
 				},
 			}
 		}
@@ -338,6 +348,74 @@ func buildDocument(routes []route) map[string]any {
 		"paths":      paths,
 		"components": components,
 	}
+}
+
+func routeSchemaCatalog() map[string]DomainSchema {
+	result := map[string]DomainSchema{}
+	for _, domain := range operationalDomainSchemaCatalog() {
+		for key, schema := range domain {
+			result[key] = schema
+		}
+	}
+	for key, name := range executionResponseSchemas() {
+		result[key] = DomainSchema{Response: ref(name)}
+	}
+	for key, name := range executionRequestSchemas() {
+		schema := result[key]
+		schema.Request = ref(name)
+		result[key] = schema
+	}
+	return result
+}
+
+func responseSchemaName(path string) string {
+	return map[string]string{
+		"GET /api/v1/issues": "IssueList", "GET /api/v1/issues/{identifier}": "Issue",
+		"GET /api/v1/skills": "SkillList", "GET /api/v1/skills/{skillId}": "Skill",
+		"GET /api/v1/credentials": "CredentialList", "GET /api/v1/credentials/{credentialId}": "Credential",
+		"GET /api/v1/credentials/{credentialId}/fields": "CredentialFieldList",
+		"GET /api/v1/credentials/bindings":              "CredentialBindingList",
+	}[path]
+}
+
+func requestSchema(rt route) map[string]any {
+	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.Request != nil {
+		return schema.Request
+	}
+	name := map[string]string{
+		"POST /api/v1/workspaces": "WorkspaceCreateRequest", "PATCH /api/v1/workspaces/{workspaceId}": "WorkspaceUpdateRequest",
+		"POST /api/v1/crews": "CrewCreateRequest", "PATCH /api/v1/crews/{crewId}": "CrewUpdateRequest", "PUT /api/v1/crews/{crewId}": "CrewUpdateRequest",
+		"POST /api/v1/agents": "AgentCreateRequest", "PATCH /api/v1/agents/{agentId}": "AgentUpdateRequest",
+		"POST /api/v1/projects": "ProjectCreateRequest", "PATCH /api/v1/projects/{projectId}": "ProjectUpdateRequest",
+		"POST /api/v1/agents/hire": "HireRequest", "POST /api/v1/labels": "LabelCreateRequest", "PATCH /api/v1/labels/{labelId}": "LabelUpdateRequest",
+		"POST /api/v1/credentials": "CredentialCreateRequest", "POST /api/v1/credentials/bindings": "CredentialBindingRequest",
+		"POST /api/v1/workspaces/{workspaceId}/skills/import": "SkillImportRequest",
+	}[rt.method+" "+rt.path]
+	if name != "" {
+		return ref(name)
+	}
+	return map[string]any{"type": "object"}
+}
+
+func responseSchemaForRoute(rt route) map[string]any {
+	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.Response != nil {
+		return schema.Response
+	}
+	if name := responseSchemaName(rt.method + " " + rt.path); name != "" {
+		return ref(name)
+	}
+	return responseSchema(rt)
+}
+
+func responseContentForRoute(rt route) map[string]any {
+	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && len(schema.ResponseMedia) > 0 {
+		content := map[string]any{}
+		for _, media := range schema.ResponseMedia {
+			content[media] = map[string]any{"schema": schema.Response}
+		}
+		return content
+	}
+	return responseContent(rt.path, responseSchemaForRoute(rt))
 }
 
 // responseSchema returns the schema for an audited read-only endpoint. Keep
