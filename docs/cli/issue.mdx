@@ -360,9 +360,15 @@ crewship issue link BE-42 https://ghe.acme.internal/platform/gw/pull/12
 ```
 
 The provider is recognised from the URL's path (`/pull/` → GitHub,
-`/-/merge_requests/` → GitLab), so self-hosted instances of either work with no
-configuration. Crewship then fetches the request through that provider's API
-using a stored `GITHUB` / `GITLAB` credential in the workspace.
+`/-/merge_requests/` → GitLab), so **recognising** a self-hosted instance of
+either needs no provider-specific configuration. Crewship then fetches the
+request through that provider's API using a stored `GITHUB` / `GITLAB`
+credential in the workspace.
+
+Two things a self-hosted forge does still need: a credential labelled with its
+host (below), and — if it lives on a private/intranet address — the operator
+opt-in described in [Git links](/guides/git-links#self-hosted-forges-on-a-private-network).
+Without the opt-in the fetch is refused with `blocked-host`.
 
 For a self-hosted forge, set the credential's **account label** to the forge's
 host so it is matched by host:

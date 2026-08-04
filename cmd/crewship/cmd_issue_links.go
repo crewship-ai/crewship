@@ -104,7 +104,13 @@ var issueLinksCmd = &cobra.Command{
 			}
 			branch := "—"
 			if l.SourceBranch != nil && l.TargetBranch != nil {
-				branch = *l.SourceBranch + " → " + *l.TargetBranch
+				// Branch names come out of provider JSON, same as the title.
+				// git's own refname rules forbid ASCII control bytes, but the
+				// rule that matters here is the one we enforce, not the one
+				// the forge is supposed to: this string is printed to a
+				// terminal, and a compromised or non-git-backed provider can
+				// put anything in the field.
+				branch = sanitizeTerminal(*l.SourceBranch) + " → " + sanitizeTerminal(*l.TargetBranch)
 			}
 			rows = append(rows, []string{
 				truncateID(l.ID, 12),

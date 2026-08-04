@@ -790,6 +790,7 @@ because several failures share a status:
 
 | Status | `code` | Condition |
 |---|---|---|
+| `400` | `invalid-body` | The request body is not valid JSON |
 | `400` | `unsupported-url` | Not a recognised pull-request / merge-request URL |
 | `403` | — | Caller lacks the MANAGER floor |
 | `404` | `issue-not-found` | No such issue in this crew/workspace |
@@ -801,6 +802,7 @@ because several failures share a status:
 | `502` | `credential-rejected` | Provider returned 401 — token revoked or expired |
 | `502` | `credential-forbidden` | Token valid but lacks repository read access |
 | `502` | `provider-unavailable` | Provider returned 5xx or did not answer |
+| `502` | `cross-host-redirect` | The provider redirected off its own host; not followed, because the request carries a credential |
 
 ### Refresh a code link
 

@@ -51,6 +51,11 @@ var (
 	// ErrUnexpectedStatus — anything else, including a 200 whose body is
 	// not the JSON we asked for (a captive portal or an SSO login page).
 	ErrUnexpectedStatus = errors.New("gitlink: unexpected response from the provider")
+	// ErrCrossHostRedirect — the provider tried to redirect the request onto
+	// a different host. Refused because the credential rides on the request:
+	// see the CheckRedirect hook in NewClient for why httpsafe alone does not
+	// cover this.
+	ErrCrossHostRedirect = errors.New("gitlink: the provider redirected to a different host")
 )
 
 // maxResponseBytes caps what we read from a provider. A GitHub pull-request
@@ -151,7 +156,8 @@ type Client struct {
 // host at connect time and refuses the resolved IP, which is what closes DNS
 // rebinding and split-horizon aliases (a public name whose A record answers
 // 127.0.0.1). Redirects are re-validated per hop so a permitted host cannot
-// bounce us into a refused one.
+// bounce us into a refused one, and are pinned to the originating host — see
+// ErrCrossHostRedirect.
 func NewClient(allowPrivate bool) *Client {
 	schemes := []string{"https"}
 	if allowPrivate {
@@ -164,6 +170,25 @@ func NewClient(allowPrivate bool) *Client {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("gitlink: too many redirects")
+			}
+			// Pin the redirect to the host the request started on.
+			//
+			// Re-validating the hop against httpsafe is NOT enough here, and
+			// the reason is specific to GitLab: its credential travels in
+			// PRIVATE-TOKEN, a CUSTOM header. net/http only strips
+			// Authorization, Www-Authenticate and Cookie when a redirect
+			// crosses to a different host (shouldCopyHeaderOnRedirect); every
+			// other header is copied verbatim. So a forge that answers 302
+			// with a Location on a host it does not own — a compromised
+			// instance, a misconfigured proxy, or a repository setting an
+			// attacker controls — would hand that host a live GitLab PAT, and
+			// httpsafe would wave it through because the target is a perfectly
+			// ordinary public address.
+			//
+			// Same-host redirects stay allowed: those are the legitimate ones
+			// (a renamed repository answers 301 on the same API host).
+			if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+				return fmt.Errorf("%w: %s -> %s", ErrCrossHostRedirect, via[0].URL.Host, req.URL.Host)
 			}
 			_, err := httpsafe.ValidateURLForEndpoint(req.URL.String(), allowPrivate, schemes...)
 			return err
@@ -237,6 +262,16 @@ func (c *Client) Fetch(ctx context.Context, ref Ref, token string) (Details, err
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// A redirect that tried to leave the originating host is a refusal
+		// about where the CREDENTIAL may go, not about the address. Keep it
+		// as its own sentinel so the API layer can say so.
+		if errors.Is(err, ErrCrossHostRedirect) {
+			return Details{}, &FetchError{
+				Err:      ErrCrossHostRedirect,
+				Provider: ref.Provider,
+				Detail:   "the request carries a credential, so it is not followed off the host it was issued for",
+			}
+		}
 		// Layer 2 rejects at dial time (rebind / split-horizon DNS). That
 		// is a policy refusal, not an outage, and must not be reported as
 		// "the provider is down".

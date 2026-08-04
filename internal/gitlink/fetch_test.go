@@ -134,6 +134,77 @@ func TestFetch_StrictModeRejectsPlainHTTP(t *testing.T) {
 	}
 }
 
+// ─── redirects must not carry the credential off-host ────────────────────
+
+// GitLab's credential rides in PRIVATE-TOKEN, a CUSTOM header, and net/http
+// only strips Authorization / Www-Authenticate / Cookie when a redirect
+// crosses hosts. So without an explicit host pin, a forge answering 302 with
+// somebody else's Location hands that somebody a live GitLab PAT — and an
+// SSRF check waves it through, because the target is an ordinary public
+// address. The assertion is that the second host receives NOTHING.
+func TestFetch_RefusesCrossHostRedirect(t *testing.T) {
+	var attackerHits int32
+	var attackerToken atomic.Value
+	attackerToken.Store("")
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attackerHits, 1)
+		attackerToken.Store(r.Header.Get("PRIVATE-TOKEN"))
+		_, _ = w.Write([]byte(`{"iid":7,"title":"pwned"}`))
+	}))
+	defer attacker.Close()
+
+	forge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/api/v4/projects/x/merge_requests/7", http.StatusFound)
+	}))
+	defer forge.Close()
+
+	_, err := NewClient(true).Fetch(context.Background(),
+		refFor(t, ProviderGitLab, forge.Listener.Addr().String()), "glpat_supersecret")
+	if !errors.Is(err, ErrCrossHostRedirect) {
+		t.Fatalf("Fetch across a redirect = %v, want ErrCrossHostRedirect", err)
+	}
+	if n := atomic.LoadInt32(&attackerHits); n != 0 {
+		t.Fatalf("the redirect target was contacted %d time(s)", n)
+	}
+	if tok, _ := attackerToken.Load().(string); tok != "" {
+		t.Fatalf("PRIVATE-TOKEN leaked to the redirect target: %q", tok)
+	}
+}
+
+// The teeth: a redirect that STAYS on the origin host is still followed, so
+// the test above is pinning the host rule and not merely "redirects break".
+// GitHub answers 301 on the same API host for a renamed repository; refusing
+// that would be a regression dressed up as hardening.
+func TestFetch_FollowsSameHostRedirect(t *testing.T) {
+	var hops int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v3/repos/acme/thing/pulls/7", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hops, 1)
+		http.Redirect(w, r, "/api/v3/repos/acme/renamed/pulls/7", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/api/v3/repos/acme/renamed/pulls/7", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hops, 1)
+		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
+			t.Errorf("token did not survive the same-host hop: %q", got)
+		}
+		_, _ = w.Write([]byte(githubPullJSON))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got, err := NewClient(true).Fetch(context.Background(),
+		refFor(t, ProviderGitHub, srv.Listener.Addr().String()), "tok")
+	if err != nil {
+		t.Fatalf("same-host redirect = %v, want it followed", err)
+	}
+	if got.Title != "Add the widget" {
+		t.Errorf("title = %q", got.Title)
+	}
+	if n := atomic.LoadInt32(&hops); n != 2 {
+		t.Errorf("hops = %d, want 2 (the redirect was not actually exercised)", n)
+	}
+}
+
 // ─── error mapping ───────────────────────────────────────────────────────
 
 func TestFetch_ErrorMapping(t *testing.T) {

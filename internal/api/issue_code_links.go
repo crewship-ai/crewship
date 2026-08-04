@@ -607,6 +607,11 @@ func writeFetchProblem(w http.ResponseWriter, r *http.Request, err error) {
 		writeCodeLinkProblem(w, r, http.StatusBadRequest, "unsupported-url", err.Error(), 0)
 	case errors.Is(err, gitlink.ErrBlockedHost):
 		writeCodeLinkProblem(w, r, http.StatusUnprocessableEntity, "blocked-host", err.Error(), 0)
+	case errors.Is(err, gitlink.ErrCrossHostRedirect):
+		// Distinct from blocked-host: the destination may be a perfectly
+		// ordinary public address. What is refused is carrying the
+		// credential there.
+		writeCodeLinkProblem(w, r, http.StatusBadGateway, "cross-host-redirect", err.Error(), 0)
 	case errors.Is(err, gitlink.ErrNotFound):
 		writeCodeLinkProblem(w, r, http.StatusNotFound, "pull-request-not-found", err.Error(), 0)
 	case errors.Is(err, gitlink.ErrRateLimited):

@@ -124,7 +124,7 @@ func Parse(raw string) (Ref, error) {
 		// log and the CLI's stdout. Refuse before any of that.
 		return Ref{}, fmt.Errorf("%w: the URL carries credentials (user:password@host) — paste the plain link", ErrUnsupportedURL)
 	}
-	host := strings.ToLower(u.Host)
+	host := normalizeHost(strings.ToLower(u.Host), scheme)
 	if host == "" {
 		return Ref{}, fmt.Errorf("%w: missing host", ErrUnsupportedURL)
 	}
@@ -257,6 +257,31 @@ func (r Ref) APIEndpoint() string {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
+
+// normalizeHost drops a port that merely restates the scheme's default.
+//
+// Host is not cosmetic — three things key off it, and all three break on a
+// gratuitous ":443". Attaching https://github.com:443/acme/thing/pull/7 to an
+// issue that already carries https://github.com/acme/thing/pull/7 would miss
+// the duplicate check (`WHERE … host = ?`) and store the same pull request
+// twice; credential resolution would look for a credential labelled
+// "github.com:443" and find none; and APIEndpoint would send the request to
+// https://github.com:443/api/v3/… — the GitHub Enterprise layout — instead of
+// api.github.com. A non-default port is meaningful and is kept
+// (gitlab.acme.internal:8443).
+//
+// Only the exact scheme-default pairing is stripped: :443 under https and :80
+// under http. An https URL that really is served on :80 keeps its port.
+func normalizeHost(host, scheme string) string {
+	switch {
+	case scheme == "https" && strings.HasSuffix(host, ":443"):
+		return strings.TrimSuffix(host, ":443")
+	case scheme == "http" && strings.HasSuffix(host, ":80"):
+		return strings.TrimSuffix(host, ":80")
+	default:
+		return host
+	}
+}
 
 func splitPath(p string) []string {
 	out := make([]string, 0, 8)

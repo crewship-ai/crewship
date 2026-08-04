@@ -91,6 +91,33 @@ func TestParse_RecognisedShapes(t *testing.T) {
 			host:     "gitlab.acme.example:8443", owner: "acme", repo: "thing", number: 11,
 			canon: "https://gitlab.acme.example:8443/acme/thing/-/merge_requests/11",
 		},
+		{
+			// :443 under https says nothing. Keeping it would make this a
+			// DIFFERENT link from the plain one — a second row past the
+			// duplicate check, a credential lookup for "github.com:443" that
+			// finds nothing, and an API endpoint under /api/v3 instead of
+			// api.github.com.
+			name:     "default https port is dropped",
+			raw:      "https://github.com:443/acme/thing/pull/7",
+			provider: ProviderGitHub,
+			host:     "github.com", owner: "acme", repo: "thing", number: 7,
+			canon: "https://github.com/acme/thing/pull/7",
+		},
+		{
+			name:     "default http port is dropped",
+			raw:      "http://code.acme.example:80/acme/thing/pull/7",
+			provider: ProviderGitHub,
+			host:     "code.acme.example", owner: "acme", repo: "thing", number: 7,
+			canon: "http://code.acme.example/acme/thing/pull/7",
+		},
+		{
+			// …but a port that is only the OTHER scheme's default is real.
+			name:     "a port that is another scheme's default survives",
+			raw:      "https://code.acme.example:80/acme/thing/pull/7",
+			provider: ProviderGitHub,
+			host:     "code.acme.example:80", owner: "acme", repo: "thing", number: 7,
+			canon: "https://code.acme.example:80/acme/thing/pull/7",
+		},
 	}
 
 	for _, tt := range tests {
@@ -184,6 +211,13 @@ func TestRef_APIEndpoint(t *testing.T) {
 		{
 			name: "github.com uses the api subdomain",
 			raw:  "https://github.com/crewship-ai/crewship/pull/7",
+			want: "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			// The normalisation above is what keeps this from becoming the
+			// GitHub Enterprise layout on the SaaS host.
+			name: "an explicit :443 still resolves to api.github.com",
+			raw:  "https://github.com:443/crewship-ai/crewship/pull/7",
 			want: "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
 		},
 		{
