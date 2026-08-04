@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
@@ -9,7 +9,6 @@ import {
   LogOut, Menu, Network, Search, Settings, Shield, ShieldCheck, Store, User, X, Zap,
 } from "lucide-react"
 
-import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
 import { useRealtime } from "@/hooks/use-realtime"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
@@ -22,7 +21,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
@@ -38,6 +36,7 @@ import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
+import { SystemStatusPill } from "./status-pill"
 
 // External destinations for the user menu. Kept here (not env-driven) because
 // they are stable public properties; the docs site is the Mintlify source of
@@ -166,24 +165,11 @@ export function AppToolbar() {
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
   const { status: wsStatus } = useRealtime()
-  const wifiRef = useRef<WifiIconHandle>(null)
   const isMobile = useIsMobile()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
-
-  useEffect(() => {
-    if (wsStatus === "connected") {
-      const handle = wifiRef.current
-      handle?.startAnimation()
-      const t = setTimeout(() => handle?.stopAnimation(), 1000)
-      return () => {
-        clearTimeout(t)
-        handle?.stopAnimation()
-      }
-    }
-  }, [wsStatus])
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -302,143 +288,27 @@ export function AppToolbar() {
 
       {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Status indicators: System + Crews + Escalations */}
-        {(() => {
-          const systemOnline = engineStatus === "connected" && wsStatus === "connected"
-          // "degraded" (hooks/use-engine-status.ts) covers a single failed
-          // poll or a 429 throttle — neither means the engine is gone, so
-          // it renders with the same amber "not fully confirmed yet"
-          // treatment as "checking" rather than falling through to red
-          // "Offline". The pill/tooltip text below still tells the two
-          // apart ("Connecting" vs "Reconnecting") so an operator can see
-          // a mid-deploy restart for what it is.
-          const systemChecking = engineStatus === "checking" || engineStatus === "degraded" || wsStatus === "connecting"
-
-          // QUEUED counts assignments parked in the per-crew admission
-          // queue (PR #396). Before the backend reported this number,
-          // those dispatches looked like "errors" in the toolbar
-          // because the dispatcher had marked them non-RUNNING without
-          // any underlying agent being in ERROR. Now we surface it as
-          // a first-class state. The legacy `error` count is preserved
-          // for genuine agent errors and rendered as a separate
-          // segment in the tooltip so an operator can still spot real
-          // failures alongside a deep queue.
-          const queued = crewsStatus?.queued ?? 0
-          const cap99 = (n: number) => (n > 99 ? "99+" : String(n))
-          let crewsLabel = ""
-          let crewsColor: "emerald" | "amber" | "red" | "muted" = "muted"
-          if (!crewsStatus) {
-            crewsLabel = "Loading..."
-            crewsColor = "muted"
-          } else if (crewsStatus.total === 0) {
-            crewsLabel = "No agents"
-            crewsColor = "muted"
-          } else if (crewsStatus.error > 0 && crewsStatus.running > 0) {
-            crewsLabel = `${cap99(crewsStatus.running)} active \u00b7 ${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
-            crewsColor = "amber"
-          } else if (crewsStatus.error > 0) {
-            crewsLabel = `${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
-            crewsColor = "red"
-          } else if (crewsStatus.running > 0 && queued > 0) {
-            // Healthy state: agents are working AND there's a backlog.
-            // Surface both so the operator immediately sees the queue
-            // depth without opening the tooltip.
-            crewsLabel = `${cap99(crewsStatus.running)} active \u00b7 ${cap99(queued)} queued`
-            crewsColor = "amber"
-          } else if (crewsStatus.running > 0) {
-            crewsLabel = `${cap99(crewsStatus.running)} active`
-            crewsColor = "emerald"
-          } else if (queued > 0) {
-            // Nothing running but a queue exists \u2014 happens briefly
-            // between dispatch + claim, and also when a crew's
-            // max_concurrent_agents is 0 (operator error). Amber, not
-            // red: the queue is the system working as designed, not a
-            // fault.
-            crewsLabel = `${cap99(queued)} queued`
-            crewsColor = "amber"
-          } else {
-            crewsLabel = "Crews idle"
-            crewsColor = "muted"
-          }
-
-          const colorMap = {
-            // Subtle tinted pill (matches the pre-token muted look: a low-opacity
-            // fill + a soft same-hue border, not a full-strength ring). #online-badge
-            emerald: { bg: "bg-success/10 border-success/25", dot: "bg-success", text: "text-success", icon: "text-success" },
-            amber: { bg: "bg-warn/10 border-warn/25", dot: "bg-warn", text: "text-warn", icon: "text-warn" },
-            red: { bg: "bg-destructive/10 border-destructive/25", dot: "bg-destructive", text: "text-destructive", icon: "text-destructive" },
-            muted: { bg: "bg-muted/50 border-border", dot: "bg-muted-foreground/40", text: "text-muted-foreground", icon: "text-muted-foreground" },
-          }
-
-          const sysColors = systemOnline ? colorMap.emerald : systemChecking ? colorMap.amber : colorMap.red
-          const crewsColors = colorMap[crewsColor]
-
-          return (
-            <div className="hidden lg:flex items-center gap-1.5 mr-1">
-              {/* Provisioning badge — rendered FIRST so it appears LEFT of
-                  the fixed System / Crews pills. When it shows up, the
-                  fixed pills shift left as a group (right-aligned),
-                  preserving their relative order. The fixed pills never
-                  reflow within themselves. */}
-              <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : engineStatus === "degraded" ? "reconnecting" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
-                    <AnimatedWifi ref={wifiRef} size={12} className={sysColors.icon} />
-                    <span className={`text-micro font-medium ${sysColors.text}`}>
-                      {systemOnline ? "Online" : engineStatus === "degraded" ? "Reconnecting" : systemChecking ? "Connecting" : "Offline"}
-                    </span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {/* "degraded" reads as "Reconnecting..." here — distinct from
-                      "Connecting..." (never-yet-connected) and "Offline" (two
-                      confirmed failures) so a mid-deploy restart or a 429
-                      throttle doesn't look identical to a dead engine. */}
-                  Engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : engineStatus === "degraded" ? "Reconnecting..." : "Offline"} / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div tabIndex={0} role="status" aria-label={`Crews: ${crewsLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${crewsColors.bg}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${crewsColors.dot} ${crewsStatus?.running ? "animate-pulse" : ""}`} />
-                    <span className={`text-micro font-medium ${crewsColors.text}`}>{crewsLabel}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {crewsStatus ? (() => {
-                    // Compose the breakdown line by line so segments
-                    // can be hidden when zero. Spec: always show
-                    // running + idle; show queued only when >0; show
-                    // errors only when >0. Drops the noisy "0 errors"
-                    // tail that the old string always rendered even
-                    // on a clean workspace, while keeping a clear
-                    // signal when something IS broken.
-                    const parts = [
-                      `${crewsStatus.running} running`,
-                    ]
-                    if (queued > 0) parts.push(`${queued} queued`)
-                    parts.push(`${crewsStatus.idle} idle`)
-                    if (crewsStatus.error > 0) {
-                      parts.push(`${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`)
-                    }
-                    return `${crewsStatus.total} agents: ${parts.join(", ")}`
-                  })() : "Loading crews status..."}
-                </TooltipContent>
-              </Tooltip>
-
-              {/* Live routine runs surface via the ActivityBell badge +
-                  dropdown (LIVE/RECENT sections), not a header chip —
-                  the pill group stays quiet by default. */}
-
-              {/* Escalations (incl. agent credential-approval requests) surface
-                  through the unified Inbox (the InboxBell + /inbox page), not a
-                  separate toolbar badge — one place for "things needing action". */}
-            </div>
-          )
-        })()}
+        {/* One status pill: connection on the left, fleet on the right.
+          *
+          * These were two — "Online" and "Crews idle" — and the second was
+          * losing an argument it should not have been in. Its busy state
+          * repeated the Activity panel's live count without the routine name,
+          * elapsed time, cost or Cancel that panel carries; its quiet state
+          * asserted "idle" from `agents.status`, a column that flips for the
+          * six seconds an agent takes to answer, so the word was wrong about
+          * as often as it was right.
+          *
+          * Merged rather than merely reworded, because two pills could state a
+          * contradiction side by side: "Offline" next to "7 agents", where the
+          * second is last-known and nobody can currently know it. One pill
+          * drops the fleet half while the link is down. See status-pill.tsx.
+          *
+          * The provisioning badge stays separate and stays to the LEFT, so the
+          * status pill never reflows when a build appears. */}
+        <div className="hidden lg:flex items-center gap-1.5 mr-1">
+          <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
+          <SystemStatusPill engineStatus={engineStatus} wsStatus={wsStatus} crews={crewsStatus} />
+        </div>
 
         {/* Desktop: search button. Same pill geometry as the System / Crews
             status pills it sits beside, and the same .type-meta register as
