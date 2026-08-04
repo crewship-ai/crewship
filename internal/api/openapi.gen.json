@@ -6702,6 +6702,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "integer"
+                    },
+                    "dry_run": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -6712,6 +6720,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "integer"
+                    },
+                    "dry_run": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -8224,6 +8240,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -8234,6 +8251,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -8699,18 +8717,57 @@
                 "schema": {
                   "properties": {
                     "db": {
-                      "additionalProperties": true,
+                      "properties": {
+                        "error": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "ok": {
+                          "type": "boolean"
+                        }
+                      },
                       "type": "object"
                     },
                     "disk": {
-                      "additionalProperties": true,
+                      "properties": {
+                        "error": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "free_bytes": {
+                          "type": "integer"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "total_bytes": {
+                          "type": "integer"
+                        },
+                        "used_bytes": {
+                          "type": "integer"
+                        },
+                        "used_percent": {
+                          "type": "number"
+                        }
+                      },
                       "type": "object"
                     },
                     "encryption_key_source": {
                       "type": "string"
                     },
                     "log_level": {
-                      "additionalProperties": true,
+                      "properties": {
+                        "baseline": {
+                          "type": "string"
+                        },
+                        "expires_at": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "level": {
+                          "type": "string"
+                        }
+                      },
                       "type": "object"
                     },
                     "uptime_seconds": {
@@ -8808,6 +8865,22 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "broken_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "checked": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "intact": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9089,6 +9162,104 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "any_overridden": {
+                      "type": "boolean"
+                    },
+                    "judge_model": {
+                      "type": "string"
+                    },
+                    "judge_provider": {
+                      "type": "string"
+                    },
+                    "providers": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "slots": {
+                      "items": {
+                        "properties": {
+                          "credential_id": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "overridden": {
+                            "type": "boolean"
+                          },
+                          "provider": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "updated_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "updated_by": {
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9208,7 +9379,104 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "any_overridden": {
+                      "type": "boolean"
+                    },
+                    "judge_model": {
+                      "type": "string"
+                    },
+                    "judge_provider": {
+                      "type": "string"
+                    },
+                    "providers": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "slots": {
+                      "items": {
+                        "properties": {
+                          "credential_id": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "overridden": {
+                            "type": "boolean"
+                          },
+                          "provider": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "updated_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "updated_by": {
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9309,6 +9577,104 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "any_overridden": {
+                      "type": "boolean"
+                    },
+                    "judge_model": {
+                      "type": "string"
+                    },
+                    "judge_provider": {
+                      "type": "string"
+                    },
+                    "providers": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "slots": {
+                      "items": {
+                        "properties": {
+                          "credential_id": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "overridden": {
+                            "type": "boolean"
+                          },
+                          "provider": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "updated_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "updated_by": {
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9470,6 +9836,104 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "any_overridden": {
+                      "type": "boolean"
+                    },
+                    "judge_model": {
+                      "type": "string"
+                    },
+                    "judge_provider": {
+                      "type": "string"
+                    },
+                    "providers": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "slots": {
+                      "items": {
+                        "properties": {
+                          "credential_id": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "overridden": {
+                            "type": "boolean"
+                          },
+                          "provider": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "updated_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "updated_by": {
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9598,6 +10062,20 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "credential_id": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "timeout_ms": {
+                    "type": "integer"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -9608,6 +10086,104 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "any_overridden": {
+                      "type": "boolean"
+                    },
+                    "judge_model": {
+                      "type": "string"
+                    },
+                    "judge_provider": {
+                      "type": "string"
+                    },
+                    "providers": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "slots": {
+                      "items": {
+                        "properties": {
+                          "credential_id": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "overridden": {
+                            "type": "boolean"
+                          },
+                          "provider": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "slot": {
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "properties": {
+                              "editable": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "updated_at": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "updated_by": {
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9778,6 +10354,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "decision": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "models": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "stages": {
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "latency_ms": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "skipped": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -9929,6 +10551,258 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_configured": {
+                      "type": "boolean"
+                    },
+                    "judge_endpoint_url": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_model": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_profile": {
+                      "properties": {
+                        "available_facts": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "choices": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "consistency_samples": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "escalate_from": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "evidence": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "evidence_facts": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "hard_gate": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "name": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "overridden": {
+                          "type": "boolean"
+                        },
+                        "precedent": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "precedent_n": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "prompt_budget_tokens": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "stamp": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_provider": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_timeout_ms": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_wire": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "overridden": {
+                      "type": "boolean"
+                    },
+                    "updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "updated_by": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -10048,7 +10922,258 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "enabled": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_configured": {
+                      "type": "boolean"
+                    },
+                    "judge_endpoint_url": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_model": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_profile": {
+                      "properties": {
+                        "available_facts": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "choices": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "consistency_samples": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "escalate_from": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "evidence": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "evidence_facts": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "hard_gate": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "name": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "overridden": {
+                          "type": "boolean"
+                        },
+                        "precedent": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "precedent_n": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "prompt_budget_tokens": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "stamp": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_provider": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_timeout_ms": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_wire": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "overridden": {
+                      "type": "boolean"
+                    },
+                    "updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "updated_by": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -10167,7 +11292,53 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "judge_consistency_samples": {
+                    "type": "integer"
+                  },
+                  "judge_endpoint_url": {
+                    "type": "string"
+                  },
+                  "judge_escalate_from": {
+                    "type": "integer"
+                  },
+                  "judge_evidence": {
+                    "type": "boolean"
+                  },
+                  "judge_evidence_facts": {
+                    "type": "string"
+                  },
+                  "judge_hard_gate": {
+                    "type": "boolean"
+                  },
+                  "judge_model": {
+                    "type": "string"
+                  },
+                  "judge_precedent": {
+                    "type": "boolean"
+                  },
+                  "judge_precedent_n": {
+                    "type": "integer"
+                  },
+                  "judge_profile": {
+                    "type": "string"
+                  },
+                  "judge_prompt_budget_tokens": {
+                    "type": "integer"
+                  },
+                  "judge_provider": {
+                    "type": "string"
+                  },
+                  "judge_timeout_ms": {
+                    "type": "integer"
+                  },
+                  "judge_wire": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -10178,6 +11349,258 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "boolean"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_configured": {
+                      "type": "boolean"
+                    },
+                    "judge_endpoint_url": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_model": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_profile": {
+                      "properties": {
+                        "available_facts": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "choices": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "consistency_samples": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "escalate_from": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "evidence": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "evidence_facts": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "hard_gate": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "name": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "overridden": {
+                          "type": "boolean"
+                        },
+                        "precedent": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "boolean"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "precedent_n": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "prompt_budget_tokens": {
+                          "properties": {
+                            "editable": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "stamp": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_provider": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_timeout_ms": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "judge_wire": {
+                      "properties": {
+                        "editable": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "overridden": {
+                      "type": "boolean"
+                    },
+                    "updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "updated_by": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -10328,6 +11751,17 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "workspace_id": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -10338,6 +11772,31 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "inbox_item_id": {
+                      "type": "string"
+                    },
+                    "recipients": {
+                      "items": {
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "user_id": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -11804,7 +13263,73 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "alarm": {
+                      "properties": {
+                        "at": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "alarm_judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "alarm_progressed_rate": {
+                      "type": "number"
+                    },
+                    "allow": {
+                      "type": "integer"
+                    },
+                    "allow_rate": {
+                      "type": "number"
+                    },
+                    "deny": {
+                      "type": "integer"
+                    },
+                    "deny_rate": {
+                      "type": "number"
+                    },
+                    "escalate": {
+                      "type": "integer"
+                    },
+                    "escalate_rate": {
+                      "type": "number"
+                    },
+                    "judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "judge_failures": {
+                      "type": "integer"
+                    },
+                    "min_samples": {
+                      "type": "integer"
+                    },
+                    "newest": {
+                      "type": "string"
+                    },
+                    "oldest": {
+                      "type": "string"
+                    },
+                    "p95_latency_ms": {
+                      "type": "integer"
+                    },
+                    "progressed_rate": {
+                      "type": "number"
+                    },
+                    "samples": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -11815,7 +13340,73 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "alarm": {
+                      "properties": {
+                        "at": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "alarm_judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "alarm_progressed_rate": {
+                      "type": "number"
+                    },
+                    "allow": {
+                      "type": "integer"
+                    },
+                    "allow_rate": {
+                      "type": "number"
+                    },
+                    "deny": {
+                      "type": "integer"
+                    },
+                    "deny_rate": {
+                      "type": "number"
+                    },
+                    "escalate": {
+                      "type": "integer"
+                    },
+                    "escalate_rate": {
+                      "type": "number"
+                    },
+                    "judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "judge_failures": {
+                      "type": "integer"
+                    },
+                    "min_samples": {
+                      "type": "integer"
+                    },
+                    "newest": {
+                      "type": "string"
+                    },
+                    "oldest": {
+                      "type": "string"
+                    },
+                    "p95_latency_ms": {
+                      "type": "integer"
+                    },
+                    "progressed_rate": {
+                      "type": "number"
+                    },
+                    "samples": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -11826,7 +13417,73 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "alarm": {
+                      "properties": {
+                        "at": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "alarm_judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "alarm_progressed_rate": {
+                      "type": "number"
+                    },
+                    "allow": {
+                      "type": "integer"
+                    },
+                    "allow_rate": {
+                      "type": "number"
+                    },
+                    "deny": {
+                      "type": "integer"
+                    },
+                    "deny_rate": {
+                      "type": "number"
+                    },
+                    "escalate": {
+                      "type": "integer"
+                    },
+                    "escalate_rate": {
+                      "type": "number"
+                    },
+                    "judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "judge_failures": {
+                      "type": "integer"
+                    },
+                    "min_samples": {
+                      "type": "integer"
+                    },
+                    "newest": {
+                      "type": "string"
+                    },
+                    "oldest": {
+                      "type": "string"
+                    },
+                    "p95_latency_ms": {
+                      "type": "integer"
+                    },
+                    "progressed_rate": {
+                      "type": "number"
+                    },
+                    "samples": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -11837,7 +13494,73 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "alarm": {
+                      "properties": {
+                        "at": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "alarm_judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "alarm_progressed_rate": {
+                      "type": "number"
+                    },
+                    "allow": {
+                      "type": "integer"
+                    },
+                    "allow_rate": {
+                      "type": "number"
+                    },
+                    "deny": {
+                      "type": "integer"
+                    },
+                    "deny_rate": {
+                      "type": "number"
+                    },
+                    "escalate": {
+                      "type": "integer"
+                    },
+                    "escalate_rate": {
+                      "type": "number"
+                    },
+                    "judge_failure_rate": {
+                      "type": "number"
+                    },
+                    "judge_failures": {
+                      "type": "integer"
+                    },
+                    "min_samples": {
+                      "type": "integer"
+                    },
+                    "newest": {
+                      "type": "string"
+                    },
+                    "oldest": {
+                      "type": "string"
+                    },
+                    "p95_latency_ms": {
+                      "type": "integer"
+                    },
+                    "progressed_rate": {
+                      "type": "number"
+                    },
+                    "samples": {
+                      "type": "integer"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -12179,6 +13902,34 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "models": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "suggestions": {
+                      "items": {
+                        "properties": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -12299,6 +14050,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "judge_endpoint_url": {
+                    "type": "string"
+                  },
+                  "judge_model": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -12309,6 +14068,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "decision": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "models": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "stages": {
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "latency_ms": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "skipped": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -12459,6 +14264,17 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "credential_id": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -12469,6 +14285,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "decision": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "models": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "stages": {
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "latency_ms": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "skipped": {
+                            "type": "boolean"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -12650,6 +14512,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -12787,6 +14654,18 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "requests": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -12948,7 +14827,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -13108,6 +14991,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "decision": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -13118,6 +15009,23 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "decision": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "resolved": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -13308,6 +15216,41 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "agent_id": {
+                    "type": "string"
+                  },
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "failure_snippet": {
+                    "type": "string"
+                  },
+                  "prior_lesson": {
+                    "type": "string"
+                  },
+                  "recent_tool_calls": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "skill_id": {
+                    "type": "string"
+                  },
+                  "tool_args_snippet": {
+                    "type": "string"
+                  },
+                  "tool_name": {
+                    "type": "string"
+                  },
+                  "trigger": {
+                    "type": "string"
+                  },
+                  "workspace_id": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -13318,6 +15261,27 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "data": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "decision": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "lesson": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "slot": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -13469,6 +15433,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "present": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -14913,6 +16882,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "removed": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -15073,6 +17056,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "removed": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -15364,6 +17361,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "default": {
+                      "type": "integer"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -15737,6 +17748,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "applied": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "detector_inert": {
+                      "type": "boolean"
+                    },
+                    "identified": {
+                      "type": "integer"
+                    },
+                    "inspected": {
+                      "type": "integer"
+                    },
+                    "orphans": {
+                      "items": {
+                        "properties": {
+                          "container_id": {
+                            "type": "string"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "reaped": {
+                            "type": "boolean"
+                          },
+                          "slug": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -16713,6 +18761,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -16723,6 +18772,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -16882,7 +18932,83 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "counts": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "credentials": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "journal": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "user": {
+                      "properties": {
+                        "avatar_url": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "full_name": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "workspace": {
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "workspaces": {
+                          "items": {
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -56666,6 +58792,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -56676,6 +58803,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -57047,6 +59175,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -57057,6 +59186,7 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {},
                   "type": "object"
                 }
               }
@@ -77834,7 +79964,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "autonomy_level": {
+                        "type": "string"
+                      },
+                      "behavior_mode": {
+                        "type": "string"
+                      },
+                      "crew_id": {
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "set_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "set_by_user_id": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -82131,6 +84285,28 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "runtimes": {
+                      "items": {
+                        "properties": {
+                          "available": {
+                            "type": "boolean"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -83913,7 +86089,46 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "subsystems": {
+                      "items": {
+                        "properties": {
+                          "detail": {
+                            "type": "string"
+                          },
+                          "healthy": {
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "reach_detail": {
+                            "type": "string"
+                          },
+                          "reachable": {
+                            "type": "boolean"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -84005,7 +86220,65 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "allow_count": {
+                      "type": "integer"
+                    },
+                    "deny_count": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "enabled_source": {
+                      "type": "string"
+                    },
+                    "escalate_count": {
+                      "type": "integer"
+                    },
+                    "gatekeeper_configured": {
+                      "type": "boolean"
+                    },
+                    "gov_model": {
+                      "type": "string"
+                    },
+                    "gov_model_configured": {
+                      "type": "boolean"
+                    },
+                    "gov_model_degrade_reason": {
+                      "type": "string"
+                    },
+                    "gov_model_degraded": {
+                      "type": "boolean"
+                    },
+                    "gov_model_provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "model_source": {
+                      "type": "string"
+                    },
+                    "ollama_online": {
+                      "type": "boolean"
+                    },
+                    "ollama_probed": {
+                      "type": "boolean"
+                    },
+                    "ollama_url": {
+                      "type": "string"
+                    },
+                    "ollama_url_source": {
+                      "type": "string"
+                    },
+                    "secret_count": {
+                      "type": "integer"
+                    },
+                    "total_requests": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -84127,7 +86400,32 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "edition": {
+                      "type": "string"
+                    },
+                    "features": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "license_id": {
+                      "type": "string"
+                    },
+                    "licensee_org": {
+                      "type": "string"
+                    },
+                    "max_agents_per_crew": {
+                      "type": "integer"
+                    },
+                    "max_crews": {
+                      "type": "integer"
+                    },
+                    "max_members": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -84293,7 +86591,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "allow_signup": {
+                      "type": "boolean"
+                    },
+                    "needs_bootstrap": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -84315,7 +86620,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "install_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85371,7 +87683,43 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "arch": {
+                      "type": "string"
+                    },
+                    "build_time": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "current": {
+                      "type": "string"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "go_version": {
+                      "type": "string"
+                    },
+                    "latest": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "newer": {
+                      "type": "boolean"
+                    },
+                    "os": {
+                      "type": "string"
+                    },
+                    "schema_version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85382,7 +87730,43 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "arch": {
+                      "type": "string"
+                    },
+                    "build_time": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "current": {
+                      "type": "string"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "go_version": {
+                      "type": "string"
+                    },
+                    "latest": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "newer": {
+                      "type": "boolean"
+                    },
+                    "os": {
+                      "type": "string"
+                    },
+                    "schema_version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85393,7 +87777,43 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "arch": {
+                      "type": "string"
+                    },
+                    "build_time": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "current": {
+                      "type": "string"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "go_version": {
+                      "type": "string"
+                    },
+                    "latest": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "newer": {
+                      "type": "boolean"
+                    },
+                    "os": {
+                      "type": "string"
+                    },
+                    "schema_version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85404,7 +87824,43 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "arch": {
+                      "type": "string"
+                    },
+                    "build_time": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    },
+                    "current": {
+                      "type": "string"
+                    },
+                    "dirty": {
+                      "type": "boolean"
+                    },
+                    "go_version": {
+                      "type": "string"
+                    },
+                    "latest": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "newer": {
+                      "type": "boolean"
+                    },
+                    "os": {
+                      "type": "string"
+                    },
+                    "schema_version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
