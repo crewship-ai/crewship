@@ -2,11 +2,9 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, Eye, Square, Check, Ban, Power, PowerOff, Workflow } from "lucide-react"
+import { X, Play, Eye, Square, Check, Ban, Power, PowerOff } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { TabBar } from "@/components/ui/tab-bar"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
@@ -28,15 +26,7 @@ import { extractProblemDetail } from "@/lib/problem-details"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
-import { RoutineOverviewTab } from "./routine-overview-tab"
-import { RoutineFlowDiagram } from "./routine-flow-diagram"
-import { Card } from "./_shared"
-import { RoutineEditorTab } from "./routine-editor-tab"
-import { RoutineRunsTab } from "./routine-runs-tab"
-import { RoutineVersionsTab } from "./routine-versions-tab"
-import { RoutineSchedulesTab } from "./routine-schedules-tab"
-import { RoutineWebhooksTab } from "./routine-webhooks-tab"
-import { RoutineWaitpointsTab } from "./routine-waitpoints-tab"
+import { RoutineCardDetail } from "./routine-card-detail"
 import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
 import { AgentlessBadge } from "./routine-agentless-badge"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
@@ -337,8 +327,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // has its own cancel button. RBAC: manage-tier — MEMBERs get a 403.
   const cancelActiveRun = async () => {
     if (!cancelTarget) {
-      setActiveTab("runs")
-      toast.info("Multiple runs are active — pick the one to cancel in the Runs tab")
+      // No tab to send them to any more. The per-run cancel buttons are
+      // in the Runs card's Manage view, on this same page.
+      toast.info("Multiple runs are active — open Runs → Manage and cancel the one you mean")
       return
     }
     setCancelling(true)
@@ -400,8 +391,6 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // (Editor · Versions · Webhooks · Wait points) live behind a single
   // "Advanced" tab with its own sub-tab bar so the chrome reads as
   // "the routine" first and "the machinery" second.
-  const [activeTab, setActiveTab] = useState("overview")
-  const [advancedTab, setAdvancedTab] = useState("editor")
 
   return (
     <div className="flex h-full flex-col">
@@ -632,101 +621,31 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         </div>
       )}
 
-      {/* Tab bar — primitive with animated underline */}
+      {/* One scrolling surface of cards, no tabs.
+          A tab is a hiding place: 38 routines had zero schedules between
+          them while Schedules was a tab nobody clicked. Everything that
+          worked is still here — the editor opens beside the graph,
+          schedules and webhooks live inside Triggers, versions have
+          their own card. What went is the filing, not the machinery.
+          Wait points went to Activity, where the run they belong to is. */}
       {routine && (
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col overflow-hidden">
-          <TabBar
-            value={activeTab}
-            onValueChange={setActiveTab}
-            layoutId="routine-detail-tabs-indicator"
-            ariaLabel="Routine sections"
-            className="shrink-0 px-4"
-          >
-            <TabBar.Item value="overview" className="h-10 text-sm">Overview</TabBar.Item>
-            <TabBar.Item value="preview" className="h-10 text-sm">Preview</TabBar.Item>
-            <TabBar.Item value="runs" className="h-10 text-sm">Runs</TabBar.Item>
-            <TabBar.Item value="schedules" className="h-10 text-sm">Schedules</TabBar.Item>
-            <TabBar.Item value="advanced" className="h-10 text-sm">Advanced</TabBar.Item>
-          </TabBar>
-
+        <div className="flex flex-1 flex-col overflow-hidden">
           {error && (
             <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           )}
-
           <div className="flex-1 overflow-auto">
-            <TabsContent value="overview" className="m-0 px-6 py-5">
-              <RoutineOverviewTab routine={routine} workspaceId={workspaceId} />
-            </TabsContent>
-            {/* Preview — the read-only data-flow diagram, moved out of Overview
-                into its own tab so the Overview stays scannable for non-technical
-                users. Static derivation of the DSL + manifest, not a live run. */}
-            <TabsContent value="preview" className="m-0 px-6 py-5">
-              <Card title="Data flow" subtitle="preview — not live" icon={Workflow}>
-                <div className="px-4 py-3">
-                  <RoutineFlowDiagram definition={routine.definition} manifest={routine.manifest} />
-                </div>
-              </Card>
-            </TabsContent>
-            <TabsContent value="runs" className="m-0 px-6 py-5">
-              <RoutineRunsTab workspaceId={workspaceId} slug={routine.slug} />
-            </TabsContent>
-            <TabsContent value="schedules" className="m-0 px-6 py-5">
-              <RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
-            </TabsContent>
-            {/* Advanced — power-user machinery behind a sub-tab bar so the
-                top-level chrome stays at three approachable surfaces. */}
-            <TabsContent value="advanced" className="m-0 flex h-full flex-col p-0">
-              <Tabs
-                value={advancedTab}
-                onValueChange={setAdvancedTab}
-                className="flex flex-1 flex-col overflow-hidden"
-              >
-                <TabBar
-                  value={advancedTab}
-                  onValueChange={setAdvancedTab}
-                  layoutId="routine-advanced-tabs-indicator"
-                  ariaLabel="Advanced routine sections"
-                  className="shrink-0 border-b border-border/60 px-4"
-                >
-                  <TabBar.Item value="editor" className="h-9 text-[13px]">Editor / JSON</TabBar.Item>
-                  <TabBar.Item value="versions" className="h-9 text-[13px]">Versions</TabBar.Item>
-                  <TabBar.Item value="webhooks" className="h-9 text-[13px]">Webhooks</TabBar.Item>
-                  <TabBar.Item value="waitpoints" className="h-9 text-[13px]">Wait points</TabBar.Item>
-                </TabBar>
-                <div className="flex-1 overflow-auto">
-                  <TabsContent value="editor" className="m-0 h-full p-0">
-                    <RoutineEditorTab
-                      routine={routine}
-                      workspaceId={workspaceId}
-                      onSaved={() => {
-                        fetchRoutine()
-                        onChanged()
-                      }}
-                    />
-                  </TabsContent>
-                  <TabsContent value="versions" className="m-0 px-6 py-5">
-                    <RoutineVersionsTab
-                      workspaceId={workspaceId}
-                      slug={routine.slug}
-                      onRolledBack={() => {
-                        fetchRoutine()
-                        onChanged()
-                      }}
-                    />
-                  </TabsContent>
-                  <TabsContent value="webhooks" className="m-0 px-6 py-5">
-                    <RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} />
-                  </TabsContent>
-                  <TabsContent value="waitpoints" className="m-0 px-6 py-5">
-                    <RoutineWaitpointsTab workspaceId={workspaceId} slug={routine.slug} />
-                  </TabsContent>
-                </div>
-              </Tabs>
-            </TabsContent>
+            <RoutineCardDetail
+              routine={routine}
+              workspaceId={workspaceId}
+              onChanged={() => {
+                fetchRoutine()
+                onChanged()
+              }}
+            />
           </div>
-        </Tabs>
+        </div>
       )}
     </div>
   )

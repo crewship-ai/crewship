@@ -24,6 +24,21 @@ Compared to other layers in Crewship:
 | **Recipe** *(future)* | composite | Marketplace template | Crew + agents + integrations + routines bundled |
 | **Recurring Issue** | issue-tracker | recurring user issue | "Standup every Monday" without leaving Issues — a cron dispatcher stamps a fresh issue on each fire (see [Recurring Issues](/api-reference/recurring-issues)) |
 
+### The detail page
+
+Opening a routine gives you one scrolling surface of cards, not a tab bar:
+
+| Card | What it answers |
+|------|-----------------|
+| **Definition** | What it does. The step graph, drawn by the same renderer Activity uses for live runs — so a definition and a run of it read as one picture. **Edit code** opens the DSL editor beside it. |
+| **Last run** | How the most recent invocation ended, tinted by outcome, linking to its full trace. |
+| **Triggers** | Cron schedules and inbound webhooks. **Manage** reveals the full editors. |
+| **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves. |
+| **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
+| **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
+
+Wait points are not here: they belong to a *run*, and [Activity](/guides/activity) is where the run is.
+
 The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility.
 
 <Note>
@@ -41,7 +56,7 @@ Crewship is unusual among workflow systems because **agents author routines**, n
     You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
-    Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author. An **existing** routine's DSL is also fully editable in-place from its detail page's **Editor / JSON** tab (CodeMirror, format + revert + copy) — see the note below on how that path's Save differs from Test & Save.
+    Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author. An **existing** routine's DSL is also fully editable in-place from its detail page — press **Edit code** on the Definition card and the editor opens beside the graph (CodeMirror, format + revert + copy) — see the note below on how that path's Save differs from Test & Save.
   </Card>
   <Card title="CLI" icon="terminal">
     Scaffold a starting file with `crewship routine init -o file.json` (a minimal valid one-step skeleton) or clone an existing routine with `crewship routine init --from <slug> -o file.json`. Then `crewship routine save --name "..." --definition file.json --author-crew <crew-slug-or-id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save. Print the machine-readable authoring contract with `crewship routine schema` (wire it into an editor for autocomplete, or hand it to an agent authoring a routine).
@@ -49,7 +64,7 @@ Crewship is unusual among workflow systems because **agents author routines**, n
 </CardGroup>
 
 <Note>
-**Editing an existing routine's DSL bypasses the test-run gate.** The **Editor / JSON** tab's Save button posts straight to `/pipelines/save` with `skip_test_gate: true` — it does not send the definition through `test_run` first. The server only honors that flag for **OWNER/ADMIN** (lower roles get `403`), so this is a fast lane for trusted operators, not a hole in the gate: a MEMBER/MANAGER can view and copy the DSL from this tab but can't save an edit without going through the create flow's Test & Save. A follow-up will chain `test_run → save_token → save` behind one button so any MANAGER+ role can edit safely.
+**Editing an existing routine's DSL bypasses the test-run gate.** The Definition card's editor Save button posts straight to `/pipelines/save` with `skip_test_gate: true` — it does not send the definition through `test_run` first. The server only honors that flag for **OWNER/ADMIN** (lower roles get `403`), so this is a fast lane for trusted operators, not a hole in the gate: a MEMBER/MANAGER can view and copy the DSL but can't save an edit without going through the create flow's Test & Save. A follow-up will chain `test_run → save_token → save` behind one button so any MANAGER+ role can edit safely.
 </Note>
 
 ## Authoring with AI (one-shot)
