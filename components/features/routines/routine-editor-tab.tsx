@@ -57,7 +57,18 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     }
   }, [routine.definition, format])
 
+  // `text` is what the editor is CONSTRUCTED from — it changes only
+  // when the buffer is replaced wholesale (Format, Revert, a refetch, a
+  // format switch). It must never track the live document: FileEditor
+  // rebuilds its EditorState when `code` changes, and a rebuild puts
+  // the caret back at position 0. Feeding typing into it shredded a
+  // routine in about four seconds.
+  //
+  // `liveText` mirrors what is actually in the buffer, for everything
+  // derived from it — validity, step spans, comment detection — none of
+  // which touches the editor's construction.
   const [text, setText] = useState(initial)
+  const [liveText, setLiveText] = useState(initial)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const saveRef = useRef<(() => void) | null>(null)
@@ -80,12 +91,13 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   // bufferRef already points at the new definition.
   useEffect(() => {
     setText(initial)
+    setLiveText(initial)
     bufferRef.current = initial
     setDirty(false)
     setEditorKey((k) => k + 1)
   }, [initial, routine.slug])
 
-  const validation = useMemo(() => parseRoutineBuffer(text, format), [text, format])
+  const validation = useMemo(() => parseRoutineBuffer(liveText, format), [liveText, format])
 
   // Schema completion + inline diagnostics. Memoized on the format
   // because FileEditor rebuilds its EditorState when this identity
@@ -98,7 +110,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   // computed once resolve the caret against positions that no longer
   // exist. Deferred so a parse does not run on the keystroke itself —
   // a frame of lag is invisible, parsing per character is not.
-  const deferredText = useDeferredValue(text)
+  const deferredText = useDeferredValue(liveText)
   const stepRanges = useMemo(() => stepLineRanges(deferredText), [deferredText])
   const bufferHasComments = useMemo(
     () => format === "yaml" && hasYamlComments(deferredText),
@@ -126,13 +138,20 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     }
     setFormat(next)
     setText(converted.text)
+    setLiveText(converted.text)
     bufferRef.current = converted.text
     setEditorKey((k) => k + 1)
   }
 
   const handleEditorSave = (next: string) => {
     bufferRef.current = next
-    setText(next)
+    setLiveText(next)
+  }
+
+  // Every keystroke. Updates the mirror, never the construction source.
+  const handleDocChange = (next: string) => {
+    bufferRef.current = next
+    setLiveText(next)
   }
 
   const handleFormat = () => {
@@ -143,6 +162,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     const pretty =
       format === "yaml" ? toYaml(validation.parsed) : JSON.stringify(validation.parsed, null, 2)
     setText(pretty)
+    setLiveText(pretty)
     bufferRef.current = pretty
     // Force the editor to remount with the formatted content. The
     // simplest way is to re-render with a new key, which we accomplish
@@ -153,6 +173,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
 
   const handleRevert = () => {
     setText(initial)
+    setLiveText(initial)
     bufferRef.current = initial
     setEditorKey((k) => k + 1)
     setDirty(false)
@@ -320,7 +341,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
           onDirtyChange={setDirty}
           saveRef={saveRef}
           onCursorLine={handleCursorLine}
-          onDocChange={setText}
+          onDocChange={handleDocChange}
           extraExtensions={extraExtensions}
         />
       </div>
