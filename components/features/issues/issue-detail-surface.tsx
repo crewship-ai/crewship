@@ -107,21 +107,42 @@ export function IssueDetailSurface({
    *  Reads                                                            *
    * ---------------------------------------------------------------- */
 
+  // Sequencing guards, one per fetch group. Switching issues is a click in
+  // the explorer or an arrow key on the board, and each switch is five
+  // parallel requests deep — so a response for the issue you have already
+  // left arriving after the one you are looking at is the ordinary case, not
+  // an exotic one. Without these it wins, and you read ENG-1's comments under
+  // ENG-2's title. `useIssueDetail` carried the same guards before this
+  // component took the work off it.
+  const issueReq = React.useRef(0)
+  const subReq = React.useRef(0)
+
   const fetchIssue = React.useCallback(async () => {
     if (!workspaceId || !identifier) return
+    const mine = ++issueReq.current
     try {
       const res = await apiFetch(`/api/v1/issues/${encodeURIComponent(identifier)}?${qs}`)
+      if (mine !== issueReq.current) return
       if (!res.ok) {
         setError(res.status === 404 ? "Issue not found" : "Failed to load issue")
         onNotFound?.()
         return
       }
-      setIssue(await res.json())
+      const body = await res.json()
+      // Re-checked after the parse too. The headers can arrive before the
+      // reader navigates and the body after — the check above is at the
+      // wrong await for that, and it is the longer of the two gaps.
+      if (mine !== issueReq.current) return
+      setIssue(body)
       setError(null)
     } catch {
+      if (mine !== issueReq.current) return
       setError("Failed to load issue")
     } finally {
-      setLoading(false)
+      // Not in the stale arm: clearing `loading` for an abandoned request
+      // ends the skeleton for an issue that has not arrived, and the error
+      // branch then renders "Issue not found" over an issue that exists.
+      if (mine === issueReq.current) setLoading(false)
     }
   }, [workspaceId, identifier, qs, onNotFound])
 
@@ -129,6 +150,7 @@ export function IssueDetailSurface({
   // crew + identifier and all go stale together on any write.
   const fetchSubResources = React.useCallback(async () => {
     if (!base) return
+    const mine = ++subReq.current
     const get = (path: string) =>
       apiFetch(`${base}/${path}?${qs}`)
         .then((r) => (r.ok ? r.json() : []))
@@ -140,6 +162,7 @@ export function IssueDetailSurface({
       get("runs"),
       get("subtasks"),
     ])
+    if (mine !== subReq.current) return
     setComments(Array.isArray(cs) ? cs : [])
     setActivities(Array.isArray(as) ? as : [])
     setRelations(Array.isArray(rs) ? rs : [])
@@ -150,6 +173,10 @@ export function IssueDetailSurface({
   React.useEffect(() => {
     // A new identifier is a different issue: clear first, or the previous
     // one's comments render under this one's title while the fetch is out.
+    // The sub-resource guard is bumped here rather than only inside its own
+    // fetch, because the previous issue's five requests are already in the
+    // air and nothing will start a new group until the new crew_id resolves.
+    subReq.current++
     setIssue(null)
     setComments([])
     setActivities([])
