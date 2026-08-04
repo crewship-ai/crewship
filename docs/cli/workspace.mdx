@@ -13,10 +13,10 @@ crewship workspace <subcommand> [flags]
 crewship ws <subcommand> [flags]
 ```
 
-The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace` (slug or id). It is sent as `workspace_id=` on every API request by the CLI client, so switching workspaces is purely client-side — no server round-trip.
+The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace` (slug or id). It is sent as `workspace_id=` on workspace-scoped API requests by the CLI client. Switching workspaces writes local config and, when authenticated, validates the slug or ID against the server.
 
 <Note>
-**Auth:** `list`, `get`, and `create` require `crewship login` (`create` clears the workspace context server-side — it makes a new one). `update`, all `member` operations, and `invite` additionally require an active workspace. `use` only writes the local config and validates the slug against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `OWNER` only to `delete`, `MEMBER+` to read.
+**Auth:** `list`, `get`, and `create` require `crewship login`. `update`, all `member` operations, and `invite` additionally require an active workspace. `use` writes the local config and validates the slug or ID against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `OWNER` only to `delete`, `MEMBER+` to read.
 </Note>
 
 ## Subcommands
@@ -33,8 +33,9 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace member add <user-id>` | Add an existing user to the workspace. |
 | `workspace member role <member-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
 | `workspace member remove <user-id>` | Remove a member (prompts unless `-y`). |
+| `workspace member invite <email>` | Add someone by email, creating an account if needed, and print a one-time setup link. |
 | `workspace member capabilities ...` | Manage per-member capability grants (aliases: `caps`, `capability`). See [below](#workspace-member-capabilities). |
-| `workspace invite [email]` | Invite by email (shortcut for `invite create`). |
+| `workspace invite [email]` | Record an invitation row by email (shortcut for `invite create`; no email is sent). |
 | `workspace invite create <email>` | Create an invitation. |
 | `workspace invite list` | List pending invitations. |
 
@@ -57,6 +58,7 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--name <string>` | Rename the workspace. |
 | `--slug <string>` | Change the slug (URLs flip immediately). |
 | `--language <code>` | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
+| `--allow-privileged-credentials` | Allow credentials in a `--privileged` crew despite the UID isolation boundary. Defaults to `false` (fails closed). |
 
 ### `workspace delete`
 
@@ -96,9 +98,18 @@ above you, and cannot demote the last `OWNER`.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--role <ROLE>` | `MEMBER` | Role to grant on acceptance. `MEMBER` or `ADMIN`. |
+| `--role <ROLE>` | `MEMBER` | Role to grant. `MEMBER` or `ADMIN`. This records an invitation row; no email is sent. |
 
-The role flag is mirrored on the parent `invite` command so the shortcut form (`workspace invite alice@example.com --role ADMIN`) works without an explicit `create`.
+The role flag is mirrored on the parent `invite` command so the shortcut form (`workspace invite alice@example.com --role ADMIN`) works without an explicit `create`. No mailer is wired for this command.
+
+### `workspace member invite`
+
+This provisioning command is distinct from `workspace invite`: it creates the
+account when needed, adds the membership, and prints a one-time setup link.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--role <ROLE>` | `MEMBER` | Role to grant: `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. |
 
 ## Examples
 
@@ -147,6 +158,7 @@ not the `OWNER`.
 crewship workspace member list
 crewship workspace member add usr_abc123 --role ADMIN
 crewship workspace member remove usr_abc123 --yes
+crewship workspace member invite alice@acme.com --role MEMBER
 ```
 
 User IDs come from `crewship admin list-users` or the web UI's user table.
@@ -193,7 +205,8 @@ Unknown capability strings are rejected server-side (`400`, typo guard). Revokin
 
 ```bash
 crewship workspace invite alice@acme.com --role ADMIN
-# ✓ Invitation sent to alice@acme.com (ADMIN role).
+# ✓ Invitation recorded for alice@acme.com (ADMIN role).
+# ! No email was sent — no mailer is wired. Use `crewship workspace member invite` to create the account and get a setup link.
 
 crewship workspace invite list
 # ID            EMAIL                ROLE     EXPIRES               CREATED
@@ -208,7 +221,7 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 
 - **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
 - **`--name is required`** — `create` needs at least a name.
-- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language`.
+- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials`.
 - **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
 
 </Accordion>
