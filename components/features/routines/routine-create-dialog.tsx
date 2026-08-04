@@ -468,7 +468,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
           : undefined
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-md p-4" onClick={onClose}>
       <div
         className={cn(
           "flex w-full flex-col rounded-lg border border-white/10 bg-card shadow-2xl",
