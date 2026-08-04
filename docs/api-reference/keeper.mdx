@@ -1,0 +1,337 @@
+---
+title: "Keeper administration"
+description: "Configure, test, and operate the Keeper credential-governance service."
+icon: "shield-check"
+---
+
+# Keeper administration API
+
+These are workspace-scoped operator endpoints for the Keeper judge, its evaluator
+models, watchdog governance, and manual review runs. They are separate from the
+internal `X-Internal-Token` routes used by the sidecar and scheduler.
+
+## Authentication and errors
+
+Every route below requires an authenticated session, an active workspace, and the
+role shown in the table. `ADMIN` and `OWNER` are the `manage` roles. Mutating
+routes also write a Keeper decision entry to the workspace journal where noted.
+
+| Role | Routes |
+| --- | --- |
+| `ADMIN` or `OWNER` | `GET /config`, `GET /health`, `GET /aux`, `GET /governance` |
+| `ADMIN` or `OWNER` | All `PUT`, `POST`, and `DELETE` routes on this page |
+
+Malformed JSON, invalid enum values, unknown slots, missing workspace context, or
+invalid workspace-owned references return `400`. Insufficient role returns `403`;
+an unsettled request that cannot be found in the current workspace returns `404`;
+settling an already-settled request returns `409`. Unavailable optional server
+capabilities return `503`, and probe/run spend limits return `429`. Responses from
+the routes using the problem helper are RFC 7807 objects; the remaining admin
+handlers use the same JSON error contract as the other admin API (`{"error":"..."}`).
+
+## Judge configuration
+
+### `GET /api/v1/admin/keeper/config`
+
+Returns effective instance judge settings, including whether each value is
+inherited or overridden. Endpoint userinfo is redacted. The response is:
+
+```json
+{
+  "enabled": {"value": true, "source": "env", "editable": true},
+  "judge_provider": {"value": "ollama", "source": "env", "editable": false},
+  "judge_endpoint_url": {"value": "http://ollama:11434", "source": "env", "editable": true},
+  "judge_wire": {"value": "ollama", "source": "env", "editable": false},
+  "judge_model": {"value": "qwen3.5:9b", "source": "instance", "editable": true},
+  "judge_timeout_ms": {"value": 5000, "source": "default", "editable": true},
+  "judge_profile": {
+    "name": {"value": "balanced", "source": "default", "editable": true},
+    "evidence": {"value": true, "source": "profile", "editable": true},
+    "evidence_facts": {"value": ["role", "history"], "source": "profile", "editable": true},
+    "hard_gate": {"value": true, "source": "profile", "editable": true},
+    "escalate_from": {"value": 7, "source": "profile", "editable": true},
+    "precedent": {"value": false, "source": "profile", "editable": true},
+    "precedent_n": {"value": 0, "source": "profile", "editable": true},
+    "consistency_samples": {"value": 1, "source": "profile", "editable": true},
+    "prompt_budget_tokens": {"value": 0, "source": "profile", "editable": true},
+    "overridden": false, "choices": ["balanced", "strict", "thorough"],
+    "available_facts": ["role", "history"], "stamp": "..."
+  },
+  "overridden": true, "updated_at": "2026-08-04T12:00:00Z",
+  "updated_by": "user_...", "judge_configured": true
+}
+```
+
+Each `{value, source, editable}` field is authoritative for the effective value;
+`source` identifies the server default, environment, profile, or instance
+override. `judge_configured` is false when the effective endpoint or model is
+missing.
+
+### `PUT /api/v1/admin/keeper/config`
+
+Applies a partial update and returns the same object as `GET`. Omitted fields are
+unchanged. Empty strings (or `0` for numeric overrides) clear an override; the
+three-state fields `enabled`, `judge_evidence`, `judge_hard_gate`, and
+`judge_precedent` accept `true`, `false`, or `null` (`null` means inherit/follow
+the profile). Example:
+
+```json
+{
+  "enabled": true,
+  "judge_endpoint_url": "http://ollama:11434",
+  "judge_model": "qwen3.5:9b",
+  "judge_timeout_ms": 5000,
+  "judge_profile": "thorough",
+  "judge_precedent": null,
+  "judge_precedent_n": 20
+}
+```
+
+`400` includes invalid JSON, invalid tri-state values, or Keeper configuration
+validation errors. Changes take effect on the next credential request; no restart
+is required. `PUT` and `DELETE` are journaled.
+
+### `GET /api/v1/admin/keeper/health`
+
+Returns the workspace's in-memory rolling Keeper decision window. A workspace
+with no decisions returns zero counts and is not implicitly classified as
+healthy. The response includes `workspace_id`, `samples`, `allow`, `deny`,
+`escalate`, `judge_failures`, the corresponding `*_rate` fields,
+`progressed_rate` (allow or escalate), `p95_latency_ms`, the configured
+`min_samples`, `alarm_progressed_rate`, and `alarm_judge_failure_rate`:
+
+```json
+{
+  "workspace_id": "ws_...", "samples": 42, "allow": 20, "deny": 12,
+  "escalate": 8, "judge_failures": 2, "allow_rate": 0.476,
+  "deny_rate": 0.286, "escalate_rate": 0.190, "progressed_rate": 0.667,
+  "judge_failure_rate": 0.048, "p95_latency_ms": 812,
+  "min_samples": 20, "alarm_progressed_rate": 0.25,
+  "alarm_judge_failure_rate": 0.5,
+  "alarm": {"kind":"progressed_rate","summary":"...","at":"2026-08-04T12:00:00Z"},
+  "oldest":"2026-08-04T11:00:00Z", "newest":"2026-08-04T12:00:00Z"
+}
+```
+
+`alarm` is omitted when no alarm is standing. Missing workspace context is
+`400`; the endpoint does not query the database.
+
+### `DELETE /api/v1/admin/keeper/config`
+
+Clears all instance overrides and returns the effective configuration. The server
+returns to its boot-time `KEEPER_*` settings. This is not a database/workspace
+delete.
+
+## Judge discovery and probes
+
+### `GET /api/v1/admin/keeper/judge/models?endpoint={url}`
+
+Lists models exposed by the supplied Ollama endpoint. If `endpoint` is omitted,
+the configured effective endpoint is used. A successful response is:
+
+```json
+{
+  "endpoint": "http://ollama:11434",
+  "models": ["qwen3.5:9b"],
+  "suggestions": [{"url": "http://ollama:11434", "label": "local Ollama"}]
+}
+```
+
+An unreachable or invalid endpoint is still `200` with `models: []` and an
+`error` string so a picker can render the diagnostic; `403` and `429` remain HTTP
+errors. This route dials the supplied address and is rate limited instance-wide.
+
+### `POST /api/v1/admin/keeper/judge/test`
+
+Runs the real local judge smoke test. The body is optional; absent or empty fields
+use saved configuration.
+
+```json
+{"judge_endpoint_url":"http://ollama:11434","judge_model":"qwen3.5:9b"}
+```
+
+The `200` response reports three stages (`reach`, model availability, and a
+parseable `verdict`) and includes the advertised `models` and final `decision`
+when available:
+
+```json
+{"ok":true,"endpoint":"http://ollama:11434","model":"qwen3.5:9b",
+ "stages":[{"name":"reach","label":"Reach the endpoint","ok":true,"detail":"...","latency_ms":12},
+ {"name":"model","label":"Model is available","ok":true,"detail":"..."},
+ {"name":"verdict","label":"Returns a verdict","ok":true,"detail":"verdict: ALLOW"}],
+ "models":["qwen3.5:9b"],"decision":"ALLOW"}
+```
+
+Reach/model/verdict failures are represented in `stages` with `ok: false`, not
+as a 5xx. Invalid JSON is `400`; probe exhaustion is `429`.
+
+### `POST /api/v1/admin/keeper/judge/test-hosted`
+
+Tests an unsaved hosted judge configuration using a workspace credential:
+
+```json
+{"provider":"anthropic","model":"claude-sonnet-4-20250514","credential_id":"cred_..."}
+```
+
+The `200` response uses the same `judgeTestResponse` shape, with stages for key
+resolution, verdict parsing, and the Keeper latency budget. An omitted
+`credential_id` tests the provider's server environment key. `provider` and
+`model` are required; an unusable, wrong-workspace, or wrong-type credential is
+reported in the `key` stage. `503` means hosted-provider resolution is not wired;
+`400` covers malformed or incomplete input and `429` the shared probe limit.
+
+## Evaluator models
+
+### `GET /api/v1/admin/keeper/aux`
+
+Returns every evaluator slot, its effective provider/model/timeout/credential,
+provenance, and the available provider vocabulary:
+
+```json
+{"slots":[{"slot":"curator","label":"Skill review",
+ "provider":{"value":"anthropic","source":"env","editable":true},
+ "model":{"value":"claude-sonnet-4-20250514","source":"default","editable":true},
+ "timeout_ms":{"value":30000,"source":"default","editable":true},
+ "credential_id":{"value":"cred_...","source":"instance","editable":true},
+ "overridden":true}], "providers":["anthropic","ollama","openai_compat"],
+ "judge_provider":"ollama","judge_model":"qwen3.5:9b","any_overridden":true}
+```
+
+### `PUT /api/v1/admin/keeper/aux/{slot}`
+
+Partially overrides one known evaluator slot. Valid fields are `provider`,
+`model`, `timeout_ms`, and `credential_id`; omitted fields are unchanged, empty
+strings/`0` clear the corresponding override. A credential must be an active
+`API_KEY` in the caller's workspace. The response is the complete `aux` object.
+Unknown slots, invalid provider/model values, and unverified credentials are
+`400`; a server without credential verification returns `503` when a non-empty
+credential is selected.
+
+### `DELETE /api/v1/admin/keeper/aux` and `DELETE /api/v1/admin/keeper/aux/{slot}`
+
+Clears every evaluator override, or only the named slot, respectively. Both
+return the complete `aux` object. An unknown slot is `400`.
+
+### `POST /api/v1/admin/keeper/aux/use-judge`
+
+Points every evaluator at the configured instance judge and returns the complete
+`aux` object. The instance judge must have both an endpoint and model (`400` if
+not); an unavailable evaluator store is `503`.
+
+### `POST /api/v1/admin/keeper/aux/{slot}/probe`
+
+Runs one real evaluation against the slot's resolved provider/model. The response
+is the `judgeTestResponse` stage/decision shape described above. The slot must be
+known and configured (`400` otherwise); unavailable probe support is `503`, and
+the shared spend/rate limit is `429`. This route deliberately spends model
+tokens only when explicitly called.
+
+## Watchdog governance and routing
+
+### `GET /api/v1/admin/keeper/governance`
+
+Returns the workspace watchdog settings. The response includes `configured`, the
+stored `enabled`, `security_contact_user_id`, `deny_notify_min_risk`, `watch_spec`,
+`watch_presets`, `require_second_approver`, `auto_lease_seconds`,
+`gov_model_provider`, `gov_model_id`, and `gov_model_credential_id`, plus:
+
+```json
+{"effective_second_approver":{
+  "min_security_level":4,
+  "min_security_level_label":"L4 · critical",
+  "source":"tier",
+  "tier_floor_security_level":4,
+  "tier_floor_label":"L4 · critical"
+}}
+```
+
+`source` is `workspace`, `tier`, or `none`; this reports the enforced rule, not
+only the stored toggle.
+
+### `PUT /api/v1/admin/keeper/governance`
+
+Partially merges the same settings and returns the full governance response. The
+body fields are `enabled`, `security_contact_user_id`, `deny_notify_min_risk`
+(1–10), `watch_spec`, `watch_presets`, `require_second_approver`,
+`auto_lease_seconds` (0/off or 60–30 days), `gov_model_provider`
+(`ollama`, `anthropic`, or `openai_compat`), `gov_model_id`, and
+`gov_model_credential_id`. A credential must be an `ENDPOINT_URL` or `API_KEY`
+in this workspace; a security contact must be an `ADMIN` or `OWNER` member.
+Validation failures are `400`; successful writes are journaled. A successful
+write may include a non-blocking `warning` when no eligible findings recipient
+exists.
+
+### `POST /api/v1/admin/keeper/findings/test`
+
+Sends one synthetic, non-blocking finding through the real inbox routing path;
+no model is called. The `200` response identifies the created inbox item and
+resolved recipients:
+
+```json
+{"inbox_item_id":"ibx_ESCALATION_keepertest_...",
+ "recipients":[{"user_id":"user_...","role":"ADMIN","reason":"security contact"}],
+ "security_contact_user_id":"user_..."}
+```
+
+If nobody can receive it, the write still succeeds with a `warning`. Missing
+workspace context is `400`; unavailable routing is `503`.
+
+## Manual review and adjudication
+
+### `POST /api/v1/admin/keeper/review/{slot}/run`
+
+Runs one evaluator immediately. Canonical slots are `skill-review`, `behavior`,
+`memory-health`, and `negative-learning`; aliases `curator`, `skill_review`,
+`memory_health`, `negative`, and `negative_learning` are accepted. The optional
+body supplies `crew_id`, `agent_id`, and slot-specific fields:
+`skill_id`; `tool_name`, `tool_args_snippet`, `recent_tool_calls`; or
+`trigger`, `failure_snippet`, `prior_lesson`. `workspace_id`, if supplied, must
+equal the session workspace.
+
+The response is the shared phase-2 decision payload:
+`request_id`, `decision` (`ALLOW`, `DENY`, or `ESCALATE`), `reason`, and
+`risk_score`; an escalation also creates an inbox item. Invalid slot/body or a
+cross-workspace crew/agent is `400`; unavailable reviews are `503`.
+
+### `POST /api/v1/admin/keeper/ask`
+
+Evaluates a credential request as the current operator's workspace, using the
+same path and audit behavior as an agent request. The body fields are
+`requesting_agent_id`, `requesting_crew_id`, `credential_id` or
+`credential_name`, optional `task_id`, and required `intent`. `workspace_id` is
+overwritten from the session, never trusted from the body.
+
+The `200` response is `{request_id, decision, reason, risk_score}`. Invalid or
+missing fields are `400`; an unknown agent is `401`, a workspace/crew boundary
+failure is `403`, and an unavailable active credential is `404`.
+
+### `POST /api/v1/admin/keeper/requests/{requestId}/resolve`
+
+Settles an `ESCALATE` request in the current workspace:
+
+```json
+{"decision":"ALLOW","reason":"Release approved by the security owner",
+ "adjudicator":""}
+```
+
+`decision` must be `ALLOW` or `DENY`; `reason` defaults to `resolved by an
+operator`. Optional `adjudicator` records a reference model instead of the
+authenticated user as the ledger adjudicator. The response is:
+
+```json
+{"request_id":"req_...","decision":"ALLOW",
+ "reason":"Release approved by the security owner",
+ "decided_at":"2026-08-04T12:00:00Z"}
+```
+
+The request must belong to the session workspace. A missing request is `404`, an
+already terminal request is `409`, and a required four-eyes approval that the
+requesting agent's owner attempts to self-approve is `403`. The update of the
+Keeper request, inbox item, and journal entry is atomic.
+
+### `DELETE /api/v1/admin/keeper/requests`
+
+Purges Keeper requests and their transition history for the current workspace.
+This is an administrative destructive operation; it has no request body and
+returns `200` with `{"deleted_requests": 12, "deleted_events": 24}`. It
+requires `OWNER` or `ADMIN` and returns `400` without workspace context.

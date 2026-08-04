@@ -441,6 +441,7 @@
               "api-reference/webhooks",
               "api-reference/websocket",
               "api-reference/admin",
+              "api-reference/keeper",
               "api-reference/feature-flags",
               "api-reference/instance-settings",
               "api-reference/policies",
