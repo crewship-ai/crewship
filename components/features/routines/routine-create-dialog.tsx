@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ComponentType } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { useRouter } from "next/navigation"
 import {
   X,
@@ -16,11 +16,18 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { useAbilities } from "@/hooks/use-abilities"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
+import { FileEditor } from "@/components/features/files/file-editor"
+import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
+import { parseRoutineBuffer } from "@/lib/routine-buffer"
+import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
+import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 
 // RoutineCreateDialog — describe-first authoring entry for new routines.
 //
@@ -48,7 +55,7 @@ interface Props {
 
 type Mode = "entry" | "describe" | "fork" | "advanced"
 
-const STARTER_TEMPLATES = [
+export const STARTER_TEMPLATES = [
   {
     id: "empty",
     label: "Empty",
@@ -149,10 +156,21 @@ interface RoutineListItem {
   description?: string
   invocation_count: number
   ephemeral?: boolean
+  // Same identity the sidebar and the detail header derive, so a
+  // routine looks like itself wherever it is listed. You are choosing
+  // something to copy; a column of slugs is not a thing you can
+  // recognise.
+  icon?: string
+  color?: string
+  last_invocation_status?: string
 }
 
 export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: Props) {
   const router = useRouter()
+  const { role } = useAbilities()
+  // The server gates skip_test_gate on roleManage. Mirroring that here
+  // is the difference between an option and a trap.
+  const canSkipGate = role === "OWNER" || role === "ADMIN"
   const [mode, setMode] = useState<Mode>("entry")
 
   // ── Shared meta ────────────────────────────────────────────────────
@@ -172,7 +190,22 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const [forking, setForking] = useState(false)
 
   // ── Advanced (JSON DSL) mode ───────────────────────────────────────
-  const [dslJson, setDslJson] = useState(() => JSON.stringify(STARTER_TEMPLATES[0].json, null, 2))
+  // The buffer, in whichever format the author is writing. YAML by
+  // default because that is what the routine editor, the manifest kind
+  // and `crewship apply -f` all speak — creating in JSON and then
+  // editing in YAML made one job two surfaces.
+  //
+  // `dslText` is what the editor is CONSTRUCTED from and changes only
+  // when the buffer is replaced wholesale (template, format switch,
+  // fork). `liveText` mirrors the live document for everything derived
+  // from it. Feeding typing back into construction rebuilds CodeMirror
+  // and puts the caret at position 0 — it shredded a routine in about
+  // four seconds when the detail editor did it.
+  const [dslFormat, setDslFormat] = useState<DslFormat>("yaml")
+  const [dslText, setDslText] = useState(() => toYaml(STARTER_TEMPLATES[0].json))
+  const [liveText, setLiveText] = useState(() => toYaml(STARTER_TEMPLATES[0].json))
+  const bufferRef = useRef(toYaml(STARTER_TEMPLATES[0].json))
+  const [editorKey, setEditorKey] = useState(0)
   const [parseError, setParseError] = useState<string | null>(null)
   const [busy, setBusy] = useState<"none" | "testing" | "saving">("none")
   const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
@@ -248,12 +281,14 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // so React's hooks contract holds — the `if (!open) return null` below
   // sits AFTER all hook declarations for that reason.
   const parsedDSL = useMemo<Record<string, unknown> | null>(() => {
-    try {
-      return JSON.parse(dslJson) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }, [dslJson])
+    const r = parseRoutineBuffer(liveText, dslFormat)
+    return r.ok ? r.parsed : null
+  }, [liveText, dslFormat])
+
+  // Schema completion + inline diagnostics — the same extensions the
+  // routine editor uses, so a document written here and a document
+  // edited there are held to one standard.
+  const dslExtensions = useMemo(() => routineDslExtensions(dslFormat), [dslFormat])
 
   if (!open) return null
 
@@ -263,7 +298,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     const tpl = STARTER_TEMPLATES.find((t) => t.id === templateId)
     if (!tpl) return
     const j = { ...tpl.json, name: name || tpl.json.name, description: description || tpl.json.description }
-    setDslJson(JSON.stringify(j, null, 2))
+    replaceBuffer(dslFormat === "yaml" ? toYaml(j) : JSON.stringify(j, null, 2))
     setParseError(null)
     setTestResult(null)
     setSaveToken(null) // template change → DSL change → bound token invalid
@@ -273,14 +308,43 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // the inline UI feedback. Distinct from parsedDSL so the render
   // path stays side-effect-free.
   const parseDSLWithError = (): Record<string, unknown> | null => {
-    try {
-      const parsed = JSON.parse(dslJson) as Record<string, unknown>
-      setParseError(null)
-      return parsed
-    } catch (e) {
-      setParseError(e instanceof Error ? e.message : "invalid JSON")
+    const r = parseRoutineBuffer(bufferRef.current, dslFormat)
+    if (!r.ok) {
+      setParseError(r.message)
       return null
     }
+    setParseError(null)
+    return r.parsed
+  }
+
+  /** Replace the buffer wholesale — template, format switch, fork. */
+  const replaceBuffer = (next: string) => {
+    setDslText(next)
+    setLiveText(next)
+    bufferRef.current = next
+    setEditorKey((k) => k + 1)
+    setTestResult(null)
+    setSaveToken(null)
+  }
+
+  /** Every keystroke. Mirrors, never reconstructs. */
+  const handleDocChange = (next: string) => {
+    bufferRef.current = next
+    setLiveText(next)
+    setParseError(null)
+    setTestResult(null)
+    setSaveToken(null)
+  }
+
+  const switchDslFormat = (next: DslFormat) => {
+    if (next === dslFormat) return
+    const converted = convertDsl(bufferRef.current, dslFormat, next)
+    if (!converted.ok) {
+      toast.error(`Fix the ${dslFormat.toUpperCase()} error before switching`)
+      return
+    }
+    setDslFormat(next)
+    replaceBuffer(converted.text)
   }
 
   // Returns both the pass verdict AND the freshly-minted save_token so a
@@ -429,7 +493,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       // Rename the fork so it doesn't collide with the source slug on save.
       const forkName = `${item.slug}-copy`
       const nextDef = { ...def, name: forkName }
-      setDslJson(JSON.stringify(nextDef, null, 2))
+      replaceBuffer(dslFormat === "yaml" ? toYaml(nextDef) : JSON.stringify(nextDef, null, 2))
       setName("")
       setDescription(item.description ?? detail.description ?? "")
       setParseError(null)
@@ -464,7 +528,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       : mode === "fork"
         ? "fork one of your own routines"
         : mode === "advanced"
-          ? "JSON DSL editor — Test & Save"
+          ? "Editor — test-run, then save"
           : undefined
 
   return (
@@ -521,8 +585,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             />
             <EntryCard
               icon={Wrench}
-              title="Build step by step"
-              description="Hand-write the JSON DSL in the advanced editor, test-run it, and save. For when you already know exactly what you want."
+              title="Write it yourself"
+              description="Author the DSL in the editor — YAML or JSON, with schema completion and the step graph beside it. Test-run and save without leaving the dialog."
               onClick={() => setMode("advanced")}
             />
           </div>
@@ -623,7 +687,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               ) : filteredRoutines.length === 0 ? (
                 <div className="rounded-md border border-dashed border-white/10 px-3 py-6 text-center text-xs text-muted-foreground">
                   {routines.length === 0
-                    ? "No routines yet. Describe one above, or build it step by step."
+                    ? "No routines yet. Describe one, or write the first yourself."
                     : "No routines match your search."}
                 </div>
               ) : (
@@ -636,8 +700,27 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                       onClick={() => handleForkPick(r)}
                       className="group flex w-full items-center gap-3 rounded-md border border-white/[0.06] bg-card/40 px-3 py-2 text-left transition-colors hover:border-white/15 hover:bg-card disabled:opacity-50"
                     >
+                      <span className="relative shrink-0">
+                        <CrewIcon
+                          icon={resolveRoutineIcon(r)}
+                          color={resolveRoutineColor(r)}
+                          size="sm"
+                          className="!h-6 !w-6 !rounded-md"
+                        />
+                        <span
+                          aria-hidden
+                          title={r.last_invocation_status ?? "never invoked"}
+                          className={cn(
+                            "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                            forkStatusDot(r),
+                          )}
+                        />
+                      </span>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-mono text-xs font-medium">{r.slug}</div>
+                        <div className="truncate text-xs font-medium">{r.name || r.slug}</div>
+                        <div className="truncate font-mono text-[10px] text-muted-foreground-soft">
+                          {r.slug}
+                        </div>
                         {r.description && (
                           <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{r.description}</p>
                         )}
@@ -731,30 +814,70 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               </aside>
 
               <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-1.5 shrink-0">
+                {/* The bar the routine editor has, because this is the
+                    same job: format toggle, the slug the DSL will save
+                    under, and the parse error WITH its line — the old
+                    strip said "invalid JSON" and left you to find it. */}
+                <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-1.5 shrink-0">
                   <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <span>JSON DSL</span>
-                    <span>·</span>
+                    <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+                      {(["yaml", "json"] as const).map((f) => (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => switchDslFormat(f)}
+                          aria-pressed={dslFormat === f}
+                          className={cn(
+                            "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
+                            dslFormat === f
+                              ? "bg-primary/15 text-primary"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {f}
+                        </button>
+                      ))}
+                    </div>
                     <span className="font-mono">slug: {slug}</span>
                   </div>
-                  {parseError && (
-                    <Badge variant="outline" className="text-[10px] border-destructive/30 text-destructive">
-                      invalid JSON
-                    </Badge>
+                  {parseError ? (
+                    <span className="truncate text-[10px] text-destructive" title={parseError}>
+                      {parseError}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-success">syntax ok</span>
                   )}
                 </div>
-                <textarea
-                  value={dslJson}
-                  aria-label="Routine definition JSON"
-                  onChange={(e) => {
-                    setDslJson(e.target.value)
-                    setParseError(null)
-                    setTestResult(null)
-                    setSaveToken(null) // edit → bound HMAC token invalid
-                  }}
-                  spellCheck={false}
-                  className="flex-1 resize-none bg-background p-3 font-mono text-[11px] leading-relaxed outline-none"
-                />
+                <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+                  {/* The graph, beside the code. You could not see what
+                      you were building until after it was saved. */}
+                  <div className="relative min-h-[160px] w-full min-w-0 flex-1 border-b border-white/[0.06] md:min-w-[240px] md:border-b-0 md:border-r">
+                    {parsedDSL ? (
+                      <RoutineDefinitionCanvas
+                        definition={parsedDSL}
+                        slug={slug}
+                        name={name || slug}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-4 text-center text-[11px] text-muted-foreground-soft">
+                        The graph appears once the definition parses.
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-h-[200px] w-full min-w-0 flex-1 overflow-hidden md:w-[52%] md:flex-none">
+                    <FileEditor
+                      key={editorKey}
+                      code={dslText}
+                      language={dslFormat}
+                      onDocChange={handleDocChange}
+                      extraExtensions={dslExtensions}
+                      onSave={(next) => {
+                        bufferRef.current = next
+                        setLiveText(next)
+                      }}
+                    />
+                  </div>
+                </div>
                 {testResult && (
                   <div
                     className={cn(
@@ -773,17 +896,26 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
 
             {/* Footer */}
             <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-2 shrink-0">
-              <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={skipTestGate}
-                  onChange={(e) => setSkipTestGate(e.target.checked)}
-                  className="h-3 w-3 cursor-pointer"
-                />
-                Skip test-run gate
-                <AlertTriangle className="h-2.5 w-2.5" />
-                <span className="text-[10px]">(OWNER / ADMIN only)</span>
-              </label>
+              {/* Shown only to the roles the server will accept it
+                  from. It was always visible, so a MANAGER could tick
+                  an escape hatch and get a 403 for their trouble — an
+                  affordance that cannot work is worse than an absent
+                  one, because it reads as a bug in the product rather
+                  than a limit on the person. */}
+              {canSkipGate ? (
+                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={skipTestGate}
+                    onChange={(e) => setSkipTestGate(e.target.checked)}
+                    className="h-3 w-3 cursor-pointer"
+                  />
+                  Skip test-run gate
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                </label>
+              ) : (
+                <span />
+              )}
               <div className="flex gap-2">
                 <Button size="sm" variant="ghost" onClick={onClose} disabled={busy !== "none"}>
                   Cancel
@@ -867,6 +999,15 @@ function EntryCard({
       <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
     </button>
   )
+}
+
+/** Status dot for a fork candidate — same vocabulary as the sidebar. */
+function forkStatusDot(r: RoutineListItem): string {
+  const s = r.last_invocation_status?.toLowerCase()
+  if (s === "completed" || s === "succeeded") return "bg-success"
+  if (s === "failed" || s === "error") return "bg-destructive"
+  if (r.invocation_count === 0) return "bg-muted-foreground/30"
+  return "bg-primary"
 }
 
 function truncate(s: string, n: number): string {

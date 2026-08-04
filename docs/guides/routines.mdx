@@ -48,6 +48,10 @@ On a phone the routine sidebar opens **over** the overview rather than beside it
 
 This replaced a **List / Schedules / Insights** tab bar. List rendered a table of every routine beside a sidebar that was already the catalog — the same list twice, and the copy in the main pane was the one you could not search. Schedules was a read-only table; every action on a schedule (create, pause, delete) lives on the routine's own **Triggers** card, so the tab held no capability. Insights was four derived numbers and a "top routines by usage" leaderboard. What was load-bearing in those two — what fires next, what runs cost, which routines are over budget, what is failing — is a card on the overview now.
 
+**New routine** offers three ways to fill one buffer, because the server has one way to create a routine: `test_run` mints a `save_token` bound to the definition's hash, and `save` refuses without a fresh one. **Describe it** hands off to a crew Lead carrying the `routine-author` skill. **Fork** copies one of your own routines' definitions, renamed. **Write it yourself** opens the same editor the detail page uses — YAML by default, schema completion, errors located on the line, and the step graph beside the code. All three end at the same Test-run → Save.
+
+The **skip test-run gate** checkbox appears only for OWNER/ADMIN, which is the tier the server accepts it from. An affordance that cannot work reads as a broken product rather than a limit on the person.
+
 ### The detail page
 
 Opening a routine gives you one scrolling surface of cards, not a tab bar:
