@@ -24,9 +24,22 @@ type assignRequest struct {
 	Crew string `json:"crew,omitempty"`
 }
 
-// handleAssign handles POST /assign from lead agents.
-// It validates the target slug, then forwards the assignment to crewshipd
-// via the internal API so crewshipd can exec the sub-agent.
+// handleAssign handles POST /assign from an agent delegating work.
+// It resolves the ACTING agent, validates the target slug, then forwards the
+// assignment to crewshipd via the internal API so crewshipd can exec the
+// sub-agent.
+//
+// Not "from lead agents" any more, and — the part worth stating plainly — it
+// never was, in code. This handler used to check the target and the crew
+// roster and nothing about the caller: no identity, not even a bearer token.
+// "Only leads delegate" was true only because only a LEAD's system prompt
+// carried the recipe (internal/orchestrator/lead.go), which is a fact about
+// what agents are TOLD, not about what they may do (#1754).
+//
+// The identity resolved here is what crewshipd's delegation caps measure
+// against — it finds the assignment the caller is executing and takes its depth
+// — so getting it wrong is not an attribution nit: a sub-agent's dispatch filed
+// under its lead reads as depth 1 on every hop, forever.
 func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "assignment IPC not configured"})
@@ -35,6 +48,19 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 
 	var req assignRequest
 	if !decodeCappedJSON(w, r, &req) {
+		return
+	}
+
+	// #812 identity contract, same shape as /report-confidence: a valid
+	// per-agent token is authoritative, an unrecognized one is a forgery, and
+	// an ABSENT one on a crew that issues tokens is a downgrade attempt — the
+	// caller dropping the header to be taken for whoever booted this sidecar.
+	// Only a fully token-less (legacy) deployment falls back to the boot agent.
+	actorAgentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{
+			"error": "unrecognized agent token — /assign requires the per-agent token in $CREWSHIP_AGENT_TOKEN",
+		})
 		return
 	}
 	if req.Target == "" || req.Task == "" {
@@ -86,6 +112,10 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		"crew_id":      targetCrewID,
 		"workspace_id": s.ipc.WorkspaceID,
 		"chat_id":      s.ipc.ChatID,
+		// Who is dispatching, resolved above from the bearer token. chat_id
+		// cannot answer that: the crew shares one sidecar and its IPC chat is
+		// the boot agent's.
+		"actor_agent_id": actorAgentID,
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
