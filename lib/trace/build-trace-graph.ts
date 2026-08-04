@@ -240,9 +240,22 @@ export function buildTraceGraph(
     })
   }
 
-  // ---- Layout via dagre LR ----
+  // ---- Layout via dagre TB ----
+  //
+  // Top-to-bottom, not left-to-right. LR laid a 15-step routine out as
+  // ~3500px of single-row noodle; fitView then shrank it to fit the
+  // viewport's WIDTH and every label went unreadable. Depth is the one
+  // dimension a routine grows without bound, so it has to run along the
+  // dimension the viewport can scroll — down.
+  //
+  // In TB, dagre's two gaps swap meaning: nodesep is the horizontal gap
+  // between siblings on the same rank, ranksep the vertical gap between
+  // ranks. Siblings get more room than ranks do because the nodes are
+  // wide (200) and short (70) — packing ranks tightly keeps a long
+  // routine on screen, while cramping siblings would make a fan-out
+  // read as one blob.
   const g = new DagreGraph({ multigraph: false, compound: false })
-  g.setGraph({ rankdir: "LR", nodesep: 30, ranksep: 70, marginx: 20, marginy: 20 })
+  g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 56, marginx: 24, marginy: 24 })
   g.setDefaultEdgeLabel(() => ({}))
 
   for (const n of nodes) {

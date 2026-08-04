@@ -254,15 +254,19 @@ function TraceStepNodeBase({ data }: NodeProps) {
         heatmapClass,
       )}
     >
+      {/* Top/Bottom, matching the dagre TB rank direction. Handles
+          on Left/Right would make every edge leave a node sideways
+          and loop back down — the layout and the wiring have to agree
+          on which way the graph flows. */}
       <Handle
         type="target"
-        position={Position.Left}
+        position={Position.Top}
         className="!h-2 !w-2 !border-0 !bg-white/30"
         isConnectable={false}
       />
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className="!h-2 !w-2 !border-0 !bg-white/30"
         isConnectable={false}
       />
@@ -519,7 +523,7 @@ function TriggerNodeBase({ data }: NodeProps) {
     >
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className="!h-2 !w-2 !border-0 !bg-white/30"
         isConnectable={false}
       />

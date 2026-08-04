@@ -53,6 +53,26 @@ const edgeTypes: EdgeTypes = {
   traceDataFlow: TraceDataFlowEdge,
 }
 
+// fitView's job is "show everything", which for a long routine means
+// "show everything at 3 pixels tall". A 15-step graph is ~1900px deep;
+// fit into a ~700px pane that is zoom 0.35, and the labels — the whole
+// reason the node has a label — stop being readable.
+//
+// minZoom stops it shrinking past legibility: past that point the graph
+// overflows and the user pans, which is the right trade. A step you can
+// read and must scroll to beats a whole routine you cannot read.
+// maxZoom keeps a two-step routine from filling the pane with two
+// enormous cards.
+//
+// ReactFlow centres the bounds it fits, so the clamp lands the middle of
+// the routine in view rather than a corner.
+//
+// Trace canvas only. The overview graph is built by build-overview-graph
+// (still LR, its own node components) and keeps its own fit behaviour —
+// this is a fix for the step tree, and widening it to a surface with a
+// different topology would be guessing.
+const FIT_VIEW = { padding: 0.18, minZoom: 0.62, maxZoom: 1.15 } as const
+
 interface TraceCanvasProps {
   run: PipelineRun | null
   dsl: PipelineDSL | null
@@ -225,7 +245,7 @@ function CanvasInner({
       setEdges(graphData.edges)
       // Slight delay so React Flow has the new graph in state
       // before we ask it to fit view.
-      const t = setTimeout(() => fitView({ duration: 400, padding: 0.25 }), 50)
+      const t = setTimeout(() => fitView({ ...FIT_VIEW, duration: 400 }), 50)
       return () => clearTimeout(t)
     }
 
@@ -286,7 +306,7 @@ function CanvasInner({
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={FIT_VIEW}
         minZoom={0.1}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
