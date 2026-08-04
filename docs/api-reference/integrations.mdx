@@ -67,6 +67,33 @@ requirements and the unauthenticated OAuth callback.
 | `POST` | [`/api/v1/integrations/composio/accounts/{accountId}/refresh`](#composio-connected-account-management) | Refresh a connected account's credentials |
 | `DELETE` | [`/api/v1/integrations/composio/accounts/{accountId}`](#composio-connected-account-management) | Delete a connected account |
 
+## Endpoint contract
+
+Each endpoint below has **Auth**, **Request**, **Response**, and **Status**
+details. Workspace routes require a session or CLI token plus membership;
+OAuth provider/discovery and registry list/search routes explicitly do not.
+Requests and responses are JSON unless noted. Workspace reads return `200`,
+creates `201`, deletes use the status stated by the endpoint, and registry sync
+returns `202`. The shared failures are `401` unauthenticated, `403` denied
+workspace/role, `400` invalid JSON or fields, `404` missing or foreign resource,
+`409` conflict, and `500`/`503` for handler or unavailable-backend failures.
+The route gates and handler branches are verified in
+`internal/api/router_orchestration.go`, `internal/api/mcp_*.go`, and
+`internal/api/oauth*.go`.
+
+**Auth:** The endpoint-specific role or capability is authoritative; otherwise
+the route requires an authenticated workspace member.
+
+**Request:** Query parameters and JSON bodies are shown immediately under each
+operation. Read and delete operations have no body unless stated.
+
+**Response:** Successful responses are the JSON object/array described under
+the operation; connection tests return `{ "status", "message?", "server_info?" }`.
+
+**Status:** In addition to the success status, invalid input is `400`, denied
+access is `403`, a missing resource is `404`, and backend/provider failures are
+`500` or `503` as noted by the operation.
+
 ---
 
 ## Managed Integrations (Composio)

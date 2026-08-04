@@ -17,7 +17,7 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | member | Get definition |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
-| POST | `/api/v1/workspaces/{workspaceId}/pipelines/test_run` | member | Validate an unsaved definition and mint `save_token` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/test_run` | create | Validate an unsaved definition and mint `save_token` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` | create | Execute a saved, active pipeline |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch` | create | Execute multiple input items |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run` | create | Static WouldExecute preview; no agent invocation |
@@ -45,11 +45,48 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides` | member | List step overrides |
 | PUT | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Set `{ "prompt": "...", "model_override": "..." }` |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Delete an override |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints` | member | List pending durable waitpoints |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve` | create | Approve a pending waitpoint |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | List cron schedules (see [Routines](/api-reference/routines)) |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook trigger (see [Routines](/api-reference/routines)) |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook triggers |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | manage | Delete a webhook trigger |
+| POST | `/api/v1/webhooks/{token}` | token | Public webhook dispatch; no workspace session |
 
 `create`, `manage`, and `delete` are the server's role-action gates (normally
 MANAGER+, OWNER/ADMIN, and OWNER/ADMIN respectively). A missing pipeline is
 `404`; malformed JSON or invalid input is `400`; insufficient role is `403`;
 an unavailable runner/store is `503`.
+
+## Core endpoint contract
+
+All paths in this page require the `/api/v1` prefix. `member` means an
+authenticated session or CLI token with membership in `{workspaceId}`;
+`create`, `manage`, and `delete` are the role/capability gates described above.
+Requests are JSON unless the operation is a `GET` or `DELETE` with no body.
+Successful responses are JSON and use the status shown by the operation; an
+empty successful delete uses `204 No Content`. Invalid JSON, missing required
+path/body values, or invalid query values return `400`; missing or
+soft-deleted resources return `404`; authorization failures return `401` or
+`403`; unavailable runner/storage dependencies return `503`; unexpected
+handler/database failures return `500`.
+
+The route-specific request and response contracts are:
+
+| Operation family | Request | Success response/status |
+|---|---|---|
+| List/get/version/export/diff/state reads | Query values documented beside the operation; no body | JSON resource/array/object, `200` |
+| Save/import | Definition or portable bundle; `slug`/`definition` or `author_crew_id` as applicable | Pipeline/version object, `200` or `201` |
+| Run/run-batch/dry-run/step-run | Run payload in [Run payload](#run-payload); step-run adds a fixture | Run result, per-item results, preview, or step result, `200`/`202` |
+| Governance, cancel, replay, signal, waitpoint approve | Optional operation-specific JSON body | Updated resource or `{ "ok": true, ... }`, `200` |
+| Tags/overrides/budget/state writes | JSON body described by the operation | Updated object, `200` |
+| Schedule/webhook administration | See [Routines](/api-reference/routines) | Schedule/webhook object or empty delete, `200`/`201`/`204` |
+
+The public `POST /api/v1/webhooks/{token}` route is the exception to session
+authentication: the high-entropy token authenticates dispatch, and an
+configured signing secret adds HMAC verification. Accepted dispatches return
+`202`; invalid signatures return `401`, rate limits return `429`, and an
+inactive target returns `409`.
 
 ## Run payload
 

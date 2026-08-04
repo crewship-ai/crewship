@@ -33,6 +33,32 @@ Most read endpoints accept a session or CLI token with workspace membership. Wri
 | `POST` | [`/api/v1/crew-templates/{slug}/deploy`](#deploy-crew-template) | Deploy a crew blueprint |
 | `POST` | [`/api/v1/crew-ai-suggest`](#ai-crew-wizard) | AI-suggest a crew configuration |
 
+## Endpoint contract
+
+Every endpoint identifies **Auth**, **Request**, **Response**, and **Status**.
+Read routes require a session or CLI token and workspace membership. Import,
+generation, bulk import, proposed-skill review, and template writes use the
+role gate shown beside the endpoint; crew-template deployment and the AI wizard
+require membership only. Requests are JSON; successful reads return `200`,
+creates `201`, and template deletion `204`. Unless narrowed by an endpoint,
+failures are `401`, `403`, `400`, `404`, `409`, `422` for importer rejection,
+`502` for upstream fetch/AI/git failures, or `503` for an unavailable configured
+backend. These contracts are verified against `internal/api/router_crews.go`,
+`internal/api/skills*.go`, and `internal/api/crew_*.go`.
+
+**Auth:** The endpoint's role gate is part of the contract; no write endpoint
+inherits the read permission implicitly.
+
+**Request:** JSON fields marked required below must be present; import sources
+are mutually exclusive and filenames are treated as basenames.
+
+**Response:** Successful reads return arrays/objects as shown; create operations
+return the created resource and status `201`.
+
+**Status:** `400` covers malformed or invalid input, `403` role denial, `404`
+missing/foreign resources, `409` duplicates, `422` rejected skill content,
+`502` upstream failure, and `503` unavailable memory/backend roots.
+
 ---
 
 ## Skills
@@ -479,6 +505,13 @@ A skill whose frontmatter category is missing or unrecognised defaults to `CUSTO
 ## Workflow Templates
 
 Workflow templates define reusable task structures for missions.
+
+For the five workflow-template endpoints below, **Auth** is workspace member
+for reads and `OWNER`/`ADMIN`/`MANAGER` for writes; **Request** is the JSON
+template object for create/update and no body for reads/delete; **Response** is
+the template object or array; **Status** is `200` for reads/updates, `201` for
+create, `204` for delete, plus `400`, `403`, `404`, and `500` for invalid,
+forbidden, missing, or failed operations.
 
 ### List Templates
 
