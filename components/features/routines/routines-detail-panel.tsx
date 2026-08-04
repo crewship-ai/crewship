@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, Eye, Square, Check, Ban, Power, PowerOff, MoreHorizontal } from "lucide-react"
+import { Play, Eye, Square, Check, Ban } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -26,13 +26,7 @@ import { extractProblemDetail } from "@/lib/problem-details"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { RoutineActionsMenu } from "./routine-actions-menu"
 import { RoutineCardDetail } from "./routine-card-detail"
 import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
@@ -106,6 +100,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // cancelling gates the header Cancel button while its POST is in
   // flight (same pattern as busyAction for Run / Dry run).
   const [cancelling, setCancelling] = useState(false)
+  // Bumped by the kebab's "Edit definition". A counter rather than a
+  // boolean so asking twice reopens the editor after the user closed it.
+  const [editRequest, setEditRequest] = useState(0)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
   // rapid-fire selection could race-overwrite the panel with the
@@ -502,6 +499,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 fetchRoutine()
                 onChanged()
               }}
+              editRequest={editRequest}
               statusPills={
                 <>
                   {lifecycleBadge && (
@@ -584,46 +582,20 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                       Cancel
                     </Button>
                   </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label="More actions"
-                        className="rounded-lg border border-border/60 p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      {showKillControl && lifecycle !== "proposed" && (
-                        <>
-                          {lifecycle === "disabled" ? (
-                            <DropdownMenuItem
-                              onSelect={() => governanceAction("enable")}
-                              disabled={!!busyGov || !!busyAction}
-                            >
-                              <Power className="h-3.5 w-3.5" />
-                              Enable routine
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onSelect={() => governanceAction("disable")}
-                              disabled={!!busyGov || !!busyAction}
-                            >
-                              <PowerOff className="h-3.5 w-3.5" />
-                              Disable routine
-                            </DropdownMenuItem>
-                          )}
-                        </>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={onClose}>
-                        <X className="h-3.5 w-3.5" />
-                        Close
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <RoutineActionsMenu
+                    routine={routine}
+                    workspaceId={workspaceId}
+                    onEditCode={() => setEditRequest((n) => n + 1)}
+                    onChanged={() => {
+                      fetchRoutine()
+                      onChanged()
+                    }}
+                    onClose={onClose}
+                    lifecycle={lifecycle}
+                    showKillControl={showKillControl}
+                    onGovernance={governanceAction}
+                    governanceBusy={!!busyGov || !!busyAction}
+                  />
                 </>
               }
             />

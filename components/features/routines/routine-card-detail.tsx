@@ -87,12 +87,24 @@ interface Props {
    * shared palette so the pill matches Inbox, Issues and Activity.
    */
   statusPills?: React.ReactNode
+  /** Bumped when something outside asks for the code editor. */
+  editRequest?: number
 }
 
 type SideTab = "triggers" | "versions"
 
-export function RoutineCardDetail({ routine, workspaceId, onChanged, actions, statusPills }: Props) {
+export function RoutineCardDetail({
+  routine,
+  workspaceId,
+  onChanged,
+  actions,
+  statusPills,
+  editRequest = 0,
+}: Props) {
   const [editing, setEditing] = React.useState(false)
+  React.useEffect(() => {
+    if (editRequest > 0) setEditing(true)
+  }, [editRequest])
   const [selected, setSelected] = React.useState<string | null>(null)
   const [sideTab, setSideTab] = React.useState<SideTab>("triggers")
   const [showWebhooks, setShowWebhooks] = React.useState(false)
@@ -231,27 +243,19 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged, actions, st
             title="Definition"
             subtitle={`${steps.length} ${steps.length === 1 ? "step" : "steps"}`}
             bare
-            action={
-              <button
-                type="button"
-                onClick={() => setEditing((v) => !v)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors",
-                  editing
-                    ? "border-primary/40 bg-primary/15 text-primary"
-                    : "border-border/60 text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Code2 className="h-3 w-3" />
-                {editing ? "Close code" : "Edit code"}
-              </button>
-            }
           >
             {/* The editor is a sibling, not an overlay: as a sibling it
                 takes real width and the graph slides left into what is
-                still visible, instead of hiding underneath it. */}
+                still visible, instead of hiding underneath it.
+                
+                Both panes are FLOORED so the graph can never be squeezed
+                away — a 380px canvas is the smallest one a step node is
+                still readable in, and the editor is capped at 560px
+                because past that it takes width the graph needs without
+                showing more code. Stacked, the same floors apply to
+                height. Whatever the window does, both halves survive. */}
             <div className="flex h-[56vh] min-h-[380px] flex-col md:flex-row">
-              <div className="relative min-h-[240px] min-w-0 flex-1">
+              <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
                 <RoutineDefinitionCanvas
                   definition={routine.definition}
                   slug={routine.slug}
@@ -259,9 +263,25 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged, actions, st
                   selectedStepId={selected}
                   onStepSelect={setSelected}
                 />
+                {/* On the canvas, not in the card header: the button that
+                    opens an editor for this graph belongs next to the
+                    graph, not a title-bar away from it. */}
+                <button
+                  type="button"
+                  onClick={() => setEditing((v) => !v)}
+                  className={cn(
+                    "absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition-colors",
+                    editing
+                      ? "border-primary/40 bg-primary/15 text-primary"
+                      : "border-border/60 bg-card/85 text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Code2 className="h-3.5 w-3.5" />
+                  {editing ? "Close code" : "Edit code"}
+                </button>
               </div>
               {editing && (
-                <aside className="h-[45%] w-full shrink-0 overflow-auto border-t border-border/60 md:h-auto md:w-[48%] md:border-l md:border-t-0">
+                <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t border-border/60 md:h-auto md:max-h-none md:w-[48%] md:max-w-[560px] md:border-l md:border-t-0">
                   <RoutineEditorTab
                     routine={routine}
                     workspaceId={workspaceId}
