@@ -17,8 +17,8 @@ interface SkillDetailProps {
 const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
   BUILTIN: { label: "Built-in", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
   BUNDLED: { label: "Bundled", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
-  CUSTOM: { label: "Custom", className: "bg-warn/10 text-warn dark:bg-warn dark:text-warn" },
-  MARKETPLACE: { label: "Marketplace", className: "bg-purple/10 text-purple dark:bg-purple dark:text-purple" },
+  CUSTOM: { label: "Custom", className: "bg-warn/10 text-warn dark:bg-warn/20 dark:text-warn" },
+  MARKETPLACE: { label: "Marketplace", className: "bg-purple/10 text-purple dark:bg-purple/20 dark:text-purple" },
 }
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {

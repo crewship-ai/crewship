@@ -5,10 +5,13 @@ import { AlertCircle, Check, Copy, RotateCcw, Save, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { FileEditor } from "@/components/features/files/file-editor"
+import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { convertDsl, parseDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
+import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { RoutineDetail } from "./routines-detail-panel"
 
-// RoutineEditorTab — editable JSON DSL view backed by the same
+// RoutineEditorTab — editable DSL view backed by the same
 // CodeMirror surface the file-editor uses. Three primary affordances:
 //
 //   - live syntax + structural validation (must parse to an object
@@ -56,13 +59,17 @@ function validate(text: string): ValidationResult {
 }
 
 export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
+  const [format, setFormat] = useState<DslFormat>("yaml")
   const initial = useMemo(() => {
     try {
-      return JSON.stringify(routine.definition, null, 2)
+      const json = JSON.stringify(routine.definition, null, 2)
+      if (format === "json") return json
+      const converted = convertDsl(json, "json", "yaml")
+      return converted.ok ? converted.text : json
     } catch {
       return "// failed to render definition"
     }
-  }, [routine.definition])
+  }, [routine.definition, format])
 
   const [text, setText] = useState(initial)
   const [dirty, setDirty] = useState(false)
@@ -93,7 +100,38 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     setEditorKey((k) => k + 1)
   }, [initial, routine.slug])
 
-  const validation = useMemo(() => validate(text), [text])
+  const validation = useMemo(() => {
+    const r = parseDsl(text, format)
+    if (!r.ok) {
+      return { ok: false, message: r.line ? `${r.message} (line ${r.line})` : r.message }
+    }
+    const v = r.value as Record<string, unknown>
+    if (!v.name || !Array.isArray(v.steps)) {
+      return { ok: false, message: "definition needs a `name` and a `steps` array" }
+    }
+    return { ok: true, parsed: v }
+  }, [text, format])
+
+  // Schema completion + inline diagnostics. Memoized on the format
+  // because FileEditor rebuilds its EditorState when this identity
+  // changes — an unmemoized array would blow the buffer away on every
+  // render.
+  const extraExtensions = useMemo(() => routineDslExtensions(format), [format])
+
+  // Switching format converts the BUFFER, not the stored definition, so
+  // an in-progress edit survives the toggle instead of being discarded.
+  const switchFormat = (next: DslFormat) => {
+    if (next === format) return
+    const converted = convertDsl(bufferRef.current, format, next)
+    if (!converted.ok) {
+      toast.error(`Fix the ${format.toUpperCase()} error before switching`)
+      return
+    }
+    setFormat(next)
+    setText(converted.text)
+    bufferRef.current = converted.text
+    setEditorKey((k) => k + 1)
+  }
 
   const handleEditorSave = (next: string) => {
     bufferRef.current = next
@@ -102,10 +140,11 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
 
   const handleFormat = () => {
     if (!validation.ok || !validation.parsed) {
-      toast.error("Fix the JSON error before formatting")
+      toast.error(`Fix the ${format.toUpperCase()} error before formatting`)
       return
     }
-    const pretty = JSON.stringify(validation.parsed, null, 2)
+    const pretty =
+      format === "yaml" ? toYaml(validation.parsed) : JSON.stringify(validation.parsed, null, 2)
     setText(pretty)
     bufferRef.current = pretty
     // Force the editor to remount with the formatted content. The
@@ -203,7 +242,24 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       {/* ── Toolbar ─────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
         <div className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
-          <span className="font-medium text-foreground/85">JSON DSL</span>
+          <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+            {(["yaml", "json"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => switchFormat(f)}
+                aria-pressed={format === f}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
+                  format === f
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
           <span className="opacity-60">·</span>
           <span className="tabular-nums">{text.length.toLocaleString()} chars</span>
           <span className="opacity-60">·</span>
@@ -275,19 +331,29 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       {/* ── Editor ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden">
         <FileEditor
-          key={`${routine.slug}-${editorKey}`}
+          key={`${routine.slug}-${format}-${editorKey}`}
           code={text}
-          language="json"
+          language={format}
           onSave={handleEditorSave}
           onDirtyChange={setDirty}
           saveRef={saveRef}
+          extraExtensions={extraExtensions}
         />
       </div>
 
       {/* ── Footer hint ────────────────────────────────────────── */}
       <div className="shrink-0 border-t border-border/60 bg-card/20 px-4 py-2 text-[11px] text-muted-foreground">
-        <span className="font-mono">⌘/Ctrl+S</span> flushes the buffer · Save lands changes when JSON parses with both{" "}
-        <span className="font-mono">name</span> and <span className="font-mono">steps</span>. Requires OWNER/ADMIN role.
+        <span className="font-mono">⌘/Ctrl+S</span> flushes the buffer · Save lands changes when the
+        document parses with both <span className="font-mono">name</span> and{" "}
+        <span className="font-mono">steps</span>. Requires OWNER/ADMIN role.
+        {format === "yaml" && (
+          <>
+            {" "}
+            <span className="text-warn">
+              Canonical JSON is what gets stored, so YAML comments do not survive a save.
+            </span>
+          </>
+        )}
       </div>
     </div>
   )

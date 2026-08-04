@@ -432,7 +432,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             size="sm"
             onClick={() => governanceAction("approve")}
             disabled={!!busyGov}
-            className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-warn hover:bg-warn"
+            className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-background hover:bg-warn/90"
           >
             {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
             Approve

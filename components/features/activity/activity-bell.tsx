@@ -67,7 +67,7 @@ export function ActivityBell() {
   // Live-run semantics win the badge tone; the count merges both feeds.
   const badgeClass =
     awaitingApproval > 0
-      ? "bg-warn text-warn"
+      ? "bg-warn text-white"
       : activeCount > 0
         ? "bg-primary text-white"
         : "bg-success text-white"

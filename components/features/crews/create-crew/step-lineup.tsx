@@ -214,7 +214,7 @@ function BrowseTemplates({ state, setState }: Props) {
                 <div className="text-xs font-semibold flex items-center gap-1.5">
                   <span className="truncate">{t.name}</span>
                   {t.is_builtin && (
-                    <span className="shrink-0 inline-flex items-center justify-center h-3 w-3 rounded-full bg-info text-[8px] text-info font-bold">
+                    <span className="shrink-0 inline-flex items-center justify-center h-3 w-3 rounded-full bg-info text-[8px] text-white font-bold">
                       ✓
                     </span>
                   )}
