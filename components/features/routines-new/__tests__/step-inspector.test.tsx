@@ -12,9 +12,9 @@ vi.mock("@/components/features/files/file-editor", () => ({
   FileEditor: ({ code }: { code: string }) => <pre data-testid="code">{code}</pre>,
 }))
 
-// CodeRabbit caught the empty-selection branch printing a hardcoded
-// "granular" definition while the canvas drew whatever the fidelity
-// toggle said — on "Dnes" the graph showed 7 steps and the rail showed
+// A prior review caught the empty-selection branch printing a
+// hardcoded "granular" definition while the canvas drew whatever the
+// fidelity toggle said — on "Dnes" the graph showed 7 steps and the rail showed
 // the 14-step JSON. Nothing caught it: it typechecks, and every other
 // test passed. These pin the contract the whole split design rests on,
 // which is that the two halves cannot disagree.

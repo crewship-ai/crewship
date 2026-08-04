@@ -29,6 +29,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { Progress } from "@/components/ui/progress"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
@@ -130,6 +131,13 @@ interface CodePaneProps {
   /** Renders the follow toggle. Omit for panes with nothing to follow. */
   follow?: boolean
   onFollowChange?: (next: boolean) => void
+  /**
+   * Receives the parsed definition when a save validates.
+   *
+   * Without it the pane is read-only and says so: it will not claim a
+   * redraw nobody performed.
+   */
+  onApply?: (dsl: PipelineDSL) => void
 }
 
 /**
@@ -146,6 +154,7 @@ export function CodePane({
   onStepAtCaret,
   follow,
   onFollowChange,
+  onApply,
 }: CodePaneProps) {
   const source = React.useMemo(() => dslSource(fidelity), [fidelity])
   // Line spans are a property of the source, so they are computed once
@@ -167,12 +176,43 @@ export function CodePane({
     [],
   )
 
-  const handleSave = React.useCallback(() => {
-    setSaved(true)
-    setDirty(false)
-    if (savedTimer.current) clearTimeout(savedTimer.current)
-    savedTimer.current = setTimeout(() => setSaved(false), 2400)
-  }, [])
+  const [error, setError] = React.useState<string | null>(null)
+
+  // Reads the live document and hands it to onSave. The button and
+  // Cmd+S go through the same path — a button that flipped state
+  // without reading the buffer is how the pane came to report a save
+  // that never happened.
+  const saveRef = React.useRef<(() => void) | null>(null)
+
+  const handleSave = React.useCallback(
+    (content: string) => {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(content)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "neplatný JSON")
+        setSaved(false)
+        return
+      }
+      // Same shape check the routine Editor tab applies: an object with
+      // a name and a steps array. Anything else is valid JSON and not a
+      // routine, and drawing it would produce an empty canvas rather
+      // than an error.
+      const obj = parsed as { steps?: unknown } | null
+      if (!obj || typeof obj !== "object" || !Array.isArray(obj.steps)) {
+        setError("definice musí být objekt s polem `steps`")
+        setSaved(false)
+        return
+      }
+      setError(null)
+      onApply?.({ steps: obj.steps as PipelineDSL["steps"] })
+      setSaved(true)
+      setDirty(false)
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+      savedTimer.current = setTimeout(() => setSaved(false), 2400)
+    },
+    [onApply],
+  )
 
   // Dedupe here rather than in the caller: the caret fires on every
   // arrow key, but only a change of STEP is news. Without this the
@@ -201,14 +241,17 @@ export function CodePane({
           </span>
         </div>
         <div className="flex items-center gap-2 text-[11px]">
-          <span className="inline-flex items-center gap-1 text-success">
-            <CheckCircle2 className="h-3 w-3" />
-            syntax ok
-          </span>
-          <span className="inline-flex items-center gap-1 text-success">
-            <CheckCircle2 className="h-3 w-3" />
-            doctor ok
-          </span>
+          {error ? (
+            <span className="inline-flex items-center gap-1 text-destructive" role="alert">
+              <AlertTriangle className="h-3 w-3" />
+              syntax: {error}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-success">
+              <CheckCircle2 className="h-3 w-3" />
+              syntax ok
+            </span>
+          )}
           {onFollowChange && (
             <button
               type="button"
@@ -228,7 +271,7 @@ export function CodePane({
           )}
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => saveRef.current?.()}
             className={cn(
               "rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
               dirty
@@ -247,11 +290,14 @@ export function CodePane({
           onSave={handleSave}
           onDirtyChange={setDirty}
           onCursorLine={handleCursorLine}
+          saveRef={saveRef}
         />
       </div>
       <p className="shrink-0 border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
         {footnote ??
-          "Editace jen kódem. Graf je odvozený pohled — po uložení se překreslí z uloženého DSL."}
+          (onApply
+            ? "Editace jen kódem. Graf je odvozený pohled — po uložení se překreslí z uloženého DSL."
+            : "Editace jen kódem. Tento panel je jen ke čtení — uložení se nikam nepropíše.")}
       </p>
     </div>
   )
@@ -463,15 +509,14 @@ export function OpacityMeter({ dsl }: { dsl: PipelineDSL }) {
           {opaque} z {steps.length} kroků je agent
         </span>
       </div>
-      <div className="h-1.5 min-w-[60px] flex-1 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn(
-            "h-full rounded-full transition-all",
-            pct >= 60 ? "bg-warn" : pct >= 30 ? "bg-notice" : "bg-success",
-          )}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <Progress
+        value={pct}
+        aria-label={`Neprůhlednost ${pct} procent — ${opaque} z ${steps.length} kroků je agent`}
+        className="h-1.5 min-w-[60px] flex-1 bg-muted"
+        indicatorClassName={cn(
+          pct >= 60 ? "bg-warn" : pct >= 30 ? "bg-notice" : "bg-success",
+        )}
+      />
     </div>
   )
 }

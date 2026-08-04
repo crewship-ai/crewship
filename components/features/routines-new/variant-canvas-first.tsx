@@ -27,7 +27,13 @@ import {
 } from "./shared"
 
 export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
-  const dsl = DSL_BY_FIDELITY[fidelity]
+  // The definition is local state, not a constant read: saving in the
+  // code pane replaces it and the canvas redraws from it. That loop IS
+  // the design under review, so the preview has to actually close it.
+  const [dsl, setDsl] = React.useState(DSL_BY_FIDELITY[fidelity])
+  React.useEffect(() => {
+    setDsl(DSL_BY_FIDELITY[fidelity])
+  }, [fidelity])
   const [selected, setSelected] = React.useState<string | null>(null)
   const [editing, setEditing] = React.useState(false)
   const [follow, setFollow] = React.useState(true)
@@ -82,6 +88,7 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
               onStepAtCaret={handleCaret}
               follow={follow}
               onFollowChange={setFollow}
+              onApply={setDsl}
             />
           </aside>
         )}
