@@ -32,7 +32,6 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
 import { getCrewDotColor } from "@/lib/entities"
 import { CommandPalette } from "@/components/command-palette"
-import { NotificationBell } from "@/components/features/notifications/notification-bell"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
 import { useAppStore } from "@/lib/store"
@@ -459,15 +458,29 @@ export function AppToolbar() {
           <Search className="h-4 w-4" />
         </Button>
 
-        {/* Desktop: actionable inbox + informational notifications.
-          * Two distinct surfaces: Inbox = "you need to do something"
-          * (waitpoints, escalations, failed runs); Notification bell
-          * = "FYI" (mention, comment, status change). Inbox first so
-          * the action surface gets the more prominent slot. */}
+        {/* Two surfaces, split by who is waiting: Activity = what the
+          * machines are doing (runs, live and just-finished, nothing asked
+          * of you); Inbox = what a human is being asked for (waitpoints,
+          * escalations, failed runs, replies).
+          *
+          * There was a third bell here. It read an entity-scoped
+          * `notifications` table that nothing in the product ever wrote to —
+          * `CreateNotification` had zero callers and there was no create
+          * route — so it was permanently empty by construction. It was not
+          * an unfinished wire: the pipeline the product actually runs is
+          * event -> inbox item -> notifyroute.Router -> channels + journal,
+          * with the Inbox as the origin and Activity as the record, and that
+          * table sits outside it. Three panels also cost more than they
+          * bought: "machine vs human" is a line a user can hold, "Activity
+          * vs Inbox vs Notifications" is not.
+          *
+          * System-wide messages (new version, degraded runtime, lost
+          * realtime) are banners — UpdateBanner / RuntimeBanner /
+          * RealtimeStatusBanner — because a notice nobody can afford to miss
+          * does not belong behind a closed dropdown. */}
         <div className="hidden md:flex items-center gap-0.5">
           <ActivityBell />
           <InboxBell />
-          <NotificationBell />
         </div>
 
         {/* Desktop: user menu */}

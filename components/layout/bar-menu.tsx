@@ -10,14 +10,18 @@ import { cn } from "@/lib/utils"
 // =============================================================================
 // The top bar's popover kit.
 //
-// The bar carries three of these — Activity, Inbox, Notifications — and they
-// had been built three times, by three different means, at three different
-// sizes: the inbox as a hand-rolled motion panel (380px, .type-* roles, a
-// sectioned list with counts and a two-action footer), activity and
-// notifications as Radix dropdowns at 400px and 360px with their own
-// text-[9px] / text-[10px] / text-[11px] ladders, their own badge shapes, and
-// no footer contract between them. Sitting a centimetre apart in the same
-// strip, that reads as three products.
+// The bar carried three of these — Activity, Inbox and an informational
+// Notifications bell — built three times, by three different means, at three
+// different sizes: the inbox as a hand-rolled motion panel (380px, .type-*
+// roles, a sectioned list with counts and a two-action footer), the other two
+// as Radix dropdowns at 400px and 360px with their own text-[9px] /
+// text-[10px] / text-[11px] ladders, their own badge shapes, and no footer
+// contract between them. Sitting a centimetre apart in the same strip, that
+// read as three products.
+//
+// The third one is gone — it rendered a table nothing in the product ever
+// wrote to (see app-toolbar.tsx) — so the bar is Activity and Inbox, split by
+// who is waiting: machines, or a human.
 //
 // The inbox is the one of the three that was designed rather than grown, so it
 // is the source: every class in here is lifted from it unchanged, which makes
@@ -27,8 +31,7 @@ import { cn } from "@/lib/utils"
 // What the kit fixes on the way past:
 //   · Escape closes. Radix gave activity + notifications that for free and the
 //     inbox never had it; now all three do, from one place.
-//   · One badge shape and one 99+ cap (notifications capped at 9+, so an
-//     eleventh unread read as "9+" beside an inbox that said "10").
+//   · One badge shape and one 99+ cap.
 //   · One typographic ladder — .type-row for what the row IS, .type-meta for
 //     what it is ABOUT. No component in here hardcodes a pixel size.
 //
@@ -37,7 +40,7 @@ import { cn } from "@/lib/utils"
 // =============================================================================
 
 /** Badge tone. Severity, not decoration — see BADGE_TONE. */
-export type BarMenuBadgeTone = "urgent" | "active" | "live" | "info"
+export type BarMenuBadgeTone = "urgent" | "active" | "live"
 
 const BADGE_TONE: Record<BarMenuBadgeTone, string> = {
   // Someone is parked waiting on a human answer.
@@ -46,8 +49,6 @@ const BADGE_TONE: Record<BarMenuBadgeTone, string> = {
   active: "bg-primary text-primary-foreground",
   // Agent activity — the badge's historical emerald meaning.
   live: "bg-success text-white",
-  // Unread mail. Nothing is blocked; it is the quietest of the four.
-  info: "bg-info text-white",
 }
 
 export interface BarMenuProps {
@@ -66,8 +67,8 @@ export interface BarMenuProps {
 }
 
 /**
- * Trigger + panel. Controlled, because two of the three bells fetch or tick
- * only while their panel is open.
+ * Trigger + panel. Controlled, because Activity ticks its elapsed times only
+ * while the panel is open.
  */
 export function BarMenu({ icon: Icon, ariaLabel, badge, open, onOpenChange, testId, children }: BarMenuProps) {
   const triggerRef = React.useRef<HTMLButtonElement>(null)

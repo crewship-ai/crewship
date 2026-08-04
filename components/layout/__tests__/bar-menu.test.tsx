@@ -17,26 +17,26 @@ import {
 
 afterEach(cleanup)
 
-// The top bar's three popovers (Activity, Inbox, Notifications) render from
-// this one kit so they cannot drift apart again. What is asserted here is the
+// The top bar's popovers (Activity, Inbox) and the ⌘K palette render from this
+// one kit so they cannot drift apart again. What is asserted here is the
 // shared contract — badge, open/close, section header, row, footer — not any
-// one bell's data.
+// one panel's data.
 
 function Harness({ badge, onOpenChange }: { badge?: number; onOpenChange?: (o: boolean) => void }) {
   const [open, setOpen] = useState(false)
   return (
     <BarMenu
       icon={Bell}
-      ariaLabel="Notifications"
+      ariaLabel="Probe"
       open={open}
       onOpenChange={(v: boolean) => {
         setOpen(v)
         onOpenChange?.(v)
       }}
-      badge={badge != null ? { count: badge, tone: "info" } : undefined}
+      badge={badge != null ? { count: badge, tone: "active" } : undefined}
       testId="probe"
     >
-      <BarMenuHeader title="Notifications" meta="3 unread" />
+      <BarMenuHeader title="Probe" meta="3 unread" />
       <BarMenuBody>
         <BarMenuSection label="Recent" count={2}>
           <BarMenuRow testId="probe-row-a" title="Row A" meta="alex · chat.replies" trailing="3 Aug" onClick={vi.fn()} />
