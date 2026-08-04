@@ -182,7 +182,18 @@ func (c *Client) Fetch(ctx context.Context, ref Ref, token string) (Details, err
 
 	// Layer 1: cheap, no-network reject. Catches a literal private IP, a
 	// wrong scheme, and embedded userinfo before any DNS or TCP happens.
-	if _, err := httpsafe.ValidateURLForEndpoint(endpoint, c.allowPrivate, c.schemes...); err != nil {
+	//
+	// The request is built from the value ValidateURLForEndpoint RETURNS, not
+	// from `endpoint`. Behaviourally the two are the same string; the
+	// difference is that the sanitiser's output is what reaches http.NewRequest,
+	// so the guarantee is visible to a reader — and to CodeQL's
+	// go/request-forgery taint tracking, which flagged the discard-the-result
+	// form as an unsanitised user-controlled request URL and was right to: with
+	// `endpoint` flowing into the request directly, deleting the check above
+	// would compile, keep the tests passing that do not exercise it, and leave
+	// nothing in the dataflow saying a check was ever required.
+	validated, err := httpsafe.ValidateURLForEndpoint(endpoint, c.allowPrivate, c.schemes...)
+	if err != nil {
 		return Details{}, &FetchError{
 			Err:      ErrBlockedHost,
 			Provider: ref.Provider,
@@ -190,7 +201,7 @@ func (c *Client) Fetch(ctx context.Context, ref Ref, token string) (Details, err
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, validated.String(), nil)
 	if err != nil {
 		return Details{}, &FetchError{Err: ErrUnexpectedStatus, Provider: ref.Provider, Detail: err.Error()}
 	}
