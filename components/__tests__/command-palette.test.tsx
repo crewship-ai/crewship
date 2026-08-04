@@ -51,11 +51,24 @@ describe("CommandPalette — feature coverage", () => {
     expect(screen.queryByText("Marketplace")).not.toBeInTheDocument()
   })
 
-  // The crews redesign deleted /crews/agents, /crews/agents/[id], /crews/new
-  // and /crews/agents/new. The palette kept pointing at all four, so its first
-  // two rows and every agent result landed on an empty page carrying nothing
-  // but the sidebar. Nothing here may name those paths again.
-  it("never links to a route the crews redesign deleted", async () => {
+  // /crews is a SINGLE page with a canvas: crews and agents are selected
+  // through ?crew= and ?agent=, and /crews/<anything> is not a route at all.
+  // The palette named /crews/agents, /crews/agents/<id>, /crews/new,
+  // /crews/agents/new AND /crews/<crewId>, so its first two rows, every agent
+  // and every crew landed on a page carrying nothing but the sidebar.
+  it("never links under /crews, which has no sub-routes", async () => {
+    // Every entity kind has to be on screen or this walks the static rows
+    // alone and passes while an entity row points somewhere dead — which is
+    // exactly how the agent and crew rows survived.
+    FIXTURES["/agents"] = [{ id: "a1", name: "Casey", slug: "casey", role_title: null, status: "idle", avatar_seed: null, avatar_style: null, crew: null }]
+    FIXTURES["/crews"] = [{ id: "c1", name: "Ops", slug: "ops", color: "blue", icon: "server", _count: { agents: 1, members: 1 } }]
+    FIXTURES["/projects"] = [{ id: "p1", name: "Harborlight", slug: "h", color: "blue", icon: "rocket", status: "active", issue_count: 1 }]
+    FIXTURES["/issues"] = [{ id: "i1", identifier: "ENG-1", title: "T", status: "todo", priority: "high", assignee_name: null, crew_name: null, crew_slug: null }]
+    FIXTURES["/pipelines"] = [{ id: "r1", slug: "s", name: "R", description: "", status: "active" }]
+    FIXTURES["/members"] = [{ id: "m1", role: "ADMIN", user: { id: "u1", email: "a@x.io", full_name: "A", avatar_url: null } }]
+    FIXTURES["/integrations"] = [{ id: "n1", name: "n", display_name: "N", transport: "stdio", icon: null, enabled: true }]
+    FIXTURES["/credentials"] = [{ id: "cr1", name: "K", provider: "GITHUB", type: "API_KEY" }]
+    FIXTURES["/skills"] = [{ id: "s1", name: "S", slug: "s", display_name: null, category: "AUTOMATION" }]
     openPalette()
     // CommandDialog renders through a Radix portal, so the rows live in
     // document.body, not in render()'s container. Querying the container
@@ -63,7 +76,7 @@ describe("CommandPalette — feature coverage", () => {
     await group(/navigation/i)
     const dead = [...document.body.querySelectorAll("[data-href]")]
       .map((el) => el.getAttribute("data-href") ?? "")
-      .filter((h) => /^\/crews\/agents(\/|$)|^\/crews\/new$/.test(h))
+      .filter((h) => /^\/crews\//.test(h))
     expect(dead).toEqual([])
   })
 })
@@ -135,6 +148,15 @@ describe("CommandPalette — entity coverage", () => {
     openPalette()
     const g = await group(/people/i)
     expect(within(g).getByText("Alex Rivers")).toBeInTheDocument()
+  })
+
+  it("selects a crew on the canvas instead of a route that does not exist", async () => {
+    FIXTURES["/crews"] = [
+      { id: "c1", name: "Ops", slug: "ops", color: "blue", icon: "server", _count: { agents: 2, members: 1 } },
+    ]
+    openPalette()
+    const g = await group(/^crews$/i)
+    expect(within(g).getByRole("option")).toHaveAttribute("data-href", "/crews?crew=ops")
   })
 
   it("finds integrations", async () => {

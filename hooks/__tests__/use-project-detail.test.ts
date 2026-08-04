@@ -62,3 +62,65 @@ describe("useProjectDetail", () => {
     expect(result.current.selectedProjectId).toBeNull()
   })
 })
+
+// ── Arriving from a link ───────────────────────────────────────────────────
+//
+// /issues?project=<id> — the ⌘K palette's Projects rows, and any bookmark —
+// used to be ignored outright: the hook started at null and nothing read the
+// URL, so picking a project in search dropped the caller on an unfiltered
+// board. The id has to survive the gap before the project list arrives, which
+// is the whole difficulty: on the first render `projects` is still [].
+
+describe("useProjectDetail — initialProjectId", () => {
+  it("applies the id once the project list arrives", () => {
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Project[] }) =>
+        useProjectDetail({ projects, initialProjectId: "b" }),
+      { initialProps: { projects: [] as Project[] } },
+    )
+    // Nothing to match against yet — and crucially, not cleared either.
+    expect(result.current.selectedProjectId).toBeNull()
+
+    rerender({ projects: [project("a"), project("b")] })
+    expect(result.current.selectedProjectId).toBe("b")
+  })
+
+  it("ignores an id no project has", () => {
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Project[] }) =>
+        useProjectDetail({ projects, initialProjectId: "ghost" }),
+      { initialProps: { projects: [] as Project[] } },
+    )
+    rerender({ projects: [project("a")] })
+    expect(result.current.selectedProjectId).toBeNull()
+  })
+
+  it("applies once, and never fights the user afterwards", () => {
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Project[] }) =>
+        useProjectDetail({ projects, initialProjectId: "b" }),
+      { initialProps: { projects: [] as Project[] } },
+    )
+    rerender({ projects: [project("a"), project("b")] })
+    expect(result.current.selectedProjectId).toBe("b")
+
+    // The user clicks away; a later refresh of the list must not drag them
+    // back to the project the URL named.
+    act(() => result.current.setSelectedProjectId("a"))
+    rerender({ projects: [project("a"), project("b")] })
+    expect(result.current.selectedProjectId).toBe("a")
+
+    act(() => result.current.setSelectedProjectId(null))
+    rerender({ projects: [project("a"), project("b")] })
+    expect(result.current.selectedProjectId).toBeNull()
+  })
+
+  it("changes nothing when no id was given", () => {
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
+      { initialProps: { projects: [] as Project[] } },
+    )
+    rerender({ projects: [project("a")] })
+    expect(result.current.selectedProjectId).toBeNull()
+  })
+})

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
@@ -200,6 +201,12 @@ export function OrchestrationLayout({
   // or clearing a saved view's project filter never opens or closes the
   // detail panel, and explicitly clicking a project never leaks back into
   // the saved-view's filter state.
+  // /issues?project=<id> — the ⌘K palette's Projects rows and any bookmark.
+  // Read from useSearchParams rather than window.location: the App Router
+  // renders the new route before window.location catches up, so a link
+  // clicked from elsewhere in the app would read the previous url.
+  const initialProjectId = useSearchParams().get("project")
+
   const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
@@ -375,7 +382,7 @@ export function OrchestrationLayout({
     setSelectedProjectId,
     selectedProject,
     handleProjectClose,
-  } = useProjectDetail({ projects })
+  } = useProjectDetail({ projects, initialProjectId })
 
   // Derived data — defined after useIssueDetail so the selectedIssue
   // dependency resolves; when an issue is selected the Graph/Timeline/

@@ -533,8 +533,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 key={crew.id}
                 value={`crew ${crew.name} ${crew.slug}`}
                 className={PALETTE_ITEM_CLASS}
-                data-href={`/crews/${crew.id}`}
-                onSelect={() => go(`/crews/${crew.id}`, crew.name, "Crews")}
+                data-href={`/crews?crew=${encodeURIComponent(crew.slug)}`}
+                onSelect={() => go(`/crews?crew=${encodeURIComponent(crew.slug)}`, crew.name, "Crews")}
               >
                 <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" className="h-5 w-5 rounded-md [&>svg]:h-3 [&>svg]:w-3" />
                 <span className="type-row flex-1 truncate">{crew.name}</span>
