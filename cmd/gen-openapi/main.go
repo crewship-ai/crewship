@@ -357,6 +357,11 @@ func routeSchemaCatalog() map[string]DomainSchema {
 			result[key] = schema
 		}
 	}
+	for _, domain := range publicActivitySchemaCatalog() {
+		for key, schema := range domain {
+			result[key] = schema
+		}
+	}
 	for key, name := range executionResponseSchemas() {
 		result[key] = DomainSchema{Response: ref(name)}
 	}
