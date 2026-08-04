@@ -13,7 +13,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -21,9 +20,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
-	"time"
 )
 
 const (
@@ -44,6 +43,30 @@ type openAPIOperation struct {
 	Tags        []string `json:"tags"`
 }
 
+type contractChecks struct {
+	Structural      structuralChecks `json:"structural"`
+	SemanticRuntime semanticChecks   `json:"semantic_runtime"`
+}
+
+// structuralChecks describe evidence present in MDX. They deliberately do
+// not claim that the documented behavior is correct at runtime.
+type structuralChecks struct {
+	CanonicalMethodPath bool     `json:"canonical_method_path"`
+	Auth                bool     `json:"auth"`
+	Request             bool     `json:"request"`
+	Response            bool     `json:"response"`
+	Statuses            bool     `json:"statuses"`
+	Missing             []string `json:"missing,omitempty"`
+}
+
+// semanticChecks are evidence from generated/runtime-facing sources. A test
+// signal is not a substitute for documentation and is reported separately.
+type semanticChecks struct {
+	OpenAPIOperation bool     `json:"openapi_operation"`
+	SourceFile       string   `json:"source_file,omitempty"`
+	TestSignals      []string `json:"test_signals,omitempty"`
+}
+
 type commandManifest struct {
 	Commands []commandNode `json:"commands"`
 }
@@ -62,15 +85,16 @@ type docFile struct {
 }
 
 type apiRecord struct {
-	Method       string   `json:"method"`
-	Path         string   `json:"path"`
-	OperationID  string   `json:"operation_id"`
-	Tag          string   `json:"tag"`
-	SourceFile   string   `json:"source_file,omitempty"`
-	ExactDocs    []string `json:"exact_docs,omitempty"`
-	ResourceDocs []string `json:"resource_docs,omitempty"`
-	Status       string   `json:"status"`
-	TestSignals  []string `json:"test_signals,omitempty"`
+	Method       string         `json:"method"`
+	Path         string         `json:"path"`
+	OperationID  string         `json:"operation_id"`
+	Tag          string         `json:"tag"`
+	SourceFile   string         `json:"source_file,omitempty"`
+	ExactDocs    []string       `json:"exact_docs,omitempty"`
+	ResourceDocs []string       `json:"resource_docs,omitempty"`
+	Status       string         `json:"status"`
+	TestSignals  []string       `json:"test_signals,omitempty"`
+	Contract     contractChecks `json:"contract"`
 }
 
 type cliRecord struct {
@@ -86,11 +110,149 @@ type cliRecord struct {
 }
 
 type report struct {
-	GeneratedAt string      `json:"generated_at"`
-	GitRef      string      `json:"git_ref,omitempty"`
-	Summary     summary     `json:"summary"`
-	API         []apiRecord `json:"api"`
-	CLI         []cliRecord `json:"cli"`
+	Summary summary     `json:"summary"`
+	API     []apiRecord `json:"api"`
+	CLI     []cliRecord `json:"cli"`
+}
+
+var endpointPattern = regexp.MustCompile(`(?i)\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
+var endpointHeadingPattern = regexp.MustCompile(`(?i)^#{1,6}\s+.*\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
+var pathPattern = regexp.MustCompile(`/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?`)
+var statusPattern = regexp.MustCompile(`\bstatus(?:es)?\s*:`)
+
+type endpointEvidence struct {
+	Path, Method string
+	DocPath      string
+	Text         string
+}
+
+// inventoryEndpointEvidence parses only documentation structure. It accepts
+// the common forms used in the docs: endpoint headings, fenced request lines,
+// and Markdown table rows. Query strings are removed because OpenAPI paths do
+// not include them.
+func inventoryEndpointEvidence(docs []docFile) map[string][]endpointEvidence {
+	result := make(map[string][]endpointEvidence)
+	for _, doc := range docs {
+		lines := strings.Split(strings.ReplaceAll(doc.Text, "\r\n", "\n"), "\n")
+		for i, line := range lines {
+			matches := endpointPattern.FindAllStringSubmatch(line, -1)
+			if tableMethod, tablePath, ok := endpointTableRow(line); ok {
+				matches = append(matches, []string{"", tableMethod, tablePath})
+			}
+			if len(matches) == 0 {
+				continue
+			}
+			section := endpointSection(lines, i)
+			for _, match := range matches {
+				method, path := strings.ToUpper(match[1]), canonicalDocPath(match[2])
+				if path == "" {
+					continue
+				}
+				key := method + " " + path
+				result[key] = append(result[key], endpointEvidence{Method: method, Path: path, DocPath: doc.Path, Text: section})
+			}
+		}
+	}
+	return result
+}
+
+func endpointTableRow(line string) (string, string, bool) {
+	if !strings.Contains(line, "|") {
+		return "", "", false
+	}
+	cells := strings.Split(line, "|")
+	if len(cells) < 3 {
+		return "", "", false
+	}
+	method := strings.ToUpper(strings.TrimSpace(cells[1]))
+	if !isHTTPMethod(method) {
+		return "", "", false
+	}
+	match := pathPattern.FindString(cells[2])
+	if match == "" {
+		return "", "", false
+	}
+	return method, canonicalDocPath(match), true
+}
+
+func isHTTPMethod(method string) bool {
+	switch method {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE":
+		return true
+	default:
+		return false
+	}
+}
+
+func endpointSection(lines []string, endpointLine int) string {
+	start, level := endpointLine, 0
+	if match := endpointHeadingPattern.FindStringSubmatch(lines[endpointLine]); match != nil {
+		level = len(lines[endpointLine]) - len(strings.TrimLeft(lines[endpointLine], "#"))
+		start = endpointLine
+	}
+	end := len(lines)
+	if level > 0 {
+		for i := endpointLine + 1; i < len(lines); i++ {
+			if strings.HasPrefix(lines[i], "#") {
+				hashLevel := len(lines[i]) - len(strings.TrimLeft(lines[i], "#"))
+				if hashLevel <= level && hashLevel > 0 && hashLevel < len(lines[i]) && lines[i][hashLevel] == ' ' {
+					end = i
+					break
+				}
+			}
+		}
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
+func canonicalDocPath(path string) string {
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	return strings.TrimRight(path, ".,;:")
+}
+
+func contractFor(method, path string, evidence map[string][]endpointEvidence, source string, tests []string) contractChecks {
+	key := strings.ToUpper(method) + " " + path
+	checks := contractChecks{SemanticRuntime: semanticChecks{OpenAPIOperation: true, SourceFile: source, TestSignals: tests}}
+	for _, item := range evidence[key] {
+		checks.Structural.CanonicalMethodPath = true
+		text := strings.ToLower(item.Text)
+		checks.Structural.Auth = checks.Structural.Auth || markerPresent(text, "auth", "authentication", "authorization")
+		checks.Structural.Request = checks.Structural.Request || markerPresent(text, "request", "request body", "request headers", "query parameters", "path parameters")
+		checks.Structural.Response = checks.Structural.Response || markerPresent(text, "response")
+		checks.Structural.Statuses = checks.Structural.Statuses || statusMarkerPresent(item.Text)
+	}
+	if !checks.Structural.CanonicalMethodPath {
+		checks.Structural.Missing = append(checks.Structural.Missing, "canonical_method_path")
+	}
+	if !checks.Structural.Auth {
+		checks.Structural.Missing = append(checks.Structural.Missing, "auth")
+	}
+	if !checks.Structural.Request {
+		checks.Structural.Missing = append(checks.Structural.Missing, "request")
+	}
+	if !checks.Structural.Response {
+		checks.Structural.Missing = append(checks.Structural.Missing, "response")
+	}
+	if !checks.Structural.Statuses {
+		checks.Structural.Missing = append(checks.Structural.Missing, "statuses")
+	}
+	return checks
+}
+
+func markerPresent(text string, markers ...string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func statusMarkerPresent(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "| status |") || strings.Contains(lower, "**status") || statusPattern.MatchString(lower)
 }
 
 type summary struct {
@@ -137,7 +299,8 @@ func run(openAPIFile, commandsFile string) error {
 		return err
 	}
 
-	r := report{GeneratedAt: time.Now().UTC().Format(time.RFC3339), GitRef: gitRef()}
+	evidence := inventoryEndpointEvidence(docs)
+	r := report{}
 	for path, methods := range openAPI.Paths {
 		for method, raw := range methods {
 			if method == "parameters" {
@@ -167,6 +330,7 @@ func run(openAPIFile, commandsFile string) error {
 				rec.Status = "missing_docs"
 			}
 			rec.TestSignals = testContaining(path, tests)
+			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals)
 			r.API = append(r.API, rec)
 		}
 	}
@@ -292,6 +456,7 @@ func readDocs() ([]docFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read docs: %w", err)
 	}
+	sort.Slice(docs, func(i, j int) bool { return docs[i].Path < docs[j].Path })
 	return docs, nil
 }
 
@@ -325,6 +490,8 @@ func readSourceSignals() ([]docFile, []docFile, error) {
 			return nil, nil, fmt.Errorf("read Go source root %s: %w", root, err)
 		}
 	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i].Path < sources[j].Path })
+	sort.Slice(tests, func(i, j int) bool { return tests[i].Path < tests[j].Path })
 	return sources, tests, nil
 }
 
@@ -477,11 +644,7 @@ func summarize(r report) summary {
 func markdown(r report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Release 1.0 API/CLI documentation inventory\n\n")
-	fmt.Fprintf(&b, "Generated: `%s`\n\n", r.GeneratedAt)
-	if r.GitRef != "" {
-		fmt.Fprintf(&b, "Git ref: `%s`\n\n", r.GitRef)
-	}
-	fmt.Fprintf(&b, "This report is generated by `go run ./scripts/docs-inventory`. The machine-readable full inventory is next to this file as `release-1-0-api-cli-inventory.json`.\n\n")
+	fmt.Fprintf(&b, "This report is generated by `go run ./scripts/docs-inventory`; identical inputs produce identical output. The machine-readable full inventory is next to this file as `release-1-0-api-cli-inventory.json`.\n\n")
 	fmt.Fprintf(&b, "## Summary\n\n")
 	fmt.Fprintf(&b, "| Surface | Count | Documentation signal | Test signal |\n|---|---:|---|---|\n")
 	fmt.Fprintf(&b, "| API operations | %d | %d exact, %d resource-level, %d missing | %d with a test signal |\n", r.Summary.APIOperations, r.Summary.APIExactDocs, r.Summary.APIResourceDocs, r.Summary.APIMissingDocs, r.Summary.APIWithTestSignals)
@@ -489,12 +652,12 @@ func markdown(r report) string {
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
 	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")
-	fmt.Fprintf(&b, "| Method | Path | Operation | Status | Source | Tests |\n|---|---|---|---|---|---|\n")
+	fmt.Fprintf(&b, "| Method | Path | Operation | Status | Missing structural fields | Source | Runtime/test signals |\n|---|---|---|---|---|---|---|\n")
 	for _, rec := range r.API {
-		if rec.Status == "documented_exact" {
+		if len(rec.Contract.Structural.Missing) == 0 && rec.Status == "documented_exact" {
 			continue
 		}
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` | %s |\n", rec.Method, rec.Path, rec.OperationID, rec.Status, rec.SourceFile, joinOrDash(rec.TestSignals))
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %s | `%s` | %s |\n", rec.Method, rec.Path, rec.OperationID, rec.Status, joinOrDash(rec.Contract.Structural.Missing), rec.SourceFile, joinOrDash(rec.Contract.SemanticRuntime.TestSignals))
 	}
 	fmt.Fprintf(&b, "\n## CLI commands needing attention\n\n")
 	fmt.Fprintf(&b, "| Command | Use | Status | Documentation | Tests |\n|---|---|---|---|---|\n")
@@ -520,13 +683,4 @@ func first(values []string) string {
 		return ""
 	}
 	return values[0]
-}
-
-func gitRef() string {
-	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
-	data, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(bytes.TrimSpace(data)))
 }
