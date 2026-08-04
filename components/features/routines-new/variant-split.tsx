@@ -58,16 +58,20 @@ export function VariantSplit({ fidelity }: { fidelity: Fidelity }) {
     <div className="flex h-full flex-col overflow-auto">
       {/* Top half — the split itself. Fixed height so the summary
           below is discoverable by scroll, not hidden past the fold. */}
-      <div className="grid h-[62vh] min-h-[420px] shrink-0 grid-cols-1 divide-y divide-border/60 border-b border-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-        <div className="relative min-h-[280px]">
+      {/* Below lg the two halves stack, and the container grows to fit
+          both floors instead of squeezing each into half a viewport —
+          two 210px panes are two unusable panes. */}
+      <div className="grid min-h-[420px] shrink-0 grid-cols-1 divide-y divide-border/60 border-b border-border/60 lg:h-[62vh] lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+        <div className="relative h-[45vh] min-h-[280px] lg:h-auto">
           <DefinitionCanvas
             dsl={dsl}
             selectedStepId={selected}
             onStepSelect={handleSelect}
             focusStepId={focus}
+            recenterOnResize
           />
         </div>
-        <div className="min-h-[280px]">
+        <div className="h-[45vh] min-h-[280px] lg:h-auto">
           <CodePane
             fidelity={fidelity}
             onStepAtCaret={handleCaret}

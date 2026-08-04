@@ -61,8 +61,11 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
           sibling it takes real width, the canvas shrinks, and the graph
           slides left into what is still visible. As an overlay it
           covered the half of the graph the reader was looking at. */}
-      <div className="flex h-[68vh] min-h-[440px] shrink-0 border-b border-border/60">
-        <div className="relative min-w-0 flex-1">
+      {/* Stacks below md, splits from md up. `w-full` on a flex ROW
+          would starve the canvas to zero width on a phone, so the axis
+          flips with the breakpoint rather than only the widths. */}
+      <div className="flex h-[68vh] min-h-[420px] shrink-0 flex-col border-b border-border/60 md:h-[68vh] md:flex-row">
+        <div className="relative min-h-[240px] min-w-0 flex-1">
           <DefinitionCanvas
             dsl={dsl}
             selectedStepId={selected}
@@ -89,7 +92,7 @@ export function VariantCanvasFirst({ fidelity }: { fidelity: Fidelity }) {
         {/* Rendered only while open so CodeMirror is not mounted, and
             re-measuring, behind a panel nobody asked for. */}
         {editing && (
-          <aside className="w-full shrink-0 border-l border-border/60 md:w-[46%] lg:w-[38%]">
+          <aside className="h-[45%] w-full shrink-0 border-t border-border/60 md:h-auto md:w-[46%] md:border-l md:border-t-0 lg:w-[38%]">
             <CodePane
               fidelity={fidelity}
               footnote="Zavři panel a graf se překreslí z uloženého DSL."

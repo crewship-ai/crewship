@@ -75,6 +75,13 @@ const edgeTypes: EdgeTypes = {
 // different topology would be guessing.
 const FIT_VIEW = { padding: 0.18, minZoom: 0.62, maxZoom: 1.15 } as const
 
+// Opening view, when initialFocus="start". Tighter padding and a higher
+// ceiling than FIT_VIEW because it is fitting two ranks, not a whole
+// routine: the first thing a reader sees should be legible at a glance,
+// not a correct-but-tiny overview they have to zoom into before they
+// can read a single node.
+const START_FIT = { padding: 0.12, minZoom: 0.62, maxZoom: 1.6 } as const
+
 // Fallbacks for centring a node before React Flow has measured it —
 // the first click can land before measurement, and half of an
 // unmeasured node is better than centring on its top-left corner.
@@ -83,14 +90,18 @@ const NODE_W_FALLBACK = 200
 const NODE_H_FALLBACK = 70
 
 /**
- * The trigger plus the first couple of ranks, for initialFocus="start".
+ * The trigger plus the first rank or two, for initialFocus="start".
+ *
+ * Two ranks, not three: each extra rank fitted is a step further zoomed
+ * out, and the opening view is judged on whether one node is readable,
+ * not on how much of the routine is on screen.
  *
  * Ranks are read off the dagre-assigned y, not the step order: a fan-out
  * puts several nodes on one rank, and showing one of three siblings
  * would misrepresent the shape at the very moment the reader is forming
  * their first impression of it.
  */
-function headNodeIds(nodes: Node[], ranks = 3): string[] {
+function headNodeIds(nodes: Node[], ranks = 2): string[] {
   if (nodes.length === 0) return []
   const ys = Array.from(new Set(nodes.map((n) => Math.round(n.position.y)))).sort((a, b) => a - b)
   const cutoff = ys[Math.min(ranks, ys.length) - 1]
@@ -262,6 +273,12 @@ function CanvasInner({
     [run, dsl, selectedStepId, workspaceId, waitpointTokensByStepId, heatmapBuckets, stepMetrics],
   )
 
+  // Read by the deferred initial fit. Keeping it in a ref rather than a
+  // dependency means a status repaint — which rebuilds graphData every
+  // realtime tick — does not tear down and re-arm the size observer.
+  const graphDataRef = useRef(graphData)
+  graphDataRef.current = graphData
+
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(graphData.edges)
   const { fitView } = useReactFlow()
@@ -288,21 +305,61 @@ function CanvasInner({
   // space. Shifting by half the delta puts it back in the middle of
   // what is still visible.
   const paneRef = useRef<HTMLDivElement | null>(null)
+  const pendingFitRef = useRef(true)
+
+  const applyInitialFit = useCallback(() => {
+    if (initialFocus === "start") {
+      // fitView centres what it is given, so handing it the head of the
+      // graph lands the reader at the beginning at a readable zoom
+      // rather than in the middle of the routine at a tiny one.
+      const head = headNodeIds(graphDataRef.current.nodes)
+      if (head.length > 0) {
+        fitView({ ...START_FIT, nodes: head.map((id) => ({ id })), duration: 300 })
+        return
+      }
+    }
+    fitView({ ...FIT_VIEW, duration: 300 })
+  }, [initialFocus, fitView])
+
+  // One observer owns both size concerns.
+  //
+  // The opening fit waits for the pane to have real dimensions instead
+  // of guessing with a timeout — a fit computed before layout settles
+  // is computed against a zero-width box.
+  //
+  // The recentre keeps what is on screen in the middle when the pane
+  // shrinks, so opening a side panel slides the graph over rather than
+  // hiding it underneath.
   useEffect(() => {
     const el = paneRef.current
-    if (!recenterOnResize || !el || typeof ResizeObserver === "undefined") return
+    if (!el) return
     let last = el.clientWidth
-    const ro = new ResizeObserver(() => {
-      const next = el.clientWidth
-      const delta = next - last
+
+    const onSize = () => {
+      const width = el.clientWidth
+      if (width > 0 && pendingFitRef.current) {
+        pendingFitRef.current = false
+        last = width
+        applyInitialFit()
+        return
+      }
+      const delta = width - last
       if (delta === 0) return
-      last = next
+      last = width
+      if (!recenterOnResize) return
       const vp = getViewport()
       setViewport({ ...vp, x: vp.x + delta / 2 })
-    })
+    }
+
+    if (typeof ResizeObserver === "undefined") {
+      onSize()
+      return
+    }
+    const ro = new ResizeObserver(onSize)
     ro.observe(el)
+    onSize()
     return () => ro.disconnect()
-  }, [recenterOnResize, getViewport, setViewport])
+  }, [applyInitialFit, recenterOnResize, getViewport, setViewport])
 
   // Centre a node without changing zoom. Used by both the click handler
   // and the caret follower, so they cannot drift apart.
@@ -332,23 +389,13 @@ function CanvasInner({
       userPositions.current.clear()
       setNodes(graphData.nodes)
       setEdges(graphData.edges)
-      // Slight delay so React Flow has the new graph in state
-      // before we ask it to fit view.
-      const t = setTimeout(() => {
-        if (initialFocus === "start") {
-          // Fit the trigger plus the first couple of ranks. fitView
-          // centres what it is given, so handing it the head of the
-          // graph lands the reader at the beginning at a readable zoom
-          // rather than in the middle of the routine at a tiny one.
-          const head = headNodeIds(graphData.nodes)
-          if (head.length > 0) {
-            fitView({ ...FIT_VIEW, nodes: head.map((id) => ({ id })), duration: 400 })
-            return
-          }
-        }
-        fitView({ ...FIT_VIEW, duration: 400 })
-      }, 50)
-      return () => clearTimeout(t)
+      // Ask for a fit; the size observer performs it once the pane
+      // actually has dimensions. A fixed delay was a guess, and a fit
+      // computed against a pane that has not laid out yet lands at the
+      // wrong zoom — which is why the graph sometimes opened tiny and
+      // sometimes right.
+      pendingFitRef.current = true
+      return
     }
 
     // Same run — merge positions through, but pick up new status /

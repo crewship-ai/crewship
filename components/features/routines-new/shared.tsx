@@ -539,7 +539,7 @@ export function OpacityMeter({ dsl }: { dsl: PipelineDSL }) {
   const tone = pct >= 60 ? "text-warn" : pct >= 30 ? "text-notice" : "text-success"
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-card px-3 py-2">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-border/60 bg-card px-3 py-2">
       <div className="flex items-center gap-1.5">
         {pct >= 60 ? (
           <AlertTriangle className={cn("h-3.5 w-3.5", tone)} />
