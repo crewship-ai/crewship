@@ -53,6 +53,13 @@ Returns aggregate statistics for the current workspace.
 
 **Required role:** OWNER
 
+**Request:** no body. **Response:** JSON object shown below.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Statistics returned. |
+| `403` | Caller is not OWNER. |
+
 ### Response
 
 ```json
@@ -80,6 +87,13 @@ Returns aggregate statistics for the current workspace.
 Lists all users in the current workspace with their roles.
 
 **Required role:** OWNER
+
+**Request:** no body. **Response:** JSON array shown below.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Members returned. |
+| `403` | Caller is not OWNER. |
 
 ### Response
 
@@ -123,6 +137,8 @@ Removes orphaned pre-C1, slug-only Docker containers and volumes across the
 instance. Live id-scoped resources are protected. The request has no body and
 the response lists the resource names removed.
 
+**Auth:** ADMIN or OWNER (`manage` permission). **Request:** no body.
+
 ### Response
 
 ```json
@@ -136,12 +152,22 @@ the response lists the resource names removed.
 `503`; a mid-operation failure returns `500` with the partial `removed` list
 and `count`.
 
+| Status | Condition |
+|--------|-----------|
+| `200` | Cleanup completed; response is the object above. |
+| `403` | Caller lacks `manage`. |
+| `500` | Cleanup failed; partial counts may be returned. |
+| `503` | Docker is unavailable. |
+
 ## POST /api/v1/admin/reap-orphan-containers
 
 Scans the current workspace's running crew containers for a sidecar token
 fingerprint that definitively disagrees with the token derived from the
 current internal-token master. The default is a dry run. Add `?apply=true` to
 stop and remove each detected orphan; the next dispatch recreates it.
+
+**Auth:** ADMIN or OWNER (`manage` permission). **Request:** no body; `apply`
+is an optional query parameter. **Response:** the scan object below.
 
 ### Response
 
@@ -166,12 +192,20 @@ container was inspected but none advertised a fingerprint. The endpoint
 returns `200 OK` even when an individual reap fails; that entry remains
 `reaped: false`. Docker-unavailable deployments return `503`.
 
+| Status | Condition |
+|--------|-----------|
+| `200` | Scan completed, including dry-run results. |
+| `403` | Caller lacks `manage`. |
+| `503` | Docker is unavailable. |
+
 ## POST /api/v1/admin/reencrypt
 
 Re-encrypts every inventoried stored AES-256-GCM envelope to the current
 master-key version. The request has no body. It is instance-wide and
 idempotent: envelopes already at the current version are counted as skipped.
 Rows that cannot be decrypted are counted as failed and left untouched.
+
+**Auth:** ADMIN or OWNER (`manage` permission). **Request:** no body.
 
 ### Response
 
@@ -192,11 +226,19 @@ response. A valid run returns `200 OK`. Invalid current-key configuration
 fails before any row is written with `500`; an infrastructure failure during
 the walk also returns `500` with partial counts and `columns`.
 
+| Status | Condition |
+|--------|-----------|
+| `200` | Response contains the top-level and per-column counters below. |
+| `403` | Caller lacks `manage`. |
+| `500` | Key configuration or infrastructure failure; partial counts may be returned. |
+
 ## GET /api/v1/admin/security-posture
 
 Returns read-only, instance-level security state. It reports configuration
 presence and derived state only; it never returns a key, secret, or client
 secret.
+
+**Request:** no body. **Response:** JSON object shown below.
 
 ### Response
 
@@ -225,6 +267,11 @@ machine-readable identifiers and may include
 `private_endpoints_ceiling_open`, `encryption_key_generated`,
 `privileged_credentials_enabled`, `private_endpoints_in_use`,
 `seed_account_default_password`, and `no_backup_recorded`.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Security posture returned. |
+| `403` | Caller lacks the required admin role. |
 
 ## GDPR
 
@@ -359,6 +406,13 @@ Lists workspace details with member, agent, and crew counts.
 
 **Required role:** OWNER
 
+**Request:** no body. **Response:** JSON array shown below.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Current workspace returned. |
+| `403` | Caller is not OWNER. |
+
 ### Response
 
 ```json
@@ -419,6 +473,11 @@ A non-empty `repairable` also produces a `priority` break, so `ok` is `false`
 
 CLI parity: `crewship journal verify` (exits non-zero on a broken chain **or**
 when any entry has an unresolved priority).
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Response reports `ok`; a broken chain is still a successful HTTP response. |
+| `403` | Caller lacks `manage`. |
 
 ## Audit log
 
@@ -491,6 +550,8 @@ Inspect and tune the memory subsystem: aggregate stats, row-level version drill-
 Returns aggregate statistics for the memory subsystem within the current workspace -- totals, per-tier rollups, and per-agent rollups derived from `memory_versions`.
 
 **Required role:** ADMIN or OWNER (manage permission)
+
+**Request:** no body. **Response:** the totals and rollups object below.
 
 ### Response
 
@@ -674,6 +735,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 Returns the per-workspace memory configuration. Drives the retention sweep (`versions_retention_days`) and is the operator's read surface for inspecting drift between "what's stored on the row" and "what's effective".
 
 **Required role:** ADMIN or OWNER (manage permission)
+
+**Request:** no body. **Response:** the configuration object below.
 
 ### Response
 
@@ -1125,6 +1188,12 @@ First-run gate. Returns whether the install needs to be bootstrapped (empty `use
 
 **Auth:** none -- the answer is what tells the browser which page to render.
 
+**Request:** no body. **Response:** `{needs_bootstrap, allow_signup}`.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Bootstrap state returned; database errors fail closed in the body. |
+
 #### Response
 
 ```json
@@ -1144,6 +1213,12 @@ First-run gate. Returns whether the install needs to be bootstrapped (empty `use
 Read-only consent gate for the frontend's Sentry client. The Next.js `sentry.client.config.ts` fetches this before calling `Sentry.init` and bails out if `enabled=false`. Consent is flipped via the CLI (`crewship telemetry on/off`), never over HTTP -- making this endpoint mutating would create a CSRF vector that flips the bit on every cross-site navigation.
 
 **Auth:** none -- the login page must boot crash reporting before any session exists.
+
+**Request:** no body. **Response:** `{enabled, install_id}`.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Consent state returned; transient failures fall back to disabled. |
 
 #### Response
 
@@ -1168,6 +1243,13 @@ Reports the running binary's **build identity** and (cache-permitting) the lates
 This is the only way to ask a running server what it is. `crewship version --remote` is the CLI for it.
 
 **Auth:** required (any authenticated user, no workspace role needed).
+
+**Request:** no body. **Response:** build identity and release metadata below.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Version information returned. |
+| `401` | Missing or invalid authentication. |
 
 #### Response
 

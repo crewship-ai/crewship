@@ -256,7 +256,14 @@ GET /api/health
 
 No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
+**Request:** no body. **Response:** `{"status":"ok"}`. **Statuses:** `200`
+healthy; `503` when the service is unavailable.
+
 ### System
+
+All system rows below are `GET` requests with no body. **Response:** the named
+system JSON object. **Statuses:** `200` success; `401` when authentication is
+required but missing; `403` for an admin-only surface; `500` on server failure.
 
 | Endpoint | Description |
 |---|---|
@@ -274,6 +281,10 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
 ### Auth / Signup
 
+**Request:** JSON for `POST` rows and no body for `GET`; **response:** the
+operation's JSON result. **Statuses:** `200`/`202` on success; `400` invalid
+input; `401` when auth is required; `403` when disabled or unauthorized.
+
 | Endpoint | Auth | Description |
 |---|---|---|
 | `POST /api/v1/bootstrap` | None | Bootstrap first user (empty instance) |
@@ -281,6 +292,10 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 | `GET /api/v1/ws-token` | Required | Get short-lived WebSocket JWT |
 
 ### NextAuth Compatibility
+
+**Request:** CSRF/session cookies as required by the browser flow; otherwise no
+JSON body. **Response:** NextAuth JSON or redirect. **Statuses:** `200` success;
+`401` invalid credentials/session; `403` CSRF/origin failure; `405` wrong method.
 
 | Endpoint | Description |
 |---|---|
@@ -295,6 +310,10 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
 ### Onboarding
 
+**Request:** JSON for setup/complete and no body for status. **Response:** wizard
+state or completion JSON. **Statuses:** `200` success; `400` invalid step;
+`401` unauthenticated; `500` server failure.
+
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/onboarding/status` | Check onboarding completion status |
@@ -302,6 +321,10 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 | `POST /api/v1/onboarding/setup` | Run guided setup |
 
 ### Admin (OWNER only)
+
+**Request:** no body for these `GET` routes. **Response:** the resource JSON
+described in each row. **Statuses:** `200` success; `403` insufficient admin
+role; `500` server failure.
 
 | Endpoint | Description |
 |---|---|
@@ -312,6 +335,9 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
 ### Audit
 
+**Request:** optional query filters, no body. **Response:** paginated audit JSON.
+**Statuses:** `200` success; `403` missing `manage` permission.
+
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/audit` | Audit log (workspace-scoped, requires manage role) |
@@ -319,11 +345,18 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 
 ### Runs
 
+**Request:** optional query filters, no body. **Response:** workspace-scoped
+run list. **Statuses:** `200` success; `401` unauthenticated; `403` forbidden.
+
 | Endpoint | Description |
 |---|---|
 | `GET /api/v1/runs` | List agent runs (workspace-scoped) |
 
 ### Workspaces
+
+**Request:** JSON for mutation rows and no body for `GET`; **response:** workspace
+or membership JSON. **Statuses:** `200`/`201` on success; `400` invalid input;
+`401` unauthenticated; `403` insufficient role; `404` unknown workspace.
 
 | Endpoint | Method | Description |
 |---|---|---|

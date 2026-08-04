@@ -33,6 +33,9 @@ handlers use the same JSON error contract as the other admin API (`{"error":"...
 
 ### `GET /api/v1/admin/keeper/config`
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** effective config.
+**Status:** `200` success; `403` insufficient role; `503` unavailable.
+
 Returns effective instance judge settings, including whether each value is
 inherited or overridden. Endpoint userinfo is redacted. The response is:
 
@@ -67,7 +70,14 @@ Each `{value, source, editable}` field is authoritative for the effective value;
 override. `judge_configured` is false when the effective endpoint or model is
 missing.
 
+**Status:** `200` success; `400` invalid configuration or missing workspace;
+`403` insufficient role; `503` unavailable Keeper capability.
+
 ### `PUT /api/v1/admin/keeper/config`
+
+**Auth:** ADMIN or OWNER. **Request:** partial configuration JSON. **Response:**
+effective config. **Status:** `200` updated; `400` invalid values; `403` insufficient
+role; `503` unavailable.
 
 Applies a partial update and returns the same object as `GET`. Omitted fields are
 unchanged. Empty strings (or `0` for numeric overrides) clear an override; the
@@ -91,7 +101,13 @@ the profile). Example:
 validation errors. Changes take effect on the next credential request; no restart
 is required. `PUT` and `DELETE` are journaled.
 
+**Status:** `200` updated; `400` invalid JSON or values; `403` insufficient
+role; `503` unavailable persistence.
+
 ### `GET /api/v1/admin/keeper/health`
+
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** health object below.
+**Status:** `200` success; `400` missing workspace; `403` insufficient role.
 
 Returns the workspace's in-memory rolling Keeper decision window. A workspace
 with no decisions returns zero counts and is not implicitly classified as
@@ -118,13 +134,23 @@ healthy. The response includes `workspace_id`, `samples`, `allow`, `deny`,
 
 ### `DELETE /api/v1/admin/keeper/config`
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** effective config.
+**Status:** `200` cleared; `403` insufficient role; `503` unavailable.
+
 Clears all instance overrides and returns the effective configuration. The server
 returns to its boot-time `KEEPER_*` settings. This is not a database/workspace
 delete.
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** effective config.
+**Status:** `200` cleared; `403` insufficient role; `503` unavailable store.
+
 ## Judge discovery and probes
 
 ### `GET /api/v1/admin/keeper/judge/models?endpoint={url}`
+
+**Auth:** ADMIN or OWNER. **Request:** optional `endpoint` query parameter.
+**Response:** models and optional diagnostic error. **Status:** `200` including
+an unreachable diagnostic; `403` insufficient role; `429` probe limit.
 
 Lists models exposed by the supplied Ollama endpoint. If `endpoint` is omitted,
 the configured effective endpoint is used. A successful response is:
@@ -142,6 +168,10 @@ An unreachable or invalid endpoint is still `200` with `models: []` and an
 errors. This route dials the supplied address and is rate limited instance-wide.
 
 ### `POST /api/v1/admin/keeper/judge/test`
+
+**Auth:** ADMIN or OWNER. **Request:** optional JSON override body. **Response:**
+stage/decision object. **Status:** `200` with stage failures; `400` invalid JSON;
+`403` insufficient role; `429` probe limit.
 
 Runs the real local judge smoke test. The body is optional; absent or empty fields
 use saved configuration.
@@ -167,6 +197,10 @@ as a 5xx. Invalid JSON is `400`; probe exhaustion is `429`.
 
 ### `POST /api/v1/admin/keeper/judge/test-hosted`
 
+**Auth:** ADMIN or OWNER. **Request:** provider/model and optional credential.
+**Response:** stage/decision object. **Status:** `200` with stage failures;
+`400` invalid input; `403` insufficient role; `429` probe limit; `503` unavailable.
+
 Tests an unsaved hosted judge configuration using a workspace credential:
 
 ```json
@@ -184,6 +218,9 @@ reported in the `key` stage. `503` means hosted-provider resolution is not wired
 
 ### `GET /api/v1/admin/keeper/aux`
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** complete `aux`
+object. **Status:** `200` success; `403` insufficient role.
+
 Returns every evaluator slot, its effective provider/model/timeout/credential,
 provenance, and the available provider vocabulary:
 
@@ -199,6 +236,10 @@ provenance, and the available provider vocabulary:
 
 ### `PUT /api/v1/admin/keeper/aux/{slot}`
 
+**Auth:** ADMIN or OWNER. **Request:** partial slot override JSON. **Response:**
+complete `aux` object. **Status:** `200` success; `400` invalid slot/data;
+`403` insufficient role; `503` verification unavailable.
+
 Partially overrides one known evaluator slot. Valid fields are `provider`,
 `model`, `timeout_ms`, and `credential_id`; omitted fields are unchanged, empty
 strings/`0` clear the corresponding override. A credential must be an active
@@ -209,10 +250,17 @@ credential is selected.
 
 ### `DELETE /api/v1/admin/keeper/aux` and `DELETE /api/v1/admin/keeper/aux/{slot}`
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** complete `aux`
+object. **Status:** `200` cleared; `400` unknown slot; `403` insufficient role.
+
 Clears every evaluator override, or only the named slot, respectively. Both
 return the complete `aux` object. An unknown slot is `400`.
 
 ### `POST /api/v1/admin/keeper/aux/use-judge`
+
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** complete `aux`
+object. **Status:** `200` updated; `400` incomplete judge; `403` insufficient
+role; `503` evaluator store unavailable.
 
 Points every evaluator at the configured instance judge and returns the complete
 `aux` object. The instance judge must have both an endpoint and model (`400` if
@@ -220,15 +268,26 @@ not); an unavailable evaluator store is `503`.
 
 ### `POST /api/v1/admin/keeper/aux/{slot}/probe`
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** stage/decision
+object. **Status:** `200` probe result; `400` invalid slot; `403` insufficient
+role; `429` spend limit; `503` unavailable.
+
 Runs one real evaluation against the slot's resolved provider/model. The response
 is the `judgeTestResponse` stage/decision shape described above. The slot must be
 known and configured (`400` otherwise); unavailable probe support is `503`, and
 the shared spend/rate limit is `429`. This route deliberately spends model
 tokens only when explicitly called.
 
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** stage/decision
+object. **Status:** `200` with probe result; `400` invalid slot/configuration;
+`403` insufficient role; `429` spend limit; `503` probe unavailable.
+
 ## Watchdog governance and routing
 
 ### `GET /api/v1/admin/keeper/governance`
+
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** governance object.
+**Status:** `200` success; `400` missing workspace; `403` insufficient role.
 
 Returns the workspace watchdog settings. The response includes `configured`, the
 stored `enabled`, `security_contact_user_id`, `deny_notify_min_risk`, `watch_spec`,
@@ -250,6 +309,10 @@ only the stored toggle.
 
 ### `PUT /api/v1/admin/keeper/governance`
 
+**Auth:** ADMIN or OWNER. **Request:** partial governance JSON. **Response:**
+governance object. **Status:** `200` updated; `400` invalid values; `403` insufficient
+role; `503` credential/provider unavailable.
+
 Partially merges the same settings and returns the full governance response. The
 body fields are `enabled`, `security_contact_user_id`, `deny_notify_min_risk`
 (1–10), `watch_spec`, `watch_presets`, `require_second_approver`,
@@ -262,6 +325,10 @@ write may include a non-blocking `warning` when no eligible findings recipient
 exists.
 
 ### `POST /api/v1/admin/keeper/findings/test`
+
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** routing result.
+**Status:** `200` success, including a warning; `400` missing workspace; `403`
+insufficient role; `503` routing unavailable.
 
 Sends one synthetic, non-blocking finding through the real inbox routing path;
 no model is called. The `200` response identifies the created inbox item and
@@ -280,6 +347,10 @@ workspace context is `400`; unavailable routing is `503`.
 
 ### `POST /api/v1/admin/keeper/review/{slot}/run`
 
+**Auth:** ADMIN or OWNER. **Request:** optional slot-specific JSON body.
+**Response:** decision payload. **Status:** `200` result; `400` invalid slot/body;
+`403` insufficient role; `503` review unavailable.
+
 Runs one evaluator immediately. Canonical slots are `skill-review`, `behavior`,
 `memory-health`, and `negative-learning`; aliases `curator`, `skill_review`,
 `memory_health`, `negative`, and `negative_learning` are accepted. The optional
@@ -295,6 +366,10 @@ cross-workspace crew/agent is `400`; unavailable reviews are `503`.
 
 ### `POST /api/v1/admin/keeper/ask`
 
+**Auth:** ADMIN or OWNER. **Request:** credential request JSON with required
+`intent`. **Response:** decision payload. **Status:** `200` result; `400` invalid
+body; `403` boundary failure; `404` credential unavailable.
+
 Evaluates a credential request as the current operator's workspace, using the
 same path and audit behavior as an agent request. The body fields are
 `requesting_agent_id`, `requesting_crew_id`, `credential_id` or
@@ -306,6 +381,10 @@ missing fields are `400`; an unknown agent is `401`, a workspace/crew boundary
 failure is `403`, and an unavailable active credential is `404`.
 
 ### `POST /api/v1/admin/keeper/requests/{requestId}/resolve`
+
+**Auth:** ADMIN or OWNER. **Request:** `{decision, reason?, adjudicator?}`.
+**Response:** resolution object. **Status:** `200` settled; `400` invalid body;
+`403` four-eyes violation; `404` not found; `409` already terminal.
 
 Settles an `ESCALATE` request in the current workspace:
 
@@ -330,6 +409,9 @@ requesting agent's owner attempts to self-approve is `403`. The update of the
 Keeper request, inbox item, and journal entry is atomic.
 
 ### `DELETE /api/v1/admin/keeper/requests`
+
+**Auth:** ADMIN or OWNER. **Request:** no body. **Response:** deletion counts.
+**Status:** `200` purged; `400` missing workspace; `403` insufficient role.
 
 Purges Keeper requests and their transition history for the current workspace.
 This is an administrative destructive operation; it has no request body and

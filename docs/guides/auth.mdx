@@ -346,6 +346,11 @@ Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicate
 
 ### Sign-in & sessions (mixed)
 
+The `POST /api/auth/*` rows use the browser's CSRF/session cookies and return
+NextAuth JSON or redirects; the `/api/v1/auth/sessions` rows require the caller's
+session and return JSON. **Statuses:** `200` success; `401` invalid credentials
+or session; `403` CSRF/origin failure; `405` wrong method; `500` server failure.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/auth/callback/credentials` | NextAuth-compatible credential sign-in. Sets the session cookie. |
@@ -359,12 +364,21 @@ Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicate
 
 ### Password recovery (public)
 
+**Request:** JSON body with the email or reset token/password. **Response:**
+generic recovery JSON to prevent account enumeration. **Statuses:** `200` for
+forgot; `400` invalid input/token; `500` server failure.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/auth/forgot` | Email a reset link. **Always returns 200** (non-enumeration). |
 | `POST` | `/api/v1/auth/reset` | Redeem a reset token. Atomically updates the password hash + invalidates all active sessions. |
 
 ### CLI tokens & device pairing (mixed)
+
+**Request:** JSON for `POST` rows and the pairing-code query for poll; **response:**
+token, metadata, or pairing status JSON. **Statuses:** `200` success; `400` invalid
+code/body; `401` when auth is required; `404` unknown owned token/session; `500`
+server failure.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -385,9 +399,16 @@ The redirect and callback routes are no longer registered, so setting `GOOGLE_CL
 | `GET`  | `/api/v1/auth/google/redirect` | **Gone.** 404. |
 | `GET`  | `/api/v1/auth/google/callback` | **Gone.** 404. |
 | `GET`  | `/api/v1/auth/google/status` | Still answers `{"enabled": false}` so an older frontend build gets a definite answer instead of an error it might render as a spinner. |
+
+**Response:** `{"enabled":false}`. **Statuses:** `200` for the compatibility
+probe; `404` for the removed redirect/callback routes.
 ### Onboarding (auth-required, but workspace-less)
 
 Mounted alongside auth because the wizard runs *before* any workspace context exists.
+
+**Request:** JSON for setup/complete and no body for status. **Response:** wizard
+state JSON. **Statuses:** `200` success; `400` invalid step; `401` unauthenticated;
+`500` server failure.
 
 | Method | Path | Description |
 |--------|------|-------------|
