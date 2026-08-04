@@ -193,6 +193,27 @@ func (h *CodeLinkHandler) Attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject a duplicate BEFORE spending a provider request on it. The UNIQUE
+	// constraint below is still the authority (two concurrent attaches race
+	// past this check), but without it every re-paste of the same link burns a
+	// rate-limit unit and writes a credential USE event for a call whose result
+	// is discarded.
+	var dupID string
+	switch err := h.db.QueryRowContext(r.Context(), `
+		SELECT id FROM mission_code_links
+		WHERE mission_id = ? AND provider = ? AND host = ? AND owner = ? AND repo = ? AND number = ?`,
+		missionID, string(ref.Provider), ref.Host, ref.Owner, ref.Repo, ref.Number).Scan(&dupID); {
+	case err == nil:
+		writeCodeLinkProblem(w, r, http.StatusConflict, "already-linked",
+			fmt.Sprintf("%s is already linked to this issue", ref.URL), 0)
+		return
+	case errors.Is(err, sql.ErrNoRows):
+		// The normal path.
+	default:
+		internalError(w, r, h.logger, "check duplicate code link", err)
+		return
+	}
+
 	cred, err := resolveCodeLinkCredential(r.Context(), h.db, wsID, crewID, ref.Provider, ref.Host)
 	if err != nil {
 		h.replyCredentialProblem(w, r, ref, err)

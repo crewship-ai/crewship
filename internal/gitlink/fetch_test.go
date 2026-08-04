@@ -78,10 +78,15 @@ func TestFetch_RefusesLoopbackHost(t *testing.T) {
 // (wrong URL, no route, mis-built client) and prove nothing about SSRF.
 func TestFetch_ReachesPrivateHostWhenOperatorAllowsIt(t *testing.T) {
 	var hits int32
-	var sawAuth string
+	// atomic, not a plain string: the handler runs on the server's goroutine
+	// and the assertion on the test's, and `go test -race ./internal/...` is a
+	// CI job — a bare shared string here is exactly the shape that turns into
+	// an intermittent red build on an unrelated PR.
+	var sawAuth atomic.Value
+	sawAuth.Store("")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
-		sawAuth = r.Header.Get("Authorization")
+		sawAuth.Store(r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(githubPullJSON))
 	}))
@@ -95,8 +100,8 @@ func TestFetch_ReachesPrivateHostWhenOperatorAllowsIt(t *testing.T) {
 	if n := atomic.LoadInt32(&hits); n != 1 {
 		t.Fatalf("listener saw %d requests, want 1", n)
 	}
-	if sawAuth != "Bearer ghp_supersecret" {
-		t.Errorf("Authorization = %q, want the bearer token", sawAuth)
+	if got, _ := sawAuth.Load().(string); got != "Bearer ghp_supersecret" {
+		t.Errorf("Authorization = %q, want the bearer token", got)
 	}
 	if got.Title != "Add the widget" {
 		t.Errorf("title = %q", got.Title)

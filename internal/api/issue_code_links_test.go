@@ -445,6 +445,21 @@ func TestCodeLink_AttachTwice_IsAConflict(t *testing.T) {
 	if n := f.countLinks(t); n != 1 {
 		t.Errorf("rows = %d, want 1", n)
 	}
+	// The duplicate must be refused WITHOUT a second provider call: a
+	// re-paste should not burn a rate-limit unit or write a credential USE
+	// event for a result that is thrown away.
+	if n := forge.requests(); n != 1 {
+		t.Errorf("forge saw %d requests, want 1 — the duplicate was fetched before being rejected", n)
+	}
+	var uses int
+	if err := f.db.QueryRow(
+		`SELECT COUNT(*) FROM credential_audit WHERE credential_id = 'cred-gh' AND event_type = 'USE'`).
+		Scan(&uses); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if uses != 1 {
+		t.Errorf("credential USE events = %d, want 1", uses)
+	}
 }
 
 func TestCodeLink_List_And_Delete(t *testing.T) {
