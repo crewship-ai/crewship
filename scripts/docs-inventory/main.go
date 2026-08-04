@@ -440,7 +440,7 @@ func hasConcreteSuccessSchema(responses map[string]openAPIResponse) bool {
 			if typ, ok := rawString(media.Schema["type"]); ok && typ != "object" {
 				return true
 			}
-			for _, key := range []string{"properties", "items", "oneOf", "anyOf", "allOf", "enum", "format"} {
+			for _, key := range []string{"properties", "items", "additionalProperties", "oneOf", "anyOf", "allOf", "enum", "format"} {
 				if _, ok := media.Schema[key]; ok {
 					return true
 				}

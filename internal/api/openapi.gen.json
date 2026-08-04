@@ -66715,6 +66715,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73707,16 +73712,6 @@
           }
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -78630,6 +78625,17 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "channel_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
