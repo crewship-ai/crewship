@@ -18,7 +18,7 @@ CRUD) require `OWNER` or `ADMIN`.
 ## List Feature Flags
 
 ```
-GET /api/v1/feature-flags?workspace_id={workspaceId}
+GET /api/v1/feature-flags
 ```
 
 Returns every flag definition, ordered by `key` ascending. When the request
@@ -63,7 +63,7 @@ exists for that flag.
 ## Create Feature Flag
 
 ```
-POST /api/v1/feature-flags?workspace_id={workspaceId}
+POST /api/v1/feature-flags
 ```
 
 Inserts a new instance-global flag definition.
@@ -95,6 +95,7 @@ Inserts a new instance-global flag definition.
 | `400` | Missing `key`, invalid JSON, or `percentage` outside 0-100 |
 | `403` | Insufficient role |
 | `409` | A flag with this key already exists |
+| `500` | Database failure |
 
 **WebSocket event:** `feature_flag.created`
 
@@ -103,7 +104,7 @@ Inserts a new instance-global flag definition.
 ## Update Feature Flag
 
 ```
-PATCH /api/v1/feature-flags/{key}?workspace_id={workspaceId}
+PATCH /api/v1/feature-flags/{key}
 ```
 
 Partial update -- only provided fields are changed.
@@ -129,6 +130,7 @@ Partial update -- only provided fields are changed.
 | `400` | Invalid JSON, `percentage` outside 0-100, or no fields to update |
 | `403` | Insufficient role |
 | `404` | Flag not found |
+| `500` | Database failure |
 
 **WebSocket event:** `feature_flag.updated`
 
@@ -137,7 +139,7 @@ Partial update -- only provided fields are changed.
 ## Delete Feature Flag
 
 ```
-DELETE /api/v1/feature-flags/{key}?workspace_id={workspaceId}
+DELETE /api/v1/feature-flags/{key}
 ```
 
 Removes the flag definition. The `ON DELETE CASCADE` on the override table
@@ -151,6 +153,7 @@ means all per-workspace override rows are removed too.
 |---|---|
 | `403` | Insufficient role |
 | `404` | Flag not found |
+| `500` | Database failure |
 
 **WebSocket event:** `feature_flag.deleted`
 
@@ -159,7 +162,7 @@ means all per-workspace override rows are removed too.
 ## Set Workspace Override
 
 ```
-PUT /api/v1/feature-flags/{key}/override?workspace_id={workspaceId}
+PUT /api/v1/feature-flags/{key}/override
 ```
 
 Creates or replaces the current workspace's override row for the named flag.
@@ -189,6 +192,7 @@ place (keyed on `UNIQUE(flag_id, workspace_id)`).
 | `400` | Invalid JSON, missing workspace context, or missing explicit `enabled` field |
 | `403` | Insufficient role |
 | `404` | Flag not found |
+| `500` | Database failure |
 
 **WebSocket event:** `feature_flag.override_set`
 
@@ -197,7 +201,7 @@ place (keyed on `UNIQUE(flag_id, workspace_id)`).
 ## Clear Workspace Override
 
 ```
-DELETE /api/v1/feature-flags/{key}/override?workspace_id={workspaceId}
+DELETE /api/v1/feature-flags/{key}/override
 ```
 
 Removes the current workspace's override row, reverting the flag's effective
@@ -213,5 +217,13 @@ not an override row existed (after this call, the override does not exist).
 | `400` | Missing workspace context |
 | `403` | Insufficient role |
 | `404` | Flag not found |
+| `500` | Database failure |
 
 **WebSocket event:** `feature_flag.override_cleared` (only when a row was actually removed)
+
+All six operations require an authenticated request. The API resolves the
+current workspace from the authenticated workspace context; `workspace_id` is
+not a query parameter on these routes. `GET` requires a workspace member with
+the read permission. Every mutation requires `OWNER` or `ADMIN` and returns
+`401` if unauthenticated or `403` when the role is insufficient. JSON errors
+use the API's standard error shape; successful delete operations have no body.

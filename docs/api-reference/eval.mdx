@@ -115,7 +115,7 @@ GET /api/v1/eval/runs?limit=50
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `limit` | integer | 50 | 1-200. |
+| `limit` | integer | 50 | Positive integer up to 200. Missing, malformed, zero, or out-of-range values use the default `50`. |
 
 **Response:** `200 OK`
 
@@ -207,6 +207,11 @@ Fetches a single run by id, scoped to the caller's workspace. Same shape as one 
 | 401 | No workspace. |
 | 404 | `id` doesn't exist, or belongs to a different workspace (same shape either way — existence isn't leaked cross-tenant). |
 | 500 | DB failure. |
+
+**Authentication:** Send the normal authenticated session or CLI token with
+workspace context. Reads require a workspace; there is no additional role
+gate. The API returns its standard JSON error object for `401`, `400`, and
+`500` responses.
 
 ## Tenancy and role gates
 

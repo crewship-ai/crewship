@@ -1,0 +1,103 @@
+---
+title: "Runtime Capacity"
+description: "Inspect host admission control and container starts held for capacity."
+icon: "gauge"
+---
+
+The runtime capacity endpoint reports the in-memory admission snapshot for this
+Crewship instance: its limits, host signal, container starts currently in
+flight, and starts held until capacity is available. A held start is queued
+before a container is created; this endpoint does not pause, evict, or change
+an already-running container.
+
+<Note>
+  This is a host-wide diagnostic, not a workspace resource. The response can
+  include holds from other workspaces because the host admission controller is
+  shared by the daemon.
+</Note>
+
+## Get capacity
+
+```
+GET /api/v1/runtime/capacity
+```
+
+**Authentication:** An authenticated session or CLI token is required. The
+route is read-only and has no workspace-role or admin gate. It does not use a
+request body or query parameters.
+
+**Response:** `200 OK`, `application/json`
+
+```json
+{
+  "enabled": true,
+  "limits": {
+    "MaxConcurrentStarts": 4,
+    "MinStartInterval": 150000000,
+    "RequiredFreeMB": 3072,
+    "MaxPressurePct": 20
+  },
+  "in_flight_starts": 1,
+  "held": [
+    {
+      "crew_id": "crew_123",
+      "crew_slug": "alpha",
+      "reason": "host_memory",
+      "detail": "host has 900 MiB available, 3072 MiB needed for one more agent container",
+      "since": "2026-05-19T14:00:11Z",
+      "waited_ms": 42000
+    }
+  ],
+  "held_total": 3,
+  "host_signal_available": true,
+  "host": {
+    "AvailableMB": 900,
+    "TotalMB": 16000,
+    "SomeStallPct": 3.1
+  }
+}
+```
+
+`limits.MinStartInterval` is a Go duration encoded as nanoseconds. `held` is
+always an array, including when it is empty. `held_total` is the cumulative
+number of holds since the daemon started, while `in_flight_starts` and `held`
+describe the current snapshot.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `enabled` | boolean | Whether admission control is wired into this instance. |
+| `limits.MaxConcurrentStarts` | integer | Maximum container creates/starts in flight; `0` disables this leg. |
+| `limits.MinStartInterval` | integer | Minimum spacing between admitted starts, in nanoseconds; `0` disables staggering. |
+| `limits.RequiredFreeMB` | integer | Host memory that must remain available for a start; `0` disables this leg. |
+| `limits.MaxPressurePct` | number | PSI `some avg10` ceiling; `0` disables this veto. |
+| `in_flight_starts` | integer | Starts currently admitted but not finished. |
+| `held` | array | Current holds, with reason, detail, start time, and wait duration. |
+| `held_total` | integer | Holds observed since daemon startup. |
+| `host_signal_available` | boolean | Whether Linux host memory signals are available. |
+| `host_signal_error` | string? | Why the host signal is unavailable or admission control is not configured; omitted when empty. |
+| `host.AvailableMB` | integer | Current `MemAvailable` in MiB when the signal is available. |
+| `host.TotalMB` | integer | Current `MemTotal` in MiB. |
+| `host.SomeStallPct` | number | PSI memory `some avg10` percentage, or `-1` when PSI is unavailable. |
+
+The stable hold reasons are `host_memory`, `host_pressure`, `concurrency`,
+and `pacing`. On macOS, or where the Linux `/proc` signals are unavailable,
+`host_signal_available` is `false`; the memory and pressure checks are
+inactive, but concurrency and staggering can still apply.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| `401 Unauthorized` | Missing or invalid authentication. |
+
+When admission control is not configured, the endpoint still returns `200`:
+`enabled` is `false`, `held` is an empty array, and `host_signal_error`
+explains the state. The handler is read-only and does not return a documented
+application-level `4xx` or `5xx` for a capacity snapshot.
+
+## Related CLI
+
+- [`crewship capacity`](/cli/capacity) — human-readable and formatted output.
+- [`crewship now`](/cli/me#crewship-now) — includes held starts on the live board.
+- [`crewship instance`](/cli/instance) — change the instance settings used by
+  the next admission decision.

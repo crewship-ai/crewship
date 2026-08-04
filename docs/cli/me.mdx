@@ -23,6 +23,15 @@ crewship me
 crewship me --format json
 ```
 
+All three quick-action commands require an authenticated login and selected
+workspace. The CLI sends the requests concurrently and keeps successful data
+when one endpoint fails: partial failures are printed to stderr as
+`[partial] ...` and do not discard the rest of the view. If every workspace
+request fails with the session-invalid `401` response, the command exits
+non-zero and asks the user to authenticate again. `--format json` and
+`--format yaml` return an object with the collected sections plus an `errors`
+array; human-readable mode renders the same partial data.
+
 ## `crewship today`
 
 Today's runs + spend across the workspace. Useful for retrospectives and standups.
