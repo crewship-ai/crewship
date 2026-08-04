@@ -333,6 +333,15 @@ environment, not stored vault credentials.
 --tolerance <float>    allowed extra guard-downgrade rate over incumbent
 ```
 
+The default is three replay passes per prompt (`--passes 3`); `--candidate` is
+repeatable and defaults to no candidates, so it must be supplied. `--limit 0`
+means the complete corpus, `--tolerance 0` allows no additional dangerous
+guard downgrade, and `--explain` is off by default. Human-labelled rows are
+reported separately from rows labelled only by the incumbent. Human agreement
+rates are withheld below 20 human-labelled rows and benchmark-grade messaging
+starts at 100. Human-readable output is a summary/table; `--format json` or
+`--format ndjson` is suitable for automation.
+
 Safety-first scoring marks a candidate non-viable if it downgrades more
 DENY/ESCALATE decisions to ALLOW than the incumbent, regardless of raw
 agreement. The endpoint is contacted from the local machine and protected by
@@ -375,6 +384,12 @@ clears free-form rules but leaves presets untouched. `watch preset list` shows
 the catalog and enabled entries; `preset add <key>` and `preset remove <key>`
 validate the key and update the complete preset set. The preset keys are
 `credentials`, `destructive`, `egress`, `memory`, and `secret_files`.
+
+All watch reads and mutations return the current governance object in structured
+formats. Human output shows every preset with a check mark and the free-form
+rules; an empty rule set is shown as `(none)`. `watch set` accepts at most the
+server's maximum watch-spec length (currently 4096 bytes) and authoring a spec does
+not enable the watchdog.
 
 ## Related commands
 
