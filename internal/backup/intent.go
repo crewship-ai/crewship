@@ -213,21 +213,29 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// (access) / Art. 17 (deletion) compliance events with required
 	// `reason` fields — a regulator audit reading "we lost the
 	// GDPR log on a restore" is not a defensible posture.
-	"gdpr_actions":      IntentInclude,
-	"hooks_config":      IntentInclude,
-	"inbox_items":       IntentInclude,
-	"issue_counters":    IntentInclude,
-	"memory_proposals":  IntentInclude,
-	"memory_versions":   IntentInclude,
-	"message_feedback":  IntentInclude,
-	"mission_activity":  IntentInclude,
-	"mission_comments":  IntentInclude,
-	"mission_labels":    IntentInclude,
-	"mission_proposals": IntentInclude,
-	"mission_relations": IntentInclude,
-	"mission_tasks":     IntentInclude,
-	"peer_card_audit":   IntentExcludeOperational, // audit trail
-	"peer_cards":        IntentInclude,
+	"gdpr_actions":     IntentInclude,
+	"hooks_config":     IntentInclude,
+	"inbox_items":      IntentInclude,
+	"issue_counters":   IntentInclude,
+	"memory_proposals": IntentInclude,
+	"memory_versions":  IntentInclude,
+	"message_feedback": IntentInclude,
+	"mission_activity": IntentInclude,
+	// mission_code_links is the issue → pull-request/merge-request link
+	// (link-first Git integration). It round-trips: the link is a fact the
+	// user asserted, the same class as mission_relations, and the fetched
+	// state it carries is a cache that the next refresh rewrites anyway.
+	// credential_id may dangle after a restore into an instance whose
+	// credentials differ — the column is ON DELETE SET NULL and nothing
+	// authorises on it, so a stale id costs a re-resolve, not a leak.
+	"mission_code_links": IntentInclude,
+	"mission_comments":   IntentInclude,
+	"mission_labels":     IntentInclude,
+	"mission_proposals":  IntentInclude,
+	"mission_relations":  IntentInclude,
+	"mission_tasks":      IntentInclude,
+	"peer_card_audit":    IntentExcludeOperational, // audit trail
+	"peer_cards":         IntentInclude,
 	// pending_runs holds deferred/debounced triggers waiting to fire
 	// (delay/ttl/priority). A pending row is a scheduled future run —
 	// durable, like a waitpoint; dropping it on restore loses queued work.

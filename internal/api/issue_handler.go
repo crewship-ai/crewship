@@ -253,6 +253,11 @@ type issueResponse struct {
 	// predate the columns and carry no attribution.
 	CreatedBy   *issueCreatorResponse `json:"created_by,omitempty"`
 	AuthoredVia *string               `json:"authored_via,omitempty"`
+	// CodeLinks is populated ONLY on the agent-facing internal read
+	// (issues_internal.go). Browsers get the full, unfenced link objects
+	// from GET …/issues/{identifier}/code-links instead; agents get this
+	// summary, whose free text is run through the untrusted fence.
+	CodeLinks []agentCodeLink `json:"code_links,omitempty"`
 }
 
 // issueCreatorResponse is the creator object on issue responses.
