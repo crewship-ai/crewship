@@ -509,6 +509,79 @@ All routes are workspace-scoped (the workspace comes from your auth context).
 A **workspace-scoped** channel write (the default; `personal` omitted or `false`) requires **ADMIN/OWNER** — tightened from MANAGER+ as part of #1412, since a workspace channel is now a shared delivery target for the whole category-preference system, not just a run-terminal broadcast target. A **personal** channel (`personal: true`) is self-service: any authenticated member may create their own, and only its owner (never another member, regardless of role) may update, test, or delete it. `owner_user_id` is always forced to the authenticated caller server-side — never trust a client-supplied owner.
 </Note>
 
+### Endpoint contracts
+
+The following route contracts are the HTTP boundary for the table above. All
+requests require authentication and workspace context unless stated otherwise.
+
+#### GET /api/v1/notification-channels
+
+**Request:** optional list filters; no body. **Response:** `200 OK` with workspace channels and redacted secrets. **Statuses:** `200 OK`; `401 Unauthorized` without authentication and `403 Forbidden` without workspace access.
+
+#### POST /api/v1/notification-channels
+
+**Request:** JSON channel definition; `personal` may opt into the self-service path described above. **Response:** `201 Created` with the created channel; webhook `secret` is returned once. **Statuses:** `201 Created`; `400 Bad Request` for invalid channel data and `403 Forbidden` when the caller lacks the required role.
+
+#### PATCH /api/v1/notification-channels/{id}
+
+**Request:** `id` path parameter and a JSON patch for channel settings. **Response:** `200 OK` with the updated channel. **Statuses:** `200 OK`; `400 Bad Request`, `403 Forbidden`, or `404 Not Found` for invalid input, insufficient ownership/role, or an unavailable channel.
+
+#### POST /api/v1/notification-channels/{id}/test
+
+**Request:** `id` path parameter; no body required. **Response:** `200 OK` with the test result. **Statuses:** `200 OK`; `403 Forbidden` or `404 Not Found` when the caller cannot test the channel or it is unavailable.
+
+#### DELETE /api/v1/notification-channels/{id}
+
+**Request:** `id` path parameter; no body. **Response:** JSON `{ "deleted": "<id>" }`. **Statuses:** `200 OK`; `400 Bad Request`, `401 Unauthorized`, `403 Forbidden`, `404 Not Found`, or `500 Internal Server Error` for invalid input, missing workspace, insufficient ownership/role, an unavailable channel, or a delete failure.
+
+#### GET /api/v1/notification-channels/{id}/agents
+
+**Request:** `id` path parameter; no body. **Response:** `200 OK` with the agents allowed to send to the channel. **Statuses:** `200 OK`; `403 Forbidden` or `404 Not Found` when the caller cannot inspect the channel.
+
+#### POST /api/v1/notification-channels/{id}/agents
+
+**Request:** `id` path parameter and JSON `{ "agent_id": "…" }`. **Response:** `204 No Content`. **Statuses:** `204 No Content`; `400 Bad Request`, `403 Forbidden`, or `404 Not Found` for invalid input, insufficient role, or an unavailable channel/agent.
+
+#### DELETE /api/v1/notification-channels/{id}/agents/{agentId}
+
+**Request:** `id` and `agentId` path parameters; no body. **Response:** `204 No Content`. **Statuses:** `204 No Content`; `403 Forbidden` or `404 Not Found` when the caller cannot change the channel or the relationship is absent.
+
+#### POST /api/v1/notification-channels/test
+
+**Request:** JSON unsaved channel definition. **Response:** `200 OK` with the provider test result; nothing is persisted. **Statuses:** `200 OK`; `400 Bad Request` for invalid draft data and `403 Forbidden` when the caller lacks access to the workspace.
+
+#### GET /api/v1/notification-providers
+
+**Request:** no body. **Response:** `200 OK` with provider metadata, form fields, and enabled state. **Statuses:** `200 OK`; `401 Unauthorized` without authentication.
+
+#### PATCH /api/v1/notification-providers/{provider}
+
+**Request:** `provider` path parameter and JSON provider settings. **Response:** `200 OK` with the updated provider state. **Statuses:** `200 OK`; `400 Bad Request`, `403 Forbidden`, or `404 Not Found` for invalid input, insufficient role, or an unknown provider.
+
+#### GET /api/v1/me/notification-prefs
+
+**Request:** no body; the authenticated user selects the preference owner. **Response:** `200 OK` with that user's category-by-channel matrix. **Statuses:** `200 OK`; `401 Unauthorized` without authentication.
+
+#### PUT /api/v1/me/notification-prefs
+
+**Request:** JSON `{ "cells": [{ "category", "channel_id", "state" }] }`; the submitted cells are upserted. **Response:** `200 OK` with the updated preference result. **Statuses:** `200 OK`; `400 Bad Request` for invalid cells and `401 Unauthorized` without authentication.
+
+#### GET /api/v1/notification-deliveries
+
+**Request:** optional `status`, `channel_id`, `category`, and `limit` query parameters; no body. **Response:** `200 OK` with the delivery log. **Statuses:** `200 OK`; `403 Forbidden` unless the caller is ADMIN/OWNER.
+
+#### GET /api/v1/notification-templates
+
+**Request:** no body. **Response:** `200 OK` with workspace wording overrides. **Statuses:** `200 OK`; `403 Forbidden` unless the caller is ADMIN/OWNER.
+
+#### PUT /api/v1/notification-templates
+
+**Request:** JSON wording override containing a category, title, and body. **Response:** `200 OK` with the saved override. **Statuses:** `200 OK`; `400 Bad Request` for an invalid category/body and `403 Forbidden` unless the caller is ADMIN/OWNER.
+
+#### DELETE /api/v1/notification-templates
+
+**Request:** required `category` and optional `channel_id` query parameters; no body. **Response:** `204 No Content`. **Statuses:** `204 No Content`; `400 Bad Request` for invalid query parameters and `403 Forbidden` unless the caller is ADMIN/OWNER.
+
 Create body:
 
 ```json

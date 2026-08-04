@@ -384,6 +384,8 @@ Tasks can only be added to missions in `PLANNING` or `IN_PROGRESS` state. If any
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace caller with the mission write permission (`OWNER`, `ADMIN`, or `MANAGER`). **Request:** `crewId`, `missionId`, and `taskId` path parameters, optional `workspace_id`, and a JSON body containing any of the optional fields below. **Response:** the updated task object. **Statuses:** `200 OK`; `400` for an invalid transition or body, `403` for insufficient role, `404` when the mission or task is not in the workspace, and `500` for a persistence failure.
+
 **Request Body:** All fields optional. (`internal/api/task_handler.go:160` — `updateTaskRequest`)
 
 | Field | Type | Description |
@@ -505,6 +507,8 @@ Workspace-wide aggregates for dashboards.
 ```
 GET /api/v1/mission-metrics?workspace_id={workspaceId}
 ```
+
+**Auth:** Authenticated workspace request. **Request:** required `workspace_id` query parameter; no body. **Response:** JSON aggregate metrics object. **Statuses:** `200 OK`; `400` for missing or invalid workspace context, `401` when unauthenticated, and `500` for an aggregation failure.
 
 Aggregated mission metrics for the workspace. `total_missions` and `active_missions` are lifetime counts; the `*_24h` fields cover the trailing 24 hours.
 
