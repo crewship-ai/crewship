@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-08-04T11:05:18Z",
-  "git_ref": "75c5828d",
+  "generated_at": "2026-08-04T11:12:15Z",
+  "git_ref": "58dae682",
   "summary": {
     "api_operations": 539,
-    "api_exact_docs": 514,
-    "api_resource_docs": 25,
+    "api_exact_docs": 539,
+    "api_resource_docs": 0,
     "api_missing_docs": 0,
     "cli_operations": 723,
-    "cli_exact_docs": 670,
+    "cli_exact_docs": 723,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 357,
@@ -8933,6 +8933,7 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
         "docs/api-reference/waitpoints.mdx",
@@ -8981,6 +8982,7 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
         "docs/api-reference/waitpoints.mdx",
@@ -9029,6 +9031,7 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
         "docs/api-reference/waitpoints.mdx",
@@ -9055,6 +9058,7 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
         "docs/api-reference/waitpoints.mdx",
@@ -9081,6 +9085,7 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
         "docs/api-reference/waitpoints.mdx",
@@ -9251,6 +9256,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
@@ -9265,6 +9271,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs_runId",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
@@ -9278,10 +9285,13 @@
       "path": "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs_runId_changes",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9289,6 +9299,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs_runId_files",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9301,10 +9312,13 @@
       "path": "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs_runId_logs",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "PATCH",
@@ -9312,10 +9326,13 @@
       "operation_id": "patch_api_v1_workspaces_workspaceId_pipeline-runs_runId_metadata",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9323,20 +9340,26 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipeline-runs_runId_signal",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
       "path": "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs_runId_tree",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9469,6 +9492,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx",
@@ -9487,10 +9511,13 @@
       "path": "/api/v1/workspaces/{workspaceId}/pipelines/budget-summary",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_budget-summary",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9499,6 +9526,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9511,10 +9539,13 @@
       "path": "/api/v1/workspaces/{workspaceId}/pipelines/pending",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_pending",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9522,10 +9553,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_pending_pendingId_cancel",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9533,6 +9567,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_runs_active",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9546,20 +9581,26 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_runs_bulk_replay",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
       "path": "/api/v1/workspaces/{workspaceId}/pipelines/runs/errors",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_runs_errors",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9568,6 +9609,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9581,10 +9623,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_runs_runId_replay",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9593,6 +9638,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9607,6 +9653,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/guides/routines.mdx"
       ],
       "resource_docs": [
@@ -9650,6 +9697,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
@@ -9668,6 +9716,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
@@ -9699,10 +9748,13 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_budget",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "PATCH",
@@ -9710,20 +9762,26 @@
       "operation_id": "patch_api_v1_workspaces_workspaceId_pipelines_slug_budget",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
       "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_diff",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9746,6 +9804,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9773,6 +9832,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_export",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9785,10 +9845,13 @@
       "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_overrides",
       "tag": "workspaces",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9811,6 +9874,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9825,6 +9889,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/route_scope_invariant_test.go",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9841,6 +9906,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_run-records",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9854,10 +9920,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_run_batch",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9865,6 +9934,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_runs",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9878,10 +9948,13 @@
       "operation_id": "delete_api_v1_workspaces_workspaceId_pipelines_slug_state",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9889,10 +9962,13 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_state",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "DELETE",
@@ -9900,10 +9976,13 @@
       "operation_id": "delete_api_v1_workspaces_workspaceId_pipelines_slug_state_key",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "PUT",
@@ -9911,10 +9990,13 @@
       "operation_id": "put_api_v1_workspaces_workspaceId_pipelines_slug_state_key",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9922,10 +10004,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_step_run",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "DELETE",
@@ -9933,10 +10018,13 @@
       "operation_id": "delete_api_v1_workspaces_workspaceId_pipelines_slug_steps_stepId_override",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "PUT",
@@ -9944,10 +10032,13 @@
       "operation_id": "put_api_v1_workspaces_workspaceId_pipelines_slug_steps_stepId_override",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "PUT",
@@ -9955,10 +10046,13 @@
       "operation_id": "put_api_v1_workspaces_workspaceId_pipelines_slug_tags",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "DELETE",
@@ -9966,10 +10060,13 @@
       "operation_id": "delete_api_v1_workspaces_workspaceId_pipelines_slug_tags_tag",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9977,6 +10074,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_versions",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9990,6 +10088,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_versions_n",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -15802,10 +15901,13 @@
       "use": "update-binding \u003cagent-slug\u003e \u003cbinding-id\u003e",
       "short": "Update an agent's integration binding (credential, type, env var, enabled)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15885,10 +15987,13 @@
       "use": "account",
       "short": "Manage a Composio connected account (revoke / refresh / remove)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15903,10 +16008,13 @@
       "use": "refresh \u003caccount-id\u003e",
       "short": "Refresh a connected account's credentials",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15921,10 +16029,13 @@
       "use": "remove \u003caccount-id\u003e",
       "short": "Permanently delete a connected account at the provider",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15939,10 +16050,13 @@
       "use": "revoke \u003caccount-id\u003e",
       "short": "De-authorize a connected account at the provider",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -15978,10 +16092,13 @@
       "use": "bindings \u003cagent-slug-or-id\u003e",
       "short": "Show an agent's Composio user binding(s)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16017,10 +16134,13 @@
       "use": "default",
       "short": "Manage the workspace-wide default Composio connector",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "cmd/crewship/cmd_admin_extras_test.go",
@@ -16038,10 +16158,13 @@
       "use": "enable",
       "short": "Provision the default connector, auto-deriving the user when exactly one is connected",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -16059,10 +16182,13 @@
       "use": "set \u003cuser_id\u003e",
       "short": "Set the default connector's Composio user and (re)provision the default server",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16077,10 +16203,13 @@
       "use": "show",
       "short": "Show the default-connector state (flag, default user/server, connected users)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
@@ -16098,10 +16227,13 @@
       "use": "inventory",
       "short": "Show the Composio connector catalog and connected accounts per user",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16116,10 +16248,13 @@
       "use": "key",
       "short": "Manage the workspace Composio API key",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_security_posture_test.go",
         "cmd/crewship/cmd_credential_field_test.go",
@@ -16137,10 +16272,13 @@
       "use": "remove",
       "short": "Remove the workspace Composio API key (reverts to the server env, if any)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
@@ -16158,10 +16296,13 @@
       "use": "set",
       "short": "Set \u0026 validate the workspace Composio API key (stored encrypted)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
@@ -16179,10 +16320,13 @@
       "use": "show",
       "short": "Show whether/how Composio is configured (never prints the key)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
@@ -16200,10 +16344,13 @@
       "use": "toolkits",
       "short": "Browse the Composio app catalog (1000+ connectable apps)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
@@ -16219,10 +16366,13 @@
       "use": "tools \u003ctoolkit\u003e",
       "short": "List the tools a Composio toolkit exposes (e.g. github has 846)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16237,10 +16387,13 @@
       "use": "triggers",
       "short": "Composio triggers (event subscriptions like GMAIL_NEW_MESSAGE)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
@@ -16256,10 +16409,13 @@
       "use": "active",
       "short": "List active Composio trigger instances (across all users)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_sessions_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
@@ -16277,10 +16433,13 @@
       "use": "enable \u003cslug\u003e",
       "short": "Create/enable a Composio trigger instance for a user",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16295,10 +16454,13 @@
       "use": "types",
       "short": "List available Composio trigger types (filter by toolkit)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_explain_cov_test.go",
         "cmd/crewship/cmd_inspect_cov_test.go",
@@ -16315,10 +16477,13 @@
       "use": "unbind \u003cagent-slug-or-id\u003e",
       "short": "Remove an agent's Composio access (one app with --app, else all)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16378,10 +16543,13 @@
       "use": "delete \u003ccrew-slug\u003e \u003cintegration-id\u003e",
       "short": "Delete a crew-scoped integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16396,10 +16564,13 @@
       "use": "list \u003ccrew-slug\u003e",
       "short": "List integrations for a crew",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16435,10 +16606,13 @@
       "use": "update \u003ccrew-slug\u003e \u003cintegration-id\u003e",
       "short": "Update fields on a crew-scoped integration (display, transport, endpoint, ...)",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16453,10 +16627,13 @@
       "use": "crews-overview",
       "short": "List integrations across every crew in the workspace",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16471,10 +16648,13 @@
       "use": "disable \u003cid-or-name\u003e",
       "short": "Disable a workspace integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16489,10 +16669,13 @@
       "use": "enable \u003cid-or-name\u003e",
       "short": "Enable a workspace integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16507,10 +16690,13 @@
       "use": "get \u003cid-or-name\u003e",
       "short": "Show details for a workspace integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16525,10 +16711,13 @@
       "use": "list",
       "short": "List workspace integrations",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -16546,10 +16735,13 @@
       "use": "remove \u003cid-or-name\u003e",
       "short": "Remove a workspace integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16586,10 +16778,13 @@
       "use": "test \u003cid-or-name\u003e",
       "short": "Test the connection to a workspace integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16649,10 +16844,13 @@
       "use": "enable \u003ccrew-slug\u003e \u003cintegration-id\u003e \u003ctool-name\u003e",
       "short": "Enable a single tool on a crew-scoped integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16667,10 +16865,13 @@
       "use": "list \u003ccrew-slug\u003e \u003cintegration-id\u003e",
       "short": "List tool bindings for a crew-scoped integration",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16685,10 +16886,13 @@
       "use": "refresh \u003ccrew-slug\u003e \u003cintegration-id\u003e",
       "short": "Reconcile tool bindings with the live MCP server discovery",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -16703,10 +16907,13 @@
       "use": "unbind",
       "short": "Remove an integration binding from an agent",
       "root": "integration",
+      "exact_docs": [
+        "docs/cli/integration.mdx"
+      ],
       "root_docs": [
         "docs/cli/integration.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -17370,10 +17577,13 @@
       "use": "ask --agent \u003cid\u003e --crew \u003cid\u003e --credential \u003cname\u003e --intent \u003ctext\u003e",
       "short": "Put a credential request to the judge yourself (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17727,10 +17937,13 @@
       "use": "contact \u003cemail\u003e",
       "short": "Set the security contact escalations are routed to (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17748,10 +17961,13 @@
       "use": "disable",
       "short": "Disable the Keeper watchdog for this workspace (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -17769,10 +17985,13 @@
       "use": "enable",
       "short": "Enable the Keeper watchdog for this workspace (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -17790,10 +18009,13 @@
       "use": "eval",
       "short": "Replay recorded keeper decisions against candidate models and score them against human verdicts",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "cmd/crewship/cmd_eval_test.go",
@@ -17859,10 +18081,13 @@
       "use": "health",
       "short": "How the judge has been deciding lately (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18168,10 +18393,13 @@
       "use": "requests",
       "short": "List recent Keeper decision-audit requests (requires ADMIN or OWNER)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18262,7 +18490,8 @@
       "short": "Require a different human to approve credential escalations their own agent raised",
       "root": "keeper",
       "exact_docs": [
-        "docs/cli/escalation.mdx"
+        "docs/cli/escalation.mdx",
+        "docs/cli/keeper.mdx"
       ],
       "root_docs": [
         "docs/cli/keeper.mdx"
@@ -18285,10 +18514,13 @@
       "use": "disable",
       "short": "Allow a single approver for credential escalations again (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -18354,10 +18586,13 @@
       "use": "threshold \u003c1-10\u003e",
       "short": "Set the DENY-notify risk threshold (requires OWNER or ADMIN)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18375,10 +18610,13 @@
       "use": "watch",
       "short": "Author the workspace watch spec (presets + free-form rules)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_provision_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -18396,10 +18634,13 @@
       "use": "clear",
       "short": "Clear the free-form watch rules (presets are unaffected)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -18417,10 +18658,13 @@
       "use": "get",
       "short": "Show the current workspace watch spec",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
@@ -18438,10 +18682,13 @@
       "use": "preset",
       "short": "Toggle watch presets on or off",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18459,10 +18706,13 @@
       "use": "add \u003ckey\u003e",
       "short": "Enable a watch preset",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18480,10 +18730,13 @@
       "use": "list",
       "short": "List the preset catalog with a ✓ on the enabled ones",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -18501,10 +18754,13 @@
       "use": "remove \u003ckey\u003e",
       "short": "Disable a watch preset",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18522,10 +18778,13 @@
       "use": "set \u003ctext|-\u003e",
       "short": "Set the free-form watch rules (use - to read from stdin)",
       "root": "keeper",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
       "root_docs": [
         "docs/cli/keeper.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
