@@ -85,6 +85,30 @@ func statusForRisk(risky bool) string {
 // — a projection failure must not fail the save (the proposed row is
 // authoritative).
 func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID string, saved *pipeline.Pipeline, reasons []string, senderName string) {
+	// Which two versions a reviewer should compare.
+	//
+	// The routine already keeps immutable versions and the API already
+	// serves a unified diff of any two; the payload just never carried
+	// the numbers, so the inbox could show a slug and a reason and
+	// nothing about what actually changed.
+	//
+	// from is omitted for v1: there is no predecessor, and emitting 0
+	// would have the inbox request a diff against a version that never
+	// existed.
+	payload := map[string]interface{}{
+		"kind":           "routine_proposal",
+		"slug":           saved.Slug,
+		"pipeline_id":    saved.ID,
+		"author_crew_id": saved.AuthorCrewID,
+		"risk_reasons":   reasons,
+	}
+	if head, err := h.store.HeadVersion(ctx, saved.ID); err == nil && head > 0 {
+		payload["to_version"] = head
+		if head > 1 {
+			payload["from_version"] = head - 1
+		}
+	}
+
 	_ = inbox.Insert(ctx, h.db, h.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindEscalation,
@@ -97,13 +121,7 @@ func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID s
 		SenderName: senderName,
 		Priority:   "high",
 		Blocking:   true,
-		Payload: map[string]interface{}{
-			"kind":           "routine_proposal",
-			"slug":           saved.Slug,
-			"pipeline_id":    saved.ID,
-			"author_crew_id": saved.AuthorCrewID,
-			"risk_reasons":   reasons,
-		},
+		Payload:    payload,
 	})
 	h.broadcastInboxUpdated(workspaceID, "routine_proposed")
 }

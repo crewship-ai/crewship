@@ -4,6 +4,7 @@ import { useState } from "react"
 import { AlertTriangle, Clock, Eye, EyeOff } from "lucide-react"
 
 import { Appear, DetailCard, Pill } from "@/components/ui/detail"
+import { RoutineProposalDiff } from "./routine-proposal-diff"
 import { Button } from "@/components/ui/button"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
@@ -415,6 +416,19 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
             </div>
           </DetailCard>
         </Appear>
+      )}
+
+      {/* A routine proposal is a decision about a CHANGE, so the change
+          is on the item rather than three clicks away in another
+          surface. Only for that kind — every other inbox item has no
+          versions to compare. */}
+      {payloadString(item, "kind") === "routine_proposal" && (
+        <RoutineProposalDiff
+          workspaceId={item.workspace_id}
+          slug={payloadString(item, "slug")}
+          fromVersion={payloadNumber(item, "from_version")}
+          toVersion={payloadNumber(item, "to_version")}
+        />
       )}
 
       {item.body_md && (
