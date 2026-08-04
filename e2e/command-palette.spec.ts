@@ -57,12 +57,21 @@ async function openPalette(page: Page) {
  * matters, because the destination comes from the product, not the test.
  */
 async function firstRow(page: Page, hrefPattern: RegExp) {
-  for (const row of await page.locator("[cmdk-item][data-href]").all()) {
-    const href = await row.getAttribute("data-href")
-    if (href && hrefPattern.test(href)) {
-      return { row, href, text: (await row.innerText()).trim() }
+  // The palette fans out over nine lists in parallel, so the group you want
+  // may simply not have arrived yet. Scanning once made "no crews in this
+  // workspace" and "the crews fetch was 200ms behind" indistinguishable, and
+  // the run skipped a test that should have run. Poll until it appears, and
+  // only then conclude there is nothing of that kind.
+  const deadline = Date.now() + TIMEOUT
+  do {
+    for (const row of await page.locator("[cmdk-item][data-href]").all()) {
+      const href = await row.getAttribute("data-href")
+      if (href && hrefPattern.test(href)) {
+        return { row, href, text: (await row.innerText()).trim() }
+      }
     }
-  }
+    await page.waitForTimeout(250)
+  } while (Date.now() < deadline)
   return null
 }
 
