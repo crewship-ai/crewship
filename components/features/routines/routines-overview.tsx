@@ -33,6 +33,8 @@ import {
   ChevronRight,
   PieChart,
   RefreshCw,
+  UserCheck,
+  XCircle,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -47,6 +49,10 @@ import { describeCron } from "@/lib/cron-describe"
 import { formatUsd } from "@/lib/routines-insights"
 import { RoutineBudgetSummaryCard } from "./routine-budget-summary-card"
 import { formatDurationDecimal, relTime } from "@/lib/time"
+import { Spinner } from "@/components/ui/spinner"
+import { toast } from "sonner"
+import { waitpointDecide } from "@/lib/api/waitpoints"
+import { useWorkspaceWaitpoints } from "@/hooks/use-run-waitpoints"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
@@ -61,6 +67,8 @@ import {
   spendByDay,
   successRate,
   upcomingSchedules,
+  pendingApprovals,
+  type PendingApproval,
 } from "@/lib/routines-overview"
 
 const SUCCESS_WINDOW_DAYS = 7
@@ -91,6 +99,7 @@ export function RoutinesOverview({
   const { runs } = usePipelineRuns(workspaceId, "all")
   const { schedules } = usePipelineSchedules(workspaceId)
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
+  const { waitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
 
   // One clock for the whole render. Deriving `new Date()` inside each
   // helper would let two tiles disagree about what "today" is across a
@@ -118,6 +127,16 @@ export function RoutinesOverview({
     [schedules, now],
   )
   const recent = React.useMemo(() => recentRuns(runs, RECENT_RUN_LIMIT), [runs])
+  // A waitpoint carries a run id, not a slug — this is how the queue
+  // learns which routine stopped.
+  const slugByRunId = React.useMemo(
+    () => new Map(runs.map((r) => [r.id, r.pipeline_slug])),
+    [runs],
+  )
+  const waiting = React.useMemo(
+    () => pendingApprovals(waitpoints, routines, slugByRunId),
+    [waitpoints, routines, slugByRunId],
+  )
   const spend = React.useMemo(() => spendByDay(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
   const spendTotal = React.useMemo(() => spend.reduce((s, d) => s + d.usd, 0), [spend])
   const failing = React.useMemo(
@@ -286,8 +305,9 @@ export function RoutinesOverview({
           </div>
         </Appear>
 
-        {/* ── What actually ran ───────────────────────────────────── */}
+        {/* ── What ran, and what is stuck ────────────────────────── */}
         <Appear order={3}>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <DashboardCard
             title="Recent runs"
             icon={Activity}
@@ -314,7 +334,7 @@ export function RoutinesOverview({
                     <Link
                       key={run.id}
                       href={`/activity?run=${encodeURIComponent(run.id)}`}
-                      className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] sm:grid-cols-[auto_1fr_auto_auto_auto_auto]"
+                      className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto_auto]"
                     >
                       <span className="relative shrink-0">
                         {r ? (
@@ -345,13 +365,10 @@ export function RoutinesOverview({
                           </span>
                         )}
                       </span>
-                      <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:block">
-                        {triggerLabel(run.triggered_via)}
-                      </span>
-                      <span className="hidden w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
+                      <span className="hidden w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
                         {live ? "—" : formatDurationDecimal(run.duration_ms ?? 0)}
                       </span>
-                      <span className="hidden w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground sm:block">
+                      <span className="hidden w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
                         {formatUsd(run.cost_usd ?? 0)}
                       </span>
                       <span className="shrink-0 text-right text-[10px] text-muted-foreground-soft">
@@ -363,6 +380,57 @@ export function RoutinesOverview({
               </div>
             )}
           </DashboardCard>
+
+          {/* Beside the runs, not below them: the two answer the same
+              question a second apart — what happened, and what stopped
+              halfway and is waiting for you. A parked run holds real
+              state and expires, so burying it under ten finished runs
+              is how an approval times out unread. */}
+          <DashboardCard
+            title="Waiting on you"
+            icon={UserCheck}
+            hint={waiting.length > 0 ? `${waiting.length}` : "nothing pending"}
+          >
+            {waiting.length === 0 ? (
+              <Empty icon={CheckCircle2}>Nothing is waiting on a decision.</Empty>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {waiting.map((item) =>
+                  item.kind === "run" ? (
+                    <WaitpointRow
+                      key={item.token}
+                      workspaceId={workspaceId}
+                      item={item}
+                      routine={item.routineSlug ? routineBySlug.get(item.routineSlug) : undefined}
+                      onDecided={refreshWaitpoints}
+                    />
+                  ) : (
+                    <button
+                      key={`prop-${item.slug}`}
+                      type="button"
+                      onClick={() => onSelect(item.slug)}
+                      className="group flex items-center gap-2.5 rounded-md border border-warn/25 bg-warn/[0.06] px-2 py-2 text-left transition-colors hover:bg-warn/[0.1]"
+                    >
+                      <CrewIcon
+                        icon={resolveRoutineIcon(routineBySlug.get(item.slug) ?? { slug: item.slug })}
+                        color={resolveRoutineColor(routineBySlug.get(item.slug) ?? { slug: item.slug })}
+                        size="sm"
+                        className="!h-5 !w-5 !rounded-md shrink-0"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] text-foreground/90">
+                          {item.name}
+                        </span>
+                        <span className="block text-[10px] text-warn">definition needs review</span>
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+          </DashboardCard>
+          </div>
         </Appear>
 
         {/* ── Money, and breakage ─────────────────────────────────── */}
@@ -472,24 +540,6 @@ function statusDot(status: string): string {
   return "bg-muted-foreground/40"
 }
 
-/** Where the run came from, in a word a person would use. */
-function triggerLabel(via: string | undefined): string {
-  switch (via) {
-    case "schedule":
-      return "scheduled"
-    case "webhook":
-      return "webhook"
-    case "call_pipeline":
-      return "called"
-    case "issue":
-      return "issue"
-    case "manual":
-      return "manual"
-    default:
-      return via || "—"
-  }
-}
-
 /**
  * Skeleton in the final geometry.
  *
@@ -511,6 +561,99 @@ function OverviewSkeleton() {
           <Skeleton className="h-[228px] rounded-xl" />
         </div>
         <Skeleton className="h-[300px] rounded-xl" />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One parked run, with the decision on it.
+ *
+ * Approve and Deny are here rather than a click away because the
+ * thing this row reports is a process that has stopped and is
+ * costing time. The prompt is shown as authored: the author wrote it
+ * to be the question, and paraphrasing it in the UI would put a
+ * second, unreviewed wording in front of the person deciding.
+ */
+function WaitpointRow({
+  workspaceId,
+  item,
+  routine,
+  onDecided,
+}: {
+  workspaceId: string
+  item: Extract<PendingApproval, { kind: "run" }>
+  routine?: Pipeline
+  onDecided: () => void
+}) {
+  const [deciding, setDeciding] = React.useState(false)
+
+  const decide = async (approved: boolean) => {
+    setDeciding(true)
+    const res = await waitpointDecide(workspaceId, item.token, approved)
+    setDeciding(false)
+    if (res.ok) {
+      toast.success(approved ? "Approved" : "Denied")
+      onDecided()
+      return
+    }
+    // A token decided in another tab or timed out comes back as a
+    // conflict. Refresh either way — the row is stale, and leaving it
+    // on screen invites a second click that fails the same way.
+    toast.error(res.error)
+    onDecided()
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-warn/25 bg-warn/[0.06] px-2 py-2">
+      <div className="flex items-center gap-2.5">
+        {routine ? (
+          <CrewIcon
+            icon={resolveRoutineIcon(routine)}
+            color={resolveRoutineColor(routine)}
+            size="sm"
+            className="!h-5 !w-5 !rounded-md shrink-0"
+          />
+        ) : (
+          <span className="h-5 w-5 shrink-0 rounded-md bg-muted" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] text-foreground/90">
+            {routine?.name || item.routineSlug || "Run " + item.runId.slice(0, 8)}
+          </span>
+          <span className="block truncate text-[10px] text-muted-foreground">
+            {item.prompt || `parked at ${item.stepId}`}
+          </span>
+        </span>
+        {item.expiresAt && (
+          <span className="shrink-0 text-[10px] text-warn">{relTime(item.expiresAt)}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={deciding}
+          onClick={() => decide(true)}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md bg-warn px-3 text-[11px] font-semibold text-background transition-colors hover:bg-warn/90 disabled:opacity-60"
+        >
+          {deciding ? <Spinner className="h-3 w-3" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={deciding}
+          onClick={() => decide(false)}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-3 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Deny
+        </button>
+        <Link
+          href={`/activity?run=${encodeURIComponent(item.runId)}`}
+          className="ml-auto text-[10px] text-primary hover:underline"
+        >
+          Open run
+        </Link>
       </div>
     </div>
   )

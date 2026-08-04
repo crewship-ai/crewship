@@ -9,6 +9,7 @@ import {
   upcomingSchedules,
   recentRuns,
   spendByDay,
+  pendingApprovals,
 } from "@/lib/routines-overview"
 
 // The overview replaces a 38-row table in which 37 rows said "never
@@ -260,5 +261,96 @@ describe("spendByDay", () => {
   it("ignores a negative or non-finite cost rather than subtracting it", () => {
     const runs = [run({ cost_usd: -5 }), run({ cost_usd: Number.NaN })]
     expect(spendByDay(runs, NOW, 7).every((d) => d.usd === 0)).toBe(true)
+  })
+})
+
+// "Waiting on you" is one queue with two sources: a run parked on a
+// `wait: approval` gate, and a routine whose definition needs a
+// reviewer. From the operator's side they are the same job — something
+// stopped and is waiting for a person — so they belong on one card,
+// and the ordering has to reflect which one is actually burning.
+
+function waitpoint(over: Record<string, unknown> = {}) {
+  return {
+    token: "tok-1",
+    pipeline_run_id: "run-1",
+    step_id: "approve",
+    kind: "approval",
+    prompt: "Ship it?",
+    timeout_at: at(4, 18),
+    created_at: at(4, 11),
+    ...over,
+  } as Parameters<typeof pendingApprovals>[0][number]
+}
+
+describe("pendingApprovals", () => {
+  it("names the routine a parked run belongs to", () => {
+    const out = pendingApprovals(
+      [waitpoint({})],
+      [routine({ slug: "nightly", name: "Nightly digest" })],
+      new Map([["run-1", "nightly"]]),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ kind: "run", routineSlug: "nightly", routineName: "Nightly digest" })
+  })
+
+  it("still lists a parked run whose routine cannot be resolved", () => {
+    // A waitpoint carries a run id, not a slug. Dropping the row when
+    // the lookup misses would hide a blocked run — the opposite of
+    // what this card is for.
+    const out = pendingApprovals([waitpoint({})], [], new Map())
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe("run")
+  })
+
+  it("puts parked runs above proposed routines", () => {
+    // A parked run holds a live process and expires. A proposal sits
+    // still until someone reads it.
+    const out = pendingApprovals(
+      [waitpoint({})],
+      [routine({ slug: "risky", name: "Risky", status: "proposed" })],
+      new Map([["run-1", "nightly"]]),
+    )
+    expect(out.map((x) => x.kind)).toEqual(["run", "routine"])
+  })
+
+  it("orders parked runs by how soon they expire", () => {
+    const out = pendingApprovals(
+      [
+        waitpoint({ token: "later", timeout_at: at(4, 20) }),
+        waitpoint({ token: "sooner", timeout_at: at(4, 13) }),
+      ],
+      [],
+      new Map(),
+    )
+    expect(out.map((x) => (x.kind === "run" ? x.token : ""))).toEqual(["sooner", "later"])
+  })
+
+  it("treats a waitpoint with no timeout as least urgent, not most", () => {
+    // An absent timeout_at parsed as 0 would sort to the very front
+    // and push a genuinely expiring approval down the list.
+    const out = pendingApprovals(
+      [
+        waitpoint({ token: "no-timeout", timeout_at: "" }),
+        waitpoint({ token: "expiring", timeout_at: at(4, 13) }),
+      ],
+      [],
+      new Map(),
+    )
+    expect(out.map((x) => (x.kind === "run" ? x.token : ""))).toEqual(["expiring", "no-timeout"])
+  })
+
+  it("leaves out routines that are not awaiting review", () => {
+    const out = pendingApprovals(
+      [],
+      [
+        routine({ slug: "live", status: "active" }),
+        routine({ slug: "off", status: "disabled" }),
+        routine({ slug: "risky", status: "proposed" }),
+      ],
+      new Map(),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ kind: "routine", slug: "risky" })
   })
 })

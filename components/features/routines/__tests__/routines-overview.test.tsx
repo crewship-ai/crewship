@@ -16,6 +16,9 @@ const h = vi.hoisted(() => ({
   runs: [] as unknown[],
   schedules: [] as unknown[],
   live: new Map<string, unknown>(),
+  waitpoints: [] as unknown[],
+  refreshWaitpoints: vi.fn(),
+  decide: vi.fn(async () => ({ ok: true })),
 }))
 
 vi.mock("@/hooks/use-pipeline-runs", () => ({
@@ -27,6 +30,13 @@ vi.mock("@/hooks/use-pipeline-schedules", () => ({
 vi.mock("@/hooks/use-active-routine-runs", () => ({
   useActiveRoutineRuns: () => ({ bySlug: h.live, runs: [], activeCount: 0 }),
 }))
+vi.mock("@/hooks/use-run-waitpoints", () => ({
+  useWorkspaceWaitpoints: () => ({ waitpoints: h.waitpoints, refresh: h.refreshWaitpoints }),
+}))
+vi.mock("@/lib/api/waitpoints", () => ({
+  waitpointDecide: (...args: unknown[]) => h.decide(...args),
+}))
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("@/components/features/dashboard/status-donut", () => ({
   StatusDonut: ({
     data,
@@ -97,6 +107,9 @@ describe("<RoutinesOverview>", () => {
     h.runs = []
     h.schedules = []
     h.live = new Map()
+    h.waitpoints = []
+    h.refreshWaitpoints = vi.fn()
+    h.decide = vi.fn(async () => ({ ok: true }))
     vi.useFakeTimers({ now: NOW, shouldAdvanceTime: false })
   })
   afterEach(() => vi.useRealTimers())
@@ -189,5 +202,77 @@ describe("<RoutinesOverview>", () => {
     ]
     render(<RoutinesOverview {...PROPS} routines={[routine({})]} />)
     expect(screen.getByText(/No schedule is due/i)).toBeInTheDocument()
+  })
+
+  // "Waiting on you" sits beside Recent runs because it answers the
+  // same question a second later: what stopped halfway and needs a
+  // person. A parked run holds a live process and expires.
+
+  it("offers the decision on a parked run without leaving the page", async () => {
+    h.waitpoints = [
+      {
+        token: "tok-1",
+        pipeline_run_id: "r1",
+        step_id: "gate",
+        kind: "approval",
+        prompt: "Send the invoice?",
+        timeout_at: at(4, 18),
+      },
+    ]
+    h.runs = [run({ id: "r1", status: "waiting" })]
+    render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />)
+
+    expect(screen.getByText("Send the invoice?")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }))
+    expect(h.decide).toHaveBeenCalledWith("ws-1", "tok-1", true)
+  })
+
+  it("sends an explicit false on Deny rather than omitting the field", async () => {
+    // The endpoint treats an absent `approved` as false, so a caller
+    // that omits it happens to work — until the default changes.
+    h.waitpoints = [
+      { token: "tok-1", pipeline_run_id: "r1", step_id: "gate", kind: "approval", prompt: "Ship?" },
+    ]
+    h.runs = [run({ id: "r1", status: "waiting" })]
+    render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />)
+    fireEvent.click(screen.getByRole("button", { name: /deny/i }))
+    expect(h.decide).toHaveBeenCalledWith("ws-1", "tok-1", false)
+  })
+
+  it("names the routine a parked run belongs to", () => {
+    h.waitpoints = [
+      { token: "t", pipeline_run_id: "r1", step_id: "gate", kind: "approval", prompt: "?" },
+    ]
+    h.runs = [run({ id: "r1", status: "waiting" })]
+    const { rerender } = render(
+      <RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />,
+    )
+    // Once in Recent runs, once on the parked row. A waitpoint carries
+    // a run id and no slug, so the second one only appears if the
+    // run→routine lookup worked.
+    expect(screen.getAllByText("Nightly digest")).toHaveLength(2)
+
+    h.waitpoints = []
+    rerender(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />)
+    expect(screen.getAllByText("Nightly digest")).toHaveLength(1)
+  })
+
+  it("lists a routine awaiting review and opens it on click", () => {
+    const onSelect = vi.fn()
+    render(
+      <RoutinesOverview
+        {...PROPS}
+        onSelect={onSelect}
+        routines={[routine({ slug: "risky", name: "Risky routine", status: "proposed" })]}
+      />,
+    )
+    expect(screen.getByText("definition needs review")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Risky routine"))
+    expect(onSelect).toHaveBeenCalledWith("risky")
+  })
+
+  it("says nothing is pending when the queue is empty", () => {
+    render(<RoutinesOverview {...PROPS} routines={[routine({})]} />)
+    expect(screen.getByText(/Nothing is waiting on a decision/i)).toBeInTheDocument()
   })
 })

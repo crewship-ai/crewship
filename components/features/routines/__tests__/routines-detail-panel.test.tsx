@@ -68,9 +68,6 @@ vi.mock("@/components/features/routines/routine-schedules-tab", () => ({
 vi.mock("@/components/features/routines/routine-webhooks-tab", () => ({
   RoutineWebhooksTab: () => <div data-testid="webhooks-tab" />,
 }))
-vi.mock("@/components/features/routines/routine-waitpoints-tab", () => ({
-  RoutineWaitpointsTab: () => <div data-testid="waitpoints-tab" />,
-}))
 vi.mock("@/components/features/routines/routine-flow-diagram", () => ({
   RoutineFlowDiagram: () => <div data-testid="flow-diagram" />,
 }))

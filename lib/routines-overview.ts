@@ -296,3 +296,85 @@ export function spendByDay(runs: OverviewRun[], now: Date, days: number): SpendD
   }
   return out
 }
+
+export interface OverviewWaitpoint {
+  token: string
+  pipeline_run_id: string
+  step_id: string
+  kind: string
+  prompt: string
+  timeout_at?: string
+  created_at?: string
+}
+
+export type PendingApproval =
+  | {
+      kind: "run"
+      token: string
+      runId: string
+      stepId: string
+      prompt: string
+      routineSlug?: string
+      routineName?: string
+      expiresAt?: string
+    }
+  | { kind: "routine"; slug: string; name: string }
+
+/**
+ * Everything currently waiting on a human, as one queue.
+ *
+ * Two sources that feel like one job. A run parked on a `wait:
+ * approval` step has stopped mid-flight and holds real state; a
+ * routine saved as `proposed` cannot run at all until someone reviews
+ * its definition. From the operator's side both are "something
+ * stopped, and it is waiting for me" — so they belong on one card
+ * rather than in two places neither of which is the whole answer.
+ *
+ * Parked runs sort first, and among themselves by how soon they
+ * expire: a waitpoint has a timeout and a live process behind it,
+ * while a proposal sits still indefinitely. A waitpoint with no
+ * timeout sorts LAST among runs rather than first — parsing an absent
+ * timestamp as zero would rank "never expires" as the most urgent
+ * thing on the page and push a genuinely expiring approval below it.
+ *
+ * A waitpoint carries a run id, not a slug, so the routine name comes
+ * from a run→slug lookup. When that lookup misses the row is still
+ * listed, unnamed: dropping it would hide a blocked run, which is the
+ * one thing this card exists to prevent.
+ */
+export function pendingApprovals(
+  waitpoints: OverviewWaitpoint[],
+  routines: OverviewRoutine[],
+  slugByRunId: ReadonlyMap<string, string>,
+): PendingApproval[] {
+  const bySlug = new Map(routines.map((r) => [r.slug, r]))
+  const runs: PendingApproval[] = waitpoints
+    .map((w) => {
+      const slug = slugByRunId.get(w.pipeline_run_id)
+      const r = slug ? bySlug.get(slug) : undefined
+      return {
+        kind: "run" as const,
+        token: w.token,
+        runId: w.pipeline_run_id,
+        stepId: w.step_id,
+        prompt: w.prompt,
+        routineSlug: slug,
+        routineName: r?.name,
+        expiresAt: w.timeout_at || undefined,
+      }
+    })
+    .sort((a, b) => expiryRank(a.expiresAt) - expiryRank(b.expiresAt))
+
+  const proposed: PendingApproval[] = routines
+    .filter((r) => r.status === "proposed")
+    .map((r) => ({ kind: "routine" as const, slug: r.slug, name: r.name || r.slug }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return [...runs, ...proposed]
+}
+
+/** Missing or unparseable expiry sorts last, not first. */
+function expiryRank(iso: string | undefined): number {
+  const d = parsed(iso)
+  return d ? d.getTime() : Number.POSITIVE_INFINITY
+}
