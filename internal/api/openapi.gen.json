@@ -8579,18 +8579,6 @@
             "description": "Accepted"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -8933,21 +8921,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "deleted": {
-                      "type": "integer"
-                    },
-                    "dry_run": {
-                      "type": "boolean"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -10413,14 +10386,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -15652,80 +15617,6 @@
             "description": "Accepted"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "alarm": {
-                      "properties": {
-                        "at": {
-                          "type": "string"
-                        },
-                        "kind": {
-                          "type": "string"
-                        },
-                        "summary": {
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "alarm_judge_failure_rate": {
-                      "type": "number"
-                    },
-                    "alarm_progressed_rate": {
-                      "type": "number"
-                    },
-                    "allow": {
-                      "type": "integer"
-                    },
-                    "allow_rate": {
-                      "type": "number"
-                    },
-                    "deny": {
-                      "type": "integer"
-                    },
-                    "deny_rate": {
-                      "type": "number"
-                    },
-                    "escalate": {
-                      "type": "integer"
-                    },
-                    "escalate_rate": {
-                      "type": "number"
-                    },
-                    "judge_failure_rate": {
-                      "type": "number"
-                    },
-                    "judge_failures": {
-                      "type": "integer"
-                    },
-                    "min_samples": {
-                      "type": "integer"
-                    },
-                    "newest": {
-                      "type": "string"
-                    },
-                    "oldest": {
-                      "type": "string"
-                    },
-                    "p95_latency_ms": {
-                      "type": "integer"
-                    },
-                    "progressed_rate": {
-                      "type": "number"
-                    },
-                    "samples": {
-                      "type": "integer"
-                    },
-                    "workspace_id": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -23018,14 +22909,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "image/svg+xml": {
-                "schema": {
-                  "format": "binary",
-                  "type": "string"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -23910,21 +23793,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "deleted": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -28514,13 +28382,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentPeerDeletedV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -28951,13 +28812,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentPersonaDeletedV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -30532,13 +30386,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentSkillRemovedV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -33981,18 +33828,6 @@
             "description": "Accepted"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "enabled": {
-                      "type": "boolean"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -35951,18 +35786,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "emoji": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -36178,18 +36001,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -36545,30 +36356,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "email": {
-                      "type": "string"
-                    },
-                    "full_name": {
-                      "type": "string"
-                    },
-                    "joined_at": {
-                      "type": "string"
-                    },
-                    "role": {
-                      "type": "string"
-                    },
-                    "user_id": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -36771,13 +36558,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -38037,14 +37817,6 @@
             "description": "Accepted"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -38389,13 +38161,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -38595,15 +38360,12 @@
                       "type": "string"
                     },
                     "created_by": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "crew_id": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "fork_of": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "id": {
@@ -38613,14 +38375,39 @@
                       "type": "string"
                     },
                     "label": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "mission_id": {
                       "type": "string"
                     },
                     "state": {
-                      "additionalProperties": true,
+                      "properties": {
+                        "agent_memory": {
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "crew_container_id": {
+                          "type": "string"
+                        },
+                        "meta": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "open_assignments": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "pending_tasks": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
                       "type": "object"
                     },
                     "workspace_id": {
@@ -38817,11 +38604,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "label": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -39065,15 +38847,12 @@
                           "type": "string"
                         },
                         "created_by": {
-                          "nullable": true,
                           "type": "string"
                         },
                         "crew_id": {
-                          "nullable": true,
                           "type": "string"
                         },
                         "fork_of": {
-                          "nullable": true,
                           "type": "string"
                         },
                         "id": {
@@ -39083,14 +38862,39 @@
                           "type": "string"
                         },
                         "label": {
-                          "nullable": true,
                           "type": "string"
                         },
                         "mission_id": {
                           "type": "string"
                         },
                         "state": {
-                          "additionalProperties": true,
+                          "properties": {
+                            "agent_memory": {
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "type": "object"
+                            },
+                            "crew_container_id": {
+                              "type": "string"
+                            },
+                            "meta": {
+                              "additionalProperties": true,
+                              "type": "object"
+                            },
+                            "open_assignments": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "pending_tasks": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          },
                           "type": "object"
                         },
                         "workspace_id": {
@@ -41984,18 +41788,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -45801,13 +45593,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -48412,7 +48197,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewEscalationsDeletedV1"
+                  "properties": {
+                    "deleted": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -48580,7 +48370,81 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewEscalationsResponseV1"
+                  "items": {
+                    "properties": {
+                      "action": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "context": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "credential_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "from_name": {
+                        "type": "string"
+                      },
+                      "from_slug": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "metadata": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "peer_conversation_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "redirect_to": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "resolution": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "resolved_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "resolved_by": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "second_approver_by_tier": {
+                        "type": "boolean"
+                      },
+                      "second_approver_by_workspace": {
+                        "type": "boolean"
+                      },
+                      "second_approver_required": {
+                        "type": "boolean"
+                      },
+                      "security_level_label": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -51111,7 +50975,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueCreatedV1"
+                  "$ref": "#/components/schemas/Issue"
                 }
               }
             },
@@ -51121,7 +50985,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueCreatedV1"
+                  "$ref": "#/components/schemas/Issue"
                 }
               }
             },
@@ -51297,13 +51161,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueDeletedV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -51476,7 +51333,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewIssueResponseV1"
+                  "$ref": "#/components/schemas/Issue"
                 }
               }
             },
@@ -51652,7 +51509,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueUpdatedV1"
+                  "$ref": "#/components/schemas/Issue"
                 }
               }
             },
@@ -51830,7 +51687,38 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewIssueActivityResponseV1"
+                  "items": {
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "actor_id": {
+                        "type": "string"
+                      },
+                      "actor_name": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "actor_type": {
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "details": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "mission_id": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -52008,7 +51896,36 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewIssueCommentsResponseV1"
+                  "items": {
+                    "properties": {
+                      "author_id": {
+                        "type": "string"
+                      },
+                      "author_name": {
+                        "type": "string"
+                      },
+                      "author_type": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "mission_id": {
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -52184,7 +52101,33 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueCommentCreatedV1"
+                  "properties": {
+                    "author_id": {
+                      "type": "string"
+                    },
+                    "author_name": {
+                      "type": "string"
+                    },
+                    "author_type": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -52194,7 +52137,33 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueCommentCreatedV1"
+                  "properties": {
+                    "author_id": {
+                      "type": "string"
+                    },
+                    "author_name": {
+                      "type": "string"
+                    },
+                    "author_type": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -52372,7 +52341,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewIssueRelationsResponseV1"
+                  "items": {
+                    "properties": {
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "relation_type": {
+                        "type": "string"
+                      },
+                      "source_id": {
+                        "type": "string"
+                      },
+                      "target_id": {
+                        "type": "string"
+                      },
+                      "target_identifier": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "target_status": {
+                        "type": "string"
+                      },
+                      "target_title": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -52548,7 +52547,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueRelationCreatedV1"
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -52558,7 +52565,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueRelationCreatedV1"
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -52766,7 +52781,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueReviewedV1"
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -52944,7 +52967,39 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewIssueRunsResponseV1"
+                  "items": {
+                    "properties": {
+                      "agent_name": {
+                        "type": "string"
+                      },
+                      "duration_ms": {
+                        "type": "integer"
+                      },
+                      "ended_at": {
+                        "type": "string"
+                      },
+                      "error_message": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "result_summary": {
+                        "type": "string"
+                      },
+                      "started_at": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "task": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -53122,7 +53177,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueStartedV1"
+                  "properties": {
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -53360,7 +53423,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewIssueStoppedV1"
+                  "properties": {
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -53538,7 +53609,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CrewIssueSubtasksResponseV1"
+                  "items": {
+                    "$ref": "#/components/schemas/Issue"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -54733,13 +54807,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewMissionDeletedV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -56642,13 +56709,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingCrewPersonaDeletedV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -59283,6 +59343,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -59453,6 +59518,17 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "action": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -60755,14 +60831,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -61096,14 +61164,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -61550,14 +61610,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -63996,13 +64048,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -64863,13 +64908,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -65013,13 +65051,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -65163,13 +65194,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -68498,6 +68522,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "updated": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -70688,14 +70717,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -71994,13 +72015,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -72172,13 +72186,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -74100,13 +74107,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -74241,6 +74241,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "done_count": {
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "issue_count": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "target_date": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -74954,15 +74991,12 @@
                             "type": "string"
                           },
                           "created_by": {
-                            "nullable": true,
                             "type": "string"
                           },
                           "crew_id": {
-                            "nullable": true,
                             "type": "string"
                           },
                           "fork_of": {
-                            "nullable": true,
                             "type": "string"
                           },
                           "id": {
@@ -74972,14 +75006,39 @@
                             "type": "string"
                           },
                           "label": {
-                            "nullable": true,
                             "type": "string"
                           },
                           "mission_id": {
                             "type": "string"
                           },
                           "state": {
-                            "additionalProperties": true,
+                            "properties": {
+                              "agent_memory": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "crew_container_id": {
+                                "type": "string"
+                              },
+                              "meta": {
+                                "additionalProperties": true,
+                                "type": "object"
+                              },
+                              "open_assignments": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "pending_tasks": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              }
+                            },
                             "type": "object"
                           },
                           "workspace_id": {
@@ -75155,11 +75214,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "label": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -75175,15 +75229,12 @@
                       "type": "string"
                     },
                     "created_by": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "crew_id": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "fork_of": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "id": {
@@ -75193,7 +75244,6 @@
                       "type": "string"
                     },
                     "label": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "mission_id": {
@@ -75208,7 +75258,6 @@
                           "type": "object"
                         },
                         "crew_container_id": {
-                          "nullable": true,
                           "type": "string"
                         },
                         "meta": {
@@ -75249,15 +75298,12 @@
                       "type": "string"
                     },
                     "created_by": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "crew_id": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "fork_of": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "id": {
@@ -75267,7 +75313,6 @@
                       "type": "string"
                     },
                     "label": {
-                      "nullable": true,
                       "type": "string"
                     },
                     "mission_id": {
@@ -75282,7 +75327,6 @@
                           "type": "object"
                         },
                         "crew_container_id": {
-                          "nullable": true,
                           "type": "string"
                         },
                         "meta": {
@@ -78326,13 +78370,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -79251,14 +79288,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -83127,13 +83156,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -83721,7 +83743,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "done_count": {
+                        "type": "integer"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "issue_count": {
+                        "type": "integer"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "position": {
+                        "type": "integer"
+                      },
+                      "project_id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "target_date": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -83889,6 +83951,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "done_count": {
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "issue_count": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "target_date": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -83899,6 +83998,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "done_count": {
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "issue_count": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer"
+                    },
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "target_date": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85033,7 +85169,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "assignee_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "assignee_type": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "crew_id": {
+                        "type": "string"
+                      },
+                      "crew_name": {
+                        "type": "string"
+                      },
+                      "cron_expression": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "labels_json": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "last_run": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "milestone_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "next_run": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "priority": {
+                        "type": "string"
+                      },
+                      "project_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "run_count": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -85161,6 +85361,67 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "assignee_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "assignee_type": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "crew_name": {
+                      "type": "string"
+                    },
+                    "cron_expression": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "labels_json": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_run": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "milestone_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "next_run": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "run_count": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85171,6 +85432,67 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "assignee_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "assignee_type": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "crew_name": {
+                      "type": "string"
+                    },
+                    "cron_expression": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "labels_json": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_run": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "milestone_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "next_run": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "run_count": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85309,13 +85631,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -85450,6 +85765,67 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "assignee_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "assignee_type": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "crew_name": {
+                      "type": "string"
+                    },
+                    "cron_expression": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "labels_json": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_run": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "milestone_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "next_run": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "run_count": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85641,6 +86017,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -85961,6 +86342,119 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "by_crew": {
+                      "items": {
+                        "properties": {
+                          "failed": {
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "by_model": {
+                      "items": {
+                        "properties": {
+                          "failed": {
+                            "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "by_trigger": {
+                      "items": {
+                        "properties": {
+                          "failed": {
+                            "type": "integer"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "duration": {
+                      "properties": {
+                        "p50_ms": {
+                          "type": "integer"
+                        },
+                        "p95_ms": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "top_agents": {
+                      "items": {
+                        "properties": {
+                          "crew_name": {
+                            "type": "string"
+                          },
+                          "failed": {
+                            "type": "integer"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "totals": {
+                      "properties": {
+                        "failed": {
+                          "type": "integer"
+                        },
+                        "running": {
+                          "type": "integer"
+                        },
+                        "succeeded": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "window": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -86779,14 +87273,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {},
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -89984,50 +90470,6 @@
             "description": "Accepted"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "arch": {
-                      "type": "string"
-                    },
-                    "build_time": {
-                      "type": "string"
-                    },
-                    "commit": {
-                      "type": "string"
-                    },
-                    "current": {
-                      "type": "string"
-                    },
-                    "dirty": {
-                      "type": "boolean"
-                    },
-                    "go_version": {
-                      "type": "string"
-                    },
-                    "latest": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "newer": {
-                      "type": "boolean"
-                    },
-                    "os": {
-                      "type": "string"
-                    },
-                    "schema_version": {
-                      "type": "integer"
-                    },
-                    "url": {
-                      "nullable": true,
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -90736,13 +91178,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -91264,7 +91699,56 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "assignee_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "created_at": {
+                        "type": "string"
+                      },
+                      "crew_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "labels_json": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "match_count": {
+                        "type": "integer"
+                      },
+                      "match_type": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "pattern": {
+                        "type": "string"
+                      },
+                      "position": {
+                        "type": "integer"
+                      },
+                      "priority": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "project_id": {
+                        "nullable": true,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -91392,6 +91876,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "assignee_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "labels_json": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "match_count": {
+                      "type": "integer"
+                    },
+                    "match_type": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer"
+                    },
+                    "priority": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91402,6 +91932,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "assignee_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "labels_json": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "match_count": {
+                      "type": "integer"
+                    },
+                    "match_type": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer"
+                    },
+                    "priority": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91540,13 +92116,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -91681,6 +92250,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "assignee_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "labels_json": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "match_count": {
+                      "type": "integer"
+                    },
+                    "match_type": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "integer"
+                    },
+                    "priority": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -91841,6 +92456,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "matched": {
+                      "type": "integer"
+                    },
+                    "processed": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -94665,13 +95288,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {
@@ -100103,13 +100719,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -101434,13 +102043,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "400": {
@@ -104491,13 +105093,6 @@
             "description": "OK"
           },
           "204": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
-                }
-              }
-            },
             "description": "No Content"
           },
           "401": {

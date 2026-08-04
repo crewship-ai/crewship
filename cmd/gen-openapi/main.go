@@ -308,7 +308,9 @@ func buildDocument(routes []route) map[string]any {
 				response.(map[string]any)["content"] = map[string]any{"application/problem+json": map[string]any{"schema": problemSchema()}}
 			}
 			if status[0] == '2' {
-				response.(map[string]any)["content"] = responseContentForRoute(rt)
+				if status != "204" {
+					response.(map[string]any)["content"] = responseContentForRoute(rt)
+				}
 			}
 		}
 		op := map[string]any{
@@ -406,6 +408,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	finalCatalog, _ := finalIntegrationsConnectorsSchemaCatalog()
 	for key, schema := range finalCatalog {
+		result[key] = schema
+	}
+	for key, schema := range finalWorkflowIssueSchemaCatalog() {
 		result[key] = schema
 	}
 	for key, name := range executionResponseSchemas() {
