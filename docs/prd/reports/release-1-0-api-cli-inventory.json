@@ -9,8 +9,8 @@
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 364,
-    "api_with_concrete_response_schemas": 72,
-    "api_generic_response_schemas": 459,
+    "api_with_concrete_response_schemas": 95,
+    "api_generic_response_schemas": 436,
     "cli_with_test_signals": 709
   },
   "api": [
@@ -2651,10 +2651,10 @@
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/agent_inbox_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": false,
@@ -2675,10 +2675,10 @@
             "cmd/crewship/cmd_chat_read_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/agent_inbox_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -2715,10 +2715,10 @@
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/agent_inbox_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -2739,10 +2739,10 @@
             "cmd/crewship/cmd_chat_read_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/agent_inbox_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -2779,10 +2779,10 @@
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/agent_inbox_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": false,
@@ -2803,10 +2803,10 @@
             "cmd/crewship/cmd_chat_read_test.go",
             "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/agent_inbox_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -2968,13 +2968,14 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2989,6 +2990,7 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
@@ -3016,13 +3018,14 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3037,6 +3040,7 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
@@ -3069,8 +3073,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3150,8 +3154,8 @@
         "cmd/crewship/cmd_chat_read_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3490,8 +3494,8 @@
       "test_signals": [
         "internal/api/agent_inbox_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4483,11 +4487,11 @@
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_open_test.go",
         "cmd/gen-openapi/main_test.go",
-        "internal/api/audit_entity_name_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4507,7 +4511,7 @@
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_open_test.go",
             "cmd/gen-openapi/main_test.go",
-            "internal/api/audit_entity_name_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "…"
           ]
         }
@@ -5209,8 +5213,8 @@
         "internal/api/proxy_chatmessages_route_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5245,8 +5249,8 @@
       "test_signals": [
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5278,8 +5282,8 @@
       "test_signals": [
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5308,8 +5312,8 @@
         "docs/guides/chat-sessions.mdx"
       ],
       "status": "documented_exact",
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5338,8 +5342,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5372,8 +5376,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5936,10 +5940,11 @@
         "cmd/crewship/cmd_conversation_cov_test.go",
         "cmd/crewship/cmd_conversation_test.go",
         "cmd/crewship/cmd_format_sweep_batch1_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/conversation_search_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5955,6 +5960,7 @@
             "cmd/crewship/cmd_conversation_cov_test.go",
             "cmd/crewship/cmd_conversation_test.go",
             "cmd/crewship/cmd_format_sweep_batch1_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/conversation_search_test.go"
           ]
         }
@@ -10554,8 +10560,8 @@
         "cmd/crewship/cmd_open_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10608,8 +10614,8 @@
         "cmd/crewship/cmd_open_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10697,8 +10703,8 @@
         "internal/api/inbox_handler_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10735,11 +10741,12 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/inbox_foureyes_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10752,6 +10759,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/inbox_foureyes_test.go",
             "internal/api/openapi_conformance_test.go"
           ]
@@ -10773,11 +10781,12 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/inbox_foureyes_test.go",
         "internal/api/openapi_conformance_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10790,6 +10799,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/inbox_foureyes_test.go",
             "internal/api/openapi_conformance_test.go"
           ]
@@ -13911,12 +13921,13 @@
       "test_signals": [
         "cmd/crewship/cmd_notification_cov_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/dberr_issues_cov_test.go",
         "internal/api/internal_notifications_test.go",
         "internal/api/notif_savedview_standup_cov_test.go",
         "internal/api/notification_savedview_test.go",
-        "internal/api/openapi_conformance_test.go"
+        "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -13934,12 +13945,13 @@
           "test_signals": [
             "cmd/crewship/cmd_notification_cov_test.go",
             "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/dberr_issues_cov_test.go",
             "internal/api/internal_notifications_test.go",
             "internal/api/notif_savedview_standup_cov_test.go",
             "internal/api/notification_savedview_test.go",
-            "internal/api/openapi_conformance_test.go"
+            "…"
           ]
         }
       }
@@ -14004,8 +14016,8 @@
         "internal/api/dberr_issues_cov_test.go",
         "internal/api/notif_savedview_standup_cov_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14079,8 +14091,8 @@
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/notification_savedview_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17323,8 +17335,8 @@
       "test_signals": [
         "internal/api/pipeline_webhooks_async_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17725,6 +17737,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
@@ -17744,6 +17757,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_path_query_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
@@ -17775,6 +17789,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
@@ -17794,6 +17809,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_path_query_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
@@ -17825,6 +17841,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/cross_workspace_path_query_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
@@ -17844,6 +17861,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/cross_workspace_path_query_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
@@ -18566,10 +18584,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18582,6 +18601,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/route_scope_invariant_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -18604,10 +18624,11 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18620,6 +18641,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/route_scope_invariant_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
