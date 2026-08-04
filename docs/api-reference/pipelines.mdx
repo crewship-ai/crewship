@@ -22,6 +22,10 @@ Problem Details shape (`error` is the human-readable message).
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch` | create | Execute multiple input items |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run` | create | Static WouldExecute preview; no agent invocation |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run` | create | Execute one step against a fixture |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve` | create | Approve a proposed definition |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject` | create | Reject (soft-delete) a proposed definition |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable` | manage | Disable a pipeline and stop new runs |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable` | manage | Re-enable a disabled pipeline |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs` | member | Journal-backed run entries |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records` | member | Typed run-record projection |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/active` | member | In-flight runs on this replica |
@@ -47,12 +51,17 @@ Problem Details shape (`error` is the human-readable message).
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Delete an override |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints` | member | List pending durable waitpoints |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve` | create | Approve a pending waitpoint |
+| POST | `/api/v1/waitpoint-tokens/{token}` | token | Public waitpoint completion callback |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/pending` | member | List deferred triggers not yet fired |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel` | update | Cancel a deferred trigger |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | member | Monthly spend report |
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | manage | Set or clear the monthly spend cap |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/budget-summary` | member | Workspace monthly budget roll-up |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | List cron schedules (see [Routines](/api-reference/routines)) |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | create | Create a cron schedule |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | manage | Replace a schedule |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | delete | Soft-delete a schedule |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | create | Force-fire a schedule now |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook trigger (see [Routines](/api-reference/routines)) |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook triggers |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | manage | Delete a webhook trigger |
@@ -142,6 +151,7 @@ The run status values are:
 | `WAITING` | The run is parked at a human approval waitpoint; this is not a failure. |
 | `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
 | `SCHEDULED` | A delayed or debounced trigger was accepted; no run id exists until dispatch. |
+| `DRY_RUN_OK` | A dry-run preview completed; no agent was invoked and no run was persisted. |
 
 `SCHEDULED` responses use `202 Accepted` and contain `pending_id`, RFC3339Nano
 `fire_at`, `priority`, and `coalesced`. `WAITING` responses also contain the
@@ -337,6 +347,25 @@ inputs, metadata, and tags, marks the new run as a replay, and uses HEAD unless
 source run is `404`; a deleted source pipeline is `404`; an unavailable run
 store is `503`; an execution concurrency limit is `429`; a pinned version that
 does not exist is `409`; other lookup/execution failures are `500`.
+The response is the ordinary `RunResult` object: `run_id`, `pipeline_id`,
+`pipeline_slug`, `status`, `output`, `step_outputs`, `duration_ms`, and
+`cost_usd`, with `failed_at_step`/`error_message` for failures and
+`waitpoint_token`/`current_step` when the replay parks at a waitpoint. The new
+run is marked as a replay of `runId`; its inputs, metadata, and tags come from
+the source run. An omitted `pinned_version` uses the current head version.
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors?limit=N`
+
+**Auth:** `member`. `limit` is passed to the failure-group query; the default
+is `50`, and the store normalizes non-positive or greater-than-`200` values to
+`50`. The response excludes runs whose pipeline was soft-deleted and groups
+failed runs by `error_fingerprint`, newest group first.
+
+**Response:** `200 OK` — `{ "groups": [...] }`. Each group contains
+`fingerprint`, `count`, `pipeline_slug`, `failed_at_step`, `sample_error`, and
+`run_ids`. `run_ids` is a newest-first sample capped at `100` per group; it is
+the input for `bulk_replay`, not necessarily the complete group. An unavailable
+run store is `503`; failure-group lookup is `500`.
 
 #### `POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay`
 
@@ -349,9 +378,14 @@ to `50` when absent, non-positive, or greater than `100`:
 ```
 
 When both selectors are supplied, IDs are retained and fingerprint IDs are
-appended. No selected IDs is `400`; invalid JSON is `400`; an unavailable run
-store or failure loading fingerprint groups is `503`/`500`. Individual replay
-failures are reported per item rather than failing the whole request.
+appended, then the combined list is truncated to `limit`. The handler defaults
+`limit` to `50` when it is absent, non-positive, or greater than `100`.
+No selected IDs is `400`; invalid JSON is `400`; an unavailable run store or
+failure loading fingerprint groups is `503`/`500`. Individual replay failures
+are reported per item rather than failing the whole request. The fingerprint
+selector expands from the newest sampled IDs returned by the failure-group
+store, so a group larger than the sample cannot replay every historical run in
+one request.
 
 **Response:** `200 OK` —
 `{ "requested": N, "replayed": N, "results": [{ "source_run_id", "new_run_id"?, "status"?, "error"? }] }`.
@@ -368,6 +402,50 @@ pipeline/version lookup failures or diff generation failure are `500`.
 `{ "slug", "from_version", "to_version", "from_hash", "to_hash", "identical", "unified_diff" }`.
 Definitions are pretty-printed before diffing. `unified_diff` is empty when
 the hashes are identical.
+
+### Governance
+
+`POST .../pipelines/{slug}/approve` and `POST .../pipelines/{slug}/reject`
+take no request body and require `create` (MANAGER+). Approve changes a
+`proposed` pipeline to `active` and returns `200` —
+`{ "slug", "status": "active" }`. Reject soft-deletes the proposed pipeline
+and returns `200` with the resulting status. A pipeline that is not in the
+expected state returns `409`; a missing pipeline is `404`; other store failures
+are `500`.
+
+`POST .../pipelines/{slug}/disable` and `/enable` take no request body and
+require `manage` (OWNER/ADMIN). Disable returns `200` with
+`{ "slug", "status": "disabled", "cancelled_runs": N }`; enable returns
+`200` with `{ "slug", "status": "active" }`. They return `404` for a
+missing pipeline and `500` for persistence failures. A disabled or proposed
+pipeline cannot be run; the run endpoint reports `409` with its current status.
+
+### Schedules and public waitpoint completion
+
+Schedule administration is also available through the pipeline API. Create
+uses `POST .../pipeline-schedules` with a JSON body containing `cron_expr` and
+either `target_pipeline_slug` or `target_pipeline_id`; it returns `201` with
+the schedule object. `PATCH .../pipeline-schedules/{scheduleId}` replaces the
+schedule row and returns `200` with the schedule object. Both return `400` for
+invalid JSON, missing targets, or invalid cron/timezone data; missing schedules
+or targets are `404`; backend failures are `500` and an unwired schedule store
+is `503`. Update requires `manage`; create requires `create`.
+
+`DELETE .../pipeline-schedules/{scheduleId}` requires `delete`, returns `204`
+on success, and soft-deletes the schedule. `POST .../pipeline-schedules/{scheduleId}/run`
+requires `create`, takes no body, and force-fires the stored schedule inputs
+without changing its cron cadence. It returns the normal run result (`200`),
+or `404` for a missing/foreign schedule or target, `409` for a missing pinned
+version, `429` for the concurrency limit, `500` for execution/storage errors,
+and `503` when the schedule store or runner is unavailable.
+
+The public `POST /api/v1/waitpoint-tokens/{token}` callback has no workspace
+session requirement; the high-entropy token authenticates it. Its optional
+body is `{ "approved": true, "payload": <any JSON> }`; `approved` defaults to
+`true`. It returns `200` — `{ "ok": true, "approved": true|false }`, `400` for
+an empty token or invalid JSON, `409` when the waitpoint was already decided or
+expired, `500` for completion failure, and `503` when the waitpoint backend is
+unavailable.
 
 ### Step overrides
 
