@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-08-04T09:55:48Z",
-  "git_ref": "3f9c61e0",
+  "generated_at": "2026-08-04T10:55:38Z",
+  "git_ref": "906ad896",
   "summary": {
     "api_operations": 539,
-    "api_exact_docs": 502,
-    "api_resource_docs": 37,
+    "api_exact_docs": 508,
+    "api_resource_docs": 31,
     "api_missing_docs": 0,
     "cli_operations": 723,
-    "cli_exact_docs": 649,
+    "cli_exact_docs": 655,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 357,
@@ -6352,8 +6352,12 @@
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/api-reference/labels.mdx",
         "docs/manifest/label.md",
         "docs/manifest/recurring_issue.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/labels.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -6376,8 +6380,12 @@
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/api-reference/labels.mdx",
         "docs/manifest/label.md",
         "docs/manifest/recurring_issue.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/labels.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -6400,7 +6408,11 @@
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/api-reference/labels.mdx",
         "docs/manifest/label.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/labels.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -6416,7 +6428,11 @@
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/api-reference/labels.mdx",
         "docs/manifest/label.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/labels.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -7549,10 +7565,14 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
+        "docs/api-reference/projects.mdx",
         "docs/cli/project.mdx",
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -7576,10 +7596,14 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
+        "docs/api-reference/projects.mdx",
         "docs/cli/project.mdx",
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -7603,7 +7627,11 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
+        "docs/api-reference/projects.mdx",
         "docs/manifest/milestone.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -7620,7 +7648,11 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
+        "docs/api-reference/projects.mdx",
         "docs/manifest/milestone.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -7637,7 +7669,11 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
+        "docs/api-reference/projects.mdx",
         "docs/manifest/milestone.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -7656,6 +7692,9 @@
         "docs/api-reference/milestones.mdx",
         "docs/manifest/milestone.md"
       ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
+      ],
       "status": "documented_exact",
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
@@ -7672,6 +7711,9 @@
         "docs/api-reference/milestones.mdx",
         "docs/manifest/milestone.md"
       ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
+      ],
       "status": "documented_exact",
       "test_signals": [
         "internal/api/cross_workspace_fence_matrix_test.go"
@@ -7684,7 +7726,11 @@
       "tag": "projects",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
-        "docs/api-reference/issues.mdx"
+        "docs/api-reference/issues.mdx",
+        "docs/api-reference/projects.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/projects.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -8718,6 +8764,7 @@
       "operation_id": "post_api_v1_waitpoint-tokens_token",
       "tag": "waitpoint-tokens",
       "exact_docs": [
+        "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/manifest/routine.md"
       ],
@@ -8747,8 +8794,10 @@
       "operation_id": "post_api_v1_webhooks_token",
       "tag": "webhooks",
       "exact_docs": [
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/webhook.mdx",
         "docs/guides/routines.mdx"
       ],
       "resource_docs": [
@@ -8875,11 +8924,17 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
+        "docs/api-reference/waitpoints.mdx",
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/cli/login.mdx",
+        "docs/cli/pipeline.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
+        "docs/cli/waitpoint.mdx",
+        "docs/cli/webhook.mdx",
         "docs/cli/workspace.mdx",
         "docs/guides/activity.mdx",
         "docs/guides/inbox.mdx",
@@ -8917,11 +8972,17 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
+        "docs/api-reference/waitpoints.mdx",
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/cli/login.mdx",
+        "docs/cli/pipeline.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
+        "docs/cli/waitpoint.mdx",
+        "docs/cli/webhook.mdx",
         "docs/cli/workspace.mdx",
         "docs/guides/activity.mdx",
         "docs/guides/inbox.mdx",
@@ -8959,7 +9020,10 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
+        "docs/api-reference/waitpoints.mdx",
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/skill.md"
@@ -8982,7 +9046,10 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
+        "docs/api-reference/waitpoints.mdx",
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/skill.md"
@@ -9005,7 +9072,10 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/skills.mdx",
+        "docs/api-reference/waitpoints.mdx",
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/skill.md"
@@ -9100,10 +9170,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_members_provision",
       "tag": "workspaces",
       "source_file": "internal/api/router_crews.go",
+      "exact_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "DELETE",
@@ -9169,6 +9242,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9182,6 +9256,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipeline-runs_runId",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9261,6 +9336,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9275,6 +9351,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9289,6 +9366,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9303,6 +9381,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9316,10 +9395,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipeline-schedules_scheduleId_run",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/routines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9328,6 +9410,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/route_scope_invariant_test.go",
       "exact_docs": [
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9345,6 +9428,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/route_scope_invariant_test.go",
       "exact_docs": [
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9362,6 +9446,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/webhooks.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9375,6 +9460,8 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
+        "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/guides/routines.mdx"
       ],
@@ -9524,6 +9611,7 @@
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_waitpoints",
       "tag": "workspaces",
       "exact_docs": [
+        "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9538,6 +9626,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9552,6 +9641,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9569,6 +9659,7 @@
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
       "exact_docs": [
+        "docs/api-reference/routines.mdx",
         "docs/api-reference/workspaces.mdx"
       ],
       "resource_docs": [
@@ -9585,10 +9676,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_approve",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/routines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9628,10 +9722,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_disable",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/routines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -9653,10 +9750,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_enable",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/routines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -9687,10 +9787,13 @@
       "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_reject",
       "tag": "workspaces",
       "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/routines.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/workspaces.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -12790,10 +12893,13 @@
         "fields"
       ],
       "root": "credential",
+      "exact_docs": [
+        "docs/cli/credential.mdx"
+      ],
       "root_docs": [
         "docs/cli/credential.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
@@ -12811,10 +12917,13 @@
       "use": "list \u003ccredential\u003e",
       "short": "List a credential's custom fields",
       "root": "credential",
+      "exact_docs": [
+        "docs/cli/credential.mdx"
+      ],
       "root_docs": [
         "docs/cli/credential.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
@@ -12836,10 +12945,13 @@
         "delete"
       ],
       "root": "credential",
+      "exact_docs": [
+        "docs/cli/credential.mdx"
+      ],
       "root_docs": [
         "docs/cli/credential.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
@@ -12857,10 +12969,13 @@
       "use": "set \u003ccredential\u003e \u003ckey\u003e",
       "short": "Add or replace one custom field",
       "root": "credential",
+      "exact_docs": [
+        "docs/cli/credential.mdx"
+      ],
       "root_docs": [
         "docs/cli/credential.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
@@ -21683,7 +21798,9 @@
         "docs/cli/overview.mdx",
         "docs/cli/recurring.mdx",
         "docs/cli/routine.mdx",
-        "docs/cli/wait.mdx"
+        "docs/cli/wait.mdx",
+        "docs/cli/waitpoint.mdx",
+        "docs/cli/webhook.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23239,7 +23356,8 @@
       "short": "Inspect + decide on pending HITL approval waitpoints",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/waitpoint.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23263,7 +23381,8 @@
       "short": "Approve a pending waitpoint (run resumes with comment as wait output)",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/waitpoint.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23287,7 +23406,8 @@
       "short": "List pending waitpoints in this workspace",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/waitpoint.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23311,7 +23431,8 @@
       "short": "Reject a pending waitpoint (run resumes with rejection signal)",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/waitpoint.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23334,10 +23455,13 @@
       "use": "show \u003ctoken\u003e",
       "short": "Show full prompt + metadata for a pending waitpoint",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/waitpoint.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -23380,7 +23504,8 @@
       "short": "Manage event-driven webhook triggers",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/webhook.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23404,7 +23529,8 @@
       "short": "Create a new webhook (signing secret revealed once on success)",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/webhook.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -23452,7 +23578,8 @@
       "short": "List webhooks in this workspace",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/webhook.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -25745,10 +25872,13 @@
       "use": "invite \u003cemail\u003e",
       "short": "Add someone by email, creating their account if needed",
       "root": "workspace",
+      "exact_docs": [
+        "docs/cli/workspace.mdx"
+      ],
       "root_docs": [
         "docs/cli/workspace.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_workspace_cov_test.go",
         "cmd/crewship/cmd_workspace_delete_test.go",
