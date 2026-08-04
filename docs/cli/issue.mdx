@@ -36,6 +36,10 @@ crewship issue <subcommand> [flags]
 | `relate` | Create a relation between two issues |
 | `relations` | List relations for an issue (alias: `relates`) |
 | `unrelate` | Remove a relation by relation ID |
+| `links` | List the pull requests linked to an issue (aliases: `code-links`, `prs`) |
+| `link` | Attach a pull request / merge request to an issue |
+| `relink` | Re-read a linked pull request's state from its provider (alias: `refresh-link`) |
+| `unlink` | Remove a pull-request link from an issue |
 | `bind-routine` | Bind a routine slug to an issue (sets `routine_id`) |
 | `unbind-routine` | Clear the routine binding on an issue |
 | `bulk update` | Apply the same patch to up to 100 issues in one round-trip |
@@ -340,6 +344,68 @@ Remove a relation by its **relation ID** (not the issue identifier). Hits `DELET
 
 ```bash
 crewship issue unrelate rel_01HVZ...
+```
+
+---
+
+## `crewship issue link`
+
+Attach a GitHub pull request or GitLab merge request to an issue. Wraps
+`POST /api/v1/crews/{crewId}/issues/{ident}/code-links`.
+
+```bash
+crewship issue link BE-42 https://github.com/acme/thing/pull/7
+crewship issue link BE-42 https://gitlab.com/acme/thing/-/merge_requests/7
+crewship issue link BE-42 https://ghe.acme.internal/platform/gw/pull/12
+```
+
+The provider is recognised from the URL's path (`/pull/` → GitHub,
+`/-/merge_requests/` → GitLab), so self-hosted instances of either work with no
+configuration. Crewship then fetches the request through that provider's API
+using a stored `GITHUB` / `GITLAB` credential in the workspace.
+
+For a self-hosted forge, set the credential's **account label** to the forge's
+host so it is matched by host:
+
+```bash
+crewship credential create --name ghe-ro --type SECRET --provider GITHUB \
+  --account-label ghe.acme.internal --value-stdin
+```
+
+Common failures (each a distinct RFC 7807 `code`): `no-credential` (412),
+`blocked-host` (422 — the forge is on a private address; see
+[Git links](/guides/git-links)), `credential-rejected` (502 — the token was
+revoked), `rate-limited` (429), `already-linked` (409).
+
+## `crewship issue links`
+
+List an issue's pull-request links. Aliases: `code-links`, `prs`.
+
+```bash
+crewship issue links BE-42
+```
+
+**Output columns:** ID, STATE, REF (`owner/repo#number`), TITLE, BRANCH
+(`source → target`), SYNCED. A link whose last refresh failed shows its state
+as `… (stale)` — the data is the last one successfully fetched.
+
+## `crewship issue relink`
+
+Re-read a link's state from its provider. Alias: `refresh-link`. State is never
+polled in the background; this is how you ask again.
+
+```bash
+crewship issue relink BE-42 cmsezurje0003d5e624ad
+```
+
+A failed refresh keeps the last known state and records why on the link.
+
+## `crewship issue unlink`
+
+Remove a link by its **link ID** (the first column of `issue links`).
+
+```bash
+crewship issue unlink BE-42 cmsezurje0003d5e624ad
 ```
 
 ---

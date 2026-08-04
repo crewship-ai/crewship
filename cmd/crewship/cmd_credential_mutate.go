@@ -169,6 +169,14 @@ var credCreateCmd = &cobra.Command{
 		if envVarName != "" {
 			body["env_var_name"] = envVarName
 		}
+		// account_label already existed on the API and in manifests but had
+		// no flag, so the one field that says "this token is for THAT forge"
+		// was unreachable from the CLI. Git links resolve a credential by it
+		// (internal/api/issue_code_links.go), which makes the gap a blocker
+		// for any self-hosted GitHub/GitLab.
+		if label, _ := flags.GetString("account-label"); label != "" {
+			body["account_label"] = label
+		}
 		if secLevel >= 1 {
 			body["security_level"] = secLevel
 		}
@@ -289,6 +297,12 @@ var credUpdateCmd = &cobra.Command{
 				return fmt.Errorf("--security-level %d is not a tier: %s", v, securityLevelHelp())
 			}
 			body["security_level"] = v
+		}
+		// Passing an empty --account-label clears it, which is how a
+		// credential stops being pinned to one host.
+		if flags.Changed("account-label") {
+			v, _ := flags.GetString("account-label")
+			body["account_label"] = v
 		}
 		// #1083: crew scoping parity. Passing --crews (even empty, to clear)
 		// replaces the credential_crews set; the server re-derives scope.
