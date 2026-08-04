@@ -10398,7 +10398,202 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "checksums": {
+                      "properties": {
+                        "payload_sha256": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "compatible_targets": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "contents": {
+                      "properties": {
+                        "auth_keys_included": {
+                          "type": "boolean"
+                        },
+                        "credstore_included": {
+                          "type": "boolean"
+                        },
+                        "crews": {
+                          "items": {
+                            "properties": {
+                              "agent_count": {
+                                "type": "integer"
+                              },
+                              "base_image_digest": {
+                                "type": "string"
+                              },
+                              "cached_image_digest": {
+                                "type": "string"
+                              },
+                              "config_hash": {
+                                "type": "string"
+                              },
+                              "crew_files_included": {
+                                "type": "boolean"
+                              },
+                              "devcontainer_config_included": {
+                                "type": "boolean"
+                              },
+                              "features": {
+                                "items": {
+                                  "properties": {
+                                    "digest": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "memory_included": {
+                                "type": "boolean"
+                              },
+                              "mise_config_included": {
+                                "type": "boolean"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "output_included": {
+                                "type": "boolean"
+                              },
+                              "payload_size_bytes": {
+                                "type": "integer"
+                              },
+                              "runtime_image": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              },
+                              "system_included": {
+                                "type": "boolean"
+                              },
+                              "volumes_included": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "workspace_included": {
+                                "type": "boolean"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "instance_config_included": {
+                          "type": "boolean"
+                        },
+                        "memory_blobs_included": {
+                          "type": "integer"
+                        },
+                        "memory_blobs_missing": {
+                          "type": "integer"
+                        },
+                        "workspace": {
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "user_id": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "crewship_version_at_backup": {
+                      "type": "string"
+                    },
+                    "encryption": {
+                      "properties": {
+                        "algorithm": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "key_derivation": {
+                          "type": "string"
+                        },
+                        "recipients": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "format_version": {
+                      "type": "integer"
+                    },
+                    "schema_migration_versions": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": "array"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "scope_level": {
+                      "type": "string"
+                    },
+                    "source_instance": {
+                      "properties": {
+                        "docker_version": {
+                          "type": "string"
+                        },
+                        "hostname": {
+                          "type": "string"
+                        },
+                        "platform": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -11992,6 +12187,29 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "credential_id": {
+                    "type": "string"
+                  },
+                  "credential_name": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string"
+                  },
+                  "requesting_agent_id": {
+                    "type": "string"
+                  },
+                  "requesting_crew_id": {
+                    "type": "string"
+                  },
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "workspace_id": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -12002,6 +12220,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "decision": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "risk_score": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -18592,6 +18824,18 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "baseline": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "level": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -37355,16 +37599,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -38954,16 +39188,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -46648,16 +46872,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -65249,16 +65463,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -66109,16 +66313,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -66252,16 +66446,6 @@
           }
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -66395,16 +66579,6 @@
           }
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -73372,16 +73546,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FinalStatus"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -75551,16 +75715,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -79603,16 +79757,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -81882,7 +82026,18 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": {
-                    "$ref": "#/components/schemas/FinalAdminPlatformOAuthProvider"
+                    "properties": {
+                      "auth_url": {
+                        "type": "string"
+                      },
+                      "default_scopes": {
+                        "type": "string"
+                      },
+                      "token_url": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
                   },
                   "type": "object"
                 }
@@ -84353,16 +84508,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -86828,16 +86973,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -89845,7 +89980,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "capability": {
+                        "type": "string"
+                      },
+                      "form_schema": {
+                        "items": {
+                          "properties": {
+                            "default": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "type": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "icon": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "label_cs": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -93338,16 +93513,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "204": {
             "description": "No Content"
           },
@@ -95567,6 +95732,12 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "approved": {
+                    "type": "boolean"
+                  },
+                  "payload": {}
+                },
                 "type": "object"
               }
             }
@@ -95577,6 +95748,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "approved": {
+                      "type": "boolean"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }

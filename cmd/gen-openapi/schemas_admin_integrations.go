@@ -8,6 +8,10 @@ type DomainSchema struct {
 	Request       map[string]any
 	Response      map[string]any
 	ResponseMedia []string
+	// SuccessStatuses replaces inferred success statuses for handlers whose
+	// success path is deliberately no-content (for example DELETE → 204).
+	// A non-nil slice is significant; an empty slice means no success status.
+	SuccessStatuses []string
 }
 
 // DomainSchemaMap returns the audited schemas for the API's operational

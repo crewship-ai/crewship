@@ -272,6 +272,18 @@ func buildDocument(routes []route) map[string]any {
 
 		info := inferHandlerInfo(rt)
 		applyAnnotation(&info, rt.annot)
+		if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.SuccessStatuses != nil {
+			success := map[string]bool{}
+			for _, status := range schema.SuccessStatuses {
+				success[status] = true
+			}
+			for status := range info.statuses {
+				if status[0] != '2' {
+					success[status] = true
+				}
+			}
+			info.statuses = success
+		}
 		var params []map[string]any
 		for _, name := range pathParams(rt.path) {
 			params = append(params, map[string]any{
@@ -422,6 +434,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = schema
 	}
 	for key, schema := range finalSpecialDomainSchemaCatalog() {
+		result[key] = schema
+	}
+	for key, schema := range final21GenericResponseSchemaCatalog() {
 		result[key] = schema
 	}
 	return result
