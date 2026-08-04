@@ -32,17 +32,17 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
-const (
-	routerDir  = "internal/api"
-	outputPath = "internal/api/openapi.gen.json"
-)
+var routerDir = "internal/api"
+var outputPath = "internal/api/openapi.gen.json"
 
 // combinedPattern matches r.mux.Handle("METHOD /path", ...) / HandleFunc.
 var combinedPattern = regexp.MustCompile(`r\.mux\.Handle(?:Func)?\(\s*"([A-Z]+) (/[^"]*)"`)
@@ -53,6 +53,15 @@ var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|Admin)\(\s*"([A-Z
 type route struct {
 	method string
 	path   string
+	source string
+	start  int
+	call   string
+	annot  string
+}
+
+type handlerInfo struct {
+	query    map[string]string
+	statuses map[string]bool
 }
 
 func main() {
@@ -66,6 +75,18 @@ func run() error {
 	files, err := filepath.Glob(filepath.Join(routerDir, "router_*.go"))
 	if err != nil {
 		return err
+	}
+	if len(files) == 0 {
+		// go:generate runs with the package directory as its working directory,
+		// while direct invocation runs from the repository root.
+		if wd, _ := os.Getwd(); filepath.Base(wd) == "api" {
+			routerDir = "../../internal/api"
+			outputPath = "../../internal/api/openapi.gen.json"
+			files, err = filepath.Glob(filepath.Join(routerDir, "router_*.go"))
+			if err != nil {
+				return err
+			}
+		}
 	}
 	// router.go itself (not router_*.go) registers no routes directly today,
 	// but scan it too in case that changes — cheap and future-proof.
@@ -82,11 +103,11 @@ func run() error {
 			return fmt.Errorf("read %s: %w", f, err)
 		}
 		src := string(data)
-		for _, m := range combinedPattern.FindAllStringSubmatch(src, -1) {
-			addRoute(seen, &routes, m[1], m[2])
+		for _, m := range combinedPattern.FindAllStringSubmatchIndex(src, -1) {
+			addRoute(seen, &routes, src[m[2]:m[3]], src[m[4]:m[5]], f, m[0], src)
 		}
-		for _, m := range splitPattern.FindAllStringSubmatch(src, -1) {
-			addRoute(seen, &routes, m[1], m[2])
+		for _, m := range splitPattern.FindAllStringSubmatchIndex(src, -1) {
+			addRoute(seen, &routes, src[m[2]:m[3]], src[m[4]:m[5]], f, m[0], src)
 		}
 	}
 
@@ -122,16 +143,73 @@ func run() error {
 //     the one part of the API that's deliberately not public, undoing the
 //     effect of #1308's internal-detail scrub for no benefit to a real API
 //     consumer (who has no use for endpoints they can't call anyway).
-func addRoute(seen map[route]bool, routes *[]route, method, path string) {
+func addRoute(seen map[route]bool, routes *[]route, method, path, file string, start int, src string) {
 	if strings.HasPrefix(path, "/exposed/") || strings.HasPrefix(path, "/api/v1/internal/") {
 		return
 	}
-	rt := route{method: method, path: path}
-	if seen[rt] {
+	call := registrationCall(src, start)
+	rt := route{method: method, path: path, source: file, start: start, call: call, annot: routeAnnotation(src, start)}
+	key := route{method: method, path: path}
+	if seen[key] {
 		return
 	}
-	seen[rt] = true
+	seen[key] = true
 	*routes = append(*routes, rt)
+}
+
+var annotationPattern = regexp.MustCompile(`(?m)^\s*//\s*openapi:\s*(.+)$`)
+
+func routeAnnotation(src string, start int) string {
+	begin := start - 400
+	if begin < 0 {
+		begin = 0
+	}
+	matches := annotationPattern.FindAllStringSubmatch(src[begin:start], -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1][1]
+}
+
+// registrationCall returns the complete registration expression. Keeping this
+// small amount of source context lets the generator associate a route with a
+// handler without requiring the application to expose reflection metadata.
+func registrationCall(src string, start int) string {
+	open := strings.IndexByte(src[start:], '(')
+	if open < 0 {
+		return src[start:]
+	}
+	open += start
+	depth := 0
+	inString := false
+	escaped := false
+	for i := open; i < len(src); i++ {
+		c := src[i]
+		if inString {
+			if escaped {
+				escaped = false
+			} else if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		if c == '"' {
+			inString = true
+			continue
+		}
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return src[start : i+1]
+			}
+		}
+	}
+	return src[start:]
 }
 
 // pathParamPattern finds Go 1.22 ServeMux path parameters ({id}, {id...}).
@@ -165,6 +243,8 @@ func buildDocument(routes []route) map[string]any {
 			paths[opPath] = opsForPath
 		}
 
+		info := inferHandlerInfo(rt)
+		applyAnnotation(&info, rt.annot)
 		var params []map[string]any
 		for _, name := range pathParams(rt.path) {
 			params = append(params, map[string]any{
@@ -174,18 +254,40 @@ func buildDocument(routes []route) map[string]any {
 				"schema":   map[string]any{"type": "string"},
 			})
 		}
+		for name, typ := range info.query {
+			params = append(params, map[string]any{
+				"name": name, "in": "query", "required": false,
+				"schema": map[string]any{"type": typ},
+			})
+		}
+		sort.Slice(params, func(i, j int) bool {
+			if params[i]["in"] != params[j]["in"] {
+				return params[i]["in"].(string) < params[j]["in"].(string)
+			}
+			return params[i]["name"].(string) < params[j]["name"].(string)
+		})
 
+		responses := map[string]any{}
+		for status := range info.statuses {
+			responses[status] = map[string]any{"description": httpStatusDescription(status)}
+		}
+		if len(responses) == 0 {
+			responses["200"] = map[string]any{"description": "OK"}
+		}
+		// Error responses use the shared RFC 7807 envelope. Success responses
+		// retain the generic schema until endpoint-specific schemas are added.
+		for status, response := range responses {
+			if status[0] != '2' {
+				response.(map[string]any)["content"] = map[string]any{"application/problem+json": map[string]any{"schema": problemSchema()}}
+			}
+			if status[0] == '2' {
+				response.(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": responseSchema(rt)}}
+			}
+		}
 		op := map[string]any{
 			"operationId": operationID(rt.method, rt.path),
 			"tags":        []string{tagFor(rt.path)},
-			"responses": map[string]any{
-				"200": map[string]any{
-					"description": "OK",
-					"content": map[string]any{
-						"application/json": map[string]any{"schema": responseSchema(rt)},
-					},
-				},
-			},
+			"responses":   responses,
 		}
 		if len(params) > 0 {
 			op["parameters"] = params
@@ -207,8 +309,8 @@ func buildDocument(routes []route) map[string]any {
 		"info": map[string]any{
 			"title": "Crewship API",
 			"description": "Generated from internal/api/router_*.go route registrations (cmd/gen-openapi). " +
-				"Paths and methods are exact; audited read-only resource responses use component schemas and " +
-				"remaining bodies use a generic fallback — see cmd/gen-openapi/main.go.",
+				"Paths, methods, parameters, status branches, and audited read response schemas are source-derived; " +
+				"remaining request/response bodies use a generic fallback — see cmd/gen-openapi/main.go.",
 			"version": "generated",
 		},
 		"paths":      paths,
@@ -352,6 +454,143 @@ func responseComponents() map[string]any {
 		"Pagination": object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
 	}
 	return map[string]any{"schemas": schemas}
+}
+func problemSchema() map[string]any {
+	return map[string]any{"type": "object", "required": []string{"type", "title", "status", "detail"}, "properties": map[string]any{
+		"type": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"},
+		"status": map[string]any{"type": "integer"}, "detail": map[string]any{"type": "string"},
+	}}
+}
+
+// An annotation is intentionally small and local to a route. Example:
+//
+//	// openapi: query page:integer limit:integer; responses 200,400,401,403,500
+//
+// It is an escape hatch for handlers whose query parsing is delegated to a
+// helper, or whose status is produced outside the handler body.
+func applyAnnotation(info *handlerInfo, annotation string) {
+	if annotation == "" {
+		return
+	}
+	if i := strings.Index(annotation, "query "); i >= 0 {
+		part := annotation[i+len("query "):]
+		if end := strings.Index(part, ";"); end >= 0 {
+			part = part[:end]
+		}
+		for _, field := range strings.Fields(part) {
+			bits := strings.Split(field, ":")
+			typ := "string"
+			if len(bits) > 1 {
+				typ = bits[1]
+			}
+			switch typ {
+			case "integer", "number", "boolean", "string":
+				info.query[bits[0]] = typ
+			}
+		}
+	}
+	if i := strings.Index(annotation, "responses "); i >= 0 {
+		part := strings.TrimSpace(annotation[i+len("responses "):])
+		for _, code := range strings.Split(strings.Fields(part)[0], ",") {
+			if _, err := strconv.Atoi(code); err == nil {
+				info.statuses[code] = true
+			}
+		}
+	}
+}
+
+var statusNames = map[string]string{"StatusOK": "200", "StatusCreated": "201", "StatusAccepted": "202", "StatusNoContent": "204", "StatusBadRequest": "400", "StatusUnauthorized": "401", "StatusForbidden": "403", "StatusNotFound": "404", "StatusConflict": "409", "StatusTooManyRequests": "429", "StatusInternalServerError": "500", "StatusNotImplemented": "501", "StatusBadGateway": "502", "StatusServiceUnavailable": "503", "StatusGatewayTimeout": "504"}
+var selectorPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)`)
+var functionPattern = regexp.MustCompile(`func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+var queryPattern = regexp.MustCompile(`(?:URL\.Query\(\)|\b[A-Za-z_][A-Za-z0-9_]*)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+func inferHandlerInfo(rt route) handlerInfo {
+	info := handlerInfo{query: map[string]string{}, statuses: map[string]bool{"200": true}}
+	srcBytes, err := os.ReadFile(rt.source)
+	if err != nil {
+		return info
+	}
+	src := string(srcBytes)
+	// Middleware failures are part of every wrapped operation's wire contract.
+	if strings.Contains(rt.call, "authed") {
+		info.statuses["401"] = true
+	}
+	if strings.Contains(rt.call, "authedAdmin") || strings.Contains(rt.call, "authedMut") || strings.Contains(rt.call, "authedSelfMut") || strings.Contains(rt.call, "wsCtx") {
+		info.statuses["403"] = true
+	}
+	if strings.Contains(rt.call, "wsCtx") {
+		info.statuses["400"] = true
+	}
+	selectors := selectorPattern.FindAllStringSubmatch(rt.call, -1)
+	if len(selectors) == 0 {
+		return info
+	}
+	receiver := selectors[len(selectors)-1][1]
+	method := selectors[len(selectors)-1][2]
+	// Prefer the concrete handler type declared beside the registration (for
+	// example `audit := NewAuditHandler(...)`). This avoids merging the query
+	// parameters of every `Get` method in the package.
+	typeName := ""
+	decl := regexp.MustCompile(`\b` + regexp.QuoteMeta(receiver) + `\s*:=\s*(?:&?)([A-Za-z_][A-Za-z0-9_]*)`).FindStringSubmatch(src)
+	if len(decl) == 2 {
+		typeName = strings.TrimPrefix(decl[1], "New")
+	}
+	files, _ := filepath.Glob(filepath.Join(routerDir, "*.go"))
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		candidate := string(data)
+		functionRE := functionPattern
+		if typeName != "" {
+			functionRE = regexp.MustCompile(`func\s+\([^)]*\*` + regexp.QuoteMeta(typeName) + `\)\s*` + regexp.QuoteMeta(method) + `\s*\(`)
+		}
+		for _, m := range functionRE.FindAllStringIndex(candidate, -1) {
+			body := functionBody(candidate, m[1])
+			if body == "" {
+				continue
+			}
+			for _, q := range queryPattern.FindAllStringSubmatch(body, -1) {
+				info.query[q[1]] = "string"
+			}
+			for name, code := range statusNames {
+				if strings.Contains(body, "http."+name) {
+					info.statuses[code] = true
+				}
+			}
+			for _, n := range regexp.MustCompile(`(?:writeJSON|WriteHeader)\([^\n]*?\b(\d{3})\b`).FindAllStringSubmatch(body, -1) {
+				info.statuses[n[1]] = true
+			}
+		}
+	}
+	return info
+}
+
+func functionBody(src string, from int) string {
+	open := strings.IndexByte(src[from:], '{')
+	if open < 0 {
+		return ""
+	}
+	open += from
+	depth := 0
+	for i := open; i < len(src); i++ {
+		if src[i] == '{' {
+			depth++
+		}
+		if src[i] == '}' {
+			depth--
+			if depth == 0 {
+				return src[open : i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func httpStatusDescription(code string) string {
+	n, _ := strconv.Atoi(code)
+	return http.StatusText(n)
 }
 
 // operationID builds a stable, readable id like "get_agents_id" from

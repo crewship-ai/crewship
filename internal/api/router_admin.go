@@ -23,6 +23,7 @@ func (r *Router) registerAdminRoutes() {
 
 	// Audit logs
 	audit := NewAuditHandler(r.db, r.logger)
+	// openapi: query page:integer limit:integer source:string action:string entity_type:string entity_id:string user_id:string date_from:string date_to:string search:string; responses 200,400,401,403,500
 	r.authedAdmin("GET", "/api/v1/audit", audit.List)
 
 	// Admin

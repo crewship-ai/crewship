@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestBuildDocumentUsesAuditedReadSchemas(t *testing.T) {
 	doc := buildDocument([]route{
@@ -40,5 +43,40 @@ func TestAuditedListSchemasAreArrays(t *testing.T) {
 		if schema["type"] != "array" {
 			t.Errorf("%s type = %v, want array", name, schema["type"])
 		}
+	}
+}
+func TestBuildDocumentIncludesAnnotatedQueryTypesAndResponses(t *testing.T) {
+	doc := buildDocument([]route{{
+		method: "GET", path: "/api/v1/audit", annot: "query page:integer; responses 200,400,500",
+	}})
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Paths map[string]map[string]struct {
+			Parameters []map[string]any `json:"parameters"`
+			Responses  map[string]any   `json:"responses"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	op := got.Paths["/api/v1/audit"]["get"]
+	if len(op.Parameters) != 1 || op.Parameters[0]["name"] != "page" || op.Parameters[0]["schema"].(map[string]any)["type"] != "integer" {
+		t.Fatalf("parameters = %#v", op.Parameters)
+	}
+	for _, code := range []string{"200", "400", "500"} {
+		if _, ok := op.Responses[code]; !ok {
+			t.Errorf("missing response %s", code)
+		}
+	}
+}
+
+func TestPathParametersRemainRequired(t *testing.T) {
+	doc := buildDocument([]route{{method: "GET", path: "/api/v1/crews/{crewId}"}})
+	params := doc["paths"].(map[string]any)["/api/v1/crews/{crewId}"].(map[string]any)["get"].(map[string]any)["parameters"].([]map[string]any)
+	if len(params) != 1 || params[0]["in"] != "path" || params[0]["required"] != true {
+		t.Fatalf("parameters = %#v", params)
 	}
 }
