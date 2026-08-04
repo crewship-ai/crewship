@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { CodePane } from "../shared"
 import { dslSource } from "@/lib/routines-preview/fixtures"
+import { convertDsl } from "@/lib/routine-dsl-format"
 import { stepLineRanges } from "@/lib/routine-dsl-lines"
 
 // CodeMirror cannot mount in happy-dom and is not what is under test.
@@ -23,7 +24,16 @@ vi.mock("@/components/features/files/file-editor", () => ({
 // viewport would fight the user for control. Only a change of STEP is
 // news, and that dedupe is CodePane's job, not the caller's.
 
-const ranges = stepLineRanges(dslSource("granular"))
+// The pane renders YAML by default, so the line numbers a test drives
+// the caret to have to come from the YAML rendering — measuring the
+// JSON and typing those lines into a YAML buffer lands somewhere else
+// entirely.
+const yamlSource = (() => {
+  const r = convertDsl(dslSource("granular"), "json", "yaml")
+  if (!r.ok) throw new Error("fixture must convert to YAML")
+  return r.text
+})()
+const ranges = stepLineRanges(yamlSource)
 
 /** A line comfortably inside the given step's span. */
 function lineInside(stepId: string): number {

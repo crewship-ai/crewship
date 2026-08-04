@@ -127,3 +127,50 @@ describe("stepIdAtLine", () => {
     expect(stepIdAtLine([], 5)).toBeNull()
   })
 })
+
+// The mapper runs on the YAML AST, so it serves both formats from one
+// implementation — which matters because the editor now defaults to
+// YAML. A JSON-only mapper would have shipped the caret follower turned
+// off for everybody.
+describe("stepLineRanges — YAML", () => {
+  const YAML_SOURCE = `name: demo
+steps:
+  - id: first
+    type: transform
+    transform:
+      id: not-the-step-id
+      expression: default(x)
+  - id: second
+    type: agent_run
+    prompt: |
+      emit exactly } and nothing else {
+      second line of the prompt
+  - id: third
+    type: wait
+`
+
+  const ranges = stepLineRanges(YAML_SOURCE)
+
+  it("finds the steps in order", () => {
+    expect(ranges.map((r) => r.id)).toEqual(["first", "second", "third"])
+  })
+
+  it("is not fooled by an id nested inside a step body", () => {
+    expect(ranges.map((r) => r.id)).not.toContain("not-the-step-id")
+  })
+
+  it("spans a block scalar rather than stopping at its first line", () => {
+    const second = ranges[1]
+    expect(second.startLine).toBe(8)
+    // Line 12 is the last line of the `prompt: |` block.
+    expect(stepIdAtLine(ranges, 12)).toBe("second")
+  })
+
+  it("resolves a line inside the first step", () => {
+    expect(stepIdAtLine(ranges, 4)).toBe("first")
+  })
+
+  it("survives a half-typed document", () => {
+    expect(() => stepLineRanges("steps:\n  - id: a\n    type:")).not.toThrow()
+  })
+})

@@ -1,13 +1,24 @@
 // Maps caret position in a routine's DSL source back to the step that
 // line defines, so a code editor and a graph can point at the same
-// thing. Editing `"type": "transform"` on line 81 should light up the
-// node that line describes — otherwise the split view is two documents
-// that happen to sit next to each other.
+// thing. Editing `type: transform` on line 81 should light up the node
+// that line describes — otherwise the split view is two documents that
+// happen to sit next to each other.
 //
-// Why a scanner and not JSON.parse: parse throws away positions, and
-// the caret is a position. It also has to work on a buffer that is
-// mid-edit and therefore not valid JSON yet — which is exactly when
-// the user is looking at it.
+// Built on the YAML document AST rather than a hand-rolled scanner.
+// YAML 1.2 is a superset of JSON, so one implementation serves both
+// formats, and the two cases a scanner has to get right by hand — a
+// nested object carrying its own `id`, and an unbalanced brace inside a
+// prompt string — stop being special cases and become properties of the
+// parser. (Both of those did slip past an earlier hand-rolled version
+// until mutation testing forced a hostile fixture; the tests below are
+// that fixture, kept as a regression guard.)
+//
+// The parser is error-tolerant: a half-typed buffer yields whatever
+// structure it could recover, which degrades to "selection stops
+// updating" rather than "the editor explodes". That matters because a
+// mid-edit buffer is exactly when the caret is moving.
+
+import { isMap, isSeq, parseDocument, type Node } from "yaml"
 
 export interface StepLineRange {
   id: string
@@ -32,65 +43,58 @@ export function stepLineRanges(source: string): StepLineRange[] {
   const out: StepLineRange[] = []
   if (!source) return out
 
-  const lines = source.split("\n")
-
-  // Phase 1: find the line holding the `"steps"` key. Anything before
-  // it belongs to some other array and must not be scanned.
-  let stepsLine = -1
-  for (let i = 0; i < lines.length; i++) {
-    if (/"steps"\s*:\s*\[/.test(stripStrings(lines[i], true))) {
-      stepsLine = i
-      break
-    }
-  }
-  if (stepsLine === -1) return out
-
-  // Phase 2: walk forward tracking brace/bracket depth relative to the
-  // steps array. Depth 1 inside the array = one step object.
-  let depth = 0 // nesting inside the steps array, in braces
-  let arrayDepth = 0 // bracket nesting; 0 again = the array closed
-  let current: { id: string | null; startLine: number } | null = null
-  let sawArrayOpen = false
-
-  for (let i = stepsLine; i < lines.length; i++) {
-    const raw = lines[i]
-    const code = stripStrings(raw, false)
-    const lineNo = i + 1
-
-    for (const ch of code) {
-      if (ch === "[") {
-        arrayDepth++
-        sawArrayOpen = true
-      } else if (ch === "]") {
-        arrayDepth--
-        if (sawArrayOpen && arrayDepth <= 0) {
-          // steps array closed — anything after is a sibling key.
-          return out
-        }
-      } else if (ch === "{") {
-        depth++
-        if (depth === 1) current = { id: null, startLine: lineNo }
-      } else if (ch === "}") {
-        if (depth === 1 && current) {
-          if (current.id) {
-            out.push({ id: current.id, startLine: current.startLine, endLine: lineNo })
-          }
-          current = null
-        }
-        depth--
-        if (depth < 0) depth = 0
-      }
-    }
-
-    // An `"id"` claimed at step level names the step. Nested objects sit
-    // at depth > 1, so a `{"id": …}` inside a step body cannot steal it.
-    if (current && current.id === null && depth === 1) {
-      const m = raw.match(/"id"\s*:\s*"([^"]*)"/)
-      if (m) current.id = m[1]
-    }
+  let doc: ReturnType<typeof parseDocument>
+  try {
+    doc = parseDocument(source, { prettyErrors: false })
+  } catch {
+    return out
   }
 
+  const contents = doc.contents
+  if (!isMap(contents)) return out
+  const steps = contents.get("steps", true)
+  if (!isSeq(steps)) return out
+
+  const lineAt = lineResolver(source)
+  for (const item of steps.items) {
+    if (!isMap(item)) continue
+    const id = item.get("id")
+    if (typeof id !== "string" || id === "") continue
+    const range = (item as unknown as { range?: [number, number, number] }).range
+    if (!range) continue
+    const startLine = lineAt(range[0])
+    // range[1] is the end of the node's value; range[2] includes any
+    // trailing comment/whitespace up to the next node, which would make
+    // one step's span swallow the blank line before the next.
+    const endLine = lineAt(Math.max(range[0], range[1] - 1))
+    if (startLine === undefined || endLine === undefined) continue
+    out.push({ id, startLine, endLine })
+  }
   return out
+}
+
+/**
+ * Offset → 1-indexed line, via a prefix table built once per call.
+ *
+ * Counting newlines per lookup would re-scan the whole buffer for every
+ * step in a long routine.
+ */
+function lineResolver(text: string): (offset: number) => number | undefined {
+  const starts: number[] = [0]
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") starts.push(i + 1)
+  }
+  return (offset: number) => {
+    if (!Number.isFinite(offset)) return undefined
+    let lo = 0
+    let hi = starts.length - 1
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2)
+      if (starts[mid] <= offset) lo = mid
+      else hi = mid - 1
+    }
+    return lo + 1
+  }
 }
 
 /** The step whose span contains `line` (1-indexed), or null. */
@@ -99,38 +103,4 @@ export function stepIdAtLine(ranges: readonly StepLineRange[], line: number): st
     if (line >= r.startLine && line <= r.endLine) return r.id
   }
   return null
-}
-
-/**
- * Blank out string contents so their punctuation can't drive the scan.
- *
- * Replaces the inside of every double-quoted run with spaces, keeping
- * the quotes and the line length so column math stays honest. When
- * `keepKeys` is set the text is returned with strings intact — used for
- * the one place we need to MATCH a key rather than ignore it.
- */
-function stripStrings(line: string, keepKeys: boolean): string {
-  if (keepKeys) return line
-  let out = ""
-  let inString = false
-  let escaped = false
-  for (const ch of line) {
-    if (escaped) {
-      out += " "
-      escaped = false
-      continue
-    }
-    if (ch === "\\" && inString) {
-      out += " "
-      escaped = true
-      continue
-    }
-    if (ch === '"') {
-      inString = !inString
-      out += '"'
-      continue
-    }
-    out += inString ? " " : ch
-  }
-  return out
 }

@@ -105,6 +105,34 @@ describe("<CodePane> save", () => {
     expect(() => fireEvent.click(saveButton())).not.toThrow()
   })
 
+  it("accepts a YAML buffer, which is what the pane renders by default", () => {
+    const onApply = vi.fn()
+    CURRENT_DOC = `name: edited
+steps:
+  - id: only
+    type: agent_run
+    prompt: |
+      first line
+      second line
+`
+    render(<CodePane fidelity="granular" onApply={onApply} />)
+    fireEvent.click(saveButton())
+    expect(onApply).toHaveBeenCalledTimes(1)
+    const applied = onApply.mock.calls[0][0]
+    // The block scalar has to survive as real newlines — this is the
+    // entire reason for authoring in YAML.
+    expect(applied.steps[0].prompt).toBe("first line\nsecond line\n")
+  })
+
+  it("reports the line of a YAML error, not just the message", () => {
+    const onApply = vi.fn()
+    CURRENT_DOC = "name: x\nsteps:\n\t- id: a\n"
+    render(<CodePane fidelity="granular" onApply={onApply} />)
+    fireEvent.click(saveButton())
+    expect(onApply).not.toHaveBeenCalled()
+    expect(screen.getByText(/řádek 3/)).toBeInTheDocument()
+  })
+
   it("keeps Cmd+S and the button on the same path", () => {
     const onApply = vi.fn()
     render(<CodePane fidelity="granular" onApply={onApply} />)

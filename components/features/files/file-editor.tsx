@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useCallback } from "react"
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view"
-import { EditorState } from "@codemirror/state"
+import { EditorState, type Extension } from "@codemirror/state"
 import { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands"
 import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 import { oneDark } from "@codemirror/theme-one-dark"
@@ -43,6 +43,17 @@ interface FileEditorProps {
    * dedupe on whatever they actually derive from the line.
    */
   onCursorLine?: (line: number) => void
+  /**
+   * Extra CodeMirror extensions appended to the base set.
+   *
+   * Lets a caller add language-specific intelligence — the routine DSL
+   * editor adds schema completion and inline diagnostics — without this
+   * shared component learning about every format that uses it.
+   *
+   * Identity matters: the editor rebuilds when this changes, so pass a
+   * memoized array or the buffer resets on every render.
+   */
+  extraExtensions?: Extension[]
 }
 
 export function FileEditor({
@@ -52,6 +63,7 @@ export function FileEditor({
   onDirtyChange,
   saveRef,
   onCursorLine,
+  extraExtensions,
 }: FileEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -112,6 +124,7 @@ export function FileEditor({
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         saveKeymap,
         updateListener,
+        ...(extraExtensions ?? []),
         EditorView.theme({
           "&": { height: "100%", fontSize: "13px" },
           ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono, monospace)" },
@@ -126,7 +139,7 @@ export function FileEditor({
 
     return () => { view.destroy(); viewRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, language])
+  }, [code, language, extraExtensions])
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden" />
 }

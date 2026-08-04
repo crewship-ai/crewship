@@ -33,6 +33,8 @@ import { Progress } from "@/components/ui/progress"
 import { FileEditor } from "@/components/features/files/file-editor"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
+import { convertDsl, parseDsl, type DslFormat } from "@/lib/routine-dsl-format"
+import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 import type { PipelineDSL, TraceStep } from "@/lib/trace/types"
 import {
@@ -156,10 +158,28 @@ export function CodePane({
   onFollowChange,
   onApply,
 }: CodePaneProps) {
-  const source = React.useMemo(() => dslSource(fidelity), [fidelity])
+  // YAML by default. The win is not fewer braces — it is `prompt: |`:
+  // the production routine's 600-character prompts are one JSON line of
+  // \n escapes, which nobody can read, let alone review. Same split the
+  // CLI already makes (internal/pipeline/parse_yaml.go, #1423): humans
+  // author YAML, the server stores canonical JSON.
+  const [format, setFormat] = React.useState<DslFormat>("yaml")
+  const source = React.useMemo(() => {
+    const json = dslSource(fidelity)
+    if (format === "json") return json
+    const converted = convertDsl(json, "json", "yaml")
+    return converted.ok ? converted.text : json
+  }, [fidelity, format])
+
   // Line spans are a property of the source, so they are computed once
-  // per definition rather than on every keystroke.
+  // per definition rather than on every keystroke. Works in both
+  // formats — the mapper runs on the YAML AST, and YAML 1.2 parses JSON.
   const ranges = React.useMemo(() => stepLineRanges(source), [source])
+
+  // Rebuilt only when the format changes. FileEditor recreates its
+  // EditorState when this identity changes, so an unmemoized array
+  // would blow the buffer away on every render.
+  const extraExtensions = React.useMemo(() => routineDslExtensions(format), [format])
   const [dirty, setDirty] = React.useState(false)
   const [saved, setSaved] = React.useState(false)
 
@@ -186,14 +206,13 @@ export function CodePane({
 
   const handleSave = React.useCallback(
     (content: string) => {
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(content)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "neplatný JSON")
+      const result = parseDsl(content, format)
+      if (!result.ok) {
+        setError(result.line ? `${result.message} (řádek ${result.line})` : result.message)
         setSaved(false)
         return
       }
+      const parsed: unknown = result.value
       // Same shape check the routine Editor tab applies: an object with
       // a name and a steps array. Anything else is valid JSON and not a
       // routine, and drawing it would produce an empty canvas rather
@@ -211,7 +230,7 @@ export function CodePane({
       if (savedTimer.current) clearTimeout(savedTimer.current)
       savedTimer.current = setTimeout(() => setSaved(false), 2400)
     },
-    [onApply],
+    [onApply, format],
   )
 
   // Dedupe here rather than in the caller: the caret fires on every
@@ -236,9 +255,24 @@ export function CodePane({
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Definice
           </span>
-          <span className="rounded border border-border/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-            JSON
-          </span>
+          <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+            {(["yaml", "json"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFormat(f)}
+                aria-pressed={format === f}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
+                  format === f
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2 text-[11px]">
           {error ? (
@@ -286,11 +320,12 @@ export function CodePane({
       <div className="min-h-0 flex-1 overflow-auto">
         <FileEditor
           code={source}
-          language="json"
+          language={format}
           onSave={handleSave}
           onDirtyChange={setDirty}
           onCursorLine={handleCursorLine}
           saveRef={saveRef}
+          extraExtensions={extraExtensions}
         />
       </div>
       <p className="shrink-0 border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
@@ -298,6 +333,14 @@ export function CodePane({
           (onApply
             ? "Editace jen kódem. Graf je odvozený pohled — po uložení se překreslí z uloženého DSL."
             : "Editace jen kódem. Tento panel je jen ke čtení — uložení se nikam nepropíše.")}
+        {format === "yaml" && (
+          <>
+            {" "}
+            <span className="text-warn">
+              Ukládá se kanonický JSON, takže komentáře v YAMLu uložení nepřežijí.
+            </span>
+          </>
+        )}
       </p>
     </div>
   )
