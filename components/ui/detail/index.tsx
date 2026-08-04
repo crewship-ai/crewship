@@ -68,6 +68,63 @@ export function Appear({ order = 0, reflow = false, className, children }: Appea
   )
 }
 
+/**
+ * Grid placement utilities — the ones that mean "where in the grid",
+ * as opposed to how the thing looks. Variant prefixes included, since
+ * `lg:col-span-2` is placement just as much as `col-span-2` is.
+ */
+const PLACEMENT_CLASS = /(^|:)(col-span|row-span|col-start|col-end|row-start|row-end)-/
+
+/**
+ * A staggered entrance for a group of cards.
+ *
+ * `Appear` inserts a div between the grid and the card, which is
+ * exactly the change that silently breaks a layout: put `col-span-2`
+ * on the card and the card is no longer the grid item, so the span
+ * does nothing and the grid reflows without a word. This moves those
+ * classes up to the wrapper, so the element the grid places is the
+ * element carrying the placement.
+ *
+ * It also owns the stagger index. Writing `order={n}` by hand across
+ * twenty cards means getting it right twenty times, and on the routine
+ * detail it had already produced two cards claiming the same slot.
+ *
+ * Falsy children are dropped rather than counted: half these grids are
+ * written as `{cond && <Card/>}`, and a `false` consuming an index
+ * would leave a hole in the cascade.
+ */
+export function AppearStack({
+  children,
+  /** First stagger index — for a grid that follows other animated rows. */
+  from = 0,
+}: {
+  children: React.ReactNode
+  from?: number
+}) {
+  const items = React.Children.toArray(children)
+  return (
+    <>
+      {items.map((child, i) => {
+        if (!React.isValidElement(child)) return child
+        const props = child.props as { className?: unknown }
+        const raw = typeof props.className === "string" ? props.className : ""
+        const classes = raw.split(/\s+/).filter(Boolean)
+        const placement = classes.filter((c) => PLACEMENT_CLASS.test(c))
+        const node = placement.length
+          ? React.cloneElement(child as React.ReactElement<{ className?: string }>, {
+              className: classes.filter((c) => !PLACEMENT_CLASS.test(c)).join(" "),
+            })
+          : child
+        return (
+          <Appear key={child.key ?? i} order={from + i} className={placement.join(" ") || undefined}>
+            {node}
+          </Appear>
+        )
+      })}
+    </>
+  )
+}
+
 export type DetailTone = "default" | "success" | "destructive" | "warn" | "blue" | "purple"
 
 const TONE_BORDER: Record<"default" | "purple" | "success" | "warn", string> = {

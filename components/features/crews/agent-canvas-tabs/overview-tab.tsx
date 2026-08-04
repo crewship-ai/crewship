@@ -14,6 +14,7 @@ import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { withReturnTo } from "@/lib/return-to"
 
 import { DetailCell, type DetailCellItem, type DetailCellTone } from "../canvas/detail-cell"
+import { AppearStack } from "@/components/ui/detail"
 import { SkillsManager } from "../agent-canvas-managers"
 import { AgentChannelsCard } from "../agent-channels-card"
 import { BlockingNotice, NowRunning } from "../canvas/detail-blocks"
@@ -180,6 +181,7 @@ export function OverviewTab({
 
   return (
     <div className="space-y-5">
+      <AppearStack>
       {inbox.count > 0 && (
         <BlockingNotice
           title="Waiting on your decision."
@@ -408,6 +410,7 @@ export function OverviewTab({
           <AgentChannelsCard agentId={agent.id} agentName={agent.name} workspaceId={workspaceId} />
         )}
       </ManagerDialog>
+      </AppearStack>
     </div>
   )
 }

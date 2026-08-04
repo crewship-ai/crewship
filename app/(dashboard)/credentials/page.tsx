@@ -9,6 +9,7 @@ import {
   ArrowUpDown, RefreshCw, Link2, PackageX, CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppearStack } from "@/components/ui/detail"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
@@ -596,6 +597,7 @@ export default function CredentialsPage() {
         <div className="space-y-4">
           {/* KPI strip */}
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+            <AppearStack>
             <KpiCard label="Active" value={kpis.active}
               valueColor={kpis.active > 0 ? "rgb(52, 211, 153)" : undefined}
               subtitle={`of ${credentials.length} total`} />
@@ -613,6 +615,7 @@ export default function CredentialsPage() {
               subtitle="next 30 days" />
             <KpiCard label="Linked agents" value={kpis.linked}
               subtitle={`across ${credentials.length} credential${credentials.length === 1 ? "" : "s"}`} />
+            </AppearStack>
           </div>
 
           {/* Banner */}

@@ -7,6 +7,7 @@ import { StatusDot } from "@/components/ui/status-badge"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { runtimeBrand } from "@/components/icons/runtime-icons"
 import { cn } from "@/lib/utils"
+import { AppearStack } from "@/components/ui/detail"
 import type {
   Stats, AdminHealth, LicenseInfo, TelemetryInfo, VersionInfo,
   SecurityPosture, JournalIntegrity, KeeperStatus,
@@ -123,6 +124,7 @@ export const OverviewTab = React.memo(function OverviewTab({
 
   return (
     <div className="space-y-5">
+      <AppearStack>
       {/* ── Needs attention ──
           First, and present even when empty. The old overview rendered only
           things that were fine and therefore always looked fine, while the
@@ -451,6 +453,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsRow>
         )}
       </SettingsCard>
+      </AppearStack>
     </div>
   )
 })
