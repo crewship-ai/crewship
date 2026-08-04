@@ -211,6 +211,14 @@ const PALETTE_GROUP_CLASS = [
 ].join(" ")
 
 // The kit's BarMenuRow: same padding, same gap, same hover fill.
+// Every row registers "<its own name> … <kind>", never "<kind> <name>".
+//
+// cmdk matches on this string, and paletteFilter ranks a value that STARTS
+// with the query above one that merely contains it. Leading with the kind put
+// six characters in front of every real name, so "ops" scored the crew called
+// Ops exactly as highly as an issue that happens to mention it, and the group
+// that rendered first won. The kind still trails so that typing "crew" or
+// "routine" lists them all.
 const PALETTE_ITEM_CLASS =
   "gap-2.5 rounded-none px-3 py-2 data-[selected=true]:bg-white/[0.04] data-[selected=true]:text-foreground"
 
@@ -412,7 +420,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {recent.map((entry) => (
               <CommandItem
                 key={entry.href}
-                value={`recent ${entry.label} ${entry.group}`}
+                value={`${entry.label} ${entry.group} recent`}
                 className={PALETTE_ITEM_CLASS}
                 data-href={entry.href}
                 onSelect={() => go(entry.href, entry.label, entry.group)}
@@ -448,7 +456,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {filteredIssues.map((issue) => (
               <CommandItem
                 key={issue.id}
-                value={`issue ${issue.identifier} ${issue.title}`}
+                value={`${issue.identifier} ${issue.title} issue`}
                 keywords={[issue.status, issue.priority, issue.assignee_name ?? "", issue.crew_name ?? ""]}
                 className={PALETTE_ITEM_CLASS}
                 data-href={`/issues/${issue.identifier}`}
@@ -468,7 +476,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {projects.map((project) => (
               <CommandItem
                 key={project.id}
-                value={`project ${project.name} ${project.slug}`}
+                value={`${project.name} ${project.slug} project`}
                 keywords={[project.status]}
                 className={PALETTE_ITEM_CLASS}
                 data-href={`/issues?project=${project.id}`}
@@ -498,7 +506,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {agents.map((agent) => (
               <CommandItem
                 key={agent.id}
-                value={`agent ${agent.name} ${agent.slug}`}
+                value={`${agent.name} ${agent.slug} agent`}
                 keywords={[agent.role_title ?? "", agent.crew?.name ?? "", agent.status]}
                 className={PALETTE_ITEM_CLASS}
                 data-href={`/crews?agent=${encodeURIComponent(agent.slug)}`}
@@ -531,7 +539,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {crews.map((crew) => (
               <CommandItem
                 key={crew.id}
-                value={`crew ${crew.name} ${crew.slug}`}
+                value={`${crew.name} ${crew.slug} crew`}
                 className={PALETTE_ITEM_CLASS}
                 data-href={`/crews?crew=${encodeURIComponent(crew.slug)}`}
                 onSelect={() => go(`/crews?crew=${encodeURIComponent(crew.slug)}`, crew.name, "Crews")}
@@ -551,7 +559,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {skills.map((skill) => (
               <CommandItem
                 key={skill.id}
-                value={`skill ${skill.display_name ?? skill.name} ${skill.slug}`}
+                value={`${skill.display_name ?? skill.name} ${skill.slug} skill`}
                 keywords={[skill.category]}
                 className={PALETTE_ITEM_CLASS}
                 data-href="/skills"
@@ -570,7 +578,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {credentials.map((cred) => (
               <CommandItem
                 key={cred.id}
-                value={`credential ${cred.name}`}
+                value={`${cred.name} credential`}
                 keywords={[cred.provider, cred.type]}
                 className={PALETTE_ITEM_CLASS}
                 data-href="/credentials"
@@ -593,7 +601,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {routines.map((routine) => (
               <CommandItem
                 key={routine.id}
-                value={`routine ${routine.name} ${routine.slug}`}
+                value={`${routine.name} ${routine.slug} routine`}
                 keywords={[routine.status, routine.description ?? ""]}
                 className={PALETTE_ITEM_CLASS}
                 data-href={routineHref(routine.slug)}
@@ -617,7 +625,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               return (
                 <CommandItem
                   key={m.id}
-                  value={`member ${name} ${m.user.email}`}
+                  value={`${name} ${m.user.email} member person`}
                   keywords={[m.role.toLowerCase()]}
                   className={PALETTE_ITEM_CLASS}
                   data-href={href}
@@ -643,7 +651,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {integrations.map((it) => (
               <CommandItem
                 key={it.id}
-                value={`integration ${it.display_name || it.name} ${it.name}`}
+                value={`${it.display_name || it.name} ${it.name} integration`}
                 keywords={[it.transport, it.crew_name ?? ""]}
                 className={PALETTE_ITEM_CLASS}
                 data-href="/integrations?tab=tools"
@@ -663,7 +671,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           {NAV_ITEMS.filter((item) => item.href !== "/admin" || isAdmin).map((item) => (
             <CommandItem
               key={item.href}
-              value={`go to ${item.title}`}
+              value={`${item.title} go to page`}
               keywords={["navigate", "page", item.title.toLowerCase(), ...item.keywords]}
               className={PALETTE_ITEM_CLASS}
               data-href={item.href}
@@ -681,7 +689,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             return (
               <CommandItem
                 key={item.key}
-                value={`settings ${item.label}`}
+                value={`${item.label} settings`}
                 keywords={["settings", "preferences", item.label.toLowerCase()]}
                 className={PALETTE_ITEM_CLASS}
                 data-href={href}

@@ -267,3 +267,25 @@ describe("CommandPalette — people deep-link", () => {
     )
   })
 })
+
+describe("CommandPalette — ranking", () => {
+  it("puts the thing actually called Ops above an issue that merely mentions it", async () => {
+    FIXTURES["/crews"] = [
+      { id: "c1", name: "Ops", slug: "ops", color: "blue", icon: "server", _count: { agents: 2, members: 1 } },
+    ]
+    FIXTURES["/issues"] = [
+      { id: "i1", identifier: "OPS-6", title: "Map container resource limits", status: "todo", priority: "high", assignee_name: null, crew_name: null, crew_slug: null },
+    ]
+    openPalette()
+    await group(/^crews$/i)
+
+    // Leading every value with its kind ("crew Ops") pushed the real name six
+    // characters in, so a name match could never score as a prefix and the
+    // group that happened to render first won.
+    const { paletteFilter } = await import("@/lib/palette-filter")
+    const crew = paletteFilter("Ops ops crew", "ops")
+    const issue = paletteFilter("OPS-6 Map container resource limits issue", "ops")
+    expect(crew).toBeGreaterThanOrEqual(issue)
+    expect(paletteFilter("Ops ops crew", "crew")).toBeGreaterThan(0)
+  })
+})
