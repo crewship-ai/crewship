@@ -2547,6 +2547,584 @@
         },
         "type": "object"
       },
+      "FinalAdminPlatformBackupCreate": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "format_version": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "payload_sha256": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "scope_level": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupEntry": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "format_version": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "scope_level": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupMetrics": {
+        "properties": {
+          "created_by_scope": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "created_total": {
+            "type": "integer"
+          },
+          "duration_seconds_mean": {
+            "type": "number"
+          },
+          "duration_seconds_p50": {
+            "type": "number"
+          },
+          "duration_seconds_p95": {
+            "type": "number"
+          },
+          "failed_by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "failed_total": {
+            "type": "integer"
+          },
+          "lock_held_seconds_by_workspace": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "restored_total": {
+            "type": "integer"
+          },
+          "size_bytes_total": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupRestore": {
+        "properties": {
+          "crews_count": {
+            "type": "integer"
+          },
+          "crews_restored": {
+            "type": "integer"
+          },
+          "docker_phase_skipped": {
+            "type": "boolean"
+          },
+          "dropped_crew_filesystems": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "manifest": {
+            "properties": {},
+            "type": "object"
+          },
+          "restored_workspace_id": {
+            "type": "string"
+          },
+          "restored_ws": {
+            "type": "boolean"
+          },
+          "rows_inserted": {
+            "type": "integer"
+          },
+          "security_level_clamped": {
+            "type": "integer"
+          },
+          "security_level_clamps": {
+            "items": {
+              "properties": {},
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupRotate": {
+        "properties": {
+          "deleted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "dry_run": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupSelfTest": {
+        "properties": {
+          "bundle_bytes": {
+            "type": "integer"
+          },
+          "canary_bytes": {
+            "type": "integer"
+          },
+          "canary_path": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "crew_slug": {
+            "type": "string"
+          },
+          "elapsed_ms": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupStatus": {
+        "properties": {
+          "acquired_at": {
+            "type": "string"
+          },
+          "acquired_by": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "held": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBackupVerify": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "manifest": {
+            "properties": {
+              "compatible_targets": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "created_at": {
+                "type": "string"
+              },
+              "crewship_version_at_backup": {
+                "type": "string"
+              },
+              "format_version": {
+                "type": "integer"
+              },
+              "schema_migration_versions": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "scope_level": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformBootstrap": {
+        "properties": {
+          "cli_token": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "session_pending": {
+            "type": "boolean"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformFeatureFlag": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "override_enabled": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "percentage": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformFeatureOverride": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformGovernance": {
+        "properties": {
+          "auto_lease_seconds": {
+            "type": "integer"
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "deny_notify_min_risk": {
+            "type": "integer"
+          },
+          "effective_second_approver": {
+            "properties": {
+              "min_security_level": {
+                "type": "integer"
+              },
+              "min_security_level_label": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "tier_floor_label": {
+                "type": "string"
+              },
+              "tier_floor_security_level": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "gov_model_credential_id": {
+            "type": "string"
+          },
+          "gov_model_id": {
+            "type": "string"
+          },
+          "gov_model_provider": {
+            "type": "string"
+          },
+          "require_second_approver": {
+            "type": "boolean"
+          },
+          "security_contact_user_id": {
+            "type": "string"
+          },
+          "warning": {
+            "type": "string"
+          },
+          "watch_presets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "watch_spec": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformInstanceSetting": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformMessage": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformModel": {
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOAuthAutoConnect": {
+        "properties": {
+          "auth_url": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOAuthDiscovery": {
+        "properties": {
+          "auth_url": {
+            "type": "string"
+          },
+          "registration_endpoint": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "supports_dcr": {
+            "type": "boolean"
+          },
+          "supports_pkce": {
+            "type": "boolean"
+          },
+          "token_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOAuthExchange": {
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOAuthInitiate": {
+        "properties": {
+          "auth_url": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOAuthLoopback": {
+        "properties": {
+          "auth_url": {
+            "type": "string"
+          },
+          "loopback_port": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOAuthProvider": {
+        "properties": {
+          "auth_url": {
+            "type": "string"
+          },
+          "default_scopes": {
+            "type": "string"
+          },
+          "token_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformOnboardingSetup": {
+        "properties": {
+          "agent_count": {
+            "type": "integer"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformRateLimitState": {
+        "properties": {
+          "default": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "min": {
+            "type": "integer"
+          },
+          "overridden": {
+            "type": "boolean"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAdminPlatformWsToken": {
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "HireRequest": {
         "properties": {
           "crew_id": {
@@ -8545,11 +9123,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/FinalAdminPlatformBackupEntry"
+                      },
+                      "type": "array"
+                    }
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -8667,29 +9249,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "crew_id": {
-                    "type": "string"
-                  },
-                  "no_encrypt": {
-                    "type": "boolean"
-                  },
-                  "output_dir": {
-                    "type": "string"
-                  },
-                  "passphrase": {
-                    "type": "string"
-                  },
-                  "recipient": {
-                    "type": "string"
-                  },
-                  "scope": {
-                    "type": "string"
-                  },
-                  "scope_level": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -8700,8 +9259,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupCreate"
                 }
               }
             },
@@ -8711,8 +9269,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupCreate"
                 }
               }
             },
@@ -9187,8 +9744,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupMetrics"
                 }
               }
             },
@@ -9278,32 +9834,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "as_crew": {
-                    "type": "string"
-                  },
-                  "as_workspace": {
-                    "type": "string"
-                  },
-                  "dry_run": {
-                    "type": "boolean"
-                  },
-                  "files_only": {
-                    "type": "boolean"
-                  },
-                  "identity": {
-                    "type": "string"
-                  },
-                  "passphrase": {
-                    "type": "string"
-                  },
-                  "path": {
-                    "type": "string"
-                  },
-                  "replace": {
-                    "type": "boolean"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -9314,8 +9844,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupRestore"
                 }
               }
             },
@@ -9505,8 +10034,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupRotate"
                 }
               }
             },
@@ -9666,8 +10194,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupSelfTest"
                 }
               }
             },
@@ -10009,8 +10536,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupStatus"
                 }
               }
             },
@@ -10171,8 +10697,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBackupVerify"
                 }
               }
             },
@@ -13586,8 +14111,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformGovernance"
                 }
               }
             },
@@ -13705,7 +14229,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -13716,7 +14239,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformGovernance"
                 }
               }
             },
@@ -18862,8 +19385,7 @@
                   "properties": {
                     "limiters": {
                       "items": {
-                        "additionalProperties": true,
-                        "type": "object"
+                        "$ref": "#/components/schemas/FinalAdminPlatformRateLimitState"
                       },
                       "type": "array"
                     }
@@ -18999,21 +19521,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "default": {
-                      "type": "integer"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "source": {
-                      "type": "string"
-                    },
-                    "value": {
-                      "type": "integer"
-                    }
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformRateLimitState"
                 }
               }
             },
@@ -19171,11 +19679,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "value": {
-                    "type": "integer"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -19186,7 +19689,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformRateLimitState"
                 }
               }
             },
@@ -32371,11 +32874,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "email": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -32386,8 +32884,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformMessage"
                 }
               }
             },
@@ -34073,14 +34570,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "new_password": {
-                    "type": "string"
-                  },
-                  "token": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -34091,7 +34580,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -34411,17 +34904,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "email": {
-                    "type": "string"
-                  },
-                  "full_name": {
-                    "type": "string"
-                  },
-                  "password": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -34432,8 +34914,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformMessage"
                 }
               }
             },
@@ -34523,7 +35004,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
                 "type": "object"
               }
             }
@@ -34534,8 +35014,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBootstrap"
                 }
               }
             },
@@ -34545,8 +35024,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformBootstrap"
                 }
               }
             },
@@ -59968,37 +60446,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "properties": {
-                      "created_at": {
-                        "format": "date-time",
-                        "type": "string"
-                      },
-                      "description": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "enabled": {
-                        "type": "boolean"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "key": {
-                        "type": "string"
-                      },
-                      "override_enabled": {
-                        "nullable": true,
-                        "type": "boolean"
-                      },
-                      "percentage": {
-                        "type": "integer"
-                      },
-                      "updated_at": {
-                        "format": "date-time",
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
+                    "$ref": "#/components/schemas/FinalAdminPlatformFeatureFlag"
                   },
                   "type": "array"
                 }
@@ -60118,21 +60566,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "description": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "key": {
-                    "type": "string"
-                  },
-                  "percentage": {
-                    "type": "integer"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -60143,37 +60576,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "format": "date-time",
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "override_enabled": {
-                      "nullable": true,
-                      "type": "boolean"
-                    },
-                    "percentage": {
-                      "type": "integer"
-                    },
-                    "updated_at": {
-                      "format": "date-time",
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformFeatureFlag"
                 }
               }
             },
@@ -60183,37 +60586,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "format": "date-time",
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "override_enabled": {
-                      "nullable": true,
-                      "type": "boolean"
-                    },
-                    "percentage": {
-                      "type": "integer"
-                    },
-                    "updated_at": {
-                      "format": "date-time",
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformFeatureFlag"
                 }
               }
             },
@@ -60544,18 +60917,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "description": {
-                    "nullable": true,
-                    "type": "string"
-                  },
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "percentage": {
-                    "type": "integer"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -60566,37 +60927,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "created_at": {
-                      "format": "date-time",
-                      "type": "string"
-                    },
-                    "description": {
-                      "nullable": true,
-                      "type": "string"
-                    },
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "key": {
-                      "type": "string"
-                    },
-                    "override_enabled": {
-                      "nullable": true,
-                      "type": "boolean"
-                    },
-                    "percentage": {
-                      "type": "integer"
-                    },
-                    "updated_at": {
-                      "format": "date-time",
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformFeatureFlag"
                 }
               }
             },
@@ -60927,11 +61258,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "enabled": {
-                    "type": "boolean"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -60942,15 +61268,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "enabled": {
-                      "type": "boolean"
-                    },
-                    "key": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformFeatureOverride"
                 }
               }
             },
@@ -61111,6 +61429,40 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "features": {
+                      "items": {
+                        "properties": {
+                          "category": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "icon": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "publisher": {
+                            "type": "string"
+                          },
+                          "ref": {
+                            "type": "string"
+                          },
+                          "size_hint": {
+                            "type": "string"
+                          },
+                          "tier": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -63503,7 +63855,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "$ref": "#/components/schemas/FinalAdminPlatformInstanceSetting"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -63842,7 +64197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformInstanceSetting"
                 }
               }
             },
@@ -64040,7 +64395,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformInstanceSetting"
                 }
               }
             },
@@ -75153,6 +75508,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "models": {
+                      "items": {
+                        "$ref": "#/components/schemas/FinalAdminPlatformModel"
+                      },
+                      "type": "array"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -79179,7 +79548,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOAuthAutoConnect"
                 }
               }
             },
@@ -79354,10 +79723,9 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "text/html": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "type": "string"
                 }
               }
             },
@@ -79507,7 +79875,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOAuthDiscovery"
                 }
               }
             },
@@ -79657,14 +80025,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "code": {
-                    "type": "string"
-                  },
-                  "state": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -79675,8 +80035,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOAuthExchange"
                 }
               }
             },
@@ -79904,14 +80263,6 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "provider": {
-                    "type": "string"
-                  },
-                  "redirect_uri": {
-                    "type": "string"
-                  }
-                },
                 "type": "object"
               }
             }
@@ -79922,8 +80273,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOAuthInitiate"
                 }
               }
             },
@@ -80113,7 +80463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOAuthLoopback"
                 }
               }
             },
@@ -80294,11 +80644,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/FinalAdminPlatformOAuthProvider"
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -80368,6 +80717,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -80488,6 +80842,45 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "agent_name": {
+                    "type": "string"
+                  },
+                  "cli_adapter": {
+                    "type": "string"
+                  },
+                  "credential_name": {
+                    "type": "string"
+                  },
+                  "credential_value": {
+                    "type": "string"
+                  },
+                  "crew_name": {
+                    "type": "string"
+                  },
+                  "crew_template_slug": {
+                    "type": "string"
+                  },
+                  "llm_model": {
+                    "type": "string"
+                  },
+                  "llm_provider": {
+                    "type": "string"
+                  },
+                  "pairing_mode": {
+                    "type": "boolean"
+                  },
+                  "preferred_language": {
+                    "type": "string"
+                  },
+                  "telemetry_opt_in": {
+                    "nullable": true,
+                    "type": "boolean"
+                  },
+                  "workspace_name": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -80498,7 +80891,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOnboardingSetup"
                 }
               }
             },
@@ -80508,7 +80901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformOnboardingSetup"
                 }
               }
             },
@@ -80689,6 +81082,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "completed": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -110923,7 +111321,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FinalAdminPlatformWsToken"
                 }
               }
             },
