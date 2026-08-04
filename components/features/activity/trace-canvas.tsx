@@ -89,6 +89,49 @@ const START_FIT = { padding: 0.12, minZoom: 0.62, maxZoom: 1.6 } as const
 const NODE_W_FALLBACK = 200
 const NODE_H_FALLBACK = 70
 
+// How far the canvas will let you go.
+//
+// React Flow's default floor is 0.1 — a 14-step routine at 10% is a
+// smudge, and once you have panned away from it there is nothing on
+// screen to pan back towards. Neither is a state anyone chose; they are
+// states you fall into with one scroll wheel overshoot.
+//
+// The floor is set where a node label stops being readable, and panning
+// is bounded to the graph plus a screen of slack in each direction, so
+// the graph is always reachable by dragging back.
+const ZOOM_FLOOR = 0.3
+const ZOOM_CEILING = 2
+const PAN_SLACK = 600
+
+/**
+ * Bounds for translateExtent: the graph's own box, plus slack.
+ *
+ * Without slack the graph would be pinned against the viewport edges
+ * and could never be centred; with unbounded extent it can be lost off
+ * screen entirely. Returns undefined for an empty graph so React Flow
+ * keeps its default rather than being handed an inverted box.
+ */
+function panExtent(nodes: Node[]): [[number, number], [number, number]] | undefined {
+  if (nodes.length === 0) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of nodes) {
+    const w = n.measured?.width ?? n.width ?? NODE_W_FALLBACK
+    const h = n.measured?.height ?? n.height ?? NODE_H_FALLBACK
+    minX = Math.min(minX, n.position.x)
+    minY = Math.min(minY, n.position.y)
+    maxX = Math.max(maxX, n.position.x + w)
+    maxY = Math.max(maxY, n.position.y + h)
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return undefined
+  return [
+    [minX - PAN_SLACK, minY - PAN_SLACK],
+    [maxX + PAN_SLACK, maxY + PAN_SLACK],
+  ]
+}
+
 /**
  * The trigger plus the first rank or two, for initialFocus="start".
  *
@@ -455,6 +498,11 @@ function CanvasInner({
     onStepSelect(null)
   }, [onStepSelect])
 
+  // Recomputed only when the graph itself changes, not on every status
+  // repaint — an extent that changed identity each tick would make
+  // React Flow re-clamp the viewport mid-drag.
+  const extent = useMemo(() => panExtent(graphData.nodes), [graphData.nodes])
+
   // Empty trace — DSL has no steps and no outputs were captured.
   // Surface a friendly message rather than an empty canvas.
   if (graphData.nodes.length <= 1) {
@@ -486,8 +534,9 @@ function CanvasInner({
         }}
         fitView
         fitViewOptions={FIT_VIEW}
-        minZoom={0.1}
-        maxZoom={2.5}
+        minZoom={ZOOM_FLOOR}
+        maxZoom={ZOOM_CEILING}
+        translateExtent={extent}
         proOptions={{ hideAttribution: true }}
         className="!bg-transparent"
       >

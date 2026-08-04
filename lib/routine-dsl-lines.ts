@@ -18,7 +18,7 @@
 // updating" rather than "the editor explodes". That matters because a
 // mid-edit buffer is exactly when the caret is moving.
 
-import { isMap, isSeq, parseDocument, type Node } from "yaml"
+import { isMap, isSeq, parseDocument } from "yaml"
 
 export interface StepLineRange {
   id: string

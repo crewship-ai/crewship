@@ -84,6 +84,8 @@ export type BrandIconKey =
   | "github"
   | "notion"
   | "googlecalendar"
+  | "gmail"
+  | "googledrive"
   | "zapier"
 
 // Alias table: every datastore type / tool type / integration slug we can
@@ -124,6 +126,12 @@ const BRAND_ICON_ALIASES: Record<string, BrandIconKey> = {
   gcal: "googlecalendar",
   googlecalendar: "googlecalendar",
   "google-calendar": "googlecalendar",
+  gmail: "gmail",
+  googlemail: "gmail",
+  googledrive: "googledrive",
+  "google-drive": "googledrive",
+  gdrive: "googledrive",
+  drive: "googledrive",
   google_calendar: "googlecalendar",
   zapier: "zapier",
 }

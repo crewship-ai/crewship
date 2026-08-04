@@ -52,6 +52,7 @@ import {
 import { cn } from "@/lib/utils"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { CrewIconPopover } from "@/components/crew-icon-popover"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +61,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { DEPENDENCY_SUMMARY, RUN_HISTORY, opacityOf, type Fidelity } from "@/lib/routines-preview/fixtures"
+import { brandIconForType, BrandGlyph } from "@/components/features/routines/brand-icons"
 import { CodePane, DefinitionCanvas, RunHistoryCard, type Workbench } from "./shared"
 
 const DEP_ICON = {
@@ -74,6 +76,8 @@ type SideTab = "triggers" | "versions"
 export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbench }) {
   const [editing, setEditing] = React.useState(false)
   const [sideTab, setSideTab] = React.useState<SideTab>("triggers")
+  const [icon, setIcon] = React.useState("receipt")
+  const [color, setColor] = React.useState("amber")
   const steps = wb.dsl.steps ?? []
   const opacity = opacityOf(wb.dsl)
   const lastRun = RUN_HISTORY[0]
@@ -96,7 +100,19 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
           <DetailCard>
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
+                <div className="flex min-w-0 items-start gap-3">
+                  {/* Same picker projects and crews use. A workspace
+                      ends up with dozens of routines and they all look
+                      identical in a list; an icon is the cheapest way
+                      to make one findable at a glance. */}
+                  <CrewIconPopover
+                    icon={icon}
+                    color={color}
+                    size="lg"
+                    onIconChange={setIcon}
+                    onColorChange={setColor}
+                  />
+                  <div className="min-w-0">
                   <h1 className="truncate text-lg font-semibold tracking-tight">
                     Monthly accounting pack
                   </h1>
@@ -116,6 +132,7 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
                       <AgentAvatar seed="auditor" className="h-4 w-4" alt="" />
                       <span className="font-medium">auditor</span>
                     </Link>
+                  </div>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
@@ -305,12 +322,7 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
               >
                 <div className="flex flex-wrap gap-1.5">
                   {reach.map((item) => (
-                    <EntityChip
-                      key={`${item.kind}:${item.name}`}
-                      icon={DEP_ICON[item.kind as keyof typeof DEP_ICON]}
-                      label={item.name}
-                      tone={item.risk ? "warn" : "default"}
-                    />
+                    <AccessChip key={`${item.kind}:${item.name}`} item={item} />
                   ))}
                 </div>
               </DetailCard>
@@ -330,6 +342,34 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
         </Appear>
       </div>
     </div>
+  )
+}
+
+/**
+ * One thing the routine can reach.
+ *
+ * Real marks where a real mark exists: a chip reading "Gmail" beside a
+ * generic puzzle piece has stopped carrying its own meaning, and Access
+ * is the panel a reviewer scans fastest. Falls back to the group's
+ * lucide glyph for anything with no logo — an agent, an egress host.
+ */
+function AccessChip({
+  item,
+}: {
+  item: { kind: string; name: string; detail: string; risk?: boolean }
+}) {
+  const brand = brandIconForType(item.name)
+  const Fallback = DEP_ICON[item.kind as keyof typeof DEP_ICON]
+  return (
+    <EntityChip
+      icon={
+        brand
+          ? () => <BrandGlyph brand={brand} fallback={Fallback} className="h-3 w-3" />
+          : Fallback
+      }
+      label={item.name}
+      tone={item.risk ? "warn" : "default"}
+    />
   )
 }
 
