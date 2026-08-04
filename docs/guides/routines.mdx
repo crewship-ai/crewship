@@ -24,6 +24,22 @@ Compared to other layers in Crewship:
 | **Recipe** *(future)* | composite | Marketplace template | Crew + agents + integrations + routines bundled |
 | **Recurring Issue** | issue-tracker | recurring user issue | "Standup every Monday" without leaving Issues — a cron dispatcher stamps a fresh issue on each fire (see [Recurring Issues](/api-reference/recurring-issues)) |
 
+### The routines page
+
+Two states, no tabs: the **overview**, or the routine you picked in the sidebar.
+
+The overview answers, in the order you ask on arrival — did anything run today, is the catalog healthy, what fires next, what ran, what did it cost, what is broken:
+
+| Card | What it answers |
+|------|-----------------|
+| **Runs today · Success · Next run · Needs attention** | The shift report. The success rate always carries its denominator (`100% · 1 of 1`), because a rate without a sample size cannot be weighed. |
+| **Catalog health** | The catalog as one donut — running, healthy, failing, awaiting approval, disabled, never invoked. The arcs sum to the catalog, and clicking one filters the sidebar to it. |
+| **Firing next** | The upcoming schedules, soonest first, each written as a sentence (`Every weekday at 08:00`) rather than as a cron expression. A `next_run_at` already in the past is left out — that is a scheduler that has not caught up, not a next run. |
+| **Recent runs** | The last ten invocations with trigger, duration, cost and age. Live runs pin to the top with their current step. Each row opens that run in [Activity](/guides/activity). |
+| **Spend · Budgets · Recently failing** | Real per-run `cost_usd` over the week, any routine over its monthly cap, and what broke most recently. |
+
+This replaced a **List / Schedules / Insights** tab bar. List rendered a table of every routine beside a sidebar that was already the catalog — the same list twice, and the copy in the main pane was the one you could not search. Schedules was a read-only table; every action on a schedule (create, pause, delete) lives on the routine's own **Triggers** card, so the tab held no capability. Insights was four derived numbers and a "top routines by usage" leaderboard. What was load-bearing in those two — what fires next, what runs cost, which routines are over budget, what is failing — is a card on the overview now.
+
 ### The detail page
 
 Opening a routine gives you one scrolling surface of cards, not a tab bar:
@@ -35,9 +51,9 @@ Opening a routine gives you one scrolling surface of cards, not a tab bar:
 | **Triggers** | Cron schedules and inbound webhooks. **Manage** reveals the full editors. |
 | **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves. |
 | **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
+| **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
 
 A routine also carries an **icon and colour**, picked from the header and stored in columns of their own — so recolouring never touches the definition, never mints a version, and never invalidates a save token. Unset routines derive a stable icon from their slug, so a list of thirty is legible before anyone chooses anything. CLI: [`crewship routine appearance`](/cli/routine#crewship-routine-appearance).
-| **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
 
 Wait points are not here: they belong to a *run*, and [Activity](/guides/activity) is where the run is.
 

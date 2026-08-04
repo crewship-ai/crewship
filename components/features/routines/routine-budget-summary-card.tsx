@@ -7,8 +7,9 @@ import { useBudgetSummary } from "@/hooks/use-routine-budget"
 
 // RoutineBudgetSummaryCard — workspace-wide roll-up of every routine
 // with a monthly budget set or spend this month (#1422 item 3). Lives
-// on the routines Insights tab, next to the other workspace-health
-// panels (Top routines, Recent failures).
+// on the routines overview, beside Spend and Recently failing. (It was
+// on the Insights tab; when that tab went, this was the only thing on
+// it you could not see anywhere else.)
 export function RoutineBudgetSummaryCard({
   workspaceId,
   onSelect,

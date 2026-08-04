@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
 import { WakeGateChip } from "./routine-wake-gate-chip"
+import { describeCron } from "@/lib/cron-describe"
 
 // RoutineSchedulesTab — cron-trigger CRUD restyled for the dashboard.
 // Card-wrapped list + inline form, Pill states, readable typography,
@@ -275,16 +276,3 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
   )
 }
 
-// describeCron is a tiny humanizer for the most common patterns.
-function describeCron(expr: string): string {
-  const t = expr.trim()
-  const parts = t.split(/\s+/)
-  if (parts.length !== 5) return `${parts.length}-field cron (need 5)`
-  const [m, h, dom, mon, dow] = parts
-  if (m === "*" && h === "*" && dom === "*" && mon === "*" && dow === "*") return "every minute"
-  if (dom === "*" && mon === "*" && dow === "*")
-    return `daily at ${h.padStart(2, "0")}:${m.padStart(2, "0")}`
-  if (dom === "*" && mon === "*" && dow !== "*")
-    return `weekly (dow ${dow}) at ${h.padStart(2, "0")}:${m.padStart(2, "0")}`
-  return "custom cron"
-}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  ScrollText, Calendar, BarChart3, Workflow,
+  Workflow,
   Plus, Upload,
   X, ChevronLeft, ChevronRight,
 } from "lucide-react"
@@ -15,11 +15,7 @@ import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
-import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
-import { matchesRoutineFilters } from "@/lib/routine-filters"
-import { RoutinesListView } from "./routines-list-view"
-import { RoutinesSchedulesView } from "./routines-schedules-view"
-import { RoutinesInsightsView } from "./routines-insights-view"
+import { RoutinesOverview } from "./routines-overview"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { type RoutineFilters } from "./routines-filter-sidebar"
 import { RoutinesExplorer } from "./routines-explorer"
@@ -27,25 +23,25 @@ import { RoutineCreateDialog } from "./routine-create-dialog"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
-// RoutinesLayout — full /routines page. The IA refactor cut the
-// previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
-//   - List      — the catalog, primary entry point.
-//   - Schedules — workspace-wide cron triggers across all routines.
-//   - Insights  — health snapshot (top usage, recent failures).
+// RoutinesLayout — full /routines page. Two states, no tabs: the
+// overview, or the routine you picked.
 //
-// Graph + Timeline + Activity moved to /activity, which is now the
-// single live observability surface for the whole workspace. This
-// page stays focused on the asset-management story (catalog +
-// triggers + health), separating workflow definitions from runs the
-// way most operator-facing workflow tools do.
-
-const ROUTINES_TABS = [
-  { id: "list" as const, label: "List", icon: ScrollText },
-  { id: "schedules" as const, label: "Schedules", icon: Calendar },
-  { id: "insights" as const, label: "Insights", icon: BarChart3 },
-] as const
-
-type RoutinesTab = (typeof ROUTINES_TABS)[number]["id"]
+// It had three tabs. List rendered a table of every routine, beside a
+// sidebar that was already the catalog — the same list twice, and the
+// copy in the main pane was the one you could not search. Schedules
+// was a read-only table of every cron in the workspace; every action
+// on a schedule (create, pause, delete) lives on the routine's own
+// Triggers card, so the tab held no capability, only a second view of
+// one. Insights was four derived numbers and a "top routines by
+// usage" leaderboard, which is not a question anyone asks.
+//
+// The parts of those two that were load-bearing — what fires next,
+// what runs cost, what is failing — are cards on the overview now.
+// Nothing was deleted that could be done; only places where it could
+// be looked at twice.
+//
+// Graph + Timeline + Activity moved to /activity, which stays the
+// single live observability surface for the whole workspace.
 
 interface RoutinesLayoutProps {
   workspaceId: string
@@ -53,7 +49,6 @@ interface RoutinesLayoutProps {
 
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
-  const [activeTab, setActiveTab] = useState<RoutinesTab>("list")
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [search, setSearch] = useState("")
   const [filters, setFilters] = useState<RoutineFilters>({
@@ -120,29 +115,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     setSelectedSlug((prev) => (prev === slug ? null : slug))
   }
 
-  // Live runs, for the two status buckets a routine row cannot answer:
-  // last_invocation_status reads "running" while a run is parked on a
-  // human, so Running and Awaiting approval are the same value there.
-  const { bySlug: liveBySlug } = useActiveRoutineRuns()
-
-  const filteredRoutines = pipelines.filter((p) =>
-    matchesRoutineFilters(
-      {
-        slug: p.slug,
-        name: p.name,
-        description: p.description,
-        authorAgentId: p.author_agent_id,
-        authorAgentName: p.author_agent_name,
-        invocationCount: p.invocation_count,
-        lastStatus: p.last_invocation_status,
-        ephemeral: p.ephemeral,
-      },
-      filters,
-      liveBySlug,
-      search,
-    ),
-  )
-
   // Selected routine — looked up from the loaded pipeline list so the
   // toolbar breadcrumb can show the human name without a second fetch.
   // The detail panel does its own fetch for the full DSL body.
@@ -169,12 +141,12 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
-      {/* ---- Sub-bar: identity + tabs + actions ----
-          Row 1 carries global context (List/Schedules/Insights + Import/New
-          routine); the page-specific 'Back to routines / <name>' breadcrumb
-          lives one level down inside the content area (matches /issues) so it
-          doesn't compete with the global affordances. */}
-      <SubBar<RoutinesTab>
+      {/* ---- Sub-bar: identity + actions ----
+          Row 1 carries global context (Import / New routine); the
+          page-specific 'Back to routines / <name>' breadcrumb lives one level
+          down inside the content area (matches /issues) so it doesn't compete
+          with the global affordances. */}
+      <SubBar
         icon={Workflow}
         title="Routines"
         description={
@@ -184,9 +156,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           </>
         }
         ariaLabel="Routines"
-        tabs={ROUTINES_TABS.map((t) => ({ id: t.id, label: t.label, icon: t.icon }))}
-        activeTab={activeTab}
-        onTabChange={(id) => setActiveTab(id)}
         actions={
           <>
             <SubBarSecondary
@@ -294,52 +263,25 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   />
                 </div>
               </motion.div>
-            ) : activeTab === "list" ? (
+            ) : (
               <motion.div
-                key="list"
+                key="overview"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="absolute inset-0 overflow-hidden"
               >
-                <RoutinesListView
-                  routines={filteredRoutines}
+                <RoutinesOverview
+                  workspaceId={workspaceId}
+                  routines={pipelines}
                   loading={loading}
                   error={error}
-                  selectedSlug={selectedSlug}
                   onSelect={handleSelect}
+                  onFilter={(status) =>
+                    setFilters((f) => ({ ...f, status: status as RoutineFilters["status"] }))
+                  }
                   onRefresh={refresh}
-                />
-              </motion.div>
-            ) : activeTab === "schedules" ? (
-              <motion.div
-                key="schedules"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="absolute inset-0"
-              >
-                <RoutinesSchedulesView
-                  workspaceId={workspaceId}
-                  routines={pipelines}
-                  onSelect={handleSelect}
-                />
-              </motion.div>
-            ) : (
-              <motion.div
-                key="insights"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="absolute inset-0"
-              >
-                <RoutinesInsightsView
-                  workspaceId={workspaceId}
-                  routines={pipelines}
-                  onSelect={handleSelect}
                 />
               </motion.div>
             )}
