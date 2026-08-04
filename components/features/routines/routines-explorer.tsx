@@ -13,6 +13,7 @@ import {
   Flame,
   Users,
   EyeOff,
+  Check,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -222,7 +223,8 @@ export function RoutinesExplorer({
                 <div className="fixed inset-0 z-40" onClick={() => setFilterDropdownOpen(false)} />
                 <motion.div
                   {...dropdownAnim}
-                  className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[200px] max-h-[360px] overflow-y-auto"
+                  role="menu"
+                  className="absolute right-0 top-9 z-50 min-w-[220px] max-h-[360px] overflow-y-auto rounded-lg border border-white/[0.08] bg-card/95 py-1 shadow-2xl ring-1 ring-black/40 backdrop-blur-xl"
                 >
                   <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">Usage</div>
                   {(["all", "popular", "fresh"] as RoutineFilters["invocations"][]).map((v) => (
@@ -233,14 +235,19 @@ export function RoutinesExplorer({
                         setFilterDropdownOpen(false)
                       }}
                       className={cn(
-                        "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2",
-                        filters.invocations === v ? "text-primary-hover" : "text-muted-foreground/80",
+                        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                        filters.invocations === v
+                          ? "bg-primary/10 text-primary-hover"
+                          : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
                       )}
                     >
                       {v === "popular" && <Flame className="h-3.5 w-3.5 shrink-0" />}
                       {v === "fresh" && <Sparkles className="h-3.5 w-3.5 shrink-0" />}
                       {v === "all" && <ScrollText className="h-3.5 w-3.5 shrink-0 opacity-60" />}
-                      {v === "all" ? "All usage" : v === "popular" ? "Popular (10+)" : "Fresh (no runs)"}
+                      <span className="flex-1">
+                        {v === "all" ? "All usage" : v === "popular" ? "Popular (10+)" : "Fresh (no runs)"}
+                      </span>
+                      {filters.invocations === v && <Check className="h-3 w-3 shrink-0" />}
                     </button>
                   ))}
                   {agents.length > 0 && (
@@ -255,12 +262,15 @@ export function RoutinesExplorer({
                           setFilterDropdownOpen(false)
                         }}
                         className={cn(
-                          "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2",
-                          filters.authorAgentId === null ? "text-primary-hover" : "text-muted-foreground/80",
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                          filters.authorAgentId === null
+                            ? "bg-primary/10 text-primary-hover"
+                            : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
                         )}
                       >
                         <Users className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                        All authors
+                        <span className="flex-1">All authors</span>
+                        {filters.authorAgentId === null && <Check className="h-3 w-3 shrink-0" />}
                       </button>
                       {agents.map((a) => (
                         <button
@@ -270,8 +280,10 @@ export function RoutinesExplorer({
                             setFilterDropdownOpen(false)
                           }}
                           className={cn(
-                            "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2",
-                            filters.authorAgentId === a.id ? "text-primary-hover" : "text-muted-foreground/80",
+                            "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                            filters.authorAgentId === a.id
+                              ? "bg-primary/10 text-primary-hover"
+                              : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
                           )}
                         >
                           <span
@@ -281,6 +293,7 @@ export function RoutinesExplorer({
                           />
                           <span className="truncate flex-1">{a.name}</span>
                           <span className="text-[10px] tabular-nums text-muted-foreground-soft">{a.count}</span>
+                          {filters.authorAgentId === a.id && <Check className="h-3 w-3 shrink-0" />}
                         </button>
                       ))}
                     </>
@@ -292,12 +305,17 @@ export function RoutinesExplorer({
                   <button
                     onClick={() => onChange({ ...filters, showEphemeral: !filters.showEphemeral })}
                     className={cn(
-                      "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2",
-                      filters.showEphemeral ? "text-primary-hover" : "text-muted-foreground/80",
+                      "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
+                      filters.showEphemeral
+                        ? "bg-primary/10 text-primary-hover"
+                        : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
                     )}
                   >
                     <EyeOff className="h-3.5 w-3.5 shrink-0" />
-                    {filters.showEphemeral ? "Hiding nothing" : "Show ephemeral"}
+                    <span className="flex-1">
+                      {filters.showEphemeral ? "Hiding nothing" : "Show ephemeral"}
+                    </span>
+                    {filters.showEphemeral && <Check className="h-3 w-3 shrink-0" />}
                   </button>
                 </motion.div>
               </>
@@ -326,9 +344,33 @@ export function RoutinesExplorer({
               selected={isSelected}
               onSelect={() => onChange({ ...filters, status: b.id })}
             >
-              <IconComp className={cn("h-3.5 w-3.5 shrink-0", b.tone)} />
-              <span className="text-foreground/80 truncate flex-1">{b.label}</span>
-              <span className="text-[10px] text-muted-foreground-soft tabular-nums">{count}</span>
+              {/* A bucket holding nothing dims to match. Six rows of
+                  equal weight, four of them zero, is what made this
+                  column read as a wall — and the ones with something
+                  in them are the only ones worth a click. */}
+              <IconComp
+                className={cn("h-3.5 w-3.5 shrink-0", b.tone, count === 0 && !isSelected && "opacity-40")}
+              />
+              <span
+                className={cn(
+                  "truncate flex-1",
+                  count === 0 && !isSelected ? "text-foreground/40" : "text-foreground/80",
+                )}
+              >
+                {b.label}
+              </span>
+              <span
+                className={cn(
+                  "rounded-full px-1.5 py-px text-[10px] tabular-nums",
+                  count === 0
+                    ? "text-muted-foreground-soft/50"
+                    : isSelected
+                      ? "bg-primary/15 text-primary"
+                      : "bg-white/[0.05] text-muted-foreground",
+                )}
+              >
+                {count}
+              </span>
             </SidebarRow>
           )
         })}
@@ -390,35 +432,71 @@ export function RoutinesExplorer({
                             a different icon for one routine would be
                             worse than showing none. */}
                         <span className="relative shrink-0">
+                          {/* A halo, not a moved icon. While a run is
+                              live the icon keeps its place — a row
+                              whose contents shift position is harder
+                              to track than one that just glows — and
+                              the ring pulses outward from behind it.
+                              Absolutely positioned so it costs no
+                              layout: a ring that changed the row's
+                              width would nudge every name beside it. */}
+                          {liveRun && (
+                            <span
+                              aria-hidden
+                              className={cn(
+                                "absolute -inset-1 animate-ping rounded-lg opacity-60",
+                                liveAwaiting ? "bg-warn/20" : "bg-primary/20",
+                              )}
+                            />
+                          )}
                           <CrewIcon
                             icon={resolveRoutineIcon(routine)}
                             color={resolveRoutineColor(routine)}
                             size="sm"
-                            className="!h-5 !w-5 !rounded-md"
+                            className={cn(
+                              "relative !h-5 !w-5 !rounded-md transition-shadow",
+                              liveRun &&
+                                (liveAwaiting
+                                  ? "ring-2 ring-warn/60"
+                                  : "ring-2 ring-primary/60"),
+                            )}
                           />
                           <span
                             aria-hidden
                             title={liveRun ? liveRun.status : (lastStatus ?? "never invoked")}
                             className={cn(
-                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                              "absolute -bottom-0.5 -right-0.5 z-10 h-2 w-2 rounded-full ring-2 ring-card",
                               statusTone,
                             )}
                           />
                         </span>
-                        <span className="text-foreground/80 truncate flex-1">
-                          {routine.name || routine.slug}
-                          {liveRun && (
-                            <span
-                              className={cn(
-                                "block truncate text-[10px]",
-                                liveAwaiting ? "text-warn" : "text-primary",
-                              )}
-                            >
-                              {liveAwaiting
-                                ? `⏸ awaiting approval · ${formatElapsedSince(liveRun.started_at)}`
-                                : `▶ ${liveRun.current_step_id || "starting…"} · ${formatElapsedSince(liveRun.started_at)}`}
-                            </span>
-                          )}
+                        <span className="min-w-0 flex-1 text-foreground/80">
+                          <span className="block truncate">{routine.name || routine.slug}</span>
+                          {/* The sub-line grows the row from one line to
+                              two. Popping that in doubles the row's
+                              height between two frames and shoves every
+                              row below it down a step; animating the
+                              height reads as the row opening rather
+                              than the list jumping. */}
+                          <AnimatePresence initial={false}>
+                            {liveRun && (
+                              <motion.span
+                                key="live"
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                                className={cn(
+                                  "block overflow-hidden truncate text-[10px]",
+                                  liveAwaiting ? "text-warn" : "text-primary",
+                                )}
+                              >
+                                {liveAwaiting
+                                  ? `⏸ awaiting approval · ${formatElapsedSince(liveRun.started_at)}`
+                                  : `▶ ${liveRun.current_step_id || "starting…"} · ${formatElapsedSince(liveRun.started_at)}`}
+                              </motion.span>
+                            )}
+                          </AnimatePresence>
                         </span>
                         {routine.invocation_count > 0 && (
                           <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
