@@ -64,6 +64,9 @@ shoutrrr it is the composed service URL.
 
 ### `PATCH /api/v1/notification-channels/{id}`
 
+**Auth:** authenticated workspace member; workspace channels require `ADMIN`
+or `OWNER`, personal channels require their owner.
+
 Updates only supplied settings and returns `200 OK` with
 `{ "updated": "nch_01..." }`. Optional fields are `enabled` (boolean),
 `categories` (array; empty means every category), `min_priority` (`low`,
@@ -84,6 +87,8 @@ Missing or unauthorized channels return `404` or `403` respectively.
 
 ### `POST /api/v1/notification-channels/test`
 
+**Auth:** authenticated workspace member with workspace context.
+
 Tests an unsaved draft without persisting it. The body accepts the delivery
 fields needed to compose a channel (`type`, `url`/`to`, or `provider` plus
 `fields`, with optional `secret`) and the response is `200 OK` with
@@ -97,6 +102,9 @@ all provider fields (or a composed `shoutrrr_url`).
 ## Agent pairing
 
 ### `GET /api/v1/notification-channels/{id}/agents`
+
+**Auth:** authenticated workspace member; channel access follows the channel
+owner/manage permission.
 
 Lists agents allowed to send to the channel.
 
@@ -118,6 +126,9 @@ Lists agents allowed to send to the channel.
 ```
 
 ### `POST /api/v1/notification-channels/{id}/agents`
+
+**Auth:** authenticated workspace member with manage permission for the
+channel (`ADMIN`/`OWNER` for workspace channels, owner for personal channels).
 
 Allows an agent from the current workspace to send to the channel.
 

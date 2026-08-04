@@ -977,6 +977,21 @@ curl -X PATCH \
 
 The operator-facing Keeper audit log, plus the Phase 2 F4 evaluator routes. The audit-log read requires ADMIN or OWNER (manage permission); the Phase 2 evaluator routes are internal-auth (see below).
 
+## POST /api/v1/admin/prune-crew-runtimes
+
+Prunes crew runtime containers and volumes that are no longer needed. The
+operation is restricted to callers with `manage` permission (ADMIN or OWNER).
+
+**Request:** no body.
+
+**Response:** `200 OK` with the number of pruned runtimes. The operation is
+safe to repeat; an unavailable runtime provider returns `503` and a pruning
+failure returns `500`.
+
+**Statuses:** `200 OK`; `401` without authentication; `403` without manage
+permission; `503` when the runtime provider is unavailable; `500` for a prune
+failure.
+
 ## GET /api/v1/admin/keeper/requests
 
 Returns the Keeper access request audit log -- every credential access and command execution request evaluated by the Keeper.
@@ -1044,11 +1059,17 @@ Returns the Keeper access request audit log -- every credential access and comma
   This endpoint returns the **current** state of each request. `decision` is written `PENDING` and updated in place, so it cannot tell you how the request got there. For that, use the transition history below.
 </Note>
 
-## GET /api/v1/admin/keeper/requests/\{requestId\}/events
+## GET /api/v1/admin/keeper/requests/{requestId}/events
 
 Returns the **append-only transition history** for one Keeper request, oldest first — the record that the in-place `decision` update would otherwise destroy (issue #1369).
 
 **Required role:** ADMIN or OWNER (manage permission)
+
+**Request:** no body.
+
+**Statuses:** `200 OK`; `401` without authentication; `403` without manage
+permission; `404` when the request does not exist; `500` for a database error.
+
 
 ### Path Parameters
 

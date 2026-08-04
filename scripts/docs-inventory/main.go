@@ -118,7 +118,7 @@ type report struct {
 var endpointPattern = regexp.MustCompile(`(?i)\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
 var endpointHeadingPattern = regexp.MustCompile(`(?i)^#{1,6}\s+.*\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
 var pathPattern = regexp.MustCompile(`/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?`)
-var statusPattern = regexp.MustCompile(`\bstatus(?:es)?\s*:`)
+var statusPattern = regexp.MustCompile(`(?i)\bstatus(?:es)?\s*:`)
 
 type endpointEvidence struct {
 	Path, Method string

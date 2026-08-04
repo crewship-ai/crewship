@@ -354,6 +354,11 @@ The response is the ordinary `RunResult` object: `run_id`, `pipeline_id`,
 run is marked as a replay of `runId`; its inputs, metadata, and tags come from
 the source run. An omitted `pinned_version` uses the current head version.
 
+**Statuses:** `200 OK`; `400` for invalid input; `401` without authentication;
+`403` without membership/create permission; `404` for a missing source;
+`409` for an invalid pinned version; `429` at the concurrency limit; `503` for
+an unavailable run store; `500` for other failures.
+
 #### `GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors?limit=N`
 
 **Auth:** `member`. `limit` is passed to the failure-group query; the default
@@ -387,8 +392,16 @@ selector expands from the newest sampled IDs returned by the failure-group
 store, so a group larger than the sample cannot replay every historical run in
 one request.
 
+**Statuses:** `200 OK`; `400` for invalid selectors or JSON; `401` without
+authentication; `403` without membership; `503` for an unavailable run store;
+`500` for failure-group lookup.
+
 **Response:** `200 OK` —
 `{ "requested": N, "replayed": N, "results": [{ "source_run_id", "new_run_id"?, "status"?, "error"? }] }`.
+
+**Statuses:** `200 OK`; `400` for invalid selectors or JSON; `401` without
+authentication; `403` without membership/create permission; `503` for an
+unavailable run store; `500` for selector or replay failures.
 
 ### Version diff
 
@@ -454,6 +467,10 @@ unavailable.
 **Auth:** `member`. A missing pipeline is `404`; pipeline or override lookup
 failure is `500`.
 
+**Statuses:** `200 OK`; `401` without authentication; `403` without
+membership; `404` for a missing pipeline or key; `503` for an unavailable state
+store; `500` for lookup failure.
+
 **Response:** `200 OK` — `{ "overrides": [...] }`, with each row containing
 `step_id` and optional `prompt` and `model_override`.
 
@@ -495,6 +512,10 @@ state store is `503`; write failure is `500`.
 **Response:** `200 OK` —
 `{ "slug", "schedule_id", "key", "value" }`.
 
+**Statuses:** `200 OK`; `400` for invalid JSON or key; `401` without
+authentication; `403` without manage permission; `404` for a missing pipeline;
+`503` for an unavailable state store; `500` for write failure.
+
 #### `DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}?schedule_id=S`
 
 **Auth:** `member` plus `manage` (OWNER/ADMIN). Empty `key` is `400`. The
@@ -502,12 +523,20 @@ response is `200 OK` — `{ "slug", "schedule_id", "key", "deleted": true }`.
 An absent key in the selected bucket is `404`; a missing pipeline is `404`;
 an unavailable state store is `503`; delete failure is `500`.
 
+**Statuses:** `200 OK`; `400` for an empty key; `401` without authentication;
+`403` without manage permission; `404` for a missing pipeline or key; `503` for
+an unavailable state store; `500` for delete failure.
+
 #### `DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state?schedule_id=S`
 
 **Auth:** `member` plus `manage` (OWNER/ADMIN). The operation clears only the
 selected bucket (empty `schedule_id` selects manual/webhook state). `200 OK`
 returns `{ "slug", "schedule_id", "removed": N }`. A missing pipeline is
 `404`; an unavailable state store is `503`; clear failure is `500`.
+
+**Statuses:** `200 OK`; `401` without authentication; `403` without manage
+permission; `404` for a missing pipeline; `503` for an unavailable state store;
+`500` for clear failure.
 
 ### Single-step execution
 
