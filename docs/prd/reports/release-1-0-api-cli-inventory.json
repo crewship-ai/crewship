@@ -1,332 +1,17 @@
 {
   "summary": {
-    "api_operations": 539,
-    "api_exact_docs": 539,
+    "api_operations": 531,
+    "api_exact_docs": 531,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
     "cli_operations": 723,
     "cli_exact_docs": 723,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 357,
+    "api_with_test_signals": 352,
     "cli_with_test_signals": 709
   },
   "api": [
-    {
-      "method": "POST",
-      "path": "/api/auth/callback/credentials",
-      "operation_id": "post_api_auth_callback_credentials",
-      "tag": "api",
-      "source_file": "internal/api/admin_ratelimits_test.go",
-      "exact_docs": [
-        "docs/api-reference/auth.mdx",
-        "docs/api-reference/overview.mdx",
-        "docs/cli/login.mdx",
-        "docs/guides/auth.mdx",
-        "docs/security/threat-model.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_login_https_test.go",
-        "cmd/crewship/cmd_login_password_stdin_test.go",
-        "internal/api/admin_ratelimits_test.go",
-        "internal/api/auth_recovery_cov_test.go",
-        "internal/api/auth_test.go",
-        "internal/api/nextauth_cov_test.go",
-        "internal/api/nextauth_test.go",
-        "internal/api/ratelimit_auth_read_test.go",
-        "…"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/admin_ratelimits_test.go",
-          "test_signals": [
-            "cmd/crewship/cmd_login_https_test.go",
-            "cmd/crewship/cmd_login_password_stdin_test.go",
-            "internal/api/admin_ratelimits_test.go",
-            "internal/api/auth_recovery_cov_test.go",
-            "internal/api/auth_test.go",
-            "internal/api/nextauth_cov_test.go",
-            "internal/api/nextauth_test.go",
-            "internal/api/ratelimit_auth_read_test.go",
-            "…"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/auth/csrf",
-      "operation_id": "get_api_auth_csrf",
-      "tag": "api",
-      "source_file": "internal/api/nextauth_cov_test.go",
-      "exact_docs": [
-        "docs/api-reference/overview.mdx",
-        "docs/guides/auth.mdx",
-        "docs/security/security-headers.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_login_https_test.go",
-        "cmd/crewship/cmd_login_password_stdin_test.go",
-        "internal/api/nextauth_cov_test.go",
-        "internal/api/nextauth_test.go",
-        "internal/api/ratelimit_auth_read_test.go",
-        "internal/api/ratelimit_self_service_test.go",
-        "internal/api/unauth_reachability_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/nextauth_cov_test.go",
-          "test_signals": [
-            "cmd/crewship/cmd_login_https_test.go",
-            "cmd/crewship/cmd_login_password_stdin_test.go",
-            "internal/api/nextauth_cov_test.go",
-            "internal/api/nextauth_test.go",
-            "internal/api/ratelimit_auth_read_test.go",
-            "internal/api/ratelimit_self_service_test.go",
-            "internal/api/unauth_reachability_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/auth/error",
-      "operation_id": "get_api_auth_error",
-      "tag": "api",
-      "source_file": "internal/api/nextauth_test.go",
-      "exact_docs": [
-        "docs/api-reference/auth.mdx",
-        "docs/api-reference/overview.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_login_https_test.go",
-        "internal/api/auth_extra_test.go",
-        "internal/api/nextauth_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/nextauth_test.go",
-          "test_signals": [
-            "cmd/crewship/cmd_login_https_test.go",
-            "internal/api/auth_extra_test.go",
-            "internal/api/nextauth_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/auth/providers",
-      "operation_id": "get_api_auth_providers",
-      "tag": "api",
-      "source_file": "internal/api/nextauth_cov_test.go",
-      "exact_docs": [
-        "docs/api-reference/overview.mdx",
-        "docs/guides/auth.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/nextauth_cov_test.go",
-        "internal/api/nextauth_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/nextauth_cov_test.go",
-          "test_signals": [
-            "internal/api/nextauth_cov_test.go",
-            "internal/api/nextauth_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/auth/session",
-      "operation_id": "get_api_auth_session",
-      "tag": "api",
-      "source_file": "internal/api/auth_recovery_cov_test.go",
-      "exact_docs": [
-        "docs/api-reference/overview.mdx",
-        "docs/guides/auth.mdx",
-        "docs/security/security-headers.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/auth_recovery_cov_test.go",
-        "internal/api/nextauth_cov_test.go",
-        "internal/api/nextauth_oauth_deep_cov_test.go",
-        "internal/api/nextauth_session_identity_test.go",
-        "internal/api/nextauth_test.go",
-        "internal/api/ratelimit_auth_read_test.go",
-        "internal/api/ratelimit_self_service_test.go",
-        "internal/api/unauth_reachability_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/auth_recovery_cov_test.go",
-          "test_signals": [
-            "internal/api/auth_recovery_cov_test.go",
-            "internal/api/nextauth_cov_test.go",
-            "internal/api/nextauth_oauth_deep_cov_test.go",
-            "internal/api/nextauth_session_identity_test.go",
-            "internal/api/nextauth_test.go",
-            "internal/api/ratelimit_auth_read_test.go",
-            "internal/api/ratelimit_self_service_test.go",
-            "internal/api/unauth_reachability_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/auth/signin",
-      "operation_id": "get_api_auth_signin",
-      "tag": "api",
-      "source_file": "internal/api/nextauth_test.go",
-      "exact_docs": [
-        "docs/api-reference/overview.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/nextauth_test.go",
-        "internal/api/signout_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/nextauth_test.go",
-          "test_signals": [
-            "internal/api/nextauth_test.go",
-            "internal/api/signout_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/signout",
-      "operation_id": "post_api_auth_signout",
-      "tag": "api",
-      "source_file": "internal/api/auth_recovery_cov_test.go",
-      "exact_docs": [
-        "docs/api-reference/overview.mdx",
-        "docs/guides/auth.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/auth_recovery_cov_test.go",
-        "internal/api/nextauth_cov_test.go",
-        "internal/api/nextauth_oauth_deep_cov_test.go",
-        "internal/api/nextauth_test.go",
-        "internal/api/signout_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/auth_recovery_cov_test.go",
-          "test_signals": [
-            "internal/api/auth_recovery_cov_test.go",
-            "internal/api/nextauth_cov_test.go",
-            "internal/api/nextauth_oauth_deep_cov_test.go",
-            "internal/api/nextauth_test.go",
-            "internal/api/signout_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/auth/token/refresh",
-      "operation_id": "post_api_auth_token_refresh",
-      "tag": "api",
-      "source_file": "internal/api/refresh_test.go",
-      "exact_docs": [
-        "docs/api-reference/auth.mdx",
-        "docs/api-reference/overview.mdx",
-        "docs/guides/auth.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/middleware_reason_test.go",
-        "internal/api/nextauth_oauth_deep_cov_test.go",
-        "internal/api/refresh_test.go"
-      ],
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/refresh_test.go",
-          "test_signals": [
-            "internal/api/middleware_reason_test.go",
-            "internal/api/nextauth_oauth_deep_cov_test.go",
-            "internal/api/refresh_test.go"
-          ]
-        }
-      }
-    },
     {
       "method": "GET",
       "path": "/api/health",
@@ -530,6 +215,7 @@
         "internal/api/backup_admin_cov_test.go",
         "internal/api/backup_admin_test.go",
         "internal/api/backup_extra_cov_test.go",
+        "internal/api/openapi_conformance_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
       "contract": {
@@ -549,6 +235,7 @@
             "internal/api/backup_admin_cov_test.go",
             "internal/api/backup_admin_test.go",
             "internal/api/backup_extra_cov_test.go",
+            "internal/api/openapi_conformance_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
         }
@@ -2826,12 +2513,12 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/agent_inbox_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
-        "internal/api/internal_credentials_cov_test.go",
         "…"
       ],
       "contract": {
@@ -2848,12 +2535,12 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/agent_inbox_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
-            "internal/api/internal_credentials_cov_test.go",
             "…"
           ]
         }
@@ -2888,12 +2575,12 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/agent_inbox_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
-        "internal/api/internal_credentials_cov_test.go",
         "…"
       ],
       "contract": {
@@ -2910,12 +2597,12 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/agent_inbox_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
-            "internal/api/internal_credentials_cov_test.go",
             "…"
           ]
         }
@@ -2950,12 +2637,12 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
         "internal/api/agent_inbox_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
-        "internal/api/internal_credentials_cov_test.go",
         "…"
       ],
       "contract": {
@@ -2972,12 +2659,12 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
             "internal/api/agent_inbox_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
-            "internal/api/internal_credentials_cov_test.go",
             "…"
           ]
         }
@@ -3018,7 +2705,7 @@
       "path": "/api/v1/agents/{agentId}/avatar",
       "operation_id": "delete_api_v1_agents_agentId_avatar",
       "tag": "agents",
-      "source_file": "internal/api/router_crews.go",
+      "source_file": "internal/api/openapi_conformance_test.go",
       "exact_docs": [
         "docs/api-reference/agents.mdx"
       ],
@@ -3026,6 +2713,9 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "internal/api/openapi_conformance_test.go"
+      ],
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3036,7 +2726,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_crews.go"
+          "source_file": "internal/api/openapi_conformance_test.go",
+          "test_signals": [
+            "internal/api/openapi_conformance_test.go"
+          ]
         }
       }
     },
@@ -3045,7 +2738,7 @@
       "path": "/api/v1/agents/{agentId}/avatar",
       "operation_id": "get_api_v1_agents_agentId_avatar",
       "tag": "agents",
-      "source_file": "internal/api/router_crews.go",
+      "source_file": "internal/api/openapi_conformance_test.go",
       "exact_docs": [
         "docs/api-reference/agents.mdx"
       ],
@@ -3053,6 +2746,9 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "internal/api/openapi_conformance_test.go"
+      ],
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3063,7 +2759,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_crews.go"
+          "source_file": "internal/api/openapi_conformance_test.go",
+          "test_signals": [
+            "internal/api/openapi_conformance_test.go"
+          ]
         }
       }
     },
@@ -3072,7 +2771,7 @@
       "path": "/api/v1/agents/{agentId}/avatar",
       "operation_id": "put_api_v1_agents_agentId_avatar",
       "tag": "agents",
-      "source_file": "internal/api/router_crews.go",
+      "source_file": "internal/api/openapi_conformance_test.go",
       "exact_docs": [
         "docs/api-reference/agents.mdx"
       ],
@@ -3080,6 +2779,9 @@
         "docs/api-reference/agents.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "internal/api/openapi_conformance_test.go"
+      ],
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3090,7 +2792,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_crews.go"
+          "source_file": "internal/api/openapi_conformance_test.go",
+          "test_signals": [
+            "internal/api/openapi_conformance_test.go"
+          ]
         }
       }
     },
@@ -4537,8 +4242,8 @@
         "cmd/crewship/cmd_credential_cov_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_open_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/audit_entity_name_test.go",
-        "internal/api/audit_sources_test.go",
         "…"
       ],
       "contract": {
@@ -4559,8 +4264,8 @@
             "cmd/crewship/cmd_credential_cov_test.go",
             "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
             "cmd/crewship/cmd_open_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/audit_entity_name_test.go",
-            "internal/api/audit_sources_test.go",
             "…"
           ]
         }
@@ -7319,13 +7024,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
         "internal/api/crew_policy_test.go",
         "internal/api/crew_provisioning_durable_test.go",
         "internal/api/crew_provisioning_progress_test.go",
-        "internal/api/crew_provisioning_test.go",
         "…"
       ],
       "contract": {
@@ -7341,13 +7046,13 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
             "internal/api/crew_policy_test.go",
             "internal/api/crew_provisioning_durable_test.go",
             "internal/api/crew_provisioning_progress_test.go",
-            "internal/api/crew_provisioning_test.go",
             "…"
           ]
         }
@@ -7396,13 +7101,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
         "internal/api/crew_policy_test.go",
         "internal/api/crew_provisioning_durable_test.go",
         "internal/api/crew_provisioning_progress_test.go",
-        "internal/api/crew_provisioning_test.go",
         "…"
       ],
       "contract": {
@@ -7418,13 +7123,13 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
             "internal/api/crew_policy_test.go",
             "internal/api/crew_provisioning_durable_test.go",
             "internal/api/crew_provisioning_progress_test.go",
-            "internal/api/crew_provisioning_test.go",
             "…"
           ]
         }
@@ -7473,13 +7178,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
         "internal/api/crew_policy_test.go",
         "internal/api/crew_provisioning_durable_test.go",
         "internal/api/crew_provisioning_progress_test.go",
-        "internal/api/crew_provisioning_test.go",
         "…"
       ],
       "contract": {
@@ -7495,13 +7200,13 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
             "internal/api/crew_policy_test.go",
             "internal/api/crew_provisioning_durable_test.go",
             "internal/api/crew_provisioning_progress_test.go",
-            "internal/api/crew_provisioning_test.go",
             "…"
           ]
         }
@@ -7550,13 +7255,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/gen-openapi/main_test.go",
         "internal/api/agent_persona_delete_crew_test.go",
         "internal/api/agents_restart_test.go",
         "internal/api/crew_container_status_test.go",
         "internal/api/crew_policy_test.go",
         "internal/api/crew_provisioning_durable_test.go",
         "internal/api/crew_provisioning_progress_test.go",
-        "internal/api/crew_provisioning_test.go",
         "…"
       ],
       "contract": {
@@ -7572,13 +7277,13 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/crewship/cmd_crew_avatar_test.go",
+            "cmd/gen-openapi/main_test.go",
             "internal/api/agent_persona_delete_crew_test.go",
             "internal/api/agents_restart_test.go",
             "internal/api/crew_container_status_test.go",
             "internal/api/crew_policy_test.go",
             "internal/api/crew_provisioning_durable_test.go",
             "internal/api/crew_provisioning_progress_test.go",
-            "internal/api/crew_provisioning_test.go",
             "…"
           ]
         }
@@ -11802,6 +11507,7 @@
         "cmd/crewship/cmd_watch_cov_test.go",
         "internal/api/journal_handler_cov_test.go",
         "internal/api/journal_handler_test.go",
+        "internal/api/openapi_conformance_test.go",
         "internal/cli/tui/app_cov_test.go"
       ],
       "contract": {
@@ -11820,6 +11526,7 @@
             "cmd/crewship/cmd_watch_cov_test.go",
             "internal/api/journal_handler_cov_test.go",
             "internal/api/journal_handler_test.go",
+            "internal/api/openapi_conformance_test.go",
             "internal/cli/tui/app_cov_test.go"
           ]
         }
@@ -12358,7 +12065,7 @@
       "path": "/api/v1/memory/export",
       "operation_id": "get_api_v1_memory_export",
       "tag": "memory",
-      "source_file": "internal/api/router_orchestration.go",
+      "source_file": "internal/api/openapi_conformance_test.go",
       "exact_docs": [
         "docs/api-reference/memory.mdx",
         "docs/guides/memory-portability.mdx"
@@ -12369,7 +12076,8 @@
       "status": "documented_exact",
       "test_signals": [
         "internal/api/memory_portability_symlink_unix_test.go",
-        "internal/api/memory_portability_test.go"
+        "internal/api/memory_portability_test.go",
+        "internal/api/openapi_conformance_test.go"
       ],
       "contract": {
         "structural": {
@@ -12381,10 +12089,11 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_orchestration.go",
+          "source_file": "internal/api/openapi_conformance_test.go",
           "test_signals": [
             "internal/api/memory_portability_symlink_unix_test.go",
-            "internal/api/memory_portability_test.go"
+            "internal/api/memory_portability_test.go",
+            "internal/api/openapi_conformance_test.go"
           ]
         }
       }
@@ -15724,12 +15433,13 @@
       "path": "/api/v1/system/setup-status",
       "operation_id": "get_api_v1_system_setup-status",
       "tag": "system",
-      "source_file": "internal/api/setup_status_test.go",
+      "source_file": "internal/api/openapi_conformance_test.go",
       "exact_docs": [
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
+        "internal/api/openapi_conformance_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/setup_status_test.go",
         "internal/api/unauth_reachability_test.go"
@@ -15744,8 +15454,9 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/setup_status_test.go",
+          "source_file": "internal/api/openapi_conformance_test.go",
           "test_signals": [
+            "internal/api/openapi_conformance_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/setup_status_test.go",
             "internal/api/unauth_reachability_test.go"
