@@ -42,10 +42,13 @@ type codeLinkItem struct {
 	LastSyncError *string `json:"last_sync_error"`
 }
 
-// codeLinksPath builds the sub-resource path for an issue.
-func codeLinksPath(crewID, identifier string) string {
-	return fmt.Sprintf("/api/v1/crews/%s/issues/%s/code-links", crewID, url.PathEscape(identifier))
-}
+// The four paths below are written out with fmt.Sprintf at each call site
+// rather than built by a shared helper. That is deliberate: the CLI↔route
+// contract test (cli_route_contract_test.go) renders a call's path argument
+// statically and only checks the ones that resolve to a literal starting with
+// "/api/", so a helper would render as an opaque "{}" and these commands would
+// be dropped from the check SILENTLY — passing without ever proving the routes
+// exist. The mild repetition buys real static verification.
 
 // resolveIssueForLinks does the auth + workspace + identifier dance every
 // command below shares.
@@ -74,7 +77,8 @@ var issueLinksCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		resp, err := client.Get(codeLinksPath(crewID, identifier))
+		resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/issues/%s/code-links",
+			crewID, url.PathEscape(identifier)))
 		if err != nil {
 			return err
 		}
@@ -139,7 +143,8 @@ Examples:
 		if err != nil {
 			return err
 		}
-		resp, err := client.Post(codeLinksPath(crewID, identifier),
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/code-links",
+			crewID, url.PathEscape(identifier)),
 			map[string]interface{}{"url": args[1]})
 		if err != nil {
 			return err
@@ -168,8 +173,8 @@ var issueRelinkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		resp, err := client.Post(
-			codeLinksPath(crewID, identifier)+"/"+url.PathEscape(args[1])+"/refresh", nil)
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/code-links/%s/refresh",
+			crewID, url.PathEscape(identifier), url.PathEscape(args[1])), nil)
 		if err != nil {
 			return err
 		}
@@ -196,7 +201,8 @@ var issueUnlinkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		resp, err := client.Delete(codeLinksPath(crewID, identifier) + "/" + url.PathEscape(args[1]))
+		resp, err := client.Delete(fmt.Sprintf("/api/v1/crews/%s/issues/%s/code-links/%s",
+			crewID, url.PathEscape(identifier), url.PathEscape(args[1])))
 		if err != nil {
 			return err
 		}
