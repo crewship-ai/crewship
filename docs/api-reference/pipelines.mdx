@@ -1,0 +1,125 @@
+---
+title: "Pipelines"
+description: "Workspace-scoped pipeline and run API."
+icon: "workflow"
+---
+
+Pipelines are persisted, versioned workflow definitions. All routes below use the
+`/api/v1` prefix. Workspace routes require a session/JWT and a workspace the
+caller belongs to; mutation role checks are listed below. Errors use the API's
+Problem Details shape (`error` is the human-readable message).
+
+## Route inventory
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `order` (`popularity`, `recent`, `name`), `limit`, `include_ephemeral=1`, `include_hidden=1` |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}` | member | Get definition |
+| DELETE | `/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete |
+| POST | `/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
+| POST | `/workspaces/{workspaceId}/pipelines/test_run` | member | Validate an unsaved definition and mint `save_token` |
+| POST | `/workspaces/{workspaceId}/pipelines/{slug}/run` | create | Execute a saved, active pipeline |
+| POST | `/workspaces/{workspaceId}/pipelines/{slug}/run_batch` | create | Execute multiple input items |
+| POST | `/workspaces/{workspaceId}/pipelines/{slug}/dry_run` | create | Static WouldExecute preview; no agent invocation |
+| POST | `/workspaces/{workspaceId}/pipelines/{slug}/step_run` | create | Execute one step against a fixture |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/runs` | member | Journal-backed run entries |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/run-records` | member | Typed run-record projection |
+| GET | `/workspaces/{workspaceId}/pipelines/runs/active` | member | In-flight runs on this replica |
+| POST | `/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel` | manage | Cancel a run |
+| GET | `/workspaces/{workspaceId}/pipeline-runs` | member | Workspace run list |
+| GET | `/workspaces/{workspaceId}/pipeline-runs/{runId}` | member | One run |
+| GET | `/workspaces/{workspaceId}/pipeline-runs/{runId}/tree` | member | Run tree |
+| GET | `/workspaces/{workspaceId}/pipeline-runs/{runId}/logs` | member | Run logs |
+| GET | `/workspaces/{workspaceId}/pipeline-runs/{runId}/files` | member | Files captured for the run |
+| GET | `/workspaces/{workspaceId}/pipeline-runs/{runId}/changes` | member | Git changes for the run |
+| PATCH | `/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata` | create | Replace run metadata |
+| POST | `/workspaces/{workspaceId}/pipeline-runs/{runId}/signal` | create | Deliver a signal to a waiting step |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/versions` | member | Version list |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}` | member | One immutable version |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M` | member | Unified definition diff |
+| POST | `/workspaces/{workspaceId}/pipelines/{slug}/rollback` | manage | Move head to a prior version |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/export` | member | Export portable JSON bundle |
+| POST | `/workspaces/{workspaceId}/pipelines/import` | create | Import a bundle; requires `author_crew_id` |
+| PUT | `/workspaces/{workspaceId}/pipelines/{slug}/tags` | create | Add tags with `{ "tags": ["..."] }` |
+| DELETE | `/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}` | create | Remove one tag |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/overrides` | member | List step overrides |
+| PUT | `/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Set `{ "prompt": "...", "model_override": "..." }` |
+| DELETE | `/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Delete an override |
+
+`create`, `manage`, and `delete` are the server's role-action gates (normally
+MANAGER+, OWNER/ADMIN, and OWNER/ADMIN respectively). A missing pipeline is
+`404`; malformed JSON or invalid input is `400`; insufficient role is `403`;
+an unavailable runner/store is `503`.
+
+## Run payload
+
+`run`, `dry_run`, and the deferred-run options accept:
+
+```json
+{
+  "inputs": {"customer_id": "cus_123"},
+  "tier_override": "trivial",
+  "triggered_via": "manual",
+  "triggered_by_id": "button-1",
+  "tags": ["production"],
+  "metadata": {"request_id": "req_1"},
+  "delay_seconds": 30,
+  "ttl_seconds": 3600,
+  "debounce_key": "customer:cus_123",
+  "debounce_window_seconds": 60,
+  "debounce_max_seconds": 300,
+  "priority": 10,
+  "idempotency_key_ttl_seconds": 86400
+}
+```
+
+`tier_override` is `trivial`, `fast`, `moderate`, or `smart`; an unknown value
+is treated as no override. `triggered_via` accepts `manual`, `schedule`,
+`webhook`, `call_pipeline`, or `issue`; other values fall back to `manual`.
+Omit it for the default `manual`. `run` returns the
+run result (including `run_id`, `status`, `output`, `step_outputs`,
+`duration_ms`, and `cost_usd`). An `Idempotency-Key` header deduplicates runs.
+
+`run_batch` takes `{ "items": [{ "inputs": {}, "tags": [], "metadata": {} }],
+"tags": [], "tier_override": "fast" }` and returns per-item `index`, `run_id`,
+`status`, or `error`.
+
+## Save and validation
+
+```json
+{
+  "slug": "nightly-report",
+  "name": "Nightly report",
+  "description": "...",
+  "definition": {"steps": []},
+  "author_crew_id": "crew_123",
+  "save_token": "...",
+  "change_summary": "..."
+}
+```
+
+`slug` and `definition` are required. Call `test_run` first with
+`{ "definition": {...}, "author_crew_id": "crew_123", "sample_inputs": {} }`;
+the successful response contains an HMAC-bound `save_token`. The legacy
+`last_test_run_at`/`last_test_run_passed` fields are not proof by themselves.
+`skip_test_gate` and `skip_governance_gate` are OWNER/ADMIN-only. Risky saves
+may have status `proposed` until approved; only `active` pipelines run.
+
+## Replay, failures, budgets, and state
+
+| Method | Path | Body / query |
+|---|---|---|
+| GET | `/workspaces/{workspaceId}/pipelines/runs/errors` | `limit` query; failure groups |
+| POST | `/workspaces/{workspaceId}/pipelines/runs/{runId}/replay` | `{ "pinned_version": 3 }` optional |
+| POST | `/workspaces/{workspaceId}/pipelines/runs/bulk_replay` | `{ "run_ids": [], "fingerprint": "...", "limit": 50 }`; `run_ids` or `fingerprint` required |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/budget` | Monthly spend report |
+| PATCH | `/workspaces/{workspaceId}/pipelines/{slug}/budget` | `{ "monthly_budget_usd": 25 }`; `0` clears, negative is `400` |
+| GET | `/workspaces/{workspaceId}/pipelines/budget-summary` | Workspace monthly roll-up |
+| GET | `/workspaces/{workspaceId}/pipelines/{slug}/state` | Optional `schedule_id`; absent means all buckets |
+| PUT | `/workspaces/{workspaceId}/pipelines/{slug}/state/{key}` | `{ "value": "...", "schedule_id": "..." }` |
+| DELETE | `/workspaces/{workspaceId}/pipelines/{slug}/state/{key}` | Optional `schedule_id`; missing key is `404` |
+| DELETE | `/workspaces/{workspaceId}/pipelines/{slug}/state` | Optional `schedule_id`; clears one bucket |
+
+Budget and state writes require `manage`; state keys are limited to 128
+characters. The budget response reports `month`, `spent_usd`, `has_budget`,
+`pct_used`, and `over_budget` where applicable.

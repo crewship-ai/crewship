@@ -1,0 +1,51 @@
+---
+title: "Waitpoints"
+description: "Human and external completion of paused routine steps."
+icon: "pause"
+---
+
+Waitpoints are durable approval/external-completion pauses created by a routine
+`wait` step. Tokens are opaque capabilities; do not expose them in logs.
+
+## List pending waitpoints
+
+```http
+GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints
+```
+
+Requires workspace authentication. The response is an array (maximum 200) of
+objects containing `token`, `pipeline_run_id`, `step_id`, `kind`, `prompt`,
+`invoking_crew_id`, `timeout_at`, `created_at`, and a ready-to-call
+`callback_url`. A store/database failure is `500` or `503` when the store is
+not wired.
+
+## Approve or deny from the inbox
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve
+Content-Type: application/json
+
+{"approved": true, "comment": "Reviewed"}
+```
+
+The body is optional; absent `approved` means `false` on this authenticated
+route. This is an `update`/MANAGER+ operation. A successful response is
+`{"ok":true,"approved":true|false}` and resumes the parked run for either
+decision. A missing/expired/already-decided token is `409`; malformed JSON is
+`400`; an unknown routine/workspace or unauthorized caller is `404`/`403`.
+
+## Complete from an external service
+
+```http
+POST /api/v1/waitpoint-tokens/{token}
+Content-Type: application/json
+
+{"approved": true, "payload": {"ticket": "INC-42"}}
+```
+
+This route has no JWT: the high-entropy token is the authentication. The body
+is optional and `approved` defaults to `true` (unlike the authenticated approve
+route). `payload` accepts any JSON and is stored for the resumed step. It
+returns `{"ok":true,"approved":true|false}`; an already-decided or expired
+token is `409`, malformed JSON is `400`, and an unavailable waitpoint store is
+`503`.

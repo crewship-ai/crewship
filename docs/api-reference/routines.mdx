@@ -1,0 +1,62 @@
+---
+title: "Routines"
+description: "Scheduling and governance operations for saved pipelines."
+icon: "repeat"
+---
+
+Routines are the product name for saved pipelines. The API paths intentionally
+use `pipelines`; this page documents routine-specific controls.
+
+## Governance
+
+| Method | Path | Auth | Result |
+|---|---|---|---|
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve` | `create` | `proposed` → `active` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject` | `create` | Soft-deletes the proposal |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable` | `manage` | `disabled`; cancels in-flight runs |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable` | `manage` | `disabled` → `active` |
+
+These endpoints take no required body and return the routine representation.
+Approval/rejection of a non-`proposed` routine is `409`; a missing routine is
+`404`; insufficient role is `403`. Only `active` routines can run.
+
+## Schedules
+
+| Method | Path | Auth |
+|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | `create` or `routine.create` capability |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | `create` |
+
+Create accepts `target_pipeline_slug` or `target_pipeline_id` and requires
+`cron_expr`:
+
+```json
+{
+  "name": "Every night",
+  "target_pipeline_slug": "nightly-report",
+  "target_pipeline_version": 4,
+  "cron_expr": "0 2 * * *",
+  "timezone": "Europe/Prague",
+  "inputs": {},
+  "enabled": true,
+  "catchup_policy": "once",
+  "max_consecutive_failures": 5,
+  "wake_pipeline_slug": "is-ready",
+  "wake_inputs": {},
+  "wake_fail_closed": true
+}
+```
+
+`catchup_policy` is `once`, `all`, or `skip`. A wake pipeline must be a
+different routine whose DSL declares `agentless: true`. Schedule PATCH is a
+whole-row save with absent fields retained; an explicitly empty wake reference
+clears it. Cron/timezone/target validation errors are `400`, an unknown schedule
+is `404`, and soft delete returns the deleted schedule representation.
+
+The schedule response includes `next_run_at`, `last_run_at`, `last_status`,
+`last_run_id`, `catchup_policy`, failure-breaker counters, and wake telemetry.
+The circuit breaker can disable a schedule after consecutive failures;
+`disabled_reason` is `circuit_breaker` when that happens.

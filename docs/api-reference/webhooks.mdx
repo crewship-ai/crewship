@@ -4,7 +4,9 @@ description: "Inbound webhook endpoint for triggering agent execution from exter
 icon: "zap"
 ---
 
-Crewship exposes a single inbound webhook that lets an external system (GitHub, Grafana, n8n, CI, …) trigger an agent run. The endpoint authenticates the request against the agent's per-agent webhook secret, enqueues the run asynchronously, and returns `202` immediately. Use the [monitoring endpoints](#monitoring-webhook-runs) or the `workspace` WebSocket channel to follow execution.
+Crewship exposes agent webhooks and pipeline-webhook triggers. Agent webhooks
+target one agent; pipeline webhooks target a saved routine. Both are asynchronous
+and return `202` after authentication and admission checks.
 
 <Note>
   This endpoint uses **webhook-secret authentication only** — not session or CLI token auth. Provide exactly one of `X-Signature` (preferred) or `X-Webhook-Secret` (deprecated).
@@ -212,3 +214,77 @@ The response contains the freshly minted `webhook_secret` exactly once — store
 <Note>
   The former internal endpoint `GET /api/v1/internal/agents/{agentId}/webhook-secret` was removed — the trigger endpoint validates signatures against the database directly, and the plaintext secret never crosses an IPC hop.
 </Note>
+
+---
+
+## Pipeline webhooks
+
+Pipeline-webhook administration is workspace-authenticated. Dispatch is public:
+the high-entropy token in the URL plus its HMAC signature are the credentials.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook metadata; never returns the signing secret |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook; returns the secret once |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | delete | Soft-delete; returns `204` |
+| POST | `/api/v1/webhooks/{token}` | token + HMAC | Fire the target routine asynchronously |
+
+Create accepts either `target_pipeline_slug` or `target_pipeline_id`:
+
+```json
+{
+  "name": "GitHub events",
+  "target_pipeline_slug": "process-event",
+  "target_pipeline_version": 3,
+  "signing_secret": "optional-client-secret",
+  "inputs_template": {"source": "github"},
+  "enabled": true,
+  "rate_limit_per_min": 120
+}
+```
+
+`name` defaults to the target slug. If `signing_secret` is omitted, the server
+generates one. The `201` response includes `signing_secret` exactly once;
+list responses include `signing_secret_set`, not the secret. The response also
+contains `token`, target identifiers/version, `inputs_template`, `enabled`,
+rate-limit and last-fire telemetry. A zero or negative configured rate uses the
+server floor of 600 fires/minute. Creation requires encrypted credential storage;
+misconfiguration is `500`. Invalid target/body is `400`, and insufficient role
+is `403`.
+
+### Pipeline dispatch
+
+```http
+POST /api/v1/webhooks/{token}
+Content-Type: application/json
+X-Crewship-Signature: <hex HMAC-SHA256(body, signing_secret)>
+```
+
+The signature is required. With `X-Crewship-Timestamp: <unix-seconds>`, sign
+`<timestamp>.<raw-body>`; the timestamp must be fresh. The body may be any JSON
+(or raw bytes): the routine receives request-derived `event`, `raw`, and
+`headers` inputs. `inputs_template` may add keys but cannot override those
+three fields. `Idempotency-Key` (or `X-Crewship-Event-ID`) can select the
+deduplication identity; identical signed deliveries also deduplicate.
+
+Success returns:
+
+```json
+{"run_id":"run_123","status":"PENDING","deduped":false}
+```
+
+A duplicate returns `202` with `status: "DEDUPED"`, the original `run_id`, and
+`deduped: true`. The run may later be `COMPLETED`, `FAILED`, `CANCELLED`, or
+`WAITING`; poll `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}`.
+
+| Status | Meaning |
+|---|---|
+| `400` | Body too large/unreadable |
+| `401` | Missing or invalid HMAC/timestamp |
+| `404` | Unknown, disabled, or deleted token (deliberately indistinguishable) |
+| `409` | Target routine is not active, or its pinned version is unavailable |
+| `429` | Per-token/concurrency limit; includes `Retry-After` |
+| `503` | Dispatch dependencies are not wired |
+
+Dispatch does not accept session/JWT authentication, and it never falls back to
+an unsigned request.
