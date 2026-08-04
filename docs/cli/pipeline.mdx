@@ -23,3 +23,10 @@ the historical `pipeline` name (for example,
 
 See [Routine Commands](/cli/routine) for the complete subcommand, flag,
 output, and API reference.
+
+For run scripts, the important receipts are `COMPLETED`, `FAILED`,
+`CANCELLED`, `WAITING`, `DEDUPED`, and `SCHEDULED`. `WAITING` is a healthy
+approval pause; `SCHEDULED` is a `202` deferred receipt with a `pending_id`, not
+a run id. Use `crewship pipeline pending list|cancel` and
+`crewship pipeline budget get|set|summary` through the alias documented on the
+routine page.

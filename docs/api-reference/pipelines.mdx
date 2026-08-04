@@ -32,8 +32,8 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs` | member | Run logs |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/files` | member | Files captured for the run |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes` | member | Git changes for the run |
-| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata` | create | Replace run metadata |
-| POST | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal` | create | Deliver a signal to a waiting step |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata` | update | Replace run metadata |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal` | update | Deliver a signal to a waiting step |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions` | member | Version list |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}` | member | One immutable version |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M` | member | Unified definition diff |
@@ -47,6 +47,11 @@ Problem Details shape (`error` is the human-readable message).
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Delete an override |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints` | member | List pending durable waitpoints |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve` | create | Approve a pending waitpoint |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/pending` | member | List deferred triggers not yet fired |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel` | update | Cancel a deferred trigger |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | member | Monthly spend report |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | manage | Set or clear the monthly spend cap |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/budget-summary` | member | Workspace monthly budget roll-up |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | List cron schedules (see [Routines](/api-reference/routines)) |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook trigger (see [Routines](/api-reference/routines)) |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook triggers |
@@ -120,6 +125,31 @@ run result (including `run_id`, `status`, `output`, `step_outputs`,
 `run_batch` takes `{ "items": [{ "inputs": {}, "tags": [], "metadata": {} }],
 "tags": [], "tier_override": "fast" }` and returns per-item `index`, `run_id`,
 `status`, or `error`.
+
+### Run statuses and responses
+
+`POST .../pipelines/{slug}/run` requires `member` plus `create` (normally
+MANAGER+), and returns `200 OK` with a run result for an immediate execution.
+The result includes `run_id`, `status`, `output`, `step_outputs`,
+`duration_ms`, and `cost_usd` (plus failure/wait fields when applicable).
+The run status values are:
+
+| Status | Meaning |
+|---|---|
+| `COMPLETED` | The routine finished successfully. |
+| `FAILED` | Execution or validation failed; inspect `error_message` and `failed_at_step`. |
+| `CANCELLED` | The run was cancelled by an operator. |
+| `WAITING` | The run is parked at a human approval waitpoint; this is not a failure. |
+| `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
+| `SCHEDULED` | A delayed or debounced trigger was accepted; no run id exists until dispatch. |
+
+`SCHEDULED` responses use `202 Accepted` and contain `pending_id`, RFC3339Nano
+`fire_at`, `priority`, and `coalesced`. `WAITING` responses also contain the
+current step and waitpoint token. `DEDUPED` may still refer to an in-flight
+original. `--wait`/polling follows `WAITING` and `DEDUPED` until the persisted
+run reaches a terminal status. Persisted run records additionally use
+`queued`, `running`, `completed`, `failed`, `cancelled`, `interrupted`,
+`dry_run`, and `waiting` (lowercase); `interrupted` marks boot recovery.
 
 ## Save and validation
 

@@ -317,6 +317,13 @@ Deleting a crew removes its agents and runtime context. `--yes` bypasses the pro
 
 Show live crew status including agents, recent assignments, and open escalations.
 
+Requires login and workspace context. The command resolves the crew by slug or
+ID, then reads `GET /api/v1/crews/{crewId}`,
+`GET /api/v1/agents?crew_id={crewId}`,
+`GET /api/v1/crews/{crewId}/assignments`, and
+`GET /api/v1/crews/{crewId}/escalations`. A missing crew is `404`; each list is
+workspace-scoped and a failed dependency is reported as a command error.
+
 ```bash
 crewship crew status <slug-or-id>
 ```
@@ -325,6 +332,11 @@ Displays a compound view with three sections:
 - **AGENTS** -- all agents with their slug, role, and status
 - **ASSIGNMENTS (last 5)** -- recent task assignments with status colors
 - **ESCALATIONS (open)** -- pending or open escalations
+
+Agent and assignment statuses are printed as returned by the API. Open
+escalations are those with status `PENDING` or `OPEN`; closed escalations are
+not shown in the open section. The command is a read-only member operation and
+does not resolve assignments or escalations.
 
 ---
 

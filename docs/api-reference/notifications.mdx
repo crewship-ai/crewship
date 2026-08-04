@@ -10,6 +10,11 @@ Per-user activity feed. Other handlers create rows by calling the internal `Crea
   All endpoints below require an authenticated session **and** workspace context — the routes are wrapped in the `RequireWorkspace` middleware, so a `workspace_id` (query param, `{workspaceId}` path value, or `X-Workspace-ID` header) must be present and the caller must be a member, or the request fails at the middleware (`400` when absent, `403` when not a member). Data scoping is nonetheless strictly per-user: every query filters on `user_id = <session user>`, and a row belonging to another user is indistinguishable from one that doesn't exist (`404`).
 </Note>
 
+Every endpoint also returns `401 Unauthorized` when there is no authenticated
+user. Successful responses are `200 OK` except delete, which is `204 No
+Content`; database/query failures are `500`. These endpoints do not accept a
+request body.
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |
@@ -42,10 +47,13 @@ Paginated list, newest first.
 | Query param | Type | Default | Notes |
 |---|---|---|---|
 | `limit` | int | `50` | Capped at `100` server-side. |
-| `offset` | int | `0` | |
+| `offset` | int | `0` | Negative values become `0`. |
 | `read` | `"true"` \| `"false"` | (unset = all) | Filter by read state. |
 
 Returns `200` with a JSON array (possibly empty — never `null`).
+Unparseable or non-positive `limit` values use the default; values above 100
+are clamped to 100. Values other than `true` or `false` for `read` are
+ignored and return both read states.
 
 ```bash
 curl -H "Cookie: <session>" \
@@ -76,6 +84,7 @@ Unread count, cheap. Used to drive the navbar badge.
 ```json
 { "unread": 7 }
 ```
+Returns `200 OK`; the count is scoped to the authenticated user.
 
 ## `POST /api/v1/notifications/{notificationId}/read`
 
@@ -84,6 +93,7 @@ Mark a single notification read. Idempotent — re-reading an already-read notif
 ```json
 { "status": "ok" }
 ```
+Returns `200 OK` and is idempotent for an already-read notification.
 
 ## `POST /api/v1/notifications/read-all`
 
@@ -92,6 +102,7 @@ Mark every currently-unread notification read for the calling user. Returns the 
 ```json
 { "updated": 23 }
 ```
+Returns `200 OK`; `updated` may be zero.
 
 ## `DELETE /api/v1/notifications/{notificationId}`
 

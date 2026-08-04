@@ -179,7 +179,13 @@ crewship routine run eval-extract-emails --tier-override smart
 | `--debounce-window` | Debounce window in seconds (default 30) — fires this long after the last trigger |
 | `--debounce-max` | Max debounce extension in seconds (a continuously-retriggered key still fires by then) |
 
-Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
+Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`. Immediate runs
+use `COMPLETED`, `FAILED`, or `CANCELLED`; `WAITING` means the run is parked at
+an approval waitpoint and is not a failure; `DEDUPED` means the idempotency key
+returned the original run. A delayed or debounced invocation returns
+`SCHEDULED` with `pending_id`, `fire_at`, `priority`, and `coalesced` instead
+of a run id. The API uses `200` for immediate results and `202` for this
+deferred receipt.
 
 <Note>
 If the routine hits a `kind: approval` gate, `run` terminates with **`status: WAITING`** (exit 0, not a failure): it prints `paused at approval step: <id>` plus the waitpoint token and the `approve`/`reject` command hints, then releases its execution slot. Resume it with [`crewship routine waitpoints approve|reject <token>`](#crewship-routine-waitpoints). See [HITL waitpoints](/guides/routines#hitl-waitpoints).
@@ -418,6 +424,10 @@ Per-routine monthly spend budget (#1422 item 3) — a cap you set out-of-band fr
 
 ### `routine budget get <slug>`
 
+Requires `crewship login` and a workspace context; the API is a member-scoped
+read. `--format json` returns the response fields exactly, including `month`,
+`spent_usd`, and (when a positive cap exists) `pct_used` and `over_budget`.
+
 ```bash
 crewship routine budget get my-routine
 ```
@@ -436,6 +446,8 @@ crewship routine budget set my-routine --amount 0    # clears the budget
 | `--amount` | ✓ | Monthly cap in USD. `0` clears an existing budget. Negative values are rejected. |
 
 Setting a budget never touches the DSL and never bumps the routine's version history — it's independent of `routine save`/`rollback`.
+The mutation requires the OWNER/ADMIN `manage` capability and returns `200 OK`
+with the same budget object as `budget get`.
 
 ### `routine budget summary`
 
@@ -444,6 +456,9 @@ crewship routine budget summary
 ```
 
 Workspace-wide roll-up: every routine with a budget set **or** spend this month (a routine with neither is excluded — a fresh workspace can have dozens of zero-cost deterministic routines, and listing all of them would be noise). Table columns: `ROUTINE BUDGET SPENT PCT STATUS` (`STATUS` shows `OVER` when spend exceeds the cap), plus a workspace total line. `--format json` returns `{month, routines: [...], total_budget_usd, total_spent_usd}`.
+This is a member-scoped read and returns `200 OK`; each routine row includes
+`slug`, `monthly_budget_usd`, `spent_usd`, and optional `pct_used`/
+`over_budget`.
 
 ---
 
@@ -1111,7 +1126,7 @@ List or cancel deferred routine triggers — the parked dispatches created by `r
 crewship routine pending list
 ```
 
-Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending`. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT. Nothing pending prints `No deferred triggers pending.`
+Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped), which returns at most 100 not-yet-fired rows with `id`, `pipeline_slug`, optional `debounce_key`, `priority`, and RFC3339Nano `fire_at`. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT. Nothing pending prints `No deferred triggers pending.`
 
 ### `pending cancel <pending_id>`
 
@@ -1119,7 +1134,11 @@ Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending`. **Output columns:** P
 crewship routine pending cancel pend_abc123
 ```
 
-Cancels a trigger before it fires. Backed by `POST /api/v1/workspaces/{ws}/pipelines/pending/{pending_id}/cancel`.
+Cancels a trigger before it fires. Requires the `update` capability (MANAGER+).
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/pending/{pending_id}/cancel`,
+which returns `200 OK` with `{ "ok": true, "cancelled": "<pending_id>" }`.
+Missing, expired, already-fired, or already-cancelled items return `404`;
+missing database wiring returns `503`.
 
 ---
 
