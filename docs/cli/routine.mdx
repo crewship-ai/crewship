@@ -367,6 +367,32 @@ For a matrix sweep across many routines/tiers or a saved regression baseline, se
 
 ---
 
+## `crewship routine appearance`
+
+A routine's icon and colour — how it renders in lists. A workspace ends up with dozens of routines that look identical; an icon makes one findable at a glance, using the same set crews and projects use.
+
+Presentation only. It never touches the definition, so setting an icon does **not** create a routine version, does **not** re-run the governance risk check, and does **not** invalidate a save token. Leave a routine unset and the UI derives a stable icon from its slug, so every routine still looks different without anyone choosing.
+
+### `routine appearance get <slug>`
+
+```
+crewship routine appearance get monthly-accounting-pack
+```
+
+### `routine appearance set <slug>`
+
+```
+crewship routine appearance set monthly-accounting-pack --icon receipt --color amber
+crewship routine appearance set monthly-accounting-pack --color cyan     # icon untouched
+crewship routine appearance set monthly-accounting-pack --clear          # back to derived
+```
+
+Only the flags you pass are sent: an absent field is left alone, so changing a colour never wipes an icon you did not mention. `--clear` removes both.
+
+`--color` takes a palette id: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`.
+
+API: `PATCH /pipelines/{slug}/appearance`.
+
 ## `crewship routine budget`
 
 Per-routine monthly spend budget (#1422 item 3) — a cap you set out-of-band from the DSL, compared against actual `pipeline_runs.cost_usd` for the current calendar month. Distinct from DSL `max_cost_usd` (a per-RUN hard gate the executor enforces mid-run); this is a budget-**vs-actual view**, not an enforcement gate — going over doesn't block the next run.

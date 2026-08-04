@@ -52,8 +52,10 @@ import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { CrewIcon } from "@/components/ui/crew-icon"
-import { routineIcon, routineColor } from "@/lib/routine-identity"
+import { CrewIconPopover } from "@/components/crew-icon-popover"
+import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
+import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "sonner"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineEditorTab } from "./routine-editor-tab"
@@ -116,6 +118,42 @@ export function RoutineCardDetail({
   // reimplementation of it.
   const [manageRuns, setManageRuns] = React.useState(false)
 
+  // Stored if chosen, derived from the slug if not — resolved in one
+  // place so the header and the explorer row can never disagree.
+  const [icon, setIcon] = React.useState(() => resolveRoutineIcon(routine))
+  const [color, setColor] = React.useState(() => resolveRoutineColor(routine))
+  React.useEffect(() => {
+    setIcon(resolveRoutineIcon(routine))
+    setColor(resolveRoutineColor(routine))
+  }, [routine])
+
+  const saveAppearance = React.useCallback(
+    async (next: { icon?: string; color?: string }) => {
+      const prev = { icon, color }
+      if (next.icon !== undefined) setIcon(next.icon)
+      if (next.color !== undefined) setColor(next.color)
+      try {
+        const res = await apiFetch(
+          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(routine.slug)}/appearance`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(next),
+          },
+        )
+        if (!res.ok) throw new Error(String(res.status))
+        onChanged()
+      } catch {
+        // Put it back. A picker that silently keeps a colour the server
+        // rejected is the same lie as a save button that saves nothing.
+        setIcon(prev.icon)
+        setColor(prev.color)
+        toast.error("Could not save the icon")
+      }
+    },
+    [icon, color, routine.slug, workspaceId, onChanged],
+  )
+
   const { records } = usePipelineRunRecords(workspaceId, routine.slug)
   const { schedules } = usePipelineSchedules(workspaceId)
 
@@ -159,7 +197,18 @@ export function RoutineCardDetail({
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
-                <CrewIcon icon={routineIcon(routine.slug)} color={routineColor(routine.slug)} size="lg" />
+                {/* A real picker now: PATCH /appearance writes two
+                    columns and leaves the definition alone, so choosing
+                    an icon does not mint a routine version. Optimistic,
+                    because a colour that lags a round-trip feels
+                    broken — and it reverts loudly if the write fails. */}
+                <CrewIconPopover
+                  icon={icon}
+                  color={color}
+                  size="lg"
+                  onIconChange={(next) => saveAppearance({ icon: next })}
+                  onColorChange={(next) => saveAppearance({ color: next })}
+                />
                 <div className="min-w-0">
                   <h1 className="truncate text-lg font-semibold tracking-tight">
                     {routine.name || routine.slug}

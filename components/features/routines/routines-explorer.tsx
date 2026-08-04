@@ -26,7 +26,7 @@ import {
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { routineIcon, routineColor } from "@/lib/routine-identity"
+import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { useTick } from "@/hooks/use-tick"
@@ -377,8 +377,8 @@ export function RoutinesExplorer({
                             worse than showing none. */}
                         <span className="relative shrink-0">
                           <CrewIcon
-                            icon={routineIcon(routine.slug)}
-                            color={routineColor(routine.slug)}
+                            icon={resolveRoutineIcon(routine)}
+                            color={resolveRoutineColor(routine)}
                             size="sm"
                             className="!h-5 !w-5 !rounded-md"
                           />

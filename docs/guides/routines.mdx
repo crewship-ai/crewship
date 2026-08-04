@@ -35,6 +35,8 @@ Opening a routine gives you one scrolling surface of cards, not a tab bar:
 | **Triggers** | Cron schedules and inbound webhooks. **Manage** reveals the full editors. |
 | **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves. |
 | **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
+
+A routine also carries an **icon and colour**, picked from the header and stored in columns of their own — so recolouring never touches the definition, never mints a version, and never invalidates a save token. Unset routines derive a stable icon from their slug, so a list of thirty is legible before anyone chooses anything. CLI: [`crewship routine appearance`](/cli/routine#crewship-routine-appearance).
 | **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
 
 Wait points are not here: they belong to a *run*, and [Activity](/guides/activity) is where the run is.

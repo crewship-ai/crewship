@@ -22,6 +22,8 @@ export interface Pipeline {
   invocation_count: number
   last_invoked_at?: string
   last_invocation_status?: string
+  icon?: string
+  color?: string
   // Lifecycle status: "active" (normal/runnable), "proposed" (risky /
   // agent-authored, awaiting MANAGER+ approval), "disabled" (killed by
   // OWNER/ADMIN). Absent on older payloads → treated as "active".

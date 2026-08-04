@@ -331,7 +331,14 @@ type pipelineResponse struct {
 	// Status is the governance lifecycle state: active | proposed | disabled.
 	// Risky agent/user-authored routines land 'proposed' and need MANAGER+
 	// approval; an OWNER/ADMIN can 'disabled' a live routine (airbag).
-	Status    string `json:"status"`
+	Status string `json:"status"`
+
+	// Icon and Color are presentation — a crew-icon name and a
+	// gradient-palette id. Omitted when unset so the client can tell
+	// "not chosen" from "chosen as empty" and fall back to deriving one
+	// from the slug.
+	Icon      string `json:"icon,omitempty"`
+	Color     string `json:"color,omitempty"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 	// LinkedIssueCount is the number of issues bound to this routine
@@ -372,6 +379,8 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 		WorkspaceVisible:     p.WorkspaceVisible,
 		InvocationCount:      p.InvocationCount,
 		LastInvocationStatus: p.LastInvocationStatus,
+		Icon:                 p.Icon,
+		Color:                p.Color,
 		AuthorCrewID:         p.AuthorCrewID,
 		AuthorAgentID:        p.AuthorAgentID,
 		AuthorUserID:         p.AuthorUserID,

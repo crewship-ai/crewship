@@ -72,6 +72,12 @@ export interface RoutineDetail {
   // has_http / has_code flags). Only the detail endpoint returns it; absent
   // on list responses. Drives the flow diagram + "What it touches" panel.
   manifest?: RoutineManifest
+  // Presentation, stored in columns of its own so recolouring a routine
+  // never touches definition_json — which is hashed, versioned, and what
+  // a save_token binds to. Absent = unset; the UI derives a stable icon
+  // from the slug instead.
+  icon?: string
+  color?: string
 }
 
 interface Props {

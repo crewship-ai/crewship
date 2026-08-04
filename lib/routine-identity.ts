@@ -68,3 +68,19 @@ export function routineColor(slug: string): string {
   // a row identifiable, not either half alone.
   return COLOR_POOL[(hashSlug(slug) >>> 3) % COLOR_POOL.length]
 }
+
+/**
+ * The icon a routine should render with: stored if chosen, derived if not.
+ *
+ * Every surface goes through this rather than picking one or the other,
+ * because the failure mode is subtle — a list reading the stored value
+ * and a header reading the derived one shows two different icons for
+ * one routine, which is worse than showing none.
+ */
+export function resolveRoutineIcon(routine: { slug: string; icon?: string | null }): string {
+  return routine.icon?.trim() || routineIcon(routine.slug)
+}
+
+export function resolveRoutineColor(routine: { slug: string; color?: string | null }): string {
+  return routine.color?.trim() || routineColor(routine.slug)
+}
