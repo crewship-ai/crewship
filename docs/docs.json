@@ -432,6 +432,8 @@
               "api-reference/waitpoints",
               "api-reference/missions",
               "api-reference/issues",
+              "api-reference/projects",
+              "api-reference/labels",
               "api-reference/milestones",
               "api-reference/recurring-issues",
               "api-reference/saved-views",

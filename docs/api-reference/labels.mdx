@@ -1,0 +1,77 @@
+---
+title: "Labels"
+description: "Manage workspace-scoped issue labels."
+icon: "tag"
+---
+
+Labels are workspace-scoped metadata attached to issues. Every endpoint requires
+an authenticated session and workspace context. Read routes are available to
+any workspace member; create requires the `create` role and update/delete
+require the `manage` role.
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/labels` | List labels in the current workspace |
+| POST | `/api/v1/labels` | Create a label |
+| PATCH | `/api/v1/labels/{labelId}` | Update a label |
+| DELETE | `/api/v1/labels/{labelId}` | Delete a label |
+
+## Label shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | CUID label identifier. |
+| `name` | string | Label name. Required on create. |
+| `color` | string | Color value. Required on create. The CLI validates hex colors such as `#3B82F6`; the API stores the supplied string. |
+| `label_group` | string \| null | Optional grouping value. |
+
+### List labels
+
+```
+GET /api/v1/labels
+```
+
+Returns a JSON array ordered by `name ASC`. Labels from other workspaces are
+not returned.
+
+### Create a label
+
+```
+POST /api/v1/labels
+```
+
+```json
+{
+  "name": "Bug",
+  "color": "#EF4444",
+  "label_group": "type"
+}
+```
+
+`name` and `color` are required; `label_group` is optional. Returns `201
+Created` with the label shape. Invalid JSON or a missing required field returns
+`400`; insufficient role returns `403`.
+
+### Update a label
+
+```
+PATCH /api/v1/labels/{labelId}
+```
+
+All fields are optional, but at least one of `name`, `color`, or `label_group`
+must be supplied. Returns `200 OK` with the updated label. An empty patch
+returns `400`; a label outside the current workspace returns `404`.
+
+### Delete a label
+
+```
+DELETE /api/v1/labels/{labelId}
+```
+
+Returns `204 No Content`. Deleting an unknown or cross-workspace label returns
+`404`.
+
+See also [Issues](/api-reference/issues), which exposes label assignment on
+issue mutations.
