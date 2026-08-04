@@ -53774,7 +53774,40 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "created_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "description": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "key": {
+                        "type": "string"
+                      },
+                      "override_enabled": {
+                        "nullable": true,
+                        "type": "boolean"
+                      },
+                      "percentage": {
+                        "type": "integer"
+                      },
+                      "updated_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -53892,6 +53925,21 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "description": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "percentage": {
+                    "type": "integer"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -53902,6 +53950,36 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "override_enabled": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "percentage": {
+                      "type": "integer"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -53912,6 +53990,36 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "override_enabled": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "percentage": {
+                      "type": "integer"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -54241,6 +54349,18 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "description": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "percentage": {
+                    "type": "integer"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -54251,6 +54371,36 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "override_enabled": {
+                      "nullable": true,
+                      "type": "boolean"
+                    },
+                    "percentage": {
+                      "type": "integer"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -54580,6 +54730,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -54590,6 +54745,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -62046,6 +62209,72 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "entries": {
+                      "items": {
+                        "properties": {
+                          "actor_id": {
+                            "type": "string"
+                          },
+                          "actor_type": {
+                            "type": "string"
+                          },
+                          "agent_id": {
+                            "type": "string"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "entry_type": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "mission_id": {
+                            "type": "string"
+                          },
+                          "payload": {
+                            "additionalProperties": true,
+                            "type": "object"
+                          },
+                          "priority": {
+                            "type": "string"
+                          },
+                          "refs": {
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "severity": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "trace_id": {
+                            "type": "string"
+                          },
+                          "ts": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "next_cursor": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -62224,6 +62453,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -62386,6 +62620,79 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "agents": {
+                      "items": {
+                        "properties": {
+                          "avatar_seed": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "avatar_style": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "crew_id": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "crews": {
+                      "items": {
+                        "properties": {
+                          "color": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "icon": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "missions": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -62564,6 +62871,103 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "by_agent": {
+                      "items": {
+                        "properties": {
+                          "agent_id": {
+                            "type": "string"
+                          },
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "by_routine": {
+                      "items": {
+                        "properties": {
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "pipeline_id": {
+                            "type": "string"
+                          },
+                          "pipeline_slug": {
+                            "type": "string"
+                          },
+                          "run_count": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "top_routines": {
+                      "items": {
+                        "properties": {
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "top_runs": {
+                      "items": {
+                        "properties": {
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "total_cost_usd": {
+                      "type": "number"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "window": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -62734,8 +63138,59 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "format": "binary",
-                  "type": "string"
+                  "properties": {
+                    "actor_id": {
+                      "type": "string"
+                    },
+                    "actor_type": {
+                      "type": "string"
+                    },
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "entry_type": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "payload": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "priority": {
+                      "type": "string"
+                    },
+                    "refs": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "trace_id": {
+                      "type": "string"
+                    },
+                    "ts": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               }
             },
@@ -62905,6 +63360,58 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "actor_id": {
+                      "type": "string"
+                    },
+                    "actor_type": {
+                      "type": "string"
+                    },
+                    "agent_id": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "entry_type": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "payload": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "priority": {
+                      "type": "string"
+                    },
+                    "refs": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "trace_id": {
+                      "type": "string"
+                    },
+                    "ts": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -63095,6 +63602,14 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "priority": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -63105,6 +63620,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -64440,7 +64960,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "cells": {
+                      "items": {
+                        "properties": {
+                          "category": {
+                            "type": "string"
+                          },
+                          "channel_id": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "off",
+                              "immediate"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -64589,7 +65131,29 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
+                "properties": {
+                  "cells": {
+                    "items": {
+                      "properties": {
+                        "category": {
+                          "type": "string"
+                        },
+                        "channel_id": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "off",
+                            "immediate"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -64600,7 +65164,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -66522,6 +67090,66 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "bucket": {
+                      "enum": [
+                        "15m",
+                        "1h",
+                        "1d"
+                      ],
+                      "type": "string"
+                    },
+                    "buckets": {
+                      "items": {
+                        "properties": {
+                          "series": {
+                            "additionalProperties": {
+                              "type": "number"
+                            },
+                            "type": "object"
+                          },
+                          "ts": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "group_by": {
+                      "enum": [
+                        "crew",
+                        "model",
+                        "status",
+                        "none"
+                      ],
+                      "type": "string"
+                    },
+                    "metric": {
+                      "enum": [
+                        "issues_closed",
+                        "cost_usd",
+                        "runs_count",
+                        "active_missions"
+                      ],
+                      "type": "string"
+                    },
+                    "series_labels": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "window": {
+                      "enum": [
+                        "24h",
+                        "7d",
+                        "30d"
+                      ],
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -66993,6 +67621,35 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "active_missions": {
+                      "type": "integer"
+                    },
+                    "avg_completion_time_ms": {
+                      "type": "integer"
+                    },
+                    "completed_24h": {
+                      "type": "integer"
+                    },
+                    "failed_24h": {
+                      "type": "integer"
+                    },
+                    "tasks_completed_24h": {
+                      "type": "integer"
+                    },
+                    "tasks_failed_24h": {
+                      "type": "integer"
+                    },
+                    "total_cost_24h": {
+                      "type": "number"
+                    },
+                    "total_missions": {
+                      "type": "integer"
+                    },
+                    "total_tokens_24h": {
+                      "type": "integer"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -67837,11 +68494,66 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "properties": {
+                    "channels": {
+                      "items": {
+                        "properties": {
+                          "categories": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "created_by": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "events": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "min_priority": {
+                            "type": "string"
+                          },
+                          "owner_user_id": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -67989,7 +68701,50 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
+                "properties": {
+                  "categories": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "fields": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "min_priority": {
+                    "type": "string"
+                  },
+                  "personal": {
+                    "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "string"
+                  },
+                  "shoutrrr_url": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -68000,7 +68755,60 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "categories": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "events": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "min_priority": {
+                      "type": "string"
+                    },
+                    "owner_user_id": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "secret": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -68011,7 +68819,60 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "categories": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "events": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "min_priority": {
+                      "type": "string"
+                    },
+                    "owner_user_id": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    },
+                    "secret": {
+                      "type": "string"
+                    },
+                    "to": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -68162,6 +69023,32 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "fields": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "string"
+                  },
+                  "shoutrrr_url": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -68172,6 +69059,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -68363,6 +69255,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -68551,6 +69448,26 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "categories": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "events": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "min_priority": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -68561,6 +69478,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "updated": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -69268,6 +70190,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "channel_id": {
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -69522,11 +70452,65 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "properties": {
+                    "deliveries": {
+                      "items": {
+                        "properties": {
+                          "attempts": {
+                            "type": "integer"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "channel_id": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "dedup_key": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "sent_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "source_id": {
+                            "type": "string"
+                          },
+                          "source_kind": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "user_id": {
+                            "type": "string"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -69688,11 +70672,74 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "properties": {
+                    "categories": {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "providers": {
+                      "items": {
+                        "properties": {
+                          "blurb": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "fields": {
+                            "items": {
+                              "properties": {
+                                "help": {
+                                  "type": "string"
+                                },
+                                "help_url": {
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "placeholder": {
+                                  "type": "string"
+                                },
+                                "required": {
+                                  "type": "boolean"
+                                },
+                                "secret": {
+                                  "type": "boolean"
+                                },
+                                "type": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "scheme": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -69852,6 +70899,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -69862,6 +70914,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "provider": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -70231,11 +71291,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                  "properties": {
+                    "templates": {
+                      "items": {
+                        "properties": {
+                          "body": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "channel_id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
                   },
-                  "type": "array"
+                  "type": "object"
                 }
               }
             },
@@ -70383,6 +71461,20 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "channel_id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -70393,6 +71485,20 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "body": {
+                      "type": "string"
+                    },
+                    "category": {
+                      "type": "string"
+                    },
+                    "channel_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -70579,6 +71685,7 @@
                         "type": "string"
                       },
                       "created_at": {
+                        "format": "date-time",
                         "type": "string"
                       },
                       "entity_id": {
@@ -72898,6 +74005,34 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "agent_id": {
+                            "type": "string"
+                          },
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "input_tokens": {
+                            "type": "integer"
+                          },
+                          "output_tokens": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73090,6 +74225,39 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "input_tokens": {
+                            "type": "integer"
+                          },
+                          "output_tokens": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "since": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "until": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73260,6 +74428,39 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "row": {
+                      "properties": {
+                        "call_count": {
+                          "type": "integer"
+                        },
+                        "cost_usd": {
+                          "type": "number"
+                        },
+                        "first_ts": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "input_tokens": {
+                          "type": "integer"
+                        },
+                        "last_ts": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "mission_id": {
+                          "type": "string"
+                        },
+                        "output_tokens": {
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73452,6 +74653,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "input_tokens": {
+                            "type": "integer"
+                          },
+                          "last_ts": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "output_tokens": {
+                            "type": "integer"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "subscription_plan": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "since": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "until": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73622,6 +74860,35 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "call_count": {
+                            "type": "integer"
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          },
+                          "scope_id": {
+                            "type": "string"
+                          },
+                          "scope_kind": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "since": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -73954,6 +75221,36 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "rows": {
+                      "items": {
+                        "properties": {
+                          "agent_id": {
+                            "type": "string"
+                          },
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "details": {
+                            "additionalProperties": true,
+                            "type": "object"
+                          },
+                          "since": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -77256,7 +78553,58 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "held": {
+                      "items": {
+                        "properties": {
+                          "crew_id": {
+                            "type": "string"
+                          },
+                          "crew_slug": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "since": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "waited_ms": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "held_total": {
+                      "type": "integer"
+                    },
+                    "host": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "host_signal_available": {
+                      "type": "boolean"
+                    },
+                    "host_signal_error": {
+                      "type": "string"
+                    },
+                    "in_flight_starts": {
+                      "type": "integer"
+                    },
+                    "limits": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -79386,7 +80734,49 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "install_links": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "runtime": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "runtimes": {
+                      "items": {
+                        "properties": {
+                          "in_use": {
+                            "type": "boolean"
+                          },
+                          "runtime": {
+                            "type": "string"
+                          },
+                          "socket": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "socket": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "version": {
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }

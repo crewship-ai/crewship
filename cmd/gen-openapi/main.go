@@ -365,6 +365,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 			result[key] = schema
 		}
 	}
+	for key, schema := range observabilityPaymentsSchemaCatalog() {
+		result[key] = schema
+	}
 	for key, name := range executionResponseSchemas() {
 		result[key] = DomainSchema{Response: ref(name)}
 	}
