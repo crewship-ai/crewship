@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-08-04T09:25:15Z",
-  "git_ref": "b79938fb",
+  "generated_at": "2026-08-04T09:55:48Z",
+  "git_ref": "3f9c61e0",
   "summary": {
     "api_operations": 539,
-    "api_exact_docs": 501,
-    "api_resource_docs": 38,
+    "api_exact_docs": 502,
+    "api_resource_docs": 37,
     "api_missing_docs": 0,
     "cli_operations": 723,
-    "cli_exact_docs": 640,
+    "cli_exact_docs": 649,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 357,
@@ -1698,6 +1698,7 @@
       "tag": "agents",
       "source_file": "internal/api/agent_chats_delete_scope_test.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
         "docs/guides/chat-sessions.mdx"
@@ -1722,6 +1723,7 @@
       "tag": "agents",
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
         "docs/guides/chat-sessions.mdx"
@@ -1741,6 +1743,7 @@
       "tag": "agents",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/cli/chat.mdx",
         "docs/guides/chat-sessions.mdx"
       ],
@@ -1772,6 +1775,7 @@
       "operation_id": "get_api_v1_agents_agentId_credential-bindings",
       "tag": "agents",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/credentials.mdx"
       ],
       "resource_docs": [
@@ -1926,6 +1930,7 @@
       "tag": "agents",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
@@ -1940,6 +1945,7 @@
       "tag": "agents",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
@@ -1953,7 +1959,7 @@
       "operation_id": "get_api_v1_agents_agentId_integrations_resolved",
       "tag": "agents",
       "exact_docs": [
-        "docs/api-reference/integrations.mdx"
+        "docs/api-reference/agents.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/agents.mdx"
@@ -1967,6 +1973,7 @@
       "tag": "agents",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
@@ -1981,6 +1988,7 @@
       "tag": "agents",
       "source_file": "internal/api/router_crews.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/integrations.mdx"
       ],
       "resource_docs": [
@@ -2037,10 +2045,13 @@
       "path": "/api/v1/agents/{agentId}/notification-channels",
       "operation_id": "get_api_v1_agents_agentId_notification-channels",
       "tag": "agents",
+      "exact_docs": [
+        "docs/api-reference/agents.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/agents.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "GET",
@@ -2273,6 +2284,7 @@
       "tag": "agents",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
+        "docs/api-reference/agents.mdx",
         "docs/api-reference/webhooks.mdx"
       ],
       "resource_docs": [
@@ -3740,6 +3752,7 @@
         "docs/cli/nuke.mdx",
         "docs/cli/persona.mdx",
         "docs/cli/policy.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/configuration/manifest-schema.mdx",
@@ -3803,6 +3816,7 @@
         "docs/cli/nuke.mdx",
         "docs/cli/persona.mdx",
         "docs/cli/policy.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/configuration/manifest-schema.mdx",
@@ -3862,6 +3876,7 @@
         "docs/cli/issue.mdx",
         "docs/cli/mission.mdx",
         "docs/cli/persona.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
@@ -3914,6 +3929,7 @@
         "docs/cli/issue.mdx",
         "docs/cli/mission.mdx",
         "docs/cli/persona.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
@@ -3966,6 +3982,7 @@
         "docs/cli/issue.mdx",
         "docs/cli/mission.mdx",
         "docs/cli/persona.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
@@ -4018,6 +4035,7 @@
         "docs/cli/issue.mdx",
         "docs/cli/mission.mdx",
         "docs/cli/persona.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/wait.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
@@ -4086,6 +4104,7 @@
       "operation_id": "get_api_v1_crews_crewId_capabilities",
       "tag": "crews",
       "exact_docs": [
+        "docs/cli/routine.mdx",
         "docs/guides/routines.mdx"
       ],
       "resource_docs": [
@@ -5030,6 +5049,7 @@
       "operation_id": "get_api_v1_crews_crewId_services",
       "tag": "crews",
       "exact_docs": [
+        "docs/cli/crew.mdx",
         "docs/guides/manifests.mdx"
       ],
       "resource_docs": [
@@ -6700,6 +6720,7 @@
       "tag": "milestones",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
+        "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
         "docs/manifest/milestone.md"
       ],
@@ -6718,6 +6739,7 @@
       "tag": "milestones",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
+        "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
         "docs/manifest/milestone.md"
       ],
@@ -7630,6 +7652,7 @@
       "tag": "projects",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
+        "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
         "docs/manifest/milestone.md"
       ],
@@ -7645,6 +7668,7 @@
       "tag": "projects",
       "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
       "exact_docs": [
+        "docs/api-reference/issues.mdx",
         "docs/api-reference/milestones.mdx",
         "docs/manifest/milestone.md"
       ],
@@ -10691,10 +10715,13 @@
       "use": "channels \u003cagent-id\u003e",
       "short": "List the notification channels an agent may send to",
       "root": "agent",
+      "exact_docs": [
+        "docs/cli/agent.mdx"
+      ],
       "root_docs": [
         "docs/cli/agent.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
@@ -11140,10 +11167,13 @@
       "use": "rotate-webhook-secret \u003cslug-or-id\u003e",
       "short": "Mint a new webhook signing secret (shown ONCE; the old secret stops validating)",
       "root": "agent",
+      "exact_docs": [
+        "docs/cli/agent.mdx"
+      ],
       "root_docs": [
         "docs/cli/agent.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
@@ -13937,10 +13967,13 @@
       "use": "services \u003ccrew-slug-or-id\u003e",
       "short": "Show a crew's live sidecar service inventory (status / ports / type)",
       "root": "crew",
+      "exact_docs": [
+        "docs/cli/crew.mdx"
+      ],
       "root_docs": [
         "docs/cli/crew.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
@@ -21913,10 +21946,13 @@
       "use": "capabilities \u003ccrew\u003e",
       "short": "Dump everything needed to author a routine for a crew (schema + resources + integrations + agents + runtimes)",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -21934,10 +21970,13 @@
       "use": "delete \u003cslug\u003e",
       "short": "Soft-delete a routine (hidden but row preserved for audit)",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -22171,10 +22210,13 @@
       "use": "init",
       "short": "Scaffold a new routine — a minimal skeleton or a clone of an existing one",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
@@ -22438,7 +22480,8 @@
       "exact_docs": [
         "docs/cli/diff.mdx",
         "docs/cli/explain.mdx",
-        "docs/cli/inspect.mdx"
+        "docs/cli/inspect.mdx",
+        "docs/cli/routine.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -22779,10 +22822,13 @@
       "use": "schema",
       "short": "Print the routine DSL JSON Schema (authoring contract)",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -23048,10 +23094,13 @@
       "use": "step-run \u003cslug\u003e \u003cstep\u003e",
       "short": "Execute one step against a fixture, without the full pipeline",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
@@ -23165,10 +23214,13 @@
       "use": "show \u003cslug\u003e",
       "short": "Show full definition of a specific routine version",
       "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
       "root_docs": [
         "docs/cli/routine.mdx"
       ],
-      "status": "documented_root",
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
