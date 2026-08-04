@@ -515,6 +515,18 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if *req.DueDate == "" {
 			ub.SetNull("due_date")
 		} else {
+			// due_date is a TEXT column, so an unvalidated write persists
+			// whatever the model produced. A human picking a date in the UI
+			// cannot send "tomorrow", "next sprint" or "2026-13-45"; an agent
+			// writing JSON by hand can, and every reader downstream
+			// (parseISODateAsLocal in the issue panel, the overdue filters)
+			// then gets an Invalid Date it renders as garbage. Parse it here,
+			// where the value enters, rather than defending in each reader.
+			if !validIssueDueDate(*req.DueDate) {
+				writeProblem(w, r, http.StatusBadRequest,
+					"due_date must be YYYY-MM-DD or an RFC 3339 timestamp")
+				return
+			}
 			ub.Set("due_date", *req.DueDate)
 		}
 	}
@@ -522,16 +534,66 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		ub.Set("estimate", *req.Estimate)
 	}
 
-	if !ub.Empty() {
-		query, args := ub.Build("missions", "id = ?", missionID)
-		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-			internalError(w, r, h.logger, "update issue", err)
+	// The column update and the label replacement go in ONE transaction, the
+	// same shape Create already uses. Label replacement is DELETE-then-INSERT:
+	// run outside a transaction, a failure between the two leaves the issue
+	// stripped of the labels it had and carrying only some of the requested
+	// ones, while the handler still answers 200 — a partial write the caller
+	// records as a success. Pairing it with the missions UPDATE also means a
+	// label failure cannot leave the status changed and the labels wrong.
+	if !ub.Empty() || req.Labels != nil {
+		tx, err := h.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			internalError(w, r, h.logger, "begin issue update tx", err)
 			return
 		}
+		defer tx.Rollback() //nolint:errcheck
 
-		// Audit trail: mirror the human handlers' logActivity rows so
-		// agent-driven changes are just as visible in the activity feed.
-		// Best-effort — the update itself already committed.
+		if !ub.Empty() {
+			query, args := ub.Build("missions", "id = ?", missionID)
+			if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+				internalError(w, r, h.logger, "update issue", err)
+				return
+			}
+		}
+
+		// Labels are a full REPLACEMENT (matching the public handler), so an
+		// empty array clears them. The insert is workspace-scoped by
+		// construction: mission_labels carries no workspace column, so a label
+		// id from another tenant would otherwise attach and the read path's
+		// join would render that tenant's label name and colour inside this
+		// one. A foreign / unknown id therefore matches no row and attaches
+		// nothing — that silence is the intended behaviour, and distinct from
+		// a driver or constraint error, which now fails the whole request
+		// instead of being logged under a 200.
+		if req.Labels != nil {
+			if _, err := tx.ExecContext(r.Context(),
+				`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
+				internalError(w, r, h.logger, "clear issue labels", err)
+				return
+			}
+			for _, labelID := range *req.Labels {
+				if _, err := tx.ExecContext(r.Context(),
+					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id)
+					 SELECT ?, id FROM labels WHERE id = ? AND workspace_id = ?`,
+					missionID, labelID, req.WorkspaceID); err != nil {
+					internalError(w, r, h.logger, "insert mission label", err)
+					return
+				}
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			internalError(w, r, h.logger, "commit issue update", err)
+			return
+		}
+	}
+
+	// Audit trail: mirror the human handlers' logActivity rows so agent-driven
+	// changes are just as visible in the activity feed. Best-effort and after
+	// the commit — the mutation has already landed, and a failed activity row
+	// must not roll it back.
+	if !ub.Empty() {
 		if statusChanged {
 			h.logActivity(r.Context(), missionID, actorType, actorID,
 				"status_changed", currentStatus+" → "+req.Status)
@@ -543,28 +605,6 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		if assigneeChanged {
 			h.logActivity(r.Context(), missionID, actorType, actorID,
 				"assignee_changed", "assignee_id: "+*req.AssigneeID)
-		}
-	}
-
-	// Labels are a full REPLACEMENT (matching the public handler), so an empty
-	// array clears them. The insert is workspace-scoped by construction:
-	// mission_labels carries no workspace column, so a label id from another
-	// tenant would otherwise attach and the read path's join would render that
-	// tenant's label name and colour inside this one.
-	if req.Labels != nil {
-		if _, err := h.db.ExecContext(r.Context(),
-			`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
-			internalError(w, r, h.logger, "clear issue labels", err)
-			return
-		}
-		for _, labelID := range *req.Labels {
-			if _, err := h.db.ExecContext(r.Context(),
-				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id)
-				 SELECT ?, id FROM labels WHERE id = ? AND workspace_id = ?`,
-				missionID, labelID, req.WorkspaceID); err != nil {
-				h.logger.Error("insert mission label", "error", err,
-					"mission_id", missionID, "label_id", labelID)
-			}
 		}
 	}
 

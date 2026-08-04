@@ -45,6 +45,14 @@ func (c *captured) queryValue(name string) string {
 func mockCrewshipd(t *testing.T, status int, respBody string) (*httptest.Server, *captured) {
 	t.Helper()
 	got := &captured{}
+	// Normalise the default ONCE, before the server starts. Assigning to
+	// respBody inside the handler would be a write to a captured variable on
+	// every request — harmless while the tests are sequential, and a -race
+	// failure the day one of them drives the mock concurrently or a handler
+	// under test issues two forwards.
+	if respBody == "" {
+		respBody = "{}"
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.method = r.Method
 		got.path = r.URL.Path
@@ -55,9 +63,6 @@ func mockCrewshipd(t *testing.T, status int, respBody string) (*httptest.Server,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		if respBody == "" {
-			respBody = "{}"
-		}
 		_, _ = w.Write([]byte(respBody))
 	}))
 	t.Cleanup(srv.Close)

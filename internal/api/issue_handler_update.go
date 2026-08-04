@@ -158,9 +158,9 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			// Workspace check matches the same gate in Create — pre-fix a
 			// caller could PATCH parent_issue_id to point at another
 			// workspace's issue, silently linking unrelated tenants.
-			// Self-parenting is also rejected to stop the trivial cycle
-			// case (deeper cycles need a recursive walk; tracked
-			// separately).
+			// Self-parenting is rejected here for its specific message; the
+			// deeper A → B → A case is caught by wouldCycleParent below,
+			// the same helper the agent-facing relations endpoint calls.
 			if *req.ParentIssueID == missionID {
 				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id cannot be the issue itself")
 				return
@@ -175,6 +175,14 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			if parentExists == 0 {
 				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id does not exist in this workspace")
+				return
+			}
+			switch cErr := wouldCycleParent(r.Context(), h.db, missionID, *req.ParentIssueID, wsID); {
+			case errors.Is(cErr, errParentCycle):
+				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id would create a cycle")
+				return
+			case cErr != nil:
+				internalError(w, r, h.logger, "check parent cycle", cErr)
 				return
 			}
 			ub.Set("parent_issue_id", *req.ParentIssueID)

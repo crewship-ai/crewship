@@ -126,11 +126,21 @@ func (h *InternalIssueHandler) CreateRelation(w http.ResponseWriter, r *http.Req
 	}
 
 	if req.RelationType == relationTypeSubIssue {
-		// Cycle handling matches the public Update handler exactly: the
-		// trivial self-parent is rejected above, deeper cycles need a
-		// recursive walk and are tracked separately. Do not silently diverge
-		// from the public path here — an agent-only cycle check would give
-		// two different answers for the same graph.
+		// The hierarchy must stay a forest. Self-parenting is already refused
+		// above; wouldCycleParent walks the target's ancestors so A → B → A
+		// (two calls, trivially reachable for an agent decomposing a backlog
+		// in a loop) is refused too. The public Update path calls the same
+		// helper — an agent-only cycle rule would have the two endpoints
+		// disagree about what the same graph may look like.
+		switch err := wouldCycleParent(r.Context(), h.db, sourceID, targetID, req.WorkspaceID); {
+		case errors.Is(err, errParentCycle):
+			writeProblem(w, r, http.StatusBadRequest,
+				"sub_issue_of would create a parent cycle")
+			return
+		case err != nil:
+			internalError(w, r, h.logger, "check parent cycle", err)
+			return
+		}
 		if _, err := h.db.ExecContext(r.Context(),
 			`UPDATE missions SET parent_issue_id = ?, updated_at = datetime('now') WHERE id = ?`,
 			targetID, sourceID); err != nil {

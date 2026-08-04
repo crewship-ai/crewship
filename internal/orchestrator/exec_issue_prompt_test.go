@@ -65,8 +65,17 @@ func TestPreamble_StatesTheIssueAuthorisationRules(t *testing.T) {
 	if !strings.Contains(lower, "agent_id in the body is ignored") {
 		t.Error("the preamble does not say that a body-supplied issue author is ignored")
 	}
-	if !strings.Contains(lower, "crew's issues") {
-		t.Error("the preamble does not say the issue verbs are scoped to the agent's own crew")
+	// The rule is about MUTATION, not reach: an agent may read and relate more
+	// than it may change, and a preamble that says "your own crew's issues"
+	// flatly would have the agent refuse work it is allowed to do.
+	if !strings.Contains(lower, "only change your own") {
+		t.Error("the preamble does not scope issue CHANGES to the agent's own crew")
+	}
+	// …and that the link TARGET is the documented exception. Stating the rule
+	// without the exception makes the agent refuse a legitimate cross-crew
+	// "we are blocked on their work" link it is actually allowed to create.
+	if !strings.Contains(lower, "link target") {
+		t.Error("the preamble does not carve out the cross-crew link target")
 	}
 }
 

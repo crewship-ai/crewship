@@ -522,8 +522,11 @@ These are enforced on the server, not by convention — an agent that tries gets
 - **Author as someone else.** A crew shares one container and one sidecar, so an
   `agent_id` in the request body is ignored; the author is always the agent whose
   bearer token made the call.
-- **Reach another crew's issues.** The workspace and crew come from the sidecar's
-  own token binding, not from the request.
+- **Change another crew's issues.** The workspace and crew come from the sidecar's own
+  token binding, not from the request, and every verb is gated on the issue named in the
+  path. The single exception is the link *target*: a relation may point at another crew's
+  issue in the same workspace, because it does not modify that issue. `sub_issue_of`
+  writes `parent_issue_id` on the path issue, so it is gated like any other mutation.
 - **Rewrite the issue itself.** `title` and `description` are not updatable through
   these verbs, and neither are `project_id`, `milestone_id`, `routine_id` or
   `sort_order`. Agents report progress; they do not rewrite the brief a human wrote.

@@ -184,11 +184,11 @@ Default allowed domains (from `internal/egressallow/allowlist.go`, re-exported b
 
 Unknown network modes default to **restricted** (fail closed). Keep this list in sync with `components/features/crews/crew-network-policy.tsx` on the frontend.
 
-### Sidecar Endpoints (36 paths, 39 routes)
+### Sidecar Endpoints (40 paths, 44 routes)
 
-The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The path count below is 36; the 39-route total reflects three paths that register multiple HTTP verbs (`/manifest` GET+PATCH, `/crew-connections` GET+POST, `/connections/{id}/files` GET+POST):
+The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The path count below is 40; the 44-route total reflects four paths that register multiple HTTP verbs (`/manifest` GET+PATCH, `/crew-connections` GET+POST, `/connections/{id}/files` GET+POST, `/issue/{identifier}` GET+PATCH):
 
-<Accordion title="Full endpoint catalog (36 paths)">
+<Accordion title="Full endpoint catalog (40 paths)">
 | Category | Endpoints |
 |----------|-----------|
 | **Memory** | `/memory/search`, `/memory/status`, `/memory/reindex` |
