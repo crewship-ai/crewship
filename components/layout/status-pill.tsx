@@ -180,11 +180,11 @@ export function SystemStatusPill({ engineStatus, wsStatus, crews }: SystemStatus
                 : "Offline"}{" "}
           / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
         </span>
-        {crews && (
+        {fleet && crews && (
           <span className="block">
-            {/* The full breakdown lives here rather than in the pill: running
-                is a number Activity reports properly, and idle is only
-                interesting as the remainder. */}
+            {/* Gated on `fleet`, not on `crews`: while the link is down these
+                counts are last-known, and the pill drops them for exactly that
+                reason. A tooltip that still recited them would undo it. */}
             {crews.total} agents: {crews.running} running
             {crews.queued > 0 ? `, ${crews.queued} queued` : ""}, {crews.idle} idle
             {crews.error > 0 ? `, ${crews.error} error${crews.error > 1 ? "s" : ""}` : ""}

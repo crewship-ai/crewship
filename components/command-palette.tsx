@@ -158,10 +158,14 @@ const QUICK_ACTIONS = [
 // The issue list is fetched whole and filtered in the browser — there is no
 // server-side search route. 50 was a page size masquerading as a search: the
 // 51st issue simply did not exist as far as ⌘K was concerned, and the palette
-// answered "No results found", which was not true. This clears a real
-// workspace; if one ever outgrows it, the fix is a search endpoint, not a
-// bigger number.
-const ISSUE_FETCH_LIMIT = 500
+// answered "No results found", which was not true.
+//
+// 100 is the SERVER's ceiling, not a preference: issue_handler_crud.go clamps
+// anything above it back down to 50, so asking for more than this is asking
+// for less. (An earlier version of this asked for 500 and kept the very
+// behaviour it meant to fix.) Past the ceiling the list really is truncated,
+// and the palette says so rather than implying it searched everything.
+const ISSUE_FETCH_LIMIT = 100
 
 interface CommandPaletteProps {
   open: boolean
@@ -316,6 +320,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [integrations, setIntegrations] = useState<IntegrationResult[]>([])
   const [recent, setRecent] = useState<RecentEntry[]>([])
   const filteredIssues = issues.filter((issue) => issue.identifier)
+  // A full page means there are probably more behind it. Saying so beats
+  // "No results found" for an issue that exists but was never fetched.
+  const issuesTruncated = issues.length >= ISSUE_FETCH_LIMIT
 
   // The settings sections come from the settings nav itself, filtered by the
   // same predicate it uses, so the palette can never advertise a pane the
@@ -468,6 +475,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <PriorityIcon priority={issue.priority as "urgent" | "high" | "medium" | "low" | "none"} className="h-3.5 w-3.5 shrink-0" />
               </CommandItem>
             ))}
+            {issuesTruncated && (
+              <div className="type-meta px-3 py-1.5 text-muted-foreground-soft">
+                Showing the newest {ISSUE_FETCH_LIMIT} issues — open Issues to search the rest
+              </div>
+            )}
           </CommandGroup>
         )}
 

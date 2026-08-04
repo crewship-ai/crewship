@@ -191,14 +191,43 @@ describe("CommandPalette — real icons", () => {
 })
 
 describe("CommandPalette — honesty about what was fetched", () => {
-  it("does not cap issues at a page size that makes older ones unfindable", () => {
+  it("asks for exactly the page size the server will honour", () => {
     openPalette()
     const issueCall = vi.mocked(apiFetch).mock.calls.map(String).find((u) => u.includes("/issues"))
     expect(issueCall).toBeDefined()
     const limit = Number(/limit=(\d+)/.exec(issueCall!)?.[1] ?? 0)
-    // 50 silently hid every older issue behind a "No results found" that was
-    // not true. Whatever the cap is, it has to clear a real workspace.
-    expect(limit).toBeGreaterThanOrEqual(200)
+    // The server clamps anything above 100 back down to FIFTY
+    // (issue_handler_crud.go). An earlier version of this asked for 500 and
+    // this test passed — it pinned the request, not the outcome, so the
+    // palette silently kept the 50-issue behaviour it was meant to fix.
+    expect(limit).toBe(100)
+  })
+
+  it("says the list is truncated instead of implying it searched everything", async () => {
+    FIXTURES["/issues"] = Array.from({ length: 100 }, (_, i) => ({
+      id: `i${i}`,
+      identifier: `ENG-${i}`,
+      title: `Issue ${i}`,
+      status: "todo",
+      priority: "high",
+      assignee_name: null,
+      crew_name: null,
+      crew_slug: null,
+    }))
+    openPalette()
+    const g = await group(/issues/i)
+    // "No results found" for an issue that exists but was never fetched is the
+    // bug; saying which issues these are is the honest version of the cap.
+    expect(within(g).getByText(/Showing the newest 100 issues/)).toBeInTheDocument()
+  })
+
+  it("stays quiet when the whole list fitted", async () => {
+    FIXTURES["/issues"] = [
+      { id: "i1", identifier: "ENG-1", title: "Only one", status: "todo", priority: "high", assignee_name: null, crew_name: null, crew_slug: null },
+    ]
+    openPalette()
+    const g = await group(/issues/i)
+    expect(within(g).queryByText(/Showing the newest/)).not.toBeInTheDocument()
   })
 })
 
