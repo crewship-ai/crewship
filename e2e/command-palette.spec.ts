@@ -39,8 +39,14 @@ test.beforeEach(async ({ page }) => {
 
 async function openPalette(page: Page) {
   await page.goto("/")
-  await page.waitForLoadState("networkidle")
-  await page.keyboard.press("Meta+k")
+  // No networkidle: the dashboard polls crews-status every 6s and streams
+  // realtime, so "the network went quiet" is a state this app may never
+  // reach. The visible waits below are the readiness signal.
+  //
+  // ControlOrMeta, not Meta: on Linux and Windows runners Meta is the Super
+  // key, so a hardcoded Meta+k opens nothing and every test here fails for a
+  // reason that has nothing to do with the palette.
+  await page.keyboard.press("ControlOrMeta+k")
   const input = page.locator("[cmdk-input]")
   await expect(input).toBeVisible({ timeout: TIMEOUT })
   // Rows arrive from several parallel fetches; wait for the first one rather
@@ -197,8 +203,20 @@ test.describe("top bar — one status pill, two bells", () => {
     // "Crews idle" was a claim about right now on a column that flips for the
     // six seconds an agent takes to answer. The census is true whenever
     // anyone looks.
-    await expect(pill).toContainText(/Online/)
-    await expect(pill).toContainText(/agents?|errors?|queued|No agents/)
+    // NOT specifically "Online": that depends on the websocket connecting on
+    // the runner, and this PR deliberately hides the fleet half when it has
+    // not — so pinning the connected state would fail for the very behaviour
+    // it is meant to check. Assert the pill states A known one.
+    await expect(pill).toContainText(/Online|Connecting|Reconnecting|Offline/)
+    const text = (await pill.innerText()).replace(/\s+/g, " ")
+    if (/Online/.test(text)) {
+      // Connected: the fleet half has to be there and has to say something.
+      expect(text).toMatch(/agents?|errors?|queued|No agents/)
+    } else {
+      // Not connected: the counts are last-known, so the pill must not recite
+      // them. That is the whole reason the two pills became one.
+      expect(text).not.toMatch(/agents?|errors?|queued/)
+    }
   })
 
   test("carries Activity and Inbox, and no third bell", async ({ page }) => {

@@ -124,3 +124,53 @@ describe("useProjectDetail — initialProjectId", () => {
     expect(result.current.selectedProjectId).toBeNull()
   })
 })
+
+// ── A SECOND link, while the page stays mounted ────────────────────────────
+//
+// The "apply once" latch existed to survive the gap before the project list
+// arrives. It also swallowed every later link: on /issues?project=A, opening
+// ⌘K and picking project B changed the URL and nothing else, because the
+// component never unmounts and the latch was already set. Reported by
+// CodeRabbit; it is the more common path of the two, since the palette is
+// most reachable from a page you are already on.
+describe("useProjectDetail — a changed link on a mounted page", () => {
+  it("follows a new id without a remount", () => {
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) =>
+        useProjectDetail({ projects: [project("a"), project("b")], initialProjectId: id }),
+      { initialProps: { id: "a" } },
+    )
+    expect(result.current.selectedProjectId).toBe("a")
+
+    rerender({ id: "b" })
+    expect(result.current.selectedProjectId).toBe("b")
+  })
+
+  it("still does not drag the user back when only the list rerenders", () => {
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Project[] }) =>
+        useProjectDetail({ projects, initialProjectId: "b" }),
+      { initialProps: { projects: [project("a"), project("b")] } },
+    )
+    expect(result.current.selectedProjectId).toBe("b")
+
+    act(() => result.current.setSelectedProjectId("a"))
+    // A refresh of the roster is not a navigation.
+    rerender({ projects: [project("a"), project("b"), project("c")] })
+    expect(result.current.selectedProjectId).toBe("a")
+  })
+
+  it("treats an id no project has as handled, and does not retry it later", () => {
+    const { result, rerender } = renderHook(
+      ({ projects }: { projects: Project[] }) =>
+        useProjectDetail({ projects, initialProjectId: "ghost" }),
+      { initialProps: { projects: [project("a")] } },
+    )
+    expect(result.current.selectedProjectId).toBeNull()
+
+    act(() => result.current.setSelectedProjectId("a"))
+    rerender({ projects: [project("a"), { ...project("ghost"), id: "ghost" }] })
+    // The ghost arriving later must not yank the user off what they chose.
+    expect(result.current.selectedProjectId).toBe("a")
+  })
+})

@@ -275,3 +275,72 @@ describe("useCrewsStatus — staying true without an event", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+// ── Overlapping responses ──────────────────────────────────────────────────
+//
+// refresh() fires and returns; the 6s interval and the realtime debouncer can
+// each start another before the first lands. Nothing deduplicated them and
+// nothing checked which workspace a response belonged to, so a slow reply
+// could overwrite a newer one — or paint the previous workspace's counts into
+// the bar after a switch. Adding the interval made the overlap likelier, which
+// is what put this in scope. Reported by CodeRabbit.
+describe("useCrewsStatus — overlapping responses", () => {
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+    for (const k of Object.keys(realtimeCallbacks)) delete realtimeCallbacks[k]
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  const ok = (payload: Record<string, number>) => ({ ok: true, json: async () => payload })
+
+  it("keeps the newest answer when an older one lands late", async () => {
+    let resolveFirst!: (v: unknown) => void
+    fetchMock.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r }))
+    const { result } = renderHook(() => useCrewsStatus("ws-1"))
+    await act(async () => { await flushAsync() })
+
+    // A second request starts and finishes while the first is still open.
+    fetchMock.mockResolvedValue(ok({ total: 7, running: 5, error: 0, idle: 2, queued: 0 }))
+    await act(async () => {
+      vi.advanceTimersByTime(6000)
+      await flushAsync()
+    })
+    expect(result.current?.running).toBe(5)
+
+    // The stale first reply arrives last. It must not win.
+    await act(async () => {
+      resolveFirst(ok({ total: 7, running: 0, error: 0, idle: 7, queued: 0 }))
+      await flushAsync()
+    })
+    expect(result.current?.running).toBe(5)
+  })
+
+  it("drops a reply for the workspace the user has left", async () => {
+    let resolveOld!: (v: unknown) => void
+    fetchMock.mockImplementationOnce(() => new Promise((r) => { resolveOld = r }))
+    const { result, rerender } = renderHook(
+      ({ ws }: { ws: string }) => useCrewsStatus(ws),
+      { initialProps: { ws: "ws-1" } },
+    )
+    await act(async () => { await flushAsync() })
+
+    fetchMock.mockResolvedValue(ok({ total: 2, running: 0, error: 0, idle: 2, queued: 0 }))
+    rerender({ ws: "ws-2" })
+    await act(async () => { await flushAsync() })
+    expect(result.current?.total).toBe(2)
+
+    await act(async () => {
+      resolveOld(ok({ total: 99, running: 9, error: 0, idle: 90, queued: 0 }))
+      await flushAsync()
+    })
+    // ws-1's counts must never appear while ws-2 is selected.
+    expect(result.current?.total).toBe(2)
+  })
+})

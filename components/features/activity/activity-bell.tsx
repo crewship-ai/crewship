@@ -260,7 +260,9 @@ function RecentRunRow({ run, onClick }: { run: PipelineRun; onClick: () => void 
         </span>
       }
       title={run.pipeline_name || run.pipeline_slug}
-      meta={<SourcePill run={run} />}
+      // Unlinked: this whole row is one control that opens the run's trace,
+      // and the kit renders such a row as a <button>. See source-pill.tsx.
+      meta={<SourcePill run={run} linked={false} />}
       trailing={
         <span
           className={cn(

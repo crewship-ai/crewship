@@ -38,12 +38,23 @@ const CREWS_STATUS_POLL_MS = 6000
 
 export function useCrewsStatus(workspaceId: string | null): CrewsStatus | null {
   const [status, setStatus] = useState<CrewsStatus | null>(null)
+  // Request generation. The interval and the realtime debouncer can each start
+  // a fetch before the last one lands, and nothing deduplicated them: a slow
+  // reply could overwrite a newer one, or paint the previous workspace's
+  // counts into the bar after a switch. Adding the poll made that overlap
+  // likelier, so the guard comes with it. The sequence number decides who is
+  // allowed to write, and the workspace it was issued for decides whether the
+  // answer is even about the right place.
+  const seq = useRef(0)
+  const wsRef = useRef(workspaceId)
+  wsRef.current = workspaceId
 
   const refresh = useCallback(async () => {
     if (!workspaceId) return
+    const mine = ++seq.current
     try {
       const res = await apiFetch(`/api/v1/agents/crews-status?workspace_id=${workspaceId}`)
-      if (res.ok) {
+      if (res.ok && mine === seq.current && wsRef.current === workspaceId) {
         const raw = (await res.json()) as Partial<CrewsStatus> | null
         // Normalise: server may omit `queued` on older builds, and a
         // malformed payload shouldn't blow up downstream string

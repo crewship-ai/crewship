@@ -297,6 +297,20 @@ describe("CommandPalette — people deep-link", () => {
   })
 })
 
+describe("CommandPalette — skills", () => {
+  it("opens the skill, which has had a detail route all along", async () => {
+    // This row landed on /skills for the whole PR, excused as "that surface is
+    // being reworked" — but /skills/[skillId] exists and the detail panel
+    // already links to it. Reported by CodeRabbit.
+    FIXTURES["/skills"] = [
+      { id: "sk1", name: "Routine Author", slug: "ra", display_name: null, category: "AUTOMATION" },
+    ]
+    openPalette()
+    const g = await group(/skills/i)
+    expect(within(g).getByRole("option")).toHaveAttribute("data-href", "/skills/sk1")
+  })
+})
+
 describe("CommandPalette — ranking", () => {
   it("puts the thing actually called Ops above an issue that merely mentions it", async () => {
     FIXTURES["/crews"] = [

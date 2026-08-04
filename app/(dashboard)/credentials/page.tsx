@@ -189,15 +189,19 @@ export default function CredentialsPage() {
   // they had just searched for is the same second-search-by-eye the members
   // roster had.
   //
-  // Applied ONCE, and only after the list has arrived: on the first render
-  // `credentials` is still empty, and the id is dropped rather than left
-  // half-open if no credential has it (deleted since, or another workspace).
-  // Once, so a later refresh cannot reopen the sheet the user just closed.
+  // Keyed on the LAST id acted on, not a once-ever latch. A latch survives the
+  // gap before the list arrives (on the first render `credentials` is empty)
+  // but then swallows every later link: standing on /credentials?id=A, opening
+  // ⌘K and picking secret B changed the URL and nothing else, because this
+  // page never unmounts. Per id, each new one opens exactly once — a refresh
+  // of the vault is not a navigation, so it cannot reopen a sheet the user has
+  // closed, and an id no credential has is marked handled rather than retried.
   const linkedCredentialId = useSearchParams().get("id")
-  const linkApplied = React.useRef(false)
+  const appliedCredentialId = React.useRef<string | null>(null)
   React.useEffect(() => {
-    if (linkApplied.current || !linkedCredentialId || credentials.length === 0) return
-    linkApplied.current = true
+    if (!linkedCredentialId || credentials.length === 0) return
+    if (appliedCredentialId.current === linkedCredentialId) return
+    appliedCredentialId.current = linkedCredentialId
     const hit = credentials.find((c) => c.id === linkedCredentialId)
     if (!hit) return
     setDetailCredential(hit)

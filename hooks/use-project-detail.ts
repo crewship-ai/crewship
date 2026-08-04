@@ -25,15 +25,27 @@ export function useProjectDetail({
   initialProjectId?: string | null
 }) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const seeded = useRef(false)
+  // The last id this hook acted on — NOT a once-ever latch.
+  //
+  // A latch was the first attempt, to survive the gap before the project list
+  // arrives (on the first render `projects` is [], and the cleanup effect
+  // below would wipe a directly-seeded selection). But it also swallowed
+  // every LATER link: on /issues?project=A, opening ⌘K and picking project B
+  // changed the URL and nothing else, because this component never unmounts.
+  // That is the commoner path of the two — the palette is most reachable from
+  // a page you are already on.
+  //
+  // Keyed on the id instead, each new one is applied exactly once: a refresh
+  // of the roster is not a navigation, so it cannot drag the user back to the
+  // project the URL named after they clicked away, and an id no project has
+  // is marked handled rather than retried when a later fetch happens to
+  // produce it.
+  const appliedId = useRef<string | null>(null)
 
-  // Apply the incoming id when there is finally something to match it
-  // against. Once is the point: a later refresh of the list must not drag the
-  // user back to the project the URL named after they clicked away, and an id
-  // no project has is dropped rather than left as an empty detail pane.
   useEffect(() => {
-    if (seeded.current || !initialProjectId || projects.length === 0) return
-    seeded.current = true
+    if (!initialProjectId || projects.length === 0) return
+    if (appliedId.current === initialProjectId) return
+    appliedId.current = initialProjectId
     if (projects.some((p) => p.id === initialProjectId)) {
       setSelectedProjectId(initialProjectId)
     }

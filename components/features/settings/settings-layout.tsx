@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import { Menu, Settings as SettingsIcon } from "lucide-react"
@@ -105,22 +105,39 @@ export function SettingsLayout() {
 
   const isMobile = useIsMobile()
 
-  // Seeded from useSearchParams, NOT window.location.search.
+  // Read from useSearchParams, NOT window.location.search.
   //
   // The two disagree during a client-side navigation: the App Router renders
-  // the new route before window.location has been updated, so a useState
-  // initializer reading window.location.search on arrival from /crews or the
-  // ⌘K palette saw the OLD url and fell through to "profile". Every settings
-  // deep link in the product landed on Profile — /settings?tab=audit,
-  // ?tab=members, all of them — while a full page load at the same URL worked,
-  // which is what made it look like the links were fine.
+  // the new route before window.location has been updated, so an initializer
+  // reading window.location.search on arrival from /crews or the ⌘K palette
+  // saw the OLD url and fell through to "profile". Every settings deep link in
+  // the product landed on Profile — ?tab=audit, ?tab=members, all of them —
+  // while a full page load at the same URL worked, which is what made it look
+  // like the links were fine.
   //
-  // Still read ONCE, in an initializer: after mount the tab is local state and
-  // setActiveTab keeps the URL in step with history.replaceState (which
-  // deliberately does not re-run this).
+  // And read on every CHANGE, not once on mount. A once-only initializer
+  // handled arrival but swallowed the next link: standing on
+  // /settings?tab=members and following another settings link changed the URL
+  // and nothing else, because this layout does not unmount between them.
+  //
+  // Guarded on the query string itself so it stays compatible with
+  // setActiveTab, which writes the URL through history.replaceState precisely
+  // so it does NOT navigate: an unchanged string re-applies nothing, and
+  // replaceState does not notify useSearchParams anyway. Local state stays
+  // authoritative for clicks; this only follows real navigations.
   const searchParams = useSearchParams()
-  const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(searchParams.toString()))
-  const [focusedMember] = useState(() => initialFocusedMember(searchParams.toString()))
+  const search = searchParams.toString()
+  const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(search))
+  const [focusedMember, setFocusedMember] = useState(() => initialFocusedMember(search))
+  const appliedSearch = useRef(search)
+
+  useEffect(() => {
+    if (appliedSearch.current === search) return
+    appliedSearch.current = search
+    _setActiveTab(initialSettingsTab(search))
+    setFocusedMember(initialFocusedMember(search))
+  }, [search])
+
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // A deep link can name a section this role cannot see (/settings?tab=audit

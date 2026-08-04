@@ -263,3 +263,41 @@ describe("SettingsLayout deep-link into a section that moved", () => {
     })
   }
 })
+
+// ── A second deep link, while Settings stays mounted ────────────────────────
+//
+// The tab was read once, in a useState initializer. Standing on
+// /settings?tab=members and following another settings link — from ⌘K, from a
+// doc, from anywhere — changed the URL and nothing else, because this layout
+// does not unmount between them. Reported by CodeRabbit.
+describe("SettingsLayout — a changed link on a mounted page", () => {
+  beforeEach(() => cleanup())
+
+  it("follows a later ?tab= without a remount", async () => {
+    h.role = "OWNER"
+    window.history.replaceState(null, "", "/settings?tab=audit")
+    const { SettingsLayout } = await import("../settings-layout")
+    const { rerender } = render(<SettingsLayout />)
+    await waitFor(() => expect(screen.getByTestId("audit-section")).toBeTruthy())
+
+    // A client-side navigation: the URL changes under a mounted layout.
+    window.history.replaceState(null, "", "/settings?tab=profile")
+    rerender(<SettingsLayout />)
+    await waitFor(() => expect(screen.getByTestId("profile-section")).toBeTruthy())
+    expect(screen.queryByTestId("audit-section")).toBeNull()
+  })
+
+  it("does not re-apply the same link when something else rerenders", async () => {
+    // setActiveTab writes the URL with history.replaceState precisely so it
+    // does NOT navigate. Re-reading an unchanged URL must not undo a click.
+    h.role = "OWNER"
+    window.history.replaceState(null, "", "/settings?tab=audit")
+    const { SettingsLayout } = await import("../settings-layout")
+    const { rerender } = render(<SettingsLayout />)
+    await waitFor(() => expect(screen.getByTestId("audit-section")).toBeTruthy())
+
+    rerender(<SettingsLayout />)
+    rerender(<SettingsLayout />)
+    expect(screen.getByTestId("audit-section")).toBeTruthy()
+  })
+})

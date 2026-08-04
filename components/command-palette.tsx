@@ -574,8 +574,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 value={`${skill.display_name ?? skill.name} ${skill.slug} skill`}
                 keywords={[skill.category]}
                 className={PALETTE_ITEM_CLASS}
-                data-href="/skills"
-                onSelect={() => go("/skills", skill.display_name ?? skill.name, "Skills")}
+                data-href={`/skills/${skill.id}`}
+                onSelect={() => go(`/skills/${skill.id}`, skill.display_name ?? skill.name, "Skills")}
               >
                 <Zap className="h-4 w-4 text-muted-foreground" />
                 <span className="type-row flex-1 truncate">{skill.display_name ?? skill.name}</span>
@@ -666,6 +666,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 value={`${it.display_name || it.name} ${it.name} integration`}
                 keywords={[it.transport, it.crew_name ?? ""]}
                 className={PALETTE_ITEM_CLASS}
+                // The one row here that still lands on an index, and not for
+                // want of trying: /integrations reads only `tab` and `section`
+                // (integrations-layout.tsx), so there is no per-integration
+                // deep link to point at. Give that page one and this becomes a
+                // one-line change, like every other group already is.
                 data-href="/integrations?tab=tools"
                 onSelect={() => go("/integrations?tab=tools", it.display_name || it.name, "Integrations")}
               >

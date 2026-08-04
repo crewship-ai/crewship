@@ -335,3 +335,60 @@ describe("mock parity", () => {
     expect(d.activeCount).toBe(1)
   })
 })
+
+// A RECENT row is clickable, and its meta line carries the SourcePill — which
+// renders a next/link <Link> when the run was triggered by an issue. The kit
+// makes a row a <button> when it has an onClick and no actions, so that row
+// put an <a> inside a <button>: invalid markup, a React validateDOMNesting
+// warning, and activation the browsers disagree about. The kit documents this
+// rule for `actions` and this row broke it two files away. Reported by
+// CodeRabbit.
+describe("<ActivityBell> recent rows — markup", () => {
+  beforeEach(() => {
+    h.runs = []
+    h.agentItems = []
+  })
+
+  it("never nests a link inside the clickable row", async () => {
+    h.runs = [
+      run({
+        id: "done-issue",
+        pipeline_slug: "triage",
+        pipeline_name: "Triage",
+        status: "completed",
+        ended_at: new Date(Date.now() - 60_000).toISOString(),
+        triggered_via: "issue",
+        issue_identifier: "ENG-1",
+      }),
+    ]
+    const { container } = render(<ActivityBell />)
+    openDropdown()
+
+    await waitFor(() => expect(screen.getByText("Triage")).toBeInTheDocument())
+    expect(container.querySelector("button a"), "an anchor inside a button").toBeNull()
+    expect(container.querySelector("a button"), "a button inside an anchor").toBeNull()
+  })
+
+  it("still reaches the run's trace from that row", async () => {
+    h.runs = [
+      run({
+        id: "done-issue",
+        pipeline_name: "Triage",
+        status: "completed",
+        ended_at: new Date(Date.now() - 60_000).toISOString(),
+        triggered_via: "issue",
+        issue_identifier: "ENG-1",
+      }),
+    ]
+    render(<ActivityBell />)
+    openDropdown()
+    await waitFor(() => expect(screen.getByText("Triage")).toBeInTheDocument())
+
+    // The row is still one control that opens the run, and it still says
+    // which issue caused it — the chip just stopped being a second
+    // destination competing with the row that carries it.
+    const row = screen.getByRole("button", { name: /Triage/ })
+    expect(row).toBeInTheDocument()
+    expect(row).toHaveTextContent("ENG-1")
+  })
+})
