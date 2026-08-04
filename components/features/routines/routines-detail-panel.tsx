@@ -78,6 +78,10 @@ export interface RoutineDetail {
   // from the slug instead.
   icon?: string
   color?: string
+  // Why this routine is `proposed`, from the risk classifier. Present
+  // only while a proposal is open. Without it the reviewer is asked to
+  // approve something they cannot see.
+  risk_reasons?: string[]
 }
 
 interface Props {
@@ -421,32 +425,50 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           active; Reject → discarded. Only rendered for MANAGER+ when the
           routine is in the proposed state. */}
       {showApprovalBanner && (
-        <div className="flex items-center gap-3 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-warn">This routine is awaiting approval</div>
-            <p className="mt-0.5 text-[12px] text-warn/70">
-              It was proposed for review and can&apos;t run until a manager approves it.
-            </p>
+            {/* The reasons the classifier gave. Without them the banner
+                asks a manager to approve something they cannot see —
+                and the reasons already existed, written into the inbox
+                item at save time; nothing read them back. */}
+            {routine?.risk_reasons && routine.risk_reasons.length > 0 ? (
+              <p className="mt-0.5 text-[12px] text-warn/80">
+                Flagged because it {routine.risk_reasons.join(", ")}.
+              </p>
+            ) : (
+              <p className="mt-0.5 text-[12px] text-warn/70">
+                It was proposed for review and can&apos;t run until a manager approves it.
+              </p>
+            )}
+            <a
+              href="/inbox"
+              className="mt-1 inline-flex items-center gap-1 text-[11px] text-warn underline-offset-2 hover:underline"
+            >
+              Open the review item in Inbox
+            </a>
           </div>
-          <Button
-            size="sm"
-            onClick={() => governanceAction("approve")}
-            disabled={!!busyGov}
-            className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-background hover:bg-warn/90"
-          >
-            {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
-            Approve
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => governanceAction("reject")}
-            disabled={!!busyGov}
-            className="h-8 gap-1.5 border-warn/40 px-3 text-sm text-warn hover:text-warn"
-          >
-            {busyGov === "reject" ? <Spinner className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
-            Reject
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => governanceAction("approve")}
+              disabled={!!busyGov || !!busyAction}
+              className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-background hover:bg-warn/90"
+            >
+              {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => governanceAction("reject")}
+              disabled={!!busyGov || !!busyAction}
+              className="h-8 gap-1.5 px-3 text-sm"
+            >
+              <Ban className="h-3.5 w-3.5" />
+              Reject
+            </Button>
+          </div>
         </div>
       )}
 

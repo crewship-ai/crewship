@@ -337,8 +337,16 @@ type pipelineResponse struct {
 	// gradient-palette id. Omitted when unset so the client can tell
 	// "not chosen" from "chosen as empty" and fall back to deriving one
 	// from the slug.
-	Icon      string `json:"icon,omitempty"`
-	Color     string `json:"color,omitempty"`
+	Icon  string `json:"icon,omitempty"`
+	Color string `json:"color,omitempty"`
+
+	// RiskReasons explains WHY a routine is `proposed`. Populated only
+	// on the single-routine detail response, and only while a proposal
+	// is open — a reviewer needs to know what they are judging, and a
+	// banner that says "awaiting approval" and nothing else asks someone
+	// to approve something they cannot see.
+	RiskReasons []string `json:"risk_reasons,omitempty"`
+
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 	// LinkedIssueCount is the number of issues bound to this routine

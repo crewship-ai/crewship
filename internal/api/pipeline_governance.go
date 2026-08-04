@@ -9,6 +9,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -104,6 +106,41 @@ func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID s
 		},
 	})
 	h.broadcastInboxUpdated(workspaceID, "routine_proposed")
+}
+
+// riskReasonsForRoutine reads back WHY a routine was sent for review.
+//
+// The classifier produces these at save time and proposeRoutineInbox
+// writes them into the inbox item's payload. Nothing read them back, so
+// a reviewer got a banner saying "awaiting approval" and no indication
+// of what they were being asked to judge.
+//
+// Read from the inbox rather than stored a second time on the routine:
+// a reason shown on the routine and a reason shown in the inbox could
+// then disagree, and the inbox item is the thing a MANAGER actually
+// acts on. Best-effort — this decorates a response, and failing to
+// explain a proposal must not fail loading the routine.
+func (h *PipelineHandler) riskReasonsForRoutine(ctx context.Context, workspaceID, slug string) []string {
+	if h.db == nil {
+		return nil
+	}
+	var payload sql.NullString
+	err := h.db.QueryRowContext(ctx,
+		`SELECT payload_json FROM inbox_items
+         WHERE workspace_id = ? AND source_id = ? AND state != 'resolved'
+         ORDER BY created_at DESC LIMIT 1`,
+		workspaceID, routineProposalInboxSource(workspaceID, slug),
+	).Scan(&payload)
+	if err != nil || !payload.Valid {
+		return nil
+	}
+	var decoded struct {
+		RiskReasons []string `json:"risk_reasons"`
+	}
+	if err := json.Unmarshal([]byte(payload.String), &decoded); err != nil {
+		return nil
+	}
+	return decoded.RiskReasons
 }
 
 // broadcastInboxUpdated pushes the same inbox.updated event the inbox handler

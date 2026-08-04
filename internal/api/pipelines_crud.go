@@ -94,7 +94,14 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, toPipelineResponse(p, true))
+	out := toPipelineResponse(p, true)
+	// Only for a routine actually awaiting review — the lookup is a
+	// wasted query otherwise, and a stale reason on an active routine
+	// would be worse than none.
+	if p.Status == "proposed" {
+		out.RiskReasons = h.riskReasonsForRoutine(r.Context(), workspaceID, p.Slug)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Delete soft-deletes a pipeline by slug.
