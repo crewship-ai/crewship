@@ -19,6 +19,72 @@ Secrets and destination addresses are not returned by the agent-pairing API.
 Agent access is default-deny: an agent can send only after a human grants the
 specific `(channel, agent)` pairing.
 
+## Channel contracts
+
+### `GET /api/v1/notification-channels`
+
+Returns `200 OK` with an object containing a `channels` array. The default
+scope includes all workspace channels and the authenticated user's personal
+channels. `?scope=all` is an admin overview that also includes other members'
+personal channels, but redacts their destination fields. Secrets are never
+returned.
+
+### `POST /api/v1/notification-channels`
+
+Creates a channel and returns `201 Created`. Workspace channels require
+`ADMIN` or `OWNER`; `personal: true` lets any member create a channel owned by
+the authenticated user. The server ignores any client-supplied owner.
+
+```json
+{
+  "type": "webhook",
+  "url": "https://hooks.example.com/crewship",
+  "secret": "optional-signing-secret",
+  "events": ["failed"],
+  "provider": "",
+  "fields": {},
+  "personal": false,
+  "categories": ["routines.failed"],
+  "min_priority": "low"
+}
+```
+
+`type` is `email`, `webhook`, or `shoutrrr`. Email uses `to`; shoutrrr uses
+`provider` plus provider-specific `fields` (or the compatibility
+`shoutrrr_url`). `events` defaults to `["run.failed"]` and accepts
+`completed`, `failed`, or `all`; an empty `categories` list means every
+category; `min_priority` defaults to `low`. The response includes `secret`
+only on this create response. For a webhook it is the HMAC secret; for
+shoutrrr it is the composed service URL.
+
+### `PATCH /api/v1/notification-channels/{id}`
+
+Updates only supplied settings and returns `200 OK` with
+`{ "updated": "nch_01..." }`. Optional fields are `enabled` (boolean),
+`categories` (array; empty means every category), `min_priority` (`low`,
+`medium`, `high`, or `urgent`), and `events` (legacy `completed`, `failed`, or
+`all`). Workspace channels require `ADMIN` or `OWNER`; personal channels
+require their owner. Invalid input is `400`; an unavailable channel is `404`.
+
+### `POST /api/v1/notification-channels/{id}/test`
+
+Sends a synthetic `run.completed` event and returns `200 OK` with
+`{ "ok": true, "channel_id": "nch_01..." }`. A delivery failure returns
+`502`; authorization follows the PATCH rule.
+
+### `DELETE /api/v1/notification-channels/{id}`
+
+Deletes the channel and returns `200 OK` with `{ "deleted": "nch_01..." }`.
+Missing or unauthorized channels return `404` or `403` respectively.
+
+### `POST /api/v1/notification-channels/test`
+
+Tests an unsaved draft without persisting it. The body accepts the delivery
+fields needed to compose a channel (`type`, `url`/`to`, or `provider` plus
+`fields`, with optional `secret`) and the response is `200 OK` with
+`{ "ok": true }`. Invalid drafts return `400`; a provider or mailer failure
+returns `502`.
+
 ## Agent pairing
 
 ### `GET /api/v1/notification-channels/{id}/agents`

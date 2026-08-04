@@ -68,7 +68,7 @@ Before a key is saved the panel shows a single **Setup** row and says the sectio
 
 The connections are configured here, but the two questions they raise are asked elsewhere, so the answers appear there too:
 
-- **An agent's Skills & Tools tab** (Crews) — under **Integrations**, beside Connectors, a **Notifications** card lists the channels the agent may post to, with **Manage access** to grant or revoke. It sits there rather than on Overview because that tab is the agent's access surface, and a channel grant is access. Each pairing is still gated on the *channel* — MANAGER+ for a workspace channel, ownership for a personal one — so a refusal comes from the server in its own words rather than being guessed at in the UI.
+- **An agent's Skills & Tools tab** (Crews) — under **Integrations**, beside Connectors, a **Notifications** card lists the channels the agent may post to, with **Manage access** to grant or revoke. It sits there rather than on Overview because that tab is the agent's access surface, and a channel grant is access. Each pairing is still gated on the *channel* — ADMIN/OWNER for a workspace channel, ownership for a personal one — so a refusal comes from the server in its own words rather than being guessed at in the UI.
 - **A routine's Overview** extends *What it touches* with **Reach through its agents**: the routine runs Riley, Riley is granted Gmail, therefore this routine can send mail. That hop is invisible in the DSL, because the grant lives on the agent. Read-only — it is a summary of grants made elsewhere.
 
 ```bash
@@ -388,7 +388,7 @@ A special `*` "category" mutes a channel entirely, overriding every other cell f
 crewship notify prefs get
 
 # Get pinged in Slack immediately when an approval is waiting
-crewship notify prefs set --category approvals --channel nch_abc123 --state immediate
+crewship notify prefs set --category agents.approval --channel nch_abc123 --state immediate
 
 # Mute a channel entirely (overrides every category on it)
 crewship notify prefs set --category "*" --channel nch_abc123 --state immediate
@@ -402,7 +402,7 @@ For `chat.replies`, a member watching the chat live (an open WebSocket subscript
 
 Delivery is gated by an in-process **token bucket per (recipient, channel, category)** — a burst of 5, refilling at roughly 1 token per 30 seconds by default — so a misconfigured routine notifying the same person in a loop can't flood their Slack. Overflow is a **soft drop**: it's recorded in the delivery log with status `dropped_rate`, never silently swallowed.
 
-`approvals` and `escalations` **bypass the rate gate entirely** — a blocking human-in-the-loop item is never dropped for being "too frequent."
+`agents.approval` and `agents.escalation` **bypass the rate gate entirely** — a blocking human-in-the-loop item is never dropped for being "too frequent."
 
 Repeated fires for the exact same source event (a retried hook, a re-processed job) **coalesce** on `category:source_id` — one delivery row, one send, regardless of how many times the underlying write-through fires.
 
@@ -412,10 +412,10 @@ Every attempted delivery through the #1412 category system is recorded — `pend
 
 ```bash
 crewship notifychannel deliveries --status failed
-crewship notifychannel deliveries --category approvals --channel nch_abc123
+crewship notifychannel deliveries --category agents.approval --channel nch_abc123
 ```
 
-Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller. The **Deliveries** tab on `/integrations` renders the same rows, with each status translated into a reason — `dropped_pref` reads as *recipient has this category muted*, `dropped_rate` as *folded into a digest* — because the whole point is telling a quiet channel apart from a broken one.
+Reading the log is **admin-only** (`GET /api/v1/notification-deliveries`, ADMIN/OWNER) since it spans every recipient in the workspace, not just the caller. The **Deliveries** tab on `/integrations` renders the same rows, with each status translated into a reason — `dropped_pref` reads as *recipient has this category muted*, `dropped_rate` as *rate limit overflow; not delivered* — because the whole point is telling a quiet channel apart from a broken one.
 
 <Note>
 The API serves this log with snake_case keys (`channel_id`, `created_at`, …). Until 2026-07 the fields carried no JSON tags at all, so the server emitted Go field names and any client asking for `channel_id` got nothing: `crewship notifychannel deliveries` printed blank CHANNEL, USER and CREATED columns. If you are scripting against an older instance, that is why.
@@ -540,11 +540,11 @@ requests require authentication and workspace context unless stated otherwise.
 
 #### POST /api/v1/notification-channels/{id}/agents
 
-**Request:** `id` path parameter and JSON `{ "agent_id": "…" }`. **Response:** `204 No Content`. **Statuses:** `204 No Content`; `400 Bad Request`, `403 Forbidden`, or `404 Not Found` for invalid input, insufficient role, or an unavailable channel/agent.
+**Request:** `id` path parameter and JSON `{ "agent_id": "…" }`. **Response:** `200 OK` with `{ "channel_id": "…", "agent_id": "…", "allowed": true }`. **Statuses:** `200 OK`; `400 Bad Request` for invalid input or an agent outside the workspace, `403 Forbidden` for insufficient role, and `404 Not Found` for an unavailable channel.
 
 #### DELETE /api/v1/notification-channels/{id}/agents/{agentId}
 
-**Request:** `id` and `agentId` path parameters; no body. **Response:** `204 No Content`. **Statuses:** `204 No Content`; `403 Forbidden` or `404 Not Found` when the caller cannot change the channel or the relationship is absent.
+**Request:** `id` and `agentId` path parameters; no body. **Response:** `200 OK` with `{ "channel_id": "…", "agent_id": "…", "allowed": false }`. **Statuses:** `200 OK`; `403 Forbidden` when the caller cannot change the channel, and `404 Not Found` when the relationship is absent or the channel is unavailable.
 
 #### POST /api/v1/notification-channels/test
 
@@ -588,7 +588,7 @@ Create body:
 { "type": "webhook", "url": "https://hooks.example.com/crewship", "events": ["all"] }
 { "type": "email", "to": "ops@example.com" }
 { "type": "shoutrrr", "provider": "slack", "fields": {"webhook_url": "https://hooks.slack.com/services/T0/B0/XXX"},
-  "categories": ["approvals", "escalations"], "min_priority": "medium" }
+  "categories": ["agents.approval", "agents.escalation"], "min_priority": "medium" }
 { "type": "shoutrrr", "provider": "telegram", "fields": {"bot_token": "123:ABC", "chat_id": "@you"},
   "personal": true }
 ```
@@ -601,7 +601,7 @@ Preference matrix body (`PUT /api/v1/me/notification-prefs`):
 
 ```json
 { "cells": [
-  { "category": "approvals", "channel_id": "nch_abc123", "state": "immediate" },
+  { "category": "agents.approval", "channel_id": "nch_abc123", "state": "immediate" },
   { "category": "*", "channel_id": "nch_def456", "state": "immediate" }
 ] }
 ```

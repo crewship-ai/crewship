@@ -11,7 +11,9 @@ subsystem via the shared policy resolver, so a `PUT` takes effect immediately
 (the resolver cache is invalidated on write). The CLI counterpart is
 [`crewship policy get/list/set`](/cli/policy).
 
-All endpoints require authentication and workspace context.
+All endpoints require authentication and workspace context. Reads require
+workspace membership; setting a policy requires `MANAGER`, `ADMIN`, or
+`OWNER`.
 
 | Field | Values | Meaning |
 |---|---|---|

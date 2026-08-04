@@ -54,6 +54,9 @@ Returns `200` with a JSON array (possibly empty — never `null`).
 Unparseable or non-positive `limit` values use the default; values above 100
 are clamped to 100. Values other than `true` or `false` for `read` are
 ignored and return both read states.
+An omitted or unrecognised `read` value applies no read-state filter. The
+`offset` is zero-based and negative pagination values are normalised by the
+server.
 
 ```bash
 curl -H "Cookie: <session>" \
@@ -86,6 +89,9 @@ Unread count, cheap. Used to drive the navbar badge.
 ```
 Returns `200 OK`; the count is scoped to the authenticated user.
 
+The count is scoped to the authenticated user in the current workspace; it
+does not include notifications belonging to other users.
+
 ## `POST /api/v1/notifications/{notificationId}/read`
 
 Mark a single notification read. Idempotent — re-reading an already-read notification still returns `200`. Returns `404` only when the notification does not exist (or belongs to a different user, which is indistinguishable on purpose).
@@ -94,6 +100,9 @@ Mark a single notification read. Idempotent — re-reading an already-read notif
 { "status": "ok" }
 ```
 Returns `200 OK` and is idempotent for an already-read notification.
+
+The response is always the same for a notification that is already read. A
+notification owned by another user is treated as not found.
 
 ## `POST /api/v1/notifications/read-all`
 
