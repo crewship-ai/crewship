@@ -1135,6 +1135,96 @@
         ],
         "type": "object"
       },
+      "CrewAssignmentsResponseV1": {
+        "items": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "issue_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewCapabilitiesResponseV1": {
+        "properties": {
+          "agents": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "container": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "crew_slug": {
+            "type": "string"
+          },
+          "integrations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "runtimes": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "schema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "CrewContainerStatusResponseV1": {
+        "properties": {
+          "container_id": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "CrewCounts": {
         "properties": {
           "agents": {
@@ -1222,11 +1312,518 @@
         ],
         "type": "object"
       },
+      "CrewCredentialReadinessResponseV1": {
+        "properties": {
+          "credentials": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "ready": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "CrewEscalationsResponseV1": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "escalations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CrewGitDiffResponseV1": {
+        "properties": {
+          "base_ref": {
+            "type": "string"
+          },
+          "diff": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "head_ref": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CrewIntegrationToolsResponseV1": {
+        "items": {
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "input_schema": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewIntegrationsResponseV1": {
+        "items": {
+          "properties": {
+            "display_name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewIssueActivityResponseV1": {
+        "items": {
+          "properties": {
+            "actor_id": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewIssueCommentsResponseV1": {
+        "items": {
+          "properties": {
+            "author_id": {
+              "type": "string"
+            },
+            "author_name": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewIssueRelationsResponseV1": {
+        "items": {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "issue_id": {
+              "type": "string"
+            },
+            "related_issue_id": {
+              "type": "string"
+            },
+            "relation_type": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewIssueResponseV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CrewIssueRunsResponseV1": {
+        "items": {
+          "properties": {
+            "agent_id": {
+              "type": "string"
+            },
+            "error_message": {
+              "type": "string"
+            },
+            "finished_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "started_at": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewIssueSubtasksResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "identifier": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
       "CrewList": {
         "items": {
           "$ref": "#/components/schemas/Crew"
         },
         "type": "array"
+      },
+      "CrewMembersResponseV1": {
+        "items": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "user_name": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewMissionResponseV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CrewMissionsResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "CrewPeerConversationsResponseV1": {
+        "properties": {
+          "conversations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CrewPersonaResponseV1": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "CrewPolicyResponseV1": {
+        "properties": {
+          "approval_required": {
+            "type": "boolean"
+          },
+          "autonomy": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "execution": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CrewPortExposeResponseV1": {
+        "properties": {
+          "ports": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "host": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CrewProvisionResponseV1": {
+        "properties": {
+          "crew_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CrewServicesResponseV1": {
+        "properties": {
+          "services": {
+            "items": {
+              "properties": {
+                "image": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "ports": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "CrewStandupResponseV1": {
+        "properties": {
+          "crew_id": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "type": "object"
       },
       "CrewUpdateRequest": {
         "properties": {
@@ -3359,6 +3956,31 @@
         ],
         "type": "object"
       },
+      "WorkspaceCapabilitiesResponseV1": {
+        "properties": {
+          "members": {
+            "items": {
+              "properties": {
+                "capabilities": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "WorkspaceCounts": {
         "properties": {
           "agents": {
@@ -3400,9 +4022,389 @@
         ],
         "type": "object"
       },
+      "WorkspaceInvitationsResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "expires_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
       "WorkspaceList": {
         "items": {
           "$ref": "#/components/schemas/Workspace"
+        },
+        "type": "array"
+      },
+      "WorkspaceMemberCapabilitiesResponseV1": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspaceMembersResponseV1": {
+        "items": {
+          "properties": {
+            "capabilities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "email": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "user_name": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePendingRunsResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "pipeline_id": {
+              "type": "string"
+            },
+            "pipeline_slug": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePipelineBudgetResponseV1": {
+        "properties": {
+          "has_budget": {
+            "type": "boolean"
+          },
+          "month": {
+            "type": "string"
+          },
+          "monthly_budget_usd": {
+            "type": "number"
+          },
+          "over_budget": {
+            "type": "boolean"
+          },
+          "pct_used": {
+            "type": "number"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "spent_usd": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacePipelineBudgetSummaryResponseV1": {
+        "properties": {
+          "month": {
+            "type": "string"
+          },
+          "pipelines": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "total_budget_usd": {
+            "type": "number"
+          },
+          "total_spent_usd": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacePipelineDiffResponseV1": {
+        "properties": {
+          "diff": {
+            "type": "string"
+          },
+          "from_version": {
+            "type": "integer"
+          },
+          "to_version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacePipelineExportResponseV1": {
+        "properties": {
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacePipelineOverridesResponseV1": {
+        "items": {
+          "properties": {
+            "agent_slug": {
+              "type": "string"
+            },
+            "config": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "step_id": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePipelineResponseV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacePipelineRunChangesResponseV1": {
+        "items": {
+          "properties": {
+            "additions": {
+              "type": "integer"
+            },
+            "deletions": {
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePipelineRunFilesResponseV1": {
+        "items": {
+          "properties": {
+            "modified_at": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePipelineVersionResponseV1": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "WorkspacePipelineVersionsResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "created_by": {
+              "type": "string"
+            },
+            "definition": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "version": {
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePipelineWebhooksResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            },
+            "inputs_template": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            },
+            "rate_limit_per_min": {
+              "type": "integer"
+            },
+            "signing_secret_set": {
+              "type": "boolean"
+            },
+            "target_pipeline_slug": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "WorkspacePipelinesResponseV1": {
+        "items": {
+          "properties": {
+            "created_at": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "slug": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "workspace_id": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
         "type": "array"
       },
@@ -41030,7 +42032,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewAssignmentsResponseV1"
                 }
               }
             },
@@ -41170,7 +42172,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewCapabilitiesResponseV1"
                 }
               }
             },
@@ -41370,7 +42372,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewContainerStatusResponseV1"
                 }
               }
             },
@@ -41540,7 +42542,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewCredentialReadinessResponseV1"
                 }
               }
             },
@@ -41899,7 +42901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewEscalationsResponseV1"
                 }
               }
             },
@@ -42886,7 +43888,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewGitDiffResponseV1"
                 }
               }
             },
@@ -43116,7 +44118,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIntegrationsResponseV1"
                 }
               }
             },
@@ -43995,7 +44997,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIntegrationToolsResponseV1"
                 }
               }
             },
@@ -44804,7 +45806,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIssueResponseV1"
                 }
               }
             },
@@ -45158,7 +46160,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIssueActivityResponseV1"
                 }
               }
             },
@@ -45336,7 +46338,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIssueCommentsResponseV1"
                 }
               }
             },
@@ -45700,7 +46702,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIssueRelationsResponseV1"
                 }
               }
             },
@@ -46272,7 +47274,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIssueRunsResponseV1"
                 }
               }
             },
@@ -46866,7 +47868,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewIssueSubtasksResponseV1"
                 }
               }
             },
@@ -47036,7 +48038,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewMembersResponseV1"
                 }
               }
             },
@@ -47767,7 +48769,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewMissionsResponseV1"
                 }
               }
             },
@@ -48240,7 +49242,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewMissionResponseV1"
                 }
               }
             },
@@ -49832,7 +50834,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewPeerConversationsResponseV1"
                 }
               }
             },
@@ -50141,7 +51143,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewPersonaResponseV1"
                 }
               }
             },
@@ -50539,7 +51541,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewPolicyResponseV1"
                 }
               }
             },
@@ -50945,7 +51947,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewPortExposeResponseV1"
                 }
               }
             },
@@ -51263,7 +52265,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewProvisionResponseV1"
                 }
               }
             },
@@ -52101,7 +53103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewServicesResponseV1"
                 }
               }
             },
@@ -52287,7 +53289,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/CrewStandupResponseV1"
                 }
               }
             },
@@ -87553,7 +88555,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspaceInvitationsResponseV1"
                 }
               }
             },
@@ -87871,7 +88873,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspaceMembersResponseV1"
                 }
               }
             },
@@ -88219,7 +89221,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspaceCapabilitiesResponseV1"
                 }
               }
             },
@@ -89012,7 +90014,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspaceMemberCapabilitiesResponseV1"
                 }
               }
             },
@@ -89828,7 +90830,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineRunChangesResponseV1"
                 }
               }
             },
@@ -90066,7 +91068,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineRunFilesResponseV1"
                 }
               }
             },
@@ -92377,69 +93379,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "properties": {
-                      "created_at": {
-                        "type": "string"
-                      },
-                      "enabled": {
-                        "type": "boolean"
-                      },
-                      "fire_count": {
-                        "type": "integer"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "inputs_template": {
-                        "additionalProperties": true,
-                        "type": "object"
-                      },
-                      "last_fired_at": {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      "last_run_id": {
-                        "type": "string"
-                      },
-                      "last_status": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "rate_limit_per_min": {
-                        "type": "integer"
-                      },
-                      "signing_secret": {
-                        "type": "string"
-                      },
-                      "signing_secret_set": {
-                        "type": "boolean"
-                      },
-                      "target_pipeline_id": {
-                        "type": "string"
-                      },
-                      "target_pipeline_slug": {
-                        "type": "string"
-                      },
-                      "target_pipeline_version": {
-                        "nullable": true,
-                        "type": "integer"
-                      },
-                      "token": {
-                        "type": "string"
-                      },
-                      "updated_at": {
-                        "type": "string"
-                      },
-                      "workspace_id": {
-                        "type": "string"
-                      }
-                    },
-                    "type": "object"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/WorkspacePipelineWebhooksResponseV1"
                 }
               }
             },
@@ -93284,7 +94224,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelinesResponseV1"
                 }
               }
             },
@@ -93454,7 +94394,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineBudgetSummaryResponseV1"
                 }
               }
             },
@@ -93864,7 +94804,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePendingRunsResponseV1"
                 }
               }
             },
@@ -96239,7 +97179,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineResponseV1"
                 }
               }
             },
@@ -96655,7 +97595,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineBudgetResponseV1"
                 }
               }
             },
@@ -97145,7 +98085,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineDiffResponseV1"
                 }
               }
             },
@@ -97925,7 +98865,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineExportResponseV1"
                 }
               }
             },
@@ -98133,7 +99073,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineOverridesResponseV1"
                 }
               }
             },
@@ -101585,7 +102525,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineVersionsResponseV1"
                 }
               }
             },
@@ -101801,7 +102741,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/WorkspacePipelineVersionResponseV1"
                 }
               }
             },
