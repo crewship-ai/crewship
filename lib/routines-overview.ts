@@ -378,3 +378,51 @@ function expiryRank(iso: string | undefined): number {
   const d = parsed(iso)
   return d ? d.getTime() : Number.POSITIVE_INFINITY
 }
+
+export interface OutcomeDay extends SpendDay {
+  passed: number
+  failed: number
+  /** Started but not yet judged: running, queued, waiting, paused. */
+  pending: number
+  /** Terminal but not a verdict — cancelled, interrupted. */
+  other: number
+}
+
+/**
+ * The week by outcome, with the day's spend alongside.
+ *
+ * Two cards about money — Spend and Budgets — answered the same
+ * question twice and neither answered the one an operator opens this
+ * page with: did it work. Bars by verdict do, and cost rides along as
+ * a line, so the week reads as one story instead of two.
+ *
+ * Every run lands in exactly one bucket, including the ones that are
+ * neither a pass nor a failure: a cancelled run dropped on the floor
+ * would make a bar shorter than the day it describes, and nothing on
+ * screen would say why. `other` is usually zero and usually invisible;
+ * it exists so the bars can be trusted to sum.
+ */
+export function runOutcomesByDay(runs: OverviewRun[], now: Date, days: number): OutcomeDay[] {
+  const out: OutcomeDay[] = spendByDay(runs, now, days).map((d) => ({
+    ...d,
+    passed: 0,
+    failed: 0,
+    pending: 0,
+    other: 0,
+  }))
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  for (const r of runs) {
+    const started = parsed(r.started_at)
+    if (!started) continue
+    const runDay = new Date(started.getFullYear(), started.getMonth(), started.getDate()).getTime()
+    const diff = Math.floor((dayStart - runDay) / 86_400_000)
+    if (diff < 0 || diff >= days) continue
+    const bucket = out[days - 1 - diff]
+    const s = (r.status ?? "").toLowerCase()
+    if (SUCCEEDED.has(s)) bucket.passed++
+    else if (FAILED.has(s)) bucket.failed++
+    else if (LIVE.has(s)) bucket.pending++
+    else bucket.other++
+  }
+  return out
+}

@@ -10,6 +10,7 @@ import {
   recentRuns,
   spendByDay,
   pendingApprovals,
+  runOutcomesByDay,
 } from "@/lib/routines-overview"
 
 // The overview replaces a 38-row table in which 37 rows said "never
@@ -352,5 +353,65 @@ describe("pendingApprovals", () => {
     )
     expect(out).toHaveLength(1)
     expect(out[0]).toMatchObject({ kind: "routine", slug: "risky" })
+  })
+})
+
+// One chart instead of two cards about money. Bars by outcome — green
+// passed, red failed, amber still waiting — so the week reads as "what
+// happened" rather than "what it cost", with cost as a line over it.
+//
+// The bars have to SUM to the runs that day. A cancelled run dropped
+// on the floor would make a bar shorter than the day it describes, and
+// nothing on screen would say why.
+
+describe("runOutcomesByDay", () => {
+  it("returns one bucket per day, oldest first, today last", () => {
+    const series = runOutcomesByDay([], NOW, 7)
+    expect(series).toHaveLength(7)
+    expect(series[series.length - 1].isToday).toBe(true)
+  })
+
+  it("splits a day's runs by verdict", () => {
+    const runs = [
+      run({ id: "a", started_at: at(4, 9) }),
+      run({ id: "b", started_at: at(4, 10), status: "failed" }),
+      run({ id: "c", started_at: at(4, 11), status: "waiting" }),
+    ]
+    const today = runOutcomesByDay(runs, NOW, 7)[6]
+    expect(today).toMatchObject({ passed: 1, failed: 1, pending: 1, other: 0 })
+  })
+
+  it("counts a cancelled run rather than dropping it", () => {
+    // It is not a pass and not a failure, but it happened — and a bar
+    // shorter than its own day is a chart lying by omission.
+    const today = runOutcomesByDay([run({ status: "cancelled" })], NOW, 7)[6]
+    expect(today).toMatchObject({ passed: 0, failed: 0, pending: 0, other: 1 })
+  })
+
+  it("treats running and queued as not-yet-a-verdict, with waiting", () => {
+    const runs = [
+      run({ id: "r", status: "running" }),
+      run({ id: "q", status: "queued" }),
+      run({ id: "w", status: "waiting" }),
+      run({ id: "p", status: "paused" }),
+    ]
+    expect(runOutcomesByDay(runs, NOW, 7)[6].pending).toBe(4)
+  })
+
+  it("puts each run in the day it started", () => {
+    const runs = [run({ id: "y", started_at: at(3, 10) }), run({ id: "t", started_at: at(4, 10) })]
+    const series = runOutcomesByDay(runs, NOW, 7)
+    expect(series[5].passed).toBe(1)
+    expect(series[6].passed).toBe(1)
+  })
+
+  it("ignores a run older than the window instead of folding it into day one", () => {
+    const runs = [run({ started_at: new Date(2026, 6, 1).toISOString() })]
+    expect(runOutcomesByDay(runs, NOW, 7).every((d) => d.passed + d.failed + d.pending + d.other === 0)).toBe(true)
+  })
+
+  it("carries the day's spend so one chart can show both", () => {
+    const runs = [run({ started_at: at(4, 9), cost_usd: 0.25 })]
+    expect(runOutcomesByDay(runs, NOW, 7)[6].usd).toBeCloseTo(0.25, 6)
   })
 })

@@ -59,6 +59,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
+import { RoutineBudgetCard } from "./routine-budget-card"
 import { RoutineEditorTab } from "./routine-editor-tab"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
@@ -526,7 +527,16 @@ export function RoutineCardDetail({
             </Appear>
           )}
 
+          {/* A monthly cap belongs to the routine that carries it.
+              It used to live only in a workspace-wide roll-up on the
+              overview, which put a third card about money on one row —
+              and before that on a tab nobody opened. Here it sits next
+              to what the routine costs. */}
           <Appear order={7}>
+            <RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} />
+          </Appear>
+
+          <Appear order={8}>
             <DetailCard title="Metadata">
               <Metadata routine={routine} steps={steps.length} />
             </DetailCard>
@@ -534,7 +544,7 @@ export function RoutineCardDetail({
         </div>
       </div>
 
-      <Appear order={8}>
+      <Appear order={9}>
         <RunsCard
           slug={routine.slug}
           workspaceId={workspaceId}

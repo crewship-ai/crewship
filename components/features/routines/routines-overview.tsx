@@ -36,7 +36,7 @@ import {
   XCircle,
 } from "lucide-react"
 
-import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from "recharts"
+import { Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
 
 import { cn } from "@/lib/utils"
 import {
@@ -54,7 +54,6 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { describeCron } from "@/lib/cron-describe"
 import { formatUsd } from "@/lib/routines-insights"
-import { RoutineBudgetSummaryCard } from "./routine-budget-summary-card"
 import { formatDurationDecimal, relTime } from "@/lib/time"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
@@ -71,12 +70,12 @@ import {
   nextScheduled,
   recentRuns,
   runsToday,
-  spendByDay,
+  runOutcomesByDay,
   successRate,
   upcomingSchedules,
   pendingApprovals,
   type PendingApproval,
-  type SpendDay,
+  type OutcomeDay,
 } from "@/lib/routines-overview"
 
 const SUCCESS_WINDOW_DAYS = 7
@@ -143,8 +142,12 @@ export function RoutinesOverview({
     () => pendingApprovals(waitpoints, routines, slugByRunId),
     [waitpoints, routines, slugByRunId],
   )
-  const spend = React.useMemo(() => spendByDay(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
-  const spendTotal = React.useMemo(() => spend.reduce((s, d) => s + d.usd, 0), [spend])
+  const outcomes = React.useMemo(() => runOutcomesByDay(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
+  const spendTotal = React.useMemo(() => outcomes.reduce((s, d) => s + d.usd, 0), [outcomes])
+  const weekTotal = React.useMemo(
+    () => outcomes.reduce((s, d) => s + d.passed + d.failed + d.pending + d.other, 0),
+    [outcomes],
+  )
   const failing = React.useMemo(
     () =>
       routines
@@ -440,35 +443,29 @@ export function RoutinesOverview({
         <Appear order={4}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <DashboardCard
-              title={`Spend · ${SUCCESS_WINDOW_DAYS} days`}
-              icon={Banknote}
-              hint={formatUsd(spendTotal)}
+              title={`Runs · ${SUCCESS_WINDOW_DAYS} days`}
+              icon={Activity}
+              hint={`${weekTotal} ${weekTotal === 1 ? "run" : "runs"} · ${formatUsd(spendTotal)}`}
+              className="lg:col-span-2"
             >
-              {/* Real per-run cost_usd, or nothing. This card's
-                  ancestor had decorative sparklines drawn from a mock
-                  function; they were removed for promising a trend that
-                  did not exist, and the lesson stands.
+              {/* One chart, not two cards about money. Spend and
+                  Budgets answered the same question twice, and neither
+                  answered the one an operator opens this page with:
+                  did it work. Bars by verdict do — green passed, red
+                  failed, amber not yet judged — and cost rides along
+                  as a line, on its own axis, because dollars and run
+                  counts are not the same quantity and stacking them
+                  would invent a number that means nothing.
 
-                  Recharts, not hand-rolled bars. The first version set
-                  a percentage height on a flex item whose own height
-                  came from flex-1 — a percentage against an indefinite
-                  parent, which resolves to auto. Every bar computed to
-                  zero, so a card reporting $0.19 drew seven weekday
-                  labels under an empty box. */}
-              {spendTotal === 0 ? (
-                <Empty icon={Banknote}>No run in this window carried a cost.</Empty>
+                  Budgets moved to the routine that owns the cap. A
+                  workspace-wide roll-up of money was the third card
+                  about money on one row. */}
+              {weekTotal === 0 ? (
+                <Empty icon={Activity}>Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.</Empty>
               ) : (
-                <SpendChart data={spend} />
+                <OutcomeChart data={outcomes} />
               )}
             </DashboardCard>
-
-            {/* Budgets came from the Insights tab, and is the one
-                thing on it that was a capability rather than a second
-                view of one: a routine can carry a monthly cap, and
-                this is where you find out one is over it. It keeps its
-                own card shell — it is a list with its own tone, not a
-                tile. */}
-            <RoutineBudgetSummaryCard workspaceId={workspaceId} onSelect={onSelect} />
 
             <DashboardCard
               title="Recently failing"
@@ -649,50 +646,86 @@ function WaitpointRow({
 }
 
 /**
- * Daily spend, drawn by the same chart library as the dashboard.
+ * The week: what happened, and what it cost.
  *
- * The hand-rolled version put `height: N%` on a flex item nested in a
- * flex-1 parent. A percentage height resolves against a DEFINITE
- * parent height, and flex-1 does not give one — so every bar computed
- * to zero and the card reported $0.19 above an empty box with seven
- * weekday labels under it. The failure looked exactly like "no data",
- * which is why it survived a read-through.
+ * Stacked bars by verdict, cost as a line on its own axis. Two
+ * quantities in one frame is a judgement call — the alternative was
+ * two cards, which is what this replaced, and the story ("we ran 12,
+ * two failed, it cost twenty cents") is one story.
+ *
+ * The bars are drawn passed → failed → pending → other so the green
+ * base is stable and a red segment always sits at the same place in
+ * the stack; a stack whose order shifts with the data cannot be read
+ * across days.
+ *
+ * `other` — cancelled and interrupted — is stacked last and usually
+ * zero. It is here so the bars sum to the runs that day: a bar
+ * shorter than its own day would be a chart lying by omission.
+ *
+ * An earlier version of this card hand-rolled its bars with a
+ * percentage height on a flex item whose own height came from flex-1.
+ * A percentage against an indefinite parent resolves to auto, so every
+ * bar computed to zero and a card reporting $0.19 drew seven weekday
+ * labels under an empty box — a bug that looked exactly like "no
+ * data", which is why reading the code did not catch it.
  */
-function SpendChart({ data }: { data: SpendDay[] }) {
+function OutcomeChart({ data }: { data: OutcomeDay[] }) {
   const config = React.useMemo<ChartConfig>(
-    () => ({ usd: { label: "Spend", color: "var(--primary)" } }),
+    () => ({
+      passed: { label: "Passed", color: "rgb(52, 211, 153)" },
+      failed: { label: "Failed", color: "rgb(248, 113, 113)" },
+      pending: { label: "Waiting", color: "rgb(251, 191, 36)" },
+      other: { label: "Cancelled", color: "rgb(148, 163, 184)" },
+      usd: { label: "Spend", color: "var(--primary)" },
+    }),
     [],
   )
   return (
-    <ChartContainer config={config} className="aspect-auto h-[140px] w-full">
-      <BarChart data={data} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+    <ChartContainer config={config} className="aspect-auto h-[190px] w-full">
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeOpacity={0.08} />
-        <XAxis
-          dataKey="label"
+        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} className="text-[10px]" />
+        <YAxis
+          yAxisId="runs"
+          allowDecimals={false}
           tickLine={false}
           axisLine={false}
-          tickMargin={6}
+          width={28}
           className="text-[10px]"
         />
         <YAxis
+          yAxisId="cost"
+          orientation="right"
           tickLine={false}
           axisLine={false}
-          width={52}
+          width={54}
           tickFormatter={(v: number) => formatUsd(v)}
           className="text-[10px]"
         />
         <ChartTooltip
           cursor={false}
-          content={<ChartTooltipContent formatter={(v) => formatUsd(Number(v))} />}
+          content={
+            <ChartTooltipContent
+              formatter={(value, name) =>
+                name === "usd" ? formatUsd(Number(value)) : String(value)
+              }
+            />
+          }
         />
-        <Bar dataKey="usd" radius={[3, 3, 0, 0]}>
-          {data.map((d, i) => (
-            // Today is the bar the reader is standing in; the rest of
-            // the week is context.
-            <Cell key={i} fill={d.isToday ? "var(--primary)" : "color-mix(in oklab, var(--primary) 55%, transparent)"} />
-          ))}
-        </Bar>
-      </BarChart>
+        <Bar yAxisId="runs" dataKey="passed" stackId="runs" fill="var(--color-passed)" radius={[0, 0, 0, 0]} />
+        <Bar yAxisId="runs" dataKey="failed" stackId="runs" fill="var(--color-failed)" radius={[0, 0, 0, 0]} />
+        <Bar yAxisId="runs" dataKey="pending" stackId="runs" fill="var(--color-pending)" radius={[0, 0, 0, 0]} />
+        <Bar yAxisId="runs" dataKey="other" stackId="runs" fill="var(--color-other)" radius={[3, 3, 0, 0]} />
+        <Line
+          yAxisId="cost"
+          type="monotone"
+          dataKey="usd"
+          stroke="var(--color-usd)"
+          strokeWidth={1.5}
+          dot={false}
+          strokeDasharray="3 3"
+        />
+      </ComposedChart>
     </ChartContainer>
   )
 }

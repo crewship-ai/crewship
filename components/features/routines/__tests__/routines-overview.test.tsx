@@ -274,4 +274,31 @@ describe("<RoutinesOverview>", () => {
     render(<RoutinesOverview {...PROPS} routines={[routine({})]} />)
     expect(screen.getByText(/Nothing is waiting on a decision/i)).toBeInTheDocument()
   })
+
+  // One chart replaced two cards about money. What matters at this
+  // level is that the card counts the week honestly and says so when
+  // the week was empty — the stacking and the axes are the chart
+  // library's job, the arithmetic is pinned in lib/routines-overview.
+
+  it("heads the week with its run count and its spend", () => {
+    h.runs = [
+      run({ id: "a", started_at: at(4, 9), cost_usd: 0.02 }),
+      run({ id: "b", started_at: at(3, 9), status: "failed", cost_usd: 0.01 }),
+    ]
+    render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 2 })]} />)
+    expect(screen.getByText(/2 runs · \$0\.0300/)).toBeInTheDocument()
+  })
+
+  it("says the week was empty rather than drawing an empty frame", () => {
+    render(<RoutinesOverview {...PROPS} routines={[routine({})]} />)
+    expect(screen.getByText(/Nothing ran in the last 7 days/i)).toBeInTheDocument()
+  })
+
+  it("no longer carries a workspace budget roll-up", () => {
+    // A third card about money on one row. The cap moved to the
+    // routine that owns it.
+    h.runs = [run({})]
+    render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />)
+    expect(screen.queryByText(/Budgets/i)).not.toBeInTheDocument()
+  })
 })
