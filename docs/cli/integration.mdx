@@ -261,6 +261,155 @@ does not launch a stdio server during this check.
 For the complete command tree as emitted by the running binary, use
 `crewship commands --format json`.
 
+## Exact command references
+
+These headings mirror the live Cobra command paths, including commands whose
+details are covered in the tables above.
+
+### `crewship integration agent update-binding <agent-slug> <binding-id>`
+
+Updates an agent integration binding; see Agent bindings above.
+
+### `crewship integration composio account`
+
+Groups connected-account actions; see Composio managed integrations above.
+
+### `crewship integration composio account refresh <account-id>`
+
+Refreshes a connected account.
+
+### `crewship integration composio account remove <account-id>`
+
+Deletes a connected account at the provider.
+
+### `crewship integration composio account revoke <account-id>`
+
+Revokes a connected account while retaining its row.
+
+### `crewship integration composio bindings <agent-slug-or-id>`
+
+Lists an agent's Composio bindings.
+
+### `crewship integration composio default`
+
+Groups workspace-wide default Composio connector actions.
+
+### `crewship integration composio default enable`
+
+Enables and provisions the workspace-wide default connector.
+
+### `crewship integration composio default set <user_id>`
+
+Sets the connected user used by the default connector.
+
+### `crewship integration composio default show`
+
+Shows the default connector state.
+
+### `crewship integration composio inventory`
+
+Shows Composio toolkits and connected users.
+
+### `crewship integration composio key`
+
+Groups workspace Composio-key actions.
+
+### `crewship integration composio key remove`
+
+Removes the workspace Composio key.
+
+### `crewship integration composio key set`
+
+Stores and validates a workspace Composio key.
+
+### `crewship integration composio key show`
+
+Shows Composio-key configuration without revealing the key.
+
+### `crewship integration composio toolkits`
+
+Lists available Composio toolkits.
+
+### `crewship integration composio tools <toolkit>`
+
+Lists tools in a Composio toolkit.
+
+### `crewship integration composio triggers`
+
+Groups Composio trigger actions.
+
+### `crewship integration composio triggers active`
+
+Lists active Composio triggers.
+
+### `crewship integration composio triggers enable <slug>`
+
+Enables a Composio trigger for a user.
+
+### `crewship integration composio triggers types`
+
+Lists available Composio trigger types.
+
+### `crewship integration composio unbind <agent-slug-or-id>`
+
+Removes an agent's Composio bindings.
+
+### `crewship integration crew delete <crew-slug> <integration-id>`
+
+Deletes a crew-scoped integration.
+
+### `crewship integration crew list <crew-slug>`
+
+Lists integrations for a crew.
+
+### `crewship integration crew update <crew-slug> <integration-id>`
+
+Updates a crew-scoped integration.
+
+### `crewship integration crews-overview`
+
+Lists integrations across all crews.
+
+### `crewship integration disable <id-or-name>`
+
+Disables a workspace integration.
+
+### `crewship integration enable <id-or-name>`
+
+Enables a workspace integration.
+
+### `crewship integration get <id-or-name>`
+
+Shows a workspace integration.
+
+### `crewship integration list`
+
+Lists workspace integrations.
+
+### `crewship integration remove <id-or-name>`
+
+Removes a workspace integration.
+
+### `crewship integration test <id-or-name>`
+
+Tests a workspace integration connection.
+
+### `crewship integration tools enable <crew-slug> <integration-id> <tool-name>`
+
+Enables one tool on a crew-scoped integration.
+
+### `crewship integration tools list <crew-slug> <integration-id>`
+
+Lists tool bindings for a crew-scoped integration.
+
+### `crewship integration tools refresh <crew-slug> <integration-id>`
+
+Requests a refresh of tool bindings.
+
+### `crewship integration unbind`
+
+Removes an integration binding from an agent.
+
 ## See also
 
 - [`crewship mcp`](/cli/mcp) — MCP registry and raw configuration.

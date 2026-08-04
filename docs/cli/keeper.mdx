@@ -391,6 +391,79 @@ rules; an empty rule set is shown as `(none)`. `watch set` accepts at most the
 server's maximum watch-spec length (currently 4096 bytes) and authoring a spec does
 not enable the watchdog.
 
+## Exact command references
+
+These headings mirror the live Cobra command paths; the detailed behavior is
+described in the sections above and in the full command inventory.
+
+### `crewship keeper ask --agent <id> --crew <id> --credential <name> --intent <text>`
+
+Asks the credential-access judge to evaluate a request.
+
+### `crewship keeper contact <email>`
+
+Sets the security contact for Keeper findings.
+
+### `crewship keeper disable`
+
+Disables the workspace Keeper watchdog.
+
+### `crewship keeper enable`
+
+Enables the workspace Keeper watchdog.
+
+### `crewship keeper eval`
+
+Replays recorded Keeper decisions against candidate models.
+
+### `crewship keeper health`
+
+Shows the recent Keeper decision window.
+
+### `crewship keeper requests`
+
+Lists recent Keeper decision-audit requests.
+
+### `crewship keeper second-approver disable`
+
+Disables the second-approver requirement.
+
+### `crewship keeper threshold <1-10>`
+
+Sets the DENY-notify risk threshold.
+
+### `crewship keeper watch`
+
+Groups workspace watchdog policy actions.
+
+### `crewship keeper watch clear`
+
+Clears the free-form watchdog rules.
+
+### `crewship keeper watch get`
+
+Shows the current watchdog policy.
+
+### `crewship keeper watch preset`
+
+Groups watchdog preset actions.
+
+### `crewship keeper watch preset add <key>`
+
+Enables a watchdog preset.
+
+### `crewship keeper watch preset list`
+
+Lists watchdog presets and their enabled state.
+
+### `crewship keeper watch preset remove <key>`
+
+Disables a watchdog preset.
+
+### `crewship keeper watch set <text|->`
+
+Replaces the free-form watchdog rules.
+
 ## Related commands
 
 - [CLI overview](/cli/overview)
