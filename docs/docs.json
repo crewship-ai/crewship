@@ -358,7 +358,8 @@
               "cli/hire",
               "cli/persona",
               "cli/hooks",
-              "cli/checkpoint"
+              "cli/checkpoint",
+              "cli/keeper"
             ]
           },
           {
