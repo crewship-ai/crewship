@@ -2771,9 +2771,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/zstd": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -10037,9 +10038,16 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -13915,9 +13923,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -13925,9 +13934,10 @@
           },
           "204": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -14063,9 +14073,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -14231,9 +14242,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -16689,9 +16701,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -39308,9 +39321,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -59210,9 +59224,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "text/event-stream": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -61663,6 +61678,12 @@
               "application/json": {
                 "schema": {
                   "type": "object"
+                }
+              },
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -78806,9 +78827,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -78904,9 +78926,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
@@ -80268,9 +80291,10 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "image/svg+xml": {
                 "schema": {
-                  "type": "object"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },

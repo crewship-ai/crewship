@@ -292,7 +292,7 @@ func buildDocument(routes []route) map[string]any {
 				response.(map[string]any)["content"] = map[string]any{"application/problem+json": map[string]any{"schema": problemSchema()}}
 			}
 			if status[0] == '2' {
-				response.(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": responseSchema(rt)}}
+				response.(map[string]any)["content"] = responseContent(rt.path, responseSchema(rt))
 			}
 		}
 		op := map[string]any{
@@ -613,6 +613,33 @@ func functionBody(src string, from int) string {
 func httpStatusDescription(code string) string {
 	n, _ := strconv.Atoi(code)
 	return http.StatusText(n)
+}
+
+func responseContent(path string, schema map[string]any) map[string]any {
+	types := []string{"application/json"}
+	switch {
+	case path == "/api/v1/journal/stream":
+		types = []string{"text/event-stream"}
+	case path == "/api/v1/memory/export":
+		types = []string{"application/json", "application/zip"}
+	case path == "/api/v1/admin/backups/download":
+		types = []string{"application/zstd"}
+	case strings.HasSuffix(path, "/memory/versions/{id}/content"):
+		types = []string{"text/markdown", "application/octet-stream"}
+	case strings.HasSuffix(path, "/files/download"):
+		types = []string{"application/octet-stream"}
+	case strings.HasSuffix(path, "/avatar") && !strings.HasSuffix(path, "/apply-avatar-style"):
+		types = []string{"image/svg+xml"}
+	}
+	content := make(map[string]any, len(types))
+	for _, typ := range types {
+		responseSchema := schema
+		if typ != "application/json" {
+			responseSchema = map[string]any{"type": "string", "format": "binary"}
+		}
+		content[typ] = map[string]any{"schema": responseSchema}
+	}
+	return content
 }
 
 // operationID builds a stable, readable id like "get_agents_id" from
