@@ -363,6 +363,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() {
 		result[key] = schema
 	}
+	for key, schema := range remainingExecutionDomainSchemaCatalog() {
+		result[key] = schema
+	}
 	for _, domain := range publicActivitySchemaCatalog() {
 		for key, schema := range domain {
 			result[key] = schema
