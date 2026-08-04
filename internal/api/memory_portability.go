@@ -224,6 +224,28 @@ func (h *MemoryPortabilityHandler) Export(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// ?format=zip hands over a finished OKF bundle. The dashboard uses
+	// it so the browser never has to know what the format is: the
+	// frontmatter and the manifest live in memport, and a TypeScript
+	// copy would drift the first time either changes.
+	if r.URL.Query().Get("format") == "zip" {
+		name := "crewship-memory-" + r.URL.Query().Get("crew_id")
+		scopeLabel := "crew " + r.URL.Query().Get("crew_id")
+		if a := r.URL.Query().Get("agent_slug"); a != "" {
+			name = "crewship-memory-" + a
+			scopeLabel = "agent " + a
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.zip"`)
+		if err := memport.WriteOKFZip(w, plan.Docs, scopeLabel); err != nil {
+			// The header is already out, so the response cannot become
+			// an error page — a truncated archive is what the client
+			// sees. Recording it is the only honest thing left.
+			h.logger.Error("memory portability: streaming bundle", "err", err)
+		}
+		return
+	}
+
 	docs := make([]memoryDocPayload, 0, len(plan.Docs))
 	for _, d := range plan.Docs {
 		docs = append(docs, memoryDocPayload{

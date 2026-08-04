@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MarkdownEditor } from "@/components/shared/markdown-editor"
 import { apiFetch } from "@/lib/api-fetch"
+import { MemoryExportButton } from "./memory-export-button"
 
 // Char caps — must match server-side enforcement.
 //   AGENT.md / CREW.md: 4000 B (PR-A F1)
@@ -109,8 +110,10 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
 
   return (
     <div className="space-y-6">
-      {/* Linear-style underline tab bar (PRD §9 UI guidelines). */}
-      <div className="flex gap-2 border-b border-white/10">
+      {/* Linear-style underline tab bar (PRD §9 UI guidelines). The
+          export sits on the bar rather than inside a pane: it takes the
+          whole scope, not the sub-tab being viewed. */}
+      <div className="flex items-center gap-2 border-b border-white/10">
         {tabs.map((s) => (
           <button
             key={s}
@@ -125,6 +128,13 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
             {SUBTAB_LABEL[s]}
           </button>
         ))}
+        <div className="ml-auto pb-1.5">
+          <MemoryExportButton
+            crewId={crewId ?? ""}
+            agentSlug={agentSlug}
+            workspaceId={workspaceId}
+          />
+        </div>
       </div>
 
       {sub === "agent" && (

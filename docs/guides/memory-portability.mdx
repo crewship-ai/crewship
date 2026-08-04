@@ -23,6 +23,18 @@ The format is **OKF** (Open Knowledge Format, published by Google Cloud in June 
 
 ## Export
 
+### From the dashboard
+
+Open an agent, go to **Memory**, and use **Export** on the tab bar. It downloads the whole scope as an OKF bundle — the same archive the CLI writes, built by the server so the browser never has to know the format.
+
+The button exports the scope you are looking at: the agent's own memory from an agent canvas, and the crew-shared tier when no agent is named.
+
+<Note>
+**Import is CLI-only, on purpose.** In the terminal the plan is the default and `--apply` is a second, deliberate step. As a button that becomes skippable, and the plan is the only thing standing between an operator and overwriting an agent's memory. Tracked on #1748.
+</Note>
+
+### From the CLI
+
 ```bash
 # One agent's private memory
 crewship memory export --crew engineering --agent alex --out ./alex-memory
@@ -165,6 +177,7 @@ Export never follows a symlink out of the tree it was asked for. The directory b
 | Method | Route | Role |
 |---|---|---|
 | `GET` | `/api/v1/memory/export?crew_id=&agent_slug=` | OWNER/ADMIN |
+| `GET` | `/api/v1/memory/export?format=zip&…` | OWNER/ADMIN — the same bundle as a downloadable archive |
 | `POST` | `/api/v1/memory/import` | OWNER/ADMIN |
 
 The server reads and writes only its own memory tree. Recognising a foreign layout happens in the CLI, against files on your machine — the wire carries already-mapped documents, so no foreign directory structure ever reaches the server.
