@@ -1,15 +1,15 @@
 {
-  "generated_at": "2026-08-04T09:14:34Z",
-  "git_ref": "5d3fec1d",
+  "generated_at": "2026-08-04T09:21:08Z",
+  "git_ref": "0786f4bd",
   "summary": {
     "api_operations": 539,
-    "api_exact_docs": 489,
-    "api_resource_docs": 50,
+    "api_exact_docs": 501,
+    "api_resource_docs": 38,
     "api_missing_docs": 0,
     "cli_operations": 723,
-    "cli_exact_docs": 596,
-    "cli_root_docs_present": 649,
-    "cli_root_docs_missing": 74,
+    "cli_exact_docs": 637,
+    "cli_root_docs_present": 715,
+    "cli_root_docs_missing": 8,
     "api_with_test_signals": 357,
     "cli_with_test_signals": 709
   },
@@ -506,10 +506,13 @@
       "operation_id": "post_api_v1_admin_keeper_ask",
       "tag": "admin",
       "source_file": "internal/api/keeper_ask_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/keeper_ask_test.go",
         "internal/api/keeper_resolve_route_test.go"
@@ -521,10 +524,13 @@
       "operation_id": "delete_api_v1_admin_keeper_aux",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_aux_credential_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_aux_credential_test.go",
         "internal/api/admin_keeper_aux_test.go",
@@ -538,10 +544,13 @@
       "operation_id": "get_api_v1_admin_keeper_aux",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_aux_credential_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_aux_credential_test.go",
         "internal/api/admin_keeper_aux_test.go",
@@ -555,10 +564,13 @@
       "operation_id": "post_api_v1_admin_keeper_aux_use-judge",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_aux_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_aux_test.go"
       ]
@@ -569,10 +581,13 @@
       "operation_id": "delete_api_v1_admin_keeper_aux_slot",
       "tag": "admin",
       "source_file": "internal/api/router_admin.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "PUT",
@@ -580,10 +595,13 @@
       "operation_id": "put_api_v1_admin_keeper_aux_slot",
       "tag": "admin",
       "source_file": "internal/api/router_admin.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "POST",
@@ -591,10 +609,13 @@
       "operation_id": "post_api_v1_admin_keeper_aux_slot_probe",
       "tag": "admin",
       "source_file": "internal/api/router_admin.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource"
+      "status": "documented_exact"
     },
     {
       "method": "DELETE",
@@ -603,6 +624,7 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_config_profile_test.go",
       "exact_docs": [
+        "docs/api-reference/keeper.mdx",
         "docs/guides/keeper.mdx"
       ],
       "resource_docs": [
@@ -625,6 +647,7 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_config_profile_test.go",
       "exact_docs": [
+        "docs/api-reference/keeper.mdx",
         "docs/guides/keeper.mdx"
       ],
       "resource_docs": [
@@ -647,6 +670,7 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_config_profile_test.go",
       "exact_docs": [
+        "docs/api-reference/keeper.mdx",
         "docs/guides/keeper.mdx"
       ],
       "resource_docs": [
@@ -668,10 +692,13 @@
       "operation_id": "post_api_v1_admin_keeper_findings_test",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_findings_routing_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_findings_routing_test.go"
       ]
@@ -683,6 +710,7 @@
       "tag": "admin",
       "source_file": "internal/api/keeper_governance_test.go",
       "exact_docs": [
+        "docs/api-reference/keeper.mdx",
         "docs/guides/credentials.mdx",
         "docs/guides/keeper.mdx"
       ],
@@ -704,6 +732,7 @@
       "tag": "admin",
       "source_file": "internal/api/keeper_governance_test.go",
       "exact_docs": [
+        "docs/api-reference/keeper.mdx",
         "docs/guides/credentials.mdx",
         "docs/guides/keeper.mdx"
       ],
@@ -725,6 +754,7 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_health_test.go",
       "exact_docs": [
+        "docs/api-reference/keeper.mdx",
         "docs/guides/keeper.mdx"
       ],
       "resource_docs": [
@@ -741,10 +771,13 @@
       "operation_id": "get_api_v1_admin_keeper_judge_models",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_judge_hosted_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_judge_hosted_test.go",
         "internal/api/admin_keeper_judge_test.go"
@@ -756,10 +789,13 @@
       "operation_id": "post_api_v1_admin_keeper_judge_test",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_judge_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_judge_format_test.go",
         "internal/api/admin_keeper_judge_hosted_test.go",
@@ -773,10 +809,13 @@
       "operation_id": "post_api_v1_admin_keeper_judge_test-hosted",
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_judge_hosted_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/admin_keeper_judge_format_test.go",
         "internal/api/admin_keeper_judge_hosted_test.go"
@@ -790,6 +829,7 @@
       "source_file": "internal/api/admin_authz_floor_test.go",
       "exact_docs": [
         "docs/api-reference/admin.mdx",
+        "docs/api-reference/keeper.mdx",
         "docs/api-reference/overview.mdx",
         "docs/guides/keeper-reviews-panel.mdx",
         "docs/guides/keeper.mdx",
@@ -819,6 +859,7 @@
       "source_file": "internal/api/admin_authz_floor_test.go",
       "exact_docs": [
         "docs/api-reference/admin.mdx",
+        "docs/api-reference/keeper.mdx",
         "docs/api-reference/overview.mdx",
         "docs/guides/keeper-reviews-panel.mdx",
         "docs/guides/keeper.mdx",
@@ -863,10 +904,13 @@
       "operation_id": "post_api_v1_admin_keeper_requests_requestId_resolve",
       "tag": "admin",
       "source_file": "internal/api/inbox_target_role_test.go",
+      "exact_docs": [
+        "docs/api-reference/keeper.mdx"
+      ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
       ],
-      "status": "documented_resource",
+      "status": "documented_exact",
       "test_signals": [
         "internal/api/inbox_target_role_test.go"
       ]
@@ -879,6 +923,7 @@
       "source_file": "internal/api/router_admin.go",
       "exact_docs": [
         "docs/api-reference/admin.mdx",
+        "docs/api-reference/keeper.mdx",
         "docs/guides/keeper.mdx"
       ],
       "resource_docs": [
@@ -12165,6 +12210,7 @@
       "root": "commands",
       "exact_docs": [
         "docs/cli/commands.mdx",
+        "docs/cli/keeper.mdx",
         "docs/cli/overview.mdx"
       ],
       "root_docs": [
@@ -15138,6 +15184,7 @@
       "exact_docs": [
         "docs/cli/hire.mdx",
         "docs/cli/inbox.mdx",
+        "docs/cli/keeper.mdx",
         "docs/cli/me.mdx",
         "docs/cli/open.mdx",
         "docs/cli/tui.mdx"
@@ -15272,7 +15319,8 @@
       "short": "List inbox items",
       "root": "inbox",
       "exact_docs": [
-        "docs/cli/inbox.mdx"
+        "docs/cli/inbox.mdx",
+        "docs/cli/keeper.mdx"
       ],
       "root_docs": [
         "docs/cli/inbox.mdx"
@@ -17129,9 +17177,13 @@
       "root": "keeper",
       "exact_docs": [
         "docs/cli/escalation.mdx",
-        "docs/cli/journal.mdx"
+        "docs/cli/journal.mdx",
+        "docs/cli/keeper.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_journal_cov_test.go",
@@ -17149,7 +17201,10 @@
       "use": "ask --agent \u003cid\u003e --crew \u003cid\u003e --credential \u003cname\u003e --intent \u003ctext\u003e",
       "short": "Put a credential request to the judge yourself (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17167,7 +17222,13 @@
       "use": "auto-lease",
       "short": "Auto-issue short-lived credential leases when Keeper approves access",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17185,7 +17246,13 @@
       "use": "off",
       "short": "Stop auto-issuing credential leases (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_cov_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
@@ -17203,7 +17270,13 @@
       "use": "set \u003cduration\u003e",
       "short": "Auto-issue leases of this length on Keeper approval (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17221,7 +17294,13 @@
       "use": "status",
       "short": "Show the current credential auto-lease TTL",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "cmd/crewship/cmd_admin_extras_test.go",
@@ -17239,7 +17318,13 @@
       "use": "aux",
       "short": "Evaluator models: what the Keeper Reviews sweeps and the watchdog run on",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17257,7 +17342,13 @@
       "use": "list",
       "short": "Show every evaluator slot and where its model comes from",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -17275,7 +17366,13 @@
       "use": "reset [slot]",
       "short": "Drop the override for one slot, or for every slot with --all",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17293,7 +17390,13 @@
       "use": "set \u003cslot\u003e",
       "short": "Change one evaluator slot (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17311,7 +17414,13 @@
       "use": "test \u003cslot\u003e",
       "short": "Call one evaluator's model once and report what happened",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17329,7 +17438,13 @@
       "use": "use-judge",
       "short": "Point every evaluator at the local instance judge (no per-token cost)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17347,7 +17462,13 @@
       "use": "config",
       "short": "Instance judge configuration: whether Keeper runs, and what decides",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -17365,7 +17486,13 @@
       "use": "get",
       "short": "Show the effective instance judge configuration and where each value comes from",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
@@ -17383,7 +17510,13 @@
       "use": "reset",
       "short": "Drop every instance override and go back to the server's KEEPER_* config",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
@@ -17401,7 +17534,13 @@
       "use": "set",
       "short": "Change the instance judge (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
@@ -17419,7 +17558,10 @@
       "use": "contact \u003cemail\u003e",
       "short": "Set the security contact escalations are routed to (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17437,7 +17579,10 @@
       "use": "disable",
       "short": "Disable the Keeper watchdog for this workspace (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -17455,7 +17600,10 @@
       "use": "enable",
       "short": "Enable the Keeper watchdog for this workspace (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -17473,7 +17621,10 @@
       "use": "eval",
       "short": "Replay recorded keeper decisions against candidate models and score them against human verdicts",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "cmd/crewship/cmd_eval_test.go",
@@ -17491,7 +17642,13 @@
       "use": "findings",
       "short": "Verify that Keeper's findings actually reach a human",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17509,7 +17666,13 @@
       "use": "test",
       "short": "Send a test finding and report who it reaches (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -17527,7 +17690,10 @@
       "use": "health",
       "short": "How the judge has been deciding lately (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17548,7 +17714,10 @@
       "exact_docs": [
         "docs/cli/journal.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17566,7 +17735,13 @@
       "use": "judge",
       "short": "Verify the credential-access judge and list the models it can use",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17584,7 +17759,13 @@
       "use": "models",
       "short": "List the models the judge endpoint serves (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -17602,7 +17783,13 @@
       "use": "test",
       "short": "Run the four-stage judge check (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -17620,7 +17807,13 @@
       "use": "model",
       "short": "Choose the governance model backing the Keeper (provider + model + credential)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_cost_forecast_cov_test.go",
         "cmd/crewship/cmd_export_cov_test.go",
@@ -17638,7 +17831,13 @@
       "use": "clear",
       "short": "Clear the governance model (fall back to the server/env default)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -17656,7 +17855,13 @@
       "use": "get",
       "short": "Show the current workspace governance model",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
@@ -17674,7 +17879,13 @@
       "use": "set --provider \u003cp\u003e --model \u003cid\u003e [--credential \u003cid\u003e]",
       "short": "Set the governance model provider + model (+ optional vault credential)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17692,7 +17903,13 @@
       "use": "profile",
       "short": "Judge profile: which capabilities decide a credential request",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17710,7 +17927,13 @@
       "use": "get",
       "short": "Show which judge capabilities are in force, and what decided each",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
@@ -17728,7 +17951,13 @@
       "use": "reset",
       "short": "Drop the profile and every capability override, back to the built-in",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_avatar_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
@@ -17746,7 +17975,13 @@
       "use": "set [lean|standard|thorough]",
       "short": "Select a preset and/or override individual capabilities",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17764,7 +17999,10 @@
       "use": "requests",
       "short": "List recent Keeper decision-audit requests (requires ADMIN or OWNER)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17782,7 +18020,13 @@
       "use": "resolve \u003crequest-id\u003e --decision allow|deny [--reason \u003ctext\u003e]",
       "short": "Rule on an escalated credential request (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17800,7 +18044,13 @@
       "use": "review",
       "short": "Run a Keeper Reviews evaluator now, instead of waiting for the sweep",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go",
@@ -17818,7 +18068,13 @@
       "use": "run \u003cslot\u003e",
       "short": "Run one evaluator now and print its verdict",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17839,7 +18095,10 @@
       "exact_docs": [
         "docs/cli/escalation.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17857,7 +18116,10 @@
       "use": "disable",
       "short": "Allow a single approver for credential escalations again (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -17878,7 +18140,10 @@
       "exact_docs": [
         "docs/cli/escalation.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
@@ -17899,7 +18164,10 @@
       "exact_docs": [
         "docs/cli/escalation.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "cmd/crewship/cmd_admin_extras_test.go",
@@ -17917,7 +18185,10 @@
       "use": "threshold \u003c1-10\u003e",
       "short": "Set the DENY-notify risk threshold (requires OWNER or ADMIN)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -17935,7 +18206,10 @@
       "use": "watch",
       "short": "Author the workspace watch spec (presets + free-form rules)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_crew_provision_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -17953,7 +18227,10 @@
       "use": "clear",
       "short": "Clear the free-form watch rules (presets are unaffected)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
@@ -17971,7 +18248,10 @@
       "use": "get",
       "short": "Show the current workspace watch spec",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
@@ -17989,7 +18269,10 @@
       "use": "preset",
       "short": "Toggle watch presets on or off",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18007,7 +18290,10 @@
       "use": "add \u003ckey\u003e",
       "short": "Enable a watch preset",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18025,7 +18311,10 @@
       "use": "list",
       "short": "List the preset catalog with a ✓ on the enabled ones",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -18043,7 +18332,10 @@
       "use": "remove \u003ckey\u003e",
       "short": "Disable a watch preset",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -18061,7 +18353,10 @@
       "use": "set \u003ctext|-\u003e",
       "short": "Set the free-form watch rules (use - to read from stdin)",
       "root": "keeper",
-      "status": "missing_root_docs",
+      "root_docs": [
+        "docs/cli/keeper.mdx"
+      ],
+      "status": "documented_root",
       "test_signals": [
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
@@ -19236,6 +19531,7 @@
         "docs/cli/digest.mdx",
         "docs/cli/escalation.mdx",
         "docs/cli/notify.mdx",
+        "docs/cli/notifychannel.mdx",
         "docs/cli/overview.mdx"
       ],
       "root_docs": [
@@ -19308,7 +19604,8 @@
       "root": "notify",
       "exact_docs": [
         "docs/cli/digest.mdx",
-        "docs/cli/notify.mdx"
+        "docs/cli/notify.mdx",
+        "docs/cli/notifychannel.mdx"
       ],
       "root_docs": [
         "docs/cli/notify.mdx"
@@ -19530,9 +19827,13 @@
       "root": "notifychannel",
       "exact_docs": [
         "docs/cli/digest.mdx",
-        "docs/cli/notify.mdx"
+        "docs/cli/notify.mdx",
+        "docs/cli/notifychannel.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19547,9 +19848,13 @@
       "root": "notifychannel",
       "exact_docs": [
         "docs/cli/digest.mdx",
-        "docs/cli/notify.mdx"
+        "docs/cli/notify.mdx",
+        "docs/cli/notifychannel.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
@@ -19567,7 +19872,13 @@
       "use": "agents",
       "short": "Manage which agents may send to a notification channel",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_activity_cov_test.go",
         "cmd/crewship/cmd_admin_gdpr_test.go",
@@ -19585,7 +19896,13 @@
       "use": "allow \u003cchannel-id\u003e",
       "short": "Allow an agent to send to this channel",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19598,7 +19915,13 @@
       "use": "deny \u003cchannel-id\u003e",
       "short": "Revoke an agent's access to this channel",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19611,7 +19934,13 @@
       "use": "list \u003cchannel-id\u003e",
       "short": "List the agents allowed to send to a channel",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19624,7 +19953,13 @@
       "use": "deliveries",
       "short": "Show the outbound notification delivery log (admin only)",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19640,7 +19975,10 @@
       "exact_docs": [
         "docs/cli/notify.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -19658,7 +19996,13 @@
       "use": "providers",
       "short": "List chat/push providers and the fields each one needs",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
@@ -19672,7 +20016,13 @@
       "use": "disable \u003cprovider\u003e",
       "short": "Stop all delivery through a provider (ADMIN+)",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19685,7 +20035,13 @@
       "use": "enable \u003cprovider\u003e",
       "short": "Allow delivery through a provider again (ADMIN+)",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19702,7 +20058,13 @@
         "remove"
       ],
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19715,7 +20077,13 @@
       "use": "test \u003cid\u003e",
       "short": "Send a synthetic test notification to one channel",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
@@ -19728,7 +20096,13 @@
       "use": "test-draft",
       "short": "Send a test notification without saving a channel",
       "root": "notifychannel",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/notifychannel.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
