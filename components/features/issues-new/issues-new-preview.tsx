@@ -38,6 +38,13 @@ export function IssuesNewPreview() {
   const [issues, setIssues] = React.useState<Mission[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [loading, setLoading] = React.useState(true)
+  // Which workspace the lists above actually came from. Resetting state in
+  // the effect is not enough on its own: React runs the detail effect below
+  // in the same pass, and it reads `identifier` / `crewId` from the render
+  // that has just happened — the OLD selection, with the NEW workspaceId
+  // already in scope. That combination is a cross-workspace read. Nothing
+  // downstream may fire until the lists and the workspace agree.
+  const [loadedWorkspace, setLoadedWorkspace] = React.useState<string | null>(null)
 
   const [issueId, setIssueId] = React.useState<string | null>(null)
   const [projectId, setProjectId] = React.useState<string | null>(null)
@@ -51,6 +58,23 @@ export function IssuesNewPreview() {
   const [stats, setStats] = React.useState<ProjectStats | null>(null)
 
   React.useEffect(() => {
+    // Everything below the workspace is scoped to it. Carrying any of it
+    // across a switch renders one workspace's issue under another's header,
+    // and — worse — sends the old crew and identifier to the new workspace.
+    // Selection goes too: `prev ?? first` keeps an id that is in no list
+    // under the new workspace, and the page goes permanently blank.
+    setIssues([])
+    setProjects([])
+    setIssue(null)
+    setComments([])
+    setActivities([])
+    setRelations([])
+    setStats(null)
+    setIssueId(null)
+    setProjectId(null)
+    setLoadedWorkspace(null)
+    setLoading(Boolean(workspaceId))
+
     if (!workspaceId) return
     let cancelled = false
     const qs = `workspace_id=${encodeURIComponent(workspaceId)}`
@@ -62,8 +86,9 @@ export function IssuesNewPreview() {
         if (cancelled) return
         setIssues(Array.isArray(is) ? is : [])
         setProjects(Array.isArray(ps) ? ps : [])
-        setIssueId((prev) => prev ?? (Array.isArray(is) && is[0] ? is[0].id : null))
-        setProjectId((prev) => prev ?? (Array.isArray(ps) && ps[0] ? ps[0].id : null))
+        setIssueId(Array.isArray(is) && is[0] ? is[0].id : null)
+        setProjectId(Array.isArray(ps) && ps[0] ? ps[0].id : null)
+        setLoadedWorkspace(workspaceId)
       })
       .catch(() => {})
       .finally(() => !cancelled && setLoading(false))
@@ -76,8 +101,10 @@ export function IssuesNewPreview() {
   const identifier = listRow?.identifier
   const crewId = listRow?.crew_id
 
+  const ready = loadedWorkspace !== null && loadedWorkspace === workspaceId
+
   React.useEffect(() => {
-    if (!workspaceId || !identifier || !crewId) {
+    if (!ready || !workspaceId || !identifier || !crewId) {
       setIssue(null)
       setComments([])
       setActivities([])
@@ -109,10 +136,10 @@ export function IssuesNewPreview() {
     // listRow is the fallback only; re-running on its identity would refetch
     // every time the list is refreshed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, identifier, crewId])
+  }, [ready, workspaceId, identifier, crewId])
 
   React.useEffect(() => {
-    if (!workspaceId || !projectId) {
+    if (!ready || !workspaceId || !projectId) {
       setStats(null)
       return
     }
@@ -126,7 +153,7 @@ export function IssuesNewPreview() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, projectId])
+  }, [ready, workspaceId, projectId])
 
   const project = projects.find((p) => p.id === projectId) ?? null
   const projectIssues = React.useMemo(

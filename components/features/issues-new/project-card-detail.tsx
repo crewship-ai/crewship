@@ -55,6 +55,7 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
   const [breakdown, setBreakdown] = React.useState<BreakdownTab>("assignees")
 
   const facts = React.useMemo(() => projectFacts(project, stats), [project, stats])
+  const scope = stats?.total_issues ?? project.issue_count
   const Icon = getCrewIconDef(project.icon || "folder").icon
   const segments = React.useMemo(() => donutSegments(stats), [stats])
 
@@ -112,8 +113,11 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
                   {priorityLabel[project.priority]}
                 </Pill>
               )}
+              {/* Same source as the Scope figure below. Reading the row's
+                  counter here while the band reads /stats puts two different
+                  answers to "how big is this" on one card. */}
               <Pill tone="default">
-                {project.issue_count} {project.issue_count === 1 ? "issue" : "issues"}
+                {scope} {scope === 1 ? "issue" : "issues"}
               </Pill>
             </div>
           </div>

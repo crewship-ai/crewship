@@ -108,7 +108,13 @@ export function projectFacts(
     { label: "Scope", value: String(scope) },
     { label: "Completed", value: String(done), tone: done > 0 ? "success" : undefined },
     { label: "In progress", value: String(active) },
-    { label: "Progress", value: `${clampPercent(project.progress)}%` },
+    // Derived from the same two numbers as Scope and Completed. Reading the
+    // row's `progress` while those come from /stats is how one band ends up
+    // saying "Scope 7 · Completed 4 · Progress 0%".
+    {
+      label: "Progress",
+      value: `${clampPercent(stats && scope > 0 ? (done / scope) * 100 : project.progress)}%`,
+    },
     {
       label: "Started",
       value: project.start_date ? formatShortDate(project.start_date) : DASH,
@@ -123,16 +129,36 @@ export function projectFacts(
   ]
 }
 
-/** Destructive once the date is behind us and the thing is still open. */
+/** Destructive once the deadline is behind us and the thing is still open. */
 function overdueTone(
   date: string | null | undefined,
   now: Date,
   finished: boolean,
 ): StatFact["tone"] {
   if (!date || finished) return undefined
-  const t = new Date(date).getTime()
-  if (Number.isNaN(t)) return undefined
+  const t = deadlineMs(date)
+  if (t === null) return undefined
   return t < now.getTime() ? "destructive" : undefined
+}
+
+/** `due_date` and `target_date` as written by `<input type="date">`. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * When a deadline actually expires.
+ *
+ * A date-only value is stored verbatim, and `new Date("2026-08-04")` parses
+ * it as UTC midnight — so comparing it to the clock marks an issue due TODAY
+ * as overdue for every reader behind UTC. A day is a day: it runs to the end
+ * of that day, in the reader's timezone.
+ */
+function deadlineMs(date: string): number | null {
+  if (DATE_ONLY.test(date)) {
+    const [y, m, d] = date.split("-").map(Number)
+    return new Date(y, m - 1, d, 23, 59, 59, 999).getTime()
+  }
+  const t = new Date(date).getTime()
+  return Number.isNaN(t) ? null : t
 }
 
 function clampPercent(n: number): number {

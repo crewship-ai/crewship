@@ -106,6 +106,29 @@ describe("issueFacts", () => {
     expect(facts.find((f) => f.label === "Closed")!.tone).toBe("success")
   })
 
+  it("does not call an issue overdue on the day it is due", () => {
+    // due_date is written by <input type="date"> and stored verbatim as
+    // YYYY-MM-DD, which `new Date()` parses as UTC midnight. Comparing that
+    // against the clock marks an issue due TODAY as overdue for every
+    // reader behind UTC. A date-only deadline runs to the end of that day.
+    //
+    // 00:30 UTC is inside the local Aug-4 for every offset from UTC-12 to
+    // UTC+14, so this assertion does not depend on the runner's timezone.
+    const facts = issueFacts(issue({ due_date: "2026-08-04" }), {
+      comments: 0,
+      now: new Date("2026-08-04T00:30:00Z"),
+    })
+    expect(facts.find((f) => f.label === "Due")!.tone).toBeUndefined()
+  })
+
+  it("still calls a date-only due date that has passed overdue", () => {
+    const facts = issueFacts(issue({ due_date: "2026-08-01" }), {
+      comments: 0,
+      now: new Date("2026-08-04T00:30:00Z"),
+    })
+    expect(facts.find((f) => f.label === "Due")!.tone).toBe("destructive")
+  })
+
   it("shows an em dash rather than a zero for an absent estimate", () => {
     const facts = issueFacts(issue({ estimate: null }), { comments: 0, now: NOW })
     expect(facts.find((f) => f.label === "Estimate")!.value).toBe("—")
@@ -149,6 +172,27 @@ describe("projectFacts", () => {
     expect(facts.find((f) => f.label === "Scope")!.value).toBe("7")
     expect(facts.find((f) => f.label === "Completed")!.value).toBe("4")
     expect(facts.find((f) => f.label === "In progress")!.value).toBe("2")
+  })
+
+  it("derives progress from the same numbers as scope and completed", () => {
+    // Half the band reading the stats endpoint and the other half reading
+    // the denormalised row is how one card ends up saying "Scope 7,
+    // Completed 4, Progress 0%".
+    const stats: ProjectStats = {
+      total_issues: 8,
+      completed_issues: 4,
+      by_status: {},
+      by_assignee: [],
+      by_label: [],
+      crews: [],
+    }
+    const facts = projectFacts(project({ issue_count: 3, done_count: 0, progress: 0 }), stats)
+    expect(facts.find((f) => f.label === "Progress")!.value).toBe("50%")
+  })
+
+  it("falls back to the stored progress when stats have not loaded", () => {
+    const facts = projectFacts(project({ progress: 42 }), null)
+    expect(facts.find((f) => f.label === "Progress")!.value).toBe("42%")
   })
 
   it("counts issues under review as in progress", () => {
