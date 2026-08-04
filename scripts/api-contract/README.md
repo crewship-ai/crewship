@@ -64,9 +64,34 @@ the settings are explicit and do not affect any repository-wide test command.
   metadata. Mutating methods remain excluded.
 
 The default runs are intentionally bounded (`generation.max-examples = 10`,
-one worker, and a 10-second request timeout). The schema is fetched from the
-target, not copied into this directory, and Hypothesis examples stay in
-memory.
+one worker, a 10-second request timeout, and a 120-request/minute rate limit).
+The runner prints one concise JSON summary line; it includes the selected and
+excluded operation counts and classifies failures as `schema` or `runtime`.
+The schema is fetched into a temporary file only for validation/counting, then
+removed. Hypothesis examples and reports are temporary too. No token or raw
+response body is included in the summary.
+
+The generated catalog is broader than this safe probe. The runner always
+excludes `/api/auth/**` (NextAuth UI/session endpoints) and these non-JSON
+operations: backup/file downloads, avatars, pipeline and memory exports,
+memory-version content, and the journal stream. These are stable path
+exclusions because the generator currently gives every response a generic JSON
+placeholder. The exclusions are reported separately from the method deny-list,
+so a lower selected count is visible rather than silently looking like route
+coverage.
+
+Failure triage starts with the summary: `schema` means the OpenAPI document,
+Schemathesis configuration, or declared response schema could not be used;
+`runtime` means the target could not be reached or an executed request failed
+(for example a 5xx, status mismatch, or timeout). A schema-shaped failure from
+an excluded binary/stream route is therefore not misreported as a product
+regression in the JSON API.
+
+Example summary:
+
+```json
+{"failure_class":"none","operations":{"catalog":412,"excluded":{"auth_ui":8,"methods":253,"non_json":11},"selected":140},"phase":"positive","status":"passed","tool":"crewship-api-contract"}
+```
 
 ## Mutation safety
 

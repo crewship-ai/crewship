@@ -4,6 +4,7 @@ base-url = "${CREWSHIP_BASE_URL}"
 headers = { Authorization = "Bearer ${CREWSHIP_TOKEN}", "X-Workspace-ID" = "${CREWSHIP_WORKSPACE}" }
 request-timeout = 10.0
 workers = 1
+rate-limit = "120/m"
 
 [generation]
 max-examples = 10
