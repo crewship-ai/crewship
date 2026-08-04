@@ -1,6 +1,15 @@
 "use client"
 
-// The issue detail, as one scrolling surface of cards.
+// The issue detail. One scrolling surface of cards, and — since #1752's
+// successor — the ONLY issue detail: /issues/<identifier> and the centre pane
+// of /issues both render this file. Before that the same issue had two
+// screens with different chrome, a different rail and different capabilities,
+// and which one you got depended on whether you clicked a row or followed a
+// link.
+//
+// Read-only by default. Pass `edit` and every property becomes a picker; see
+// issue-card-editors.tsx for why that union is wider than any one of the
+// screens it replaced.
 //
 // Same shape as the routine detail (components/features/routines/
 // routine-card-detail.tsx) on purpose: identity card → figures band →
@@ -35,8 +44,10 @@ import {
   Flag,
   FolderKanban,
   GitBranch,
+  Hash,
   Link2,
   MessageSquare,
+  Milestone as MilestoneIcon,
   Tag,
   UserCircle2,
   Users,
@@ -61,6 +72,24 @@ import {
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
+import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
+import {
+  AddRelationPicker,
+  AssigneePicker,
+  DueDatePicker,
+  EditRow,
+  EstimatePicker,
+  LabelsPicker,
+  MilestonePicker,
+  PriorityPicker,
+  ProjectPicker,
+  RemoveRelationButton,
+  RoutinePicker,
+  RunRoutineButton,
+  StatusPicker,
+  TitleEditor,
+  type IssueCardEdit,
+} from "@/components/features/issues/issue-card-editors"
 import { getCrewIconDef } from "@/lib/entities"
 import { issueFacts, issuePriorityTone, issueStatusTone } from "@/lib/issue-facts"
 import type {
@@ -114,6 +143,19 @@ interface Props {
   onSubmitComment?: (body: string) => boolean | Promise<boolean>
   /** Initial for the composer's author bubble. */
   viewerInitial?: string
+  /**
+   * Makes the card writable. Absent, every property renders as text — which
+   * is what a reader without permission, and what a screenshot, should get.
+   */
+  edit?: IssueCardEdit
+  /** Children of this issue, resolved by the host from `/subtasks`. */
+  subIssues?: Mission[]
+  /**
+   * The live agent-work timeline. Passed in rather than rendered here: it
+   * reads the journal, which needs the workspace and a poller, and the card
+   * is not the thing that should own either.
+   */
+  runActivity?: React.ReactNode
 }
 
 type FootTab = "comments" | "history"
@@ -129,6 +171,9 @@ export function IssueCardDetail({
   agents,
   onSubmitComment,
   viewerInitial,
+  edit,
+  subIssues = [],
+  runActivity,
 }: Props) {
   const [footTab, setFootTab] = React.useState<FootTab>("comments")
 
@@ -160,7 +205,14 @@ export function IssueCardDetail({
                   <StatusIcon status={issue.status} className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                  <h1 className="truncate text-lg font-semibold tracking-tight">{issue.title}</h1>
+                  {edit ? (
+                    <TitleEditor
+                      title={issue.title}
+                      onSave={(next) => void edit.patch({ title: next })}
+                    />
+                  ) : (
+                    <h1 className="truncate text-lg font-semibold tracking-tight">{issue.title}</h1>
+                  )}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     <span className="font-mono">{issue.identifier ?? issue.id.slice(0, 8)}</span>
                     {issue.crew_name && (
@@ -185,7 +237,7 @@ export function IssueCardDetail({
                   </div>
                 </div>
               </div>
-              {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+              {actions && <div className="flex shrink-0 flex-col items-end gap-1.5">{actions}</div>}
             </div>
 
             {issue.description && (
@@ -237,7 +289,13 @@ export function IssueCardDetail({
         <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
           <Appear order={2}>
             <DetailCard title="Description" subtitle={issue.description ? undefined : "empty"}>
-              {issue.description ? (
+              {edit ? (
+                <DescriptionEditor
+                  key={issue.id}
+                  description={issue.description ?? ""}
+                  onSave={(md) => void edit.patch({ description: md })}
+                />
+              ) : issue.description ? (
                 <MarkdownContent>{issue.description}</MarkdownContent>
               ) : (
                 <p className="text-[12px] text-muted-foreground">
@@ -247,26 +305,34 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
+          {/* Links covers both directions an issue points: the relations a
+              human drew, and the sub-issues that hang off it. They were two
+              panels in two different screens, one of which could only read. */}
           <Appear order={3}>
             <DetailCard
               title="Links"
               icon={Link2}
-              subtitle={relations.length > 0 ? String(relations.length) : undefined}
+              subtitle={
+                relations.length + subIssues.length > 0
+                  ? String(relations.length + subIssues.length)
+                  : undefined
+              }
+              action={edit ? <AddRelationPicker edit={edit} /> : undefined}
             >
-              {relations.length === 0 ? (
+              {relations.length === 0 && subIssues.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground">
                   Nothing blocks this and nothing hangs off it.
                 </p>
               ) : (
                 <ul className="space-y-2">
                   {relations.map((rel) => (
-                    <li key={rel.id} className="flex items-center gap-2.5 text-[12px]">
+                    <li key={rel.id} className="group flex items-center gap-2.5 text-[12px]">
                       <span className="w-[86px] shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground-soft">
                         {rel.relation_type.replace(/_/g, " ")}
                       </span>
                       <Link
                         href={`/issues/${encodeURIComponent(rel.target_identifier ?? rel.target_id)}`}
-                        className="inline-flex min-w-0 items-center gap-1.5 hover:underline"
+                        className="inline-flex min-w-0 flex-1 items-center gap-1.5 hover:underline"
                       >
                         <span className="font-mono text-[10px] text-muted-foreground">
                           {rel.target_identifier ?? rel.target_id.slice(0, 8)}
@@ -275,12 +341,39 @@ export function IssueCardDetail({
                           {rel.target_title ?? "Untitled"}
                         </span>
                       </Link>
+                      {edit && (
+                        <RemoveRelationButton
+                          identifier={rel.target_identifier ?? rel.target_id.slice(0, 8)}
+                          onRemove={() => void edit.removeRelation(rel.id)}
+                        />
+                      )}
+                    </li>
+                  ))}
+                  {subIssues.map((sub) => (
+                    <li key={sub.id} className="flex items-center gap-2.5 text-[12px]">
+                      <span className="w-[86px] shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+                        sub-issue
+                      </span>
+                      <Link
+                        href={`/issues/${encodeURIComponent(sub.identifier ?? sub.id)}`}
+                        className="inline-flex min-w-0 flex-1 items-center gap-1.5 hover:underline"
+                      >
+                        <StatusIcon status={sub.status} className="h-3 w-3 shrink-0" />
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {sub.identifier ?? sub.id.slice(0, 8)}
+                        </span>
+                        <span className="truncate text-foreground/85">{sub.title}</span>
+                      </Link>
                     </li>
                   ))}
                 </ul>
               )}
             </DetailCard>
           </Appear>
+
+          {/* Live agent work — exec, files, network, llm — while the issue is
+              running. Rendered by the host; nothing here when it is quiet. */}
+          {runActivity && <Appear order={4}>{runActivity}</Appear>}
         </div>
 
         <div className="flex flex-col gap-4">
@@ -294,48 +387,95 @@ export function IssueCardDetail({
           {/* One header, not two. The old rail wrapped a panel that drew its
               own PROPERTIES header inside a card titled PROPERTIES. */}
           <Appear order={5}>
-            {/* Only what the figures band above does not already carry.
-                Due and Estimate live there; repeating them here is the
-                duplication this redesign is supposed to remove. */}
+            {/* Read-only, this card carries only what the figures band above
+                does not — repeating Due and Estimate there would be the
+                duplication the redesign removed.
+                Editable, they come back: the band is where you READ a due
+                date, the row is the only place you can CHANGE one, and a
+                figure you cannot act on is not a substitute for a control. */}
             <DetailCard title="Properties">
               <dl className="space-y-0.5">
-                <Row icon={CircleDot} label="Status">
-                  <span className="inline-flex items-center gap-1.5">
-                    <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                    {statusLabel[issue.status] ?? issue.status}
-                  </span>
-                </Row>
-                <Row icon={Flag} label="Priority">
-                  <span className="inline-flex items-center gap-1.5">
-                    <PriorityIcon priority={issue.priority ?? "none"} className="h-3.5 w-3.5" />
-                    {priorityLabel[issue.priority ?? "none"]}
-                  </span>
-                </Row>
-                <Row icon={UserCircle2} label="Assignee">
-                  {issue.assignee_name ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <AgentAvatar
-                        seed={issue.assignee_id ?? issue.assignee_name}
-                        className="h-4 w-4"
-                        alt=""
-                      />
-                      {issue.assignee_name}
-                    </span>
-                  ) : (
-                    <Muted>Unassigned</Muted>
-                  )}
-                </Row>
-                <Row icon={Users} label="Crew">
-                  {issue.crew_name ?? <Muted>Unassigned</Muted>}
-                </Row>
+                {edit ? (
+                  <>
+                    <EditRow icon={CircleDot} label="Status">
+                      <StatusPicker issue={issue} edit={edit} />
+                    </EditRow>
+                    <EditRow icon={Flag} label="Priority">
+                      <PriorityPicker issue={issue} edit={edit} />
+                    </EditRow>
+                    <EditRow icon={UserCircle2} label="Assignee">
+                      <AssigneePicker issue={issue} edit={edit} />
+                    </EditRow>
+                    <EditRow icon={Clock} label="Due">
+                      <DueDatePicker issue={issue} edit={edit} />
+                    </EditRow>
+                    <EditRow icon={Hash} label="Estimate">
+                      <EstimatePicker issue={issue} edit={edit} />
+                    </EditRow>
+                    <EditRow icon={MilestoneIcon} label="Milestone">
+                      <MilestonePicker issue={issue} edit={edit} />
+                    </EditRow>
+                    <EditRow icon={Users} label="Crew">
+                      {issue.crew_name ?? <Muted>Unassigned</Muted>}
+                    </EditRow>
+                  </>
+                ) : (
+                  <>
+                    <Row icon={CircleDot} label="Status">
+                      <span className="inline-flex items-center gap-1.5">
+                        <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
+                        {statusLabel[issue.status] ?? issue.status}
+                      </span>
+                    </Row>
+                    <Row icon={Flag} label="Priority">
+                      <span className="inline-flex items-center gap-1.5">
+                        <PriorityIcon priority={issue.priority ?? "none"} className="h-3.5 w-3.5" />
+                        {priorityLabel[issue.priority ?? "none"]}
+                      </span>
+                    </Row>
+                    <Row icon={UserCircle2} label="Assignee">
+                      {issue.assignee_name ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <AgentAvatar
+                            seed={issue.assignee_id ?? issue.assignee_name}
+                            className="h-4 w-4"
+                            alt=""
+                          />
+                          {issue.assignee_name}
+                        </span>
+                      ) : (
+                        <Muted>Unassigned</Muted>
+                      )}
+                    </Row>
+                    <Row icon={Users} label="Crew">
+                      {issue.crew_name ?? <Muted>Unassigned</Muted>}
+                    </Row>
+                  </>
+                )}
               </dl>
             </DetailCard>
           </Appear>
 
           <Appear order={6}>
-            <DetailCard title="Routine" icon={GitBranch} tone="purple">
-              {issue.routine_name ? (
-                <div className="space-y-2">
+            <DetailCard
+              title="Routine"
+              icon={GitBranch}
+              tone="purple"
+              action={
+                edit?.runRoutine && issue.routine_slug ? (
+                  <RunRoutineButton onRun={() => void edit.runRoutine!()} busy={edit.busy} />
+                ) : undefined
+              }
+            >
+              <div className="space-y-2">
+                {edit ? (
+                  <RoutinePicker issue={issue} edit={edit}>
+                    <GitBranch className="h-3.5 w-3.5 shrink-0 text-purple" />
+                    <span className="truncate text-[12px]">
+                      {issue.routine_name ?? <Muted>No routine bound</Muted>}
+                    </span>
+                  </RoutinePicker>
+                ) : issue.routine_name ? (
                   <EntityChip
                     icon={GitBranch}
                     label={issue.routine_name}
@@ -343,28 +483,41 @@ export function IssueCardDetail({
                     tone="purple"
                     href={`/routines?routine=${encodeURIComponent(issue.routine_slug ?? "")}`}
                   />
+                ) : null}
+                {issue.routine_name ? (
                   <p className="text-[11px] text-muted-foreground">
                     Starting this issue runs that routine.
                   </p>
-                </div>
-              ) : (
-                <p className="text-[12px] text-muted-foreground">
-                  No routine bound. Starting this issue hands it to{" "}
-                  {issue.assignee_name ?? "whoever is assigned"} directly.
-                </p>
-              )}
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">
+                    No routine bound. Starting this issue hands it to{" "}
+                    {issue.assignee_name ?? "whoever is assigned"} directly.
+                  </p>
+                )}
+              </div>
             </DetailCard>
           </Appear>
 
           <Appear order={7}>
             <DetailCard title="Project" icon={FolderKanban}>
-              {project ? (
-                <div className="space-y-2.5">
+              <div className="space-y-2.5">
+                {edit ? (
+                  <ProjectPicker issue={issue} edit={edit}>
+                    <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                    <span className="truncate text-[12px]">
+                      {project?.name ?? <Muted>Not filed under a project</Muted>}
+                    </span>
+                  </ProjectPicker>
+                ) : project ? (
                   <EntityChip
                     icon={getCrewIconDef(project.icon || "folder").icon}
                     label={project.name}
                     href={`/issues?project=${encodeURIComponent(project.id)}`}
                   />
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">Not filed under a project.</p>
+                )}
+                {project && (
                   <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
                       <div
@@ -375,16 +528,27 @@ export function IssueCardDetail({
                     <span className="tabular-nums">
                       {project.done_count}/{project.issue_count}
                     </span>
+                    {edit && (
+                      <Link
+                        href={`/issues?project=${encodeURIComponent(project.id)}`}
+                        className="shrink-0 text-primary hover:underline"
+                      >
+                        open
+                      </Link>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <p className="text-[12px] text-muted-foreground">Not filed under a project.</p>
-              )}
+                )}
+              </div>
             </DetailCard>
           </Appear>
 
           <Appear order={8}>
-            <DetailCard title="Labels" icon={Tag} subtitle={labels.length > 0 ? String(labels.length) : undefined}>
+            <DetailCard
+              title="Labels"
+              icon={Tag}
+              subtitle={labels.length > 0 ? String(labels.length) : undefined}
+              action={edit ? <LabelsPicker issue={issue} edit={edit} /> : undefined}
+            >
               {labels.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
                   {labels.map((l) => (
@@ -504,7 +668,27 @@ export function IssueCardDetail({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-3 xl:grid-cols-6">
             <Fact label="created" value={formatDate(issue.created_at)} />
             <Fact label="updated" value={relTime(issue.updated_at)} />
-            <Fact label="author" value={issue.created_by?.name ?? issue.created_by?.id ?? "—"} />
+            {/* Who opened this, and whether it was a person. An agent filing
+                its own issues is the thing a reader most wants flagged, so
+                the badge stays even though the rest is a plain fact grid. */}
+            {issue.created_by && (
+              <div className="min-w-0" data-testid="issue-created-by">
+                <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+                  author
+                </dt>
+                <dd className="truncate text-foreground/85">
+                  Created by {issue.created_by.name || issue.created_by.id}
+                  {issue.created_by.type === "agent" && (
+                    <span
+                      data-testid="issue-creator-agent-badge"
+                      className="ml-1.5 inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-primary"
+                    >
+                      agent
+                    </span>
+                  )}
+                </dd>
+              </div>
+            )}
             <Fact label="via" value={issue.authored_via ?? "ui"} />
             <Fact label="crew" value={issue.crew_slug ?? issue.crew_name ?? "—"} />
             <Fact label="id" value={issue.id} mono />
@@ -570,6 +754,43 @@ function LatestRun({ run, issue }: { run: IssueRun | null; issue: Mission }) {
         <ArrowUpRight className="h-3 w-3" />
       </Link>
     </TintedCard>
+  )
+}
+
+/**
+ * The description, as a WYSIWYG editor that saves on blur.
+ *
+ * The draft is local so a keystroke does not PATCH; the write happens once,
+ * when focus leaves, and only if the markdown actually changed — the shipped
+ * page's `descDraft !== issue.description` guard, kept because without it
+ * every click-through of an issue rewrote its description with itself.
+ */
+function DescriptionEditor({
+  description,
+  onSave,
+}: {
+  description: string
+  onSave: (markdown: string) => void
+}) {
+  const draft = React.useRef(description)
+  // The prop moves when a save lands (or somebody else edits the issue); the
+  // draft has to follow, or the next blur compares against the text this
+  // component was mounted with and re-saves something already saved.
+  React.useEffect(() => {
+    draft.current = description
+  }, [description])
+  return (
+    <TiptapEditor
+      content={description}
+      onChange={(md) => {
+        draft.current = md
+      }}
+      onBlur={() => {
+        if (draft.current !== description) onSave(draft.current)
+      }}
+      placeholder="Click to add description…"
+      editable
+    />
   )
 }
 

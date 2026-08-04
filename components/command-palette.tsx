@@ -495,7 +495,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 onSelect={() => go(`/issues?project=${project.id}`, project.name, "Projects")}
               >
                 {/* A project carries a real icon + colour, and every other
-                    surface draws them (project-detail-inline). The palette
+                    surface draws them (project-card-detail). The palette
                     used to paint one generic folder for all of them, which
                     made a list of projects look like a list of one thing. */}
                 <span data-project-icon={project.icon ?? "folder"}>

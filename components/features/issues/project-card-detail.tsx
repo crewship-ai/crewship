@@ -25,6 +25,7 @@ import {
   Activity,
   CalendarClock,
   CircleDot,
+  Flag,
   FolderKanban,
   Tag,
   UserCircle2,
@@ -39,6 +40,16 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { ProjectStatusIcon } from "@/components/features/issues/project-status-icon"
+import {
+  ProjectDatesPicker,
+  ProjectHealthPicker,
+  ProjectIconEditor,
+  ProjectLeadPicker,
+  ProjectNameEditor,
+  ProjectPriorityPicker,
+  ProjectStatusPicker,
+  type ProjectCardEdit,
+} from "@/components/features/issues/project-card-editors"
 import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
 import { ISSUE_STATUS_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import {
@@ -56,6 +67,8 @@ interface Props {
   /** The project's issues, already filtered by the caller. */
   issues: Mission[]
   actions?: React.ReactNode
+  /** Makes the card writable. Absent, every property renders as text. */
+  edit?: ProjectCardEdit
 }
 
 type BreakdownTab = "assignees" | "labels"
@@ -75,7 +88,7 @@ function clamp(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)))
 }
 
-export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
+export function ProjectCardDetail({ project, stats, issues, actions, edit }: Props) {
   const [breakdown, setBreakdown] = React.useState<BreakdownTab>("assignees")
 
   const facts = React.useMemo(() => projectFacts(project, stats), [project, stats])
@@ -91,12 +104,27 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
-                  <Icon className={cn("h-5 w-5", getGradientPalette(project.color).text)} />
-                </div>
+                {edit ? (
+                  // The icon+colour swatch, straight from the rail's header —
+                  // the one thing up there that was worth keeping.
+                  <div className="shrink-0">
+                    <ProjectIconEditor project={project} edit={edit} />
+                  </div>
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
+                    <Icon className={cn("h-5 w-5", getGradientPalette(project.color).text)} />
+                  </div>
+                )}
                 <div className="min-w-0">
                   {/* The name, in full, once. */}
-                  <h1 className="truncate text-lg font-semibold tracking-tight">{project.name}</h1>
+                  {edit ? (
+                    <ProjectNameEditor
+                      name={project.name}
+                      onSave={(next) => void edit.patch({ name: next })}
+                    />
+                  ) : (
+                    <h1 className="truncate text-lg font-semibold tracking-tight">{project.name}</h1>
+                  )}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     <span className="font-mono">{project.slug}</span>
                     {project.lead_name && (
@@ -342,16 +370,33 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
             <DetailCard title="Properties">
               <dl className="space-y-0.5">
                 <Row icon={FolderKanban} label="Status">
-                  <span className="inline-flex items-center gap-1.5">
-                    <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5" />
-                    {projectStatusLabel(project.status)}
-                  </span>
+                  {edit ? (
+                    <ProjectStatusPicker project={project} edit={edit} />
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5" />
+                      {projectStatusLabel(project.status)}
+                    </span>
+                  )}
                 </Row>
+                {/* Priority had a row in the rail and only a pill here — a
+                    pill you cannot click is not where you change a priority. */}
+                {edit && (
+                  <Row icon={Flag} label="Priority">
+                    <ProjectPriorityPicker project={project} edit={edit} />
+                  </Row>
+                )}
                 <Row icon={CircleDot} label="Health">
-                  {projectHealthLabel(project.health)}
+                  {edit ? (
+                    <ProjectHealthPicker project={project} edit={edit} />
+                  ) : (
+                    projectHealthLabel(project.health)
+                  )}
                 </Row>
                 <Row icon={UserCircle2} label="Lead">
-                  {project.lead_name ? (
+                  {edit ? (
+                    <ProjectLeadPicker project={project} edit={edit} />
+                  ) : project.lead_name ? (
                     <span className="inline-flex items-center gap-1.5">
                       <AgentAvatar
                         seed={project.lead_id ?? project.lead_name}
@@ -365,11 +410,13 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
                   )}
                 </Row>
                 <Row icon={CalendarClock} label="Dates">
-                  {project.start_date || project.target_date
-                    ? `${project.start_date ? formatShortDate(project.start_date) : "?"} → ${
-                        project.target_date ? formatShortDate(project.target_date) : "?"
-                      }`
-                    : <span className="text-muted-foreground-soft">Not scheduled</span>}
+                  {edit ? (
+                    <ProjectDatesPicker project={project} edit={edit}>
+                      <span className="truncate text-[12px]">{dateRange(project)}</span>
+                    </ProjectDatesPicker>
+                  ) : (
+                    dateRange(project)
+                  )}
                 </Row>
               </dl>
             </DetailCard>
@@ -457,6 +504,16 @@ function Row({
       <dd className="min-w-0 flex-1 truncate text-foreground/85">{children}</dd>
     </div>
   )
+}
+
+/** "1 Sep → 1 Oct", or a muted note when neither end is set. */
+function dateRange(project: Project): React.ReactNode {
+  if (!project.start_date && !project.target_date) {
+    return <span className="text-muted-foreground-soft">Not scheduled</span>
+  }
+  const from = project.start_date ? formatShortDate(project.start_date) : "?"
+  const to = project.target_date ? formatShortDate(project.target_date) : "?"
+  return `${from} → ${to}`
 }
 
 function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {

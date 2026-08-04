@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
@@ -52,7 +51,9 @@ import { useFilteredIssues } from "@/hooks/use-filtered-issues"
 import { useIssueDetail } from "@/hooks/use-issue-detail"
 import { useProjectDetail } from "@/hooks/use-project-detail"
 import { parseSavedViews, applySavedView } from "@/lib/saved-views"
-import { IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
+import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
+import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
+import { ProjectDetailSurface } from "@/components/features/issues/project-detail-surface"
 import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
 import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
 import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
@@ -201,12 +202,8 @@ export function OrchestrationLayout({
   // or clearing a saved view's project filter never opens or closes the
   // detail panel, and explicitly clicking a project never leaks back into
   // the saved-view's filter state.
-  // /issues?project=<id> — the ⌘K palette's Projects rows and any bookmark.
-  // Read from useSearchParams rather than window.location: the App Router
-  // renders the new route before window.location catches up, so a link
-  // clicked from elsewhere in the app would read the previous url.
-  const initialProjectId = useSearchParams().get("project")
-
+  // /issues?project=<id> — the ⌘K palette's Projects rows, a bookmark, or a
+  // project opened in this page — is read AND written by useProjectDetail.
   const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
@@ -364,25 +361,25 @@ export function OrchestrationLayout({
     fetchSavedViews()
   }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
 
-  const {
-    selectedIssue,
-    issueComments,
-    handleIssueSelect,
-    handleIssueClose,
-    handleIssueUpdated,
-  } = useIssueDetail({
-    workspaceId,
+  // Both selections live in the URL now — /issues?issue=ENG-4&project=p_1.
+  // They used to be component state, so the open issue could not be shared,
+  // a refresh lost it, and Back left the page instead of closing the detail.
+  const { selectedIdentifier, selectedIssue, handleIssueSelect, handleIssueClose } = useIssueDetail({
+    issues,
     onIssueSelected: () => setDetailContext({ type: "none" }),
-    fetchIssues,
-    fetchProjects,
   })
+
+  const handleIssueUpdated = useCallback(async () => {
+    await fetchIssues()
+    await fetchProjects()
+  }, [fetchIssues, fetchProjects])
 
   const {
     selectedProjectId,
     setSelectedProjectId,
     selectedProject,
     handleProjectClose,
-  } = useProjectDetail({ projects, initialProjectId })
+  } = useProjectDetail({ projects })
 
   // Derived data — defined after useIssueDetail so the selectedIssue
   // dependency resolves; when an issue is selected the Graph/Timeline/
@@ -425,13 +422,17 @@ export function OrchestrationLayout({
     }
   }, [selectedIssue, selectedMission])
 
-  // selectedIssue / selectedProject take over the middle pane (same
-  // pattern as /routines). When set, the board/list is hidden and the
-  // detail renders full-width with a breadcrumb back-arrow at top.
-  // Right panel is suppressed entirely for these selections.
-  const issueDetailFullWidth = selectedIssue !== null && activeTab === "issues"
+  // The selection takes over the middle pane (same pattern as /routines):
+  // the board/list is hidden and the detail renders full-width with a
+  // back-arrow on top. The right panel is suppressed for these selections.
+  //
+  // Gated on the IDENTIFIER, not on `selectedIssue`. The list is capped at 100
+  // rows, so an identifier the URL names but the page has not loaded resolves
+  // to null — and gating on the row would leave a shared link on an empty
+  // board. The detail fetches by identifier and does not need the row at all.
+  const issueDetailFullWidth = selectedIdentifier !== null && activeTab === "issues"
   const projectDetailFullWidth =
-    selectedProjectId !== null && !selectedIssue && activeTab === "issues"
+    selectedProjectId !== null && !selectedIdentifier && activeTab === "issues"
 
   const filteredIssues = useFilteredIssues({
     issues,
@@ -517,14 +518,14 @@ export function OrchestrationLayout({
   // Mobile back button: close whichever detail view is currently visible so that
   // showRightPanel ends up false and the overlay sheet actually dismisses.
   const closeMobileDetail = useCallback(() => {
-    if (selectedIssue) {
+    if (selectedIdentifier) {
       handleIssueClose()
     } else if (selectedProjectId) {
       handleProjectClose()
     } else {
       handleDetailClose()
     }
-  }, [selectedIssue, selectedProjectId, handleIssueClose, handleProjectClose, handleDetailClose])
+  }, [selectedIdentifier, selectedProjectId, handleIssueClose, handleProjectClose, handleDetailClose])
 
   // Sync breadcrumbs to global store (rendered in app-toolbar)
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
@@ -533,12 +534,12 @@ export function OrchestrationLayout({
     if (selectedProject) {
       items.push({ label: selectedProject.name, onClick: handleIssueClose })
     }
-    if (selectedIssue) {
-      items.push({ label: selectedIssue.identifier || selectedIssue.title })
+    if (selectedIdentifier) {
+      items.push({ label: selectedIdentifier })
     }
     setBreadcrumbs(items)
     return () => setBreadcrumbs([])
-  }, [selectedProject, selectedIssue, setBreadcrumbs, handleIssueClose])
+  }, [selectedProject, selectedIdentifier, setBreadcrumbs, handleIssueClose])
 
   // Toolbar surfaces are mode-dependent:
   //   - issues: hide tab bar, show New Issue + New Project buttons
@@ -704,7 +705,7 @@ export function OrchestrationLayout({
 
         {/* ---- Center content area ---- */}
         <div className="row-span-1 relative overflow-hidden min-h-0">
-          {activeTab === "issues" && issueDetailFullWidth && selectedIssue && (
+          {activeTab === "issues" && issueDetailFullWidth && selectedIdentifier && (
             <div className="flex h-full flex-col overflow-hidden">
               {/* Breadcrumb back-bar — clicking 'Issues' or the X closes
                   the detail and returns to the board/list. */}
@@ -718,37 +719,34 @@ export function OrchestrationLayout({
                   Back to issues
                 </button>
                 <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                {/* The identifier and nothing else. The title used to be here
+                    AND in the card below it AND in the global breadcrumb —
+                    three copies of one string down the left of the screen. */}
                 <span className="truncate font-mono text-xs text-muted-foreground">
-                  {selectedIssue.identifier || selectedIssue.id.slice(0, 8)}
-                </span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                <span className="truncate text-xs font-medium text-foreground/85">
-                  {selectedIssue.title}
+                  {selectedIdentifier}
                 </span>
               </div>
               {/* Full-width issue detail — slides + fades when switching
-                  between issues (key on selectedIssue.id) so the
-                  navigation feels continuous instead of a hard swap. */}
+                  between issues (key on the identifier) so the navigation
+                  feels continuous instead of a hard swap. */}
               <div className="relative flex-1 overflow-hidden">
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={`issue-${selectedIssue.id}`}
+                    key={`issue-${selectedIdentifier}`}
                     initial={{ opacity: 0, x: 12 }}
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -12 }}
                     transition={{ duration: 0.18, ease: "easeOut" }}
                     className="absolute inset-0 overflow-hidden"
                   >
-                    <IssueDetailInline
-                      issue={selectedIssue}
-                      comments={issueComments}
-                      labels={issueLabels}
-                      projects={projects}
-                      routines={pipelines}
-                      workspaceId={workspaceId}
-                      onClose={handleIssueClose}
-                      onUpdated={handleIssueUpdated}
-                    />
+                    {/* The same component /issues/<identifier> renders. */}
+                    <div className="h-full overflow-y-auto">
+                      <IssueDetailSurface
+                        workspaceId={workspaceId}
+                        identifier={selectedIdentifier}
+                        onChanged={handleIssueUpdated}
+                      />
+                    </div>
                   </motion.div>
                 </AnimatePresence>
               </div>
@@ -767,12 +765,11 @@ export function OrchestrationLayout({
                   Back to issues
                 </button>
                 <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                <span className="truncate text-xs font-medium text-muted-foreground">
-                  Project
-                </span>
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-                <span className="truncate text-xs font-medium text-foreground/85">
-                  {selectedProject.name}
+                {/* "Project", once. The name is the card's headline — saying
+                    it here as well was two of the three headers this
+                    redesign removed. */}
+                <span className="truncate font-mono text-xs text-muted-foreground">
+                  {selectedProject.slug}
                 </span>
               </div>
               <div className="relative flex-1 overflow-hidden">
@@ -785,12 +782,14 @@ export function OrchestrationLayout({
                     transition={{ duration: 0.18, ease: "easeOut" }}
                     className="absolute inset-0 overflow-hidden"
                   >
-                    <ProjectDetailInline
-                      project={selectedProject}
-                      workspaceId={workspaceId}
-                      onClose={handleProjectClose}
-                      onUpdated={fetchProjects}
-                    />
+                    <div className="h-full overflow-y-auto">
+                      <ProjectDetailSurface
+                        workspaceId={workspaceId}
+                        project={selectedProject}
+                        issues={issues}
+                        onChanged={fetchProjects}
+                      />
+                    </div>
                   </motion.div>
                 </AnimatePresence>
               </div>
@@ -956,16 +955,11 @@ export function OrchestrationLayout({
           // call sites.
           const rightPanelProps = {
             selectedIssue,
-            issueComments,
-            issueLabels,
-            projects,
-            routines: pipelines,
+            issues,
             selectedProject,
             workspaceId,
             detailContext,
-            onIssueClose: handleIssueClose,
             onIssueUpdated: handleIssueUpdated,
-            onProjectClose: handleProjectClose,
             onProjectUpdated: fetchProjects,
             onDetailClose: handleDetailClose,
             onTaskAction: handleTaskAction,

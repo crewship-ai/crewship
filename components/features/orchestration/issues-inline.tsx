@@ -11,9 +11,12 @@ import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import type { Mission, Project } from "@/lib/types/mission"
 
-// Re-exports for backwards compatibility
-export { IssueDetailInline } from "@/components/features/orchestration/issue-detail-inline"
-export { ProjectDetailInline, ProjectsListView } from "@/components/features/orchestration/project-detail-inline"
+// IssueDetailInline / ProjectDetailInline / ProjectsListView used to be
+// re-exported here. The two detail panels are gone — /issues and
+// /issues/<identifier> both render components/features/issues/
+// {issue,project}-detail-surface.tsx now, so an issue has one screen instead
+// of two. ProjectsListView went with them: it had no caller left after the
+// projects table moved into the explorer.
 
 /* -------------------------------------------------------------------------- */
 /*  IssuesExplorerPanel — left panel                                          */
