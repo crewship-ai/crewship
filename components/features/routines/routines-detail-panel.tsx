@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { X, Play, Eye, Square, Check, Ban, Power, PowerOff } from "lucide-react"
+import { X, Play, Eye, Square, Check, Ban, Power, PowerOff, MoreHorizontal } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
+import { AgentlessBadge } from "./routine-agentless-badge"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -26,9 +26,15 @@ import { extractProblemDetail } from "@/lib/problem-details"
 import { PipelineRunActivity } from "@/components/features/activity/pipeline-run-activity"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { RoutineCardDetail } from "./routine-card-detail"
 import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
-import { AgentlessBadge } from "./routine-agentless-badge"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
@@ -394,165 +400,18 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
 
   return (
     <div className="flex h-full flex-col">
-      {/* Hero — gradient title + slug + status pills + description + action group */}
-      <div className="shrink-0 border-b border-border bg-card/40 px-6 pb-5 pt-6">
-        <div className="flex items-start gap-4">
-          <div className="min-w-0 flex-1">
-            {loading ? (
-              <div className="space-y-2">
-                <div className="h-3 w-32 animate-pulse rounded bg-muted/30" />
-                <div className="h-8 w-72 animate-pulse rounded bg-muted/40" />
-                <div className="h-3 w-44 animate-pulse rounded bg-muted/30" />
-              </div>
-            ) : (
-              <>
-                {/* Status + meta pills */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {lifecycleBadge && (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                        lifecycleBadge.className,
-                      )}
-                    >
-                      <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
-                      {lifecycleBadge.label}
-                    </span>
-                  )}
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-                      STATUS_BADGE_CLASSES[runStatus.token],
-                    )}
-                  >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT_CLASSES[runStatus.token])} />
-                    {runStatus.label}
-                  </span>
-                  <Badge variant="outline" className="px-2 py-0 text-[11px]">DSL v{routine?.dsl_version}</Badge>
-                  <Badge variant="outline" className="px-2 py-0 text-[11px]">
-                    {routine?.workspace_visible ? "workspace" : "private"}
-                  </Badge>
-                  {routine?.ephemeral && (
-                    <Badge variant="outline" className="px-2 py-0 text-[11px]">ephemeral</Badge>
-                  )}
-                  {routine?.head_version != null && (
-                    <Badge variant="outline" className="px-2 py-0 text-[11px] font-mono">v{routine.head_version}</Badge>
-                  )}
-                  <AgentlessBadge agentless={isAgentless(routine?.definition)} />
-                </div>
-
-                {/* Title + slug */}
-                <h1 className="mt-3 truncate text-2xl font-semibold tracking-tight">
-                  {routine?.name || slug}
-                </h1>
-                <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                  {routine?.slug || slug}
-                </div>
-
-                {/* Description */}
-                {routine?.description && (
-                  <p className="mt-3 max-w-3xl text-sm leading-relaxed text-foreground/80">
-                    {routine.description}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onClose}
-            className="h-8 w-8 shrink-0 p-0"
-            aria-label="Close routine details"
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </Button>
+      {/* The identity used to live here as a fixed band above the scroll
+          area. It is a card now, inside the scroll, so the page reads as
+          one stack of cards and the name scrolls with what it names. The
+          panel keeps the ACTION handlers — RBAC guards, busy states, run
+          guards — and hands them down as a node. */}
+      {loading && (
+        <div className="space-y-2 p-6">
+          <div className="h-3 w-32 animate-pulse rounded bg-muted/30" />
+          <div className="h-8 w-72 animate-pulse rounded bg-muted/40" />
+          <div className="h-3 w-96 animate-pulse rounded bg-muted/20" />
         </div>
-
-        {/* Action group — pill button row */}
-        <div className="mt-5 flex items-center gap-2">
-          {/* Wrap in a span so the run-guard tooltip still shows when the
-              button is disabled — disabled buttons swallow hover events. */}
-          <span title={runGuard ?? "Invoke routine with empty inputs"} className="inline-flex">
-            <Button
-              onClick={() => triggerAction("run")}
-              disabled={!!busyAction || !routine || !!runGuard}
-              className="h-9 gap-2 rounded-md px-4 text-sm font-semibold"
-            >
-              {busyAction === "run" ? (
-                <Spinner className="h-3.5 w-3.5" />
-              ) : (
-                <Play className="h-3.5 w-3.5 fill-current" />
-              )}
-              {busyAction === "run" ? "Running…" : "Run"}
-            </Button>
-          </span>
-          <span
-            title={runGuard ?? "Static plan preview — walks the DSL + shows declared resources; no agents invoked"}
-            className="inline-flex"
-          >
-            <Button
-              variant="outline"
-              onClick={() => triggerAction("dry_run")}
-              disabled={!!busyAction || !routine || !!runGuard}
-              className="h-9 gap-2 rounded-md px-4 text-sm"
-            >
-              <Eye className="h-3.5 w-3.5" />
-              {busyAction === "dry_run" ? "Computing…" : "Dry run"}
-            </Button>
-          </span>
-          <div className="flex-1" />
-          {/* Enable / Disable — OWNER/ADMIN kill switch. Disable when the
-              routine is active; Enable when it's disabled. Hidden for a
-              proposed routine (approve/reject is the right action there). */}
-          {showKillControl && routine && lifecycle !== "proposed" && (
-            lifecycle === "disabled" ? (
-              <Button
-                variant="outline"
-                onClick={() => governanceAction("enable")}
-                disabled={!!busyGov || !!busyAction}
-                className="h-9 gap-2 rounded-md px-3 text-sm text-success hover:text-success"
-                title="Re-enable this routine so it can run again"
-              >
-                {busyGov === "enable" ? <Spinner className="h-3.5 w-3.5" /> : <Power className="h-3.5 w-3.5" />}
-                Enable
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                onClick={() => governanceAction("disable")}
-                disabled={!!busyGov || !!busyAction}
-                className="h-9 gap-2 rounded-md px-3 text-sm text-destructive hover:text-destructive"
-                title="Disable (kill) this routine — it cannot run until re-enabled"
-              >
-                {busyGov === "disable" ? <Spinner className="h-3.5 w-3.5" /> : <PowerOff className="h-3.5 w-3.5" />}
-                Disable
-              </Button>
-            )
-          )}
-          {/* Same disabled-tooltip wrapper trick as the Run button. */}
-          <span
-            title={
-              activeRuns.length === 0
-                ? "No active run to cancel"
-                : cancelTarget
-                  ? `Cancel run ${cancelTarget.id.slice(0, 12)}…`
-                  : "Multiple runs are active — pick one in the Runs tab"
-            }
-            className="inline-flex"
-          >
-            <Button
-              variant="ghost"
-              className="h-9 gap-2 rounded-md px-3 text-sm text-muted-foreground hover:text-destructive"
-              onClick={cancelActiveRun}
-              disabled={cancelling || activeRuns.length === 0}
-            >
-              {cancelling ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
-              Cancel
-            </Button>
-          </span>
-        </div>
-      </div>
+      )}
 
       {/* Approval banner — a proposed routine (risky / agent-authored)
           needs a MANAGER+ to promote it before it can run. Approve →
@@ -643,6 +502,130 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 fetchRoutine()
                 onChanged()
               }}
+              statusPills={
+                <>
+                  {lifecycleBadge && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 type-meta font-medium",
+                        lifecycleBadge.className,
+                      )}
+                    >
+                      <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
+                      {lifecycleBadge.label}
+                    </span>
+                  )}
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 type-meta font-medium",
+                      STATUS_BADGE_CLASSES[runStatus.token],
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT_CLASSES[runStatus.token])} />
+                    {runStatus.label}
+                  </span>
+                  <AgentlessBadge agentless={isAgentless(routine.definition)} />
+                </>
+              }
+              actions={
+                <>
+                  {/* Wrapped in a span so the run-guard tooltip still
+                      shows on a disabled button — disabled buttons
+                      swallow hover events. */}
+                  <span title={runGuard ?? "Invoke routine with empty inputs"} className="inline-flex">
+                    <Button
+                      onClick={() => triggerAction("run")}
+                      disabled={!!busyAction || !!runGuard}
+                      className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium"
+                    >
+                      {busyAction === "run" ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <Play className="h-3.5 w-3.5 fill-current" />
+                      )}
+                      {busyAction === "run" ? "Running…" : "Run"}
+                    </Button>
+                  </span>
+                  <span
+                    title={runGuard ?? "Static plan preview — walks the DSL + shows declared resources; no agents invoked"}
+                    className="inline-flex"
+                  >
+                    <Button
+                      variant="outline"
+                      onClick={() => triggerAction("dry_run")}
+                      disabled={!!busyAction || !!runGuard}
+                      className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      {busyAction === "dry_run" ? "Computing…" : "Dry run"}
+                    </Button>
+                  </span>
+                  {/* Cancel stays a visible button, not a menu item. An
+                      active run is precisely when you need it, and one
+                      click deeper is the wrong direction for the action
+                      that stops something already burning tokens. */}
+                  <span
+                    title={
+                      activeRuns.length === 0
+                        ? "No active run to cancel"
+                        : cancelTarget
+                          ? `Cancel run ${cancelTarget.id.slice(0, 12)}…`
+                          : "Multiple runs are active — open Runs → Manage and pick one"
+                    }
+                    className="inline-flex"
+                  >
+                    <Button
+                      variant="ghost"
+                      className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium text-muted-foreground hover:text-destructive"
+                      onClick={cancelActiveRun}
+                      disabled={cancelling || activeRuns.length === 0}
+                    >
+                      {cancelling ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                      Cancel
+                    </Button>
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="More actions"
+                        className="rounded-lg border border-border/60 p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      {showKillControl && lifecycle !== "proposed" && (
+                        <>
+                          {lifecycle === "disabled" ? (
+                            <DropdownMenuItem
+                              onSelect={() => governanceAction("enable")}
+                              disabled={!!busyGov || !!busyAction}
+                            >
+                              <Power className="h-3.5 w-3.5" />
+                              Enable routine
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => governanceAction("disable")}
+                              disabled={!!busyGov || !!busyAction}
+                            >
+                              <PowerOff className="h-3.5 w-3.5" />
+                              Disable routine
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={onClose}>
+                        <X className="h-3.5 w-3.5" />
+                        Close
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              }
             />
           </div>
         </div>

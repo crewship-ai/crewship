@@ -51,6 +51,8 @@ import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineEditorTab } from "./routine-editor-tab"
@@ -65,14 +67,34 @@ interface Props {
   routine: RoutineDetail
   workspaceId: string
   onChanged: () => void
+  /**
+   * Run / Dry run / Enable / Disable / Cancel, rendered top-right of the
+   * identity card.
+   *
+   * Passed in rather than rebuilt here: the panel owns the handlers, the
+   * RBAC guards and the busy states, and a second copy of that wiring is
+   * a second thing to keep correct.
+   */
+  actions?: React.ReactNode
+  /**
+   * Lifecycle + run-status pills, rendered first in the identity row.
+   *
+   * Computed by the panel because the logic is not "read
+   * last_invocation_status": a live approval gate wins over the
+   * persisted value — the run reads as running in the DB while parked,
+   * but the human is the bottleneck — and the colours route through the
+   * shared palette so the pill matches Inbox, Issues and Activity.
+   */
+  statusPills?: React.ReactNode
 }
 
-type TriggerTab = "triggers" | "webhooks"
+type SideTab = "triggers" | "versions"
 
-export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
+export function RoutineCardDetail({ routine, workspaceId, onChanged, actions, statusPills }: Props) {
   const [editing, setEditing] = React.useState(false)
   const [selected, setSelected] = React.useState<string | null>(null)
-  const [triggerTab, setTriggerTab] = React.useState<TriggerTab>("triggers")
+  const [sideTab, setSideTab] = React.useState<SideTab>("triggers")
+  const [showWebhooks, setShowWebhooks] = React.useState(false)
   const [manageTriggers, setManageTriggers] = React.useState(false)
   const [manageVersions, setManageVersions] = React.useState(false)
   // Cancelling a specific run lives in RoutineRunsTab, which has the
@@ -103,11 +125,80 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
   }, [routine.definition])
 
   const stats = React.useMemo(() => summarise(records), [records])
+  const agentPct = React.useMemo(() => {
+    if (steps.length === 0) return 0
+    const opaque = steps.filter((st) => st.type === "agent_run").length
+    return Math.round((opaque / steps.length) * 100)
+  }, [steps])
+  // The agent the routine runs through, for the avatar. Manifest first —
+  // it is derived from the step graph — falling back to nothing rather
+  // than guessing from the author, who may not be an agent at all.
+  const ownerAgent = routine.manifest?.agents?.[0] ?? null
   const lastRun = records[0] ?? null
 
   return (
     <div className="flex flex-col gap-4 p-4">
+      {/* Identity, as a card that scrolls with the page rather than a
+          fixed header band. The name is the first thing on the page —
+          it used to sit under a row of status chrome. */}
       <Appear order={0}>
+        <DetailCard>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <CrewIcon icon={routineIcon(routine.slug)} color={routineColor(routine.slug)} size="lg" />
+                <div className="min-w-0">
+                  <h1 className="truncate text-lg font-semibold tracking-tight">
+                    {routine.name || routine.slug}
+                  </h1>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="font-mono">{routine.slug}</span>
+                    {routine.head_version != null && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span className="font-mono">v{routine.head_version}</span>
+                      </>
+                    )}
+                    {ownerAgent && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <Link
+                          href="/crews"
+                          className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2 transition-colors hover:border-border hover:text-foreground"
+                        >
+                          <AgentAvatar seed={ownerAgent} className="h-4 w-4" alt="" />
+                          <span className="font-medium">{ownerAgent}</span>
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+            </div>
+
+            {routine.description && (
+              <p className="max-w-[80ch] text-[13px] leading-relaxed text-foreground/85">
+                {routine.description}
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {statusPills}
+              <Pill tone="default">{mine.length > 0 ? "scheduled" : "manual"}</Pill>
+              {steps.length > 0 && (
+                <Pill tone={agentPct >= 60 ? "warn" : "default"}>{agentPct}% agent steps</Pill>
+              )}
+              <Pill tone="default">
+                {steps.length} {steps.length === 1 ? "step" : "steps"}
+              </Pill>
+              {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
+            </div>
+          </div>
+        </DetailCard>
+      </Appear>
+
+      <Appear order={1}>
         <StatStrip
           items={[
             {
@@ -134,7 +225,7 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
       </Appear>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
-        <Appear order={1} className="xl:col-span-2 2xl:col-span-3">
+        <Appear order={2} className="xl:col-span-2 2xl:col-span-3">
           <DetailCard
             title="Definition"
             subtitle={`${steps.length} ${steps.length === 1 ? "step" : "steps"}`}
@@ -182,7 +273,7 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
         </Appear>
 
         <div className="flex flex-col gap-4">
-          <Appear order={2}>
+          <Appear order={3}>
             <LastRunCard
               status={routine.last_invocation_status}
               at={routine.last_invoked_at}
@@ -193,24 +284,40 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
             />
           </Appear>
 
-          <Appear order={3}>
+          {/* Triggers and Versions share one card behind a switch —
+              the mockup's arrangement, and better than two half-empty
+              cards or a tab that hides one of them. Manage reveals the
+              working editors rather than replacing them. */}
+          <Appear order={4}>
             <DetailCard
-              title={triggerTab === "triggers" ? "Triggers" : "Webhooks"}
-              subtitle={triggerTab === "triggers" ? String(mine.length) : undefined}
-              icon={triggerTab === "triggers" ? CalendarClock : Webhook}
+              title={sideTab === "triggers" ? (showWebhooks ? "Webhooks" : "Triggers") : "Versions"}
+              subtitle={
+                sideTab === "triggers"
+                  ? showWebhooks
+                    ? undefined
+                    : String(mine.length)
+                  : routine.head_version != null
+                    ? `v${routine.head_version}`
+                    : undefined
+              }
+              icon={sideTab === "triggers" ? (showWebhooks ? Webhook : CalendarClock) : GitBranch}
               tone="purple"
               action={
                 <div className="flex items-center gap-1">
                   <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                    {(["triggers", "webhooks"] as const).map((t) => (
+                    {(["triggers", "versions"] as const).map((t) => (
                       <button
                         key={t}
                         type="button"
-                        onClick={() => setTriggerTab(t)}
-                        aria-pressed={triggerTab === t}
+                        onClick={() => {
+                          setSideTab(t)
+                          setManageTriggers(false)
+                          setManageVersions(false)
+                        }}
+                        aria-pressed={sideTab === t}
                         className={cn(
                           "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
-                          triggerTab === t
+                          sideTab === t
                             ? "bg-primary/15 text-primary"
                             : "text-muted-foreground hover:text-foreground",
                         )}
@@ -221,47 +328,72 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setManageTriggers((v) => !v)}
+                    onClick={() =>
+                      sideTab === "triggers"
+                        ? setManageTriggers((v) => !v)
+                        : setManageVersions((v) => !v)
+                    }
                     className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    {manageTriggers ? "Done" : "Manage"}
+                    {(sideTab === "triggers" ? manageTriggers : manageVersions) ? "Done" : "Manage"}
                   </button>
                 </div>
               }
+              footer={
+                sideTab === "triggers" ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowWebhooks((v) => !v)}
+                    className="text-[11px] text-primary hover:underline"
+                  >
+                    {showWebhooks ? "Show cron schedules" : "Show inbound webhooks"}
+                  </button>
+                ) : undefined
+              }
             >
-              {/* Manage reveals the working CRUD rather than replacing
-                  it: the schedule and webhook editors are unchanged, they
-                  are just no longer filed under a tab called Advanced. */}
-              {manageTriggers ? (
-                triggerTab === "triggers" ? (
-                  <RoutineSchedulesTab
+              {sideTab === "versions" ? (
+                manageVersions ? (
+                  <RoutineVersionsTab
                     workspaceId={workspaceId}
-                    pipelineId={routine.id}
                     slug={routine.slug}
+                    onRolledBack={onChanged}
                   />
                 ) : (
+                  <p className="text-[12px] text-muted-foreground">
+                    Head is v{routine.head_version ?? 1}. Press Manage for the full history and
+                    rollback.
+                  </p>
+                )
+              ) : manageTriggers ? (
+                showWebhooks ? (
                   <RoutineWebhooksTab
                     workspaceId={workspaceId}
                     pipelineId={routine.id}
                     slug={routine.slug}
                   />
+                ) : (
+                  <RoutineSchedulesTab
+                    workspaceId={workspaceId}
+                    pipelineId={routine.id}
+                    slug={routine.slug}
+                  />
                 )
-              ) : triggerTab === "triggers" ? (
-                <ScheduleList schedules={mine} />
-              ) : (
+              ) : showWebhooks ? (
                 <p className="text-[12px] text-muted-foreground">
                   Inbound HTTP triggers. Press Manage to add or rotate one.
                 </p>
+              ) : (
+                <ScheduleList schedules={mine} />
               )}
             </DetailCard>
           </Appear>
 
-          <Appear order={4}>
+          <Appear order={5}>
             <AccessCard routine={routine} />
           </Appear>
 
           {(routine.manifest?.agents?.length ?? 0) > 0 && (
-            <Appear order={5}>
+            <Appear order={6}>
               <RoutineReachCard
                 workspaceId={workspaceId}
                 agentSlugs={routine.manifest?.agents ?? []}
@@ -269,36 +401,15 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
             </Appear>
           )}
 
-          <Appear order={6}>
-            <DetailCard
-              title="Versions"
-              subtitle={routine.head_version ? `v${routine.head_version}` : undefined}
-              icon={GitBranch}
-              action={
-                <button
-                  type="button"
-                  onClick={() => setManageVersions((v) => !v)}
-                  className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {manageVersions ? "Done" : "History"}
-                </button>
-              }
-            >
-              {manageVersions ? (
-                <RoutineVersionsTab
-                  workspaceId={workspaceId}
-                  slug={routine.slug}
-                  onRolledBack={onChanged}
-                />
-              ) : (
-                <Metadata routine={routine} steps={steps.length} />
-              )}
+          <Appear order={7}>
+            <DetailCard title="Metadata">
+              <Metadata routine={routine} steps={steps.length} />
             </DetailCard>
           </Appear>
         </div>
       </div>
 
-      <Appear order={7}>
+      <Appear order={8}>
         <RunsCard
           slug={routine.slug}
           workspaceId={workspaceId}
@@ -314,6 +425,39 @@ export function RoutineCardDetail({ routine, workspaceId, onChanged }: Props) {
 /* ------------------------------------------------------------------ *
  *  Pieces                                                             *
  * ------------------------------------------------------------------ */
+
+/**
+ * A routine's icon and colour, derived from its slug.
+ *
+ * The mockup let you PICK these. That needs somewhere to store them,
+ * and the routine API has no icon or colour field — so a picker here
+ * would take the user's choice and drop it on the floor, which is the
+ * same class of lie as a save button that saves nothing.
+ *
+ * Deriving from the slug gets the real benefit today: every routine
+ * looks different, the same routine always looks the same, and a list
+ * of thirty stops being thirty identical rows. Swap this for the stored
+ * value the moment the field exists; nothing else has to change.
+ */
+const ICON_POOL = [
+  "workflow", "zap", "cog", "database", "mail", "calendar", "chart",
+  "shield", "rocket", "brain", "code", "receipt", "file-text", "search",
+] as const
+const COLOR_POOL = ["blue", "emerald", "violet", "amber", "rose", "cyan", "lime", "fuchsia"] as const
+
+function hashSlug(slug: string): number {
+  let h = 0
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0
+  return h
+}
+
+function routineIcon(slug: string): string {
+  return ICON_POOL[hashSlug(slug) % ICON_POOL.length]
+}
+
+function routineColor(slug: string): string {
+  return COLOR_POOL[hashSlug(slug) % COLOR_POOL.length]
+}
 
 function toneOf(status?: string): "success" | "destructive" | "default" {
   const s = status?.toLowerCase()
