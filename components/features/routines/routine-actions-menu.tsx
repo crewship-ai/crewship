@@ -44,6 +44,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { apiFetch } from "@/lib/api-fetch"
 import { extractProblemDetail } from "@/lib/problem-details"
+import {
+  duplicatePayload,
+  renamePayload,
+  type RoutineSaveBody,
+} from "@/lib/routine-save-payload"
 import type { RoutineDetail } from "./routines-detail-panel"
 
 /**
@@ -108,14 +113,8 @@ export function RoutineActionsMenu({
     setDialog(which)
   }
 
-  /**
-   * Save a definition through the same endpoint the editor uses.
-   *
-   * skip_test_gate mirrors the editor's behaviour and its limits: the
-   * server only honours it for OWNER/ADMIN, so a lower role gets a clear
-   * 403 rather than a silent no-op.
-   */
-  const save = async (nextDefinition: Record<string, unknown>, successMsg: string) => {
+  /** POST a prepared body to the save endpoint. */
+  const post = async (body: RoutineSaveBody, successMsg: string) => {
     setBusy(true)
     try {
       const res = await apiFetch(
@@ -123,7 +122,7 @@ export function RoutineActionsMenu({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ definition: nextDefinition, skip_test_gate: true }),
+          body: JSON.stringify(body),
         },
       )
       if (!res.ok) {
@@ -142,23 +141,20 @@ export function RoutineActionsMenu({
     }
   }
 
+  const source = {
+    slug: routine.slug,
+    name: routine.name,
+    description: routine.description,
+    definition,
+    author_crew_id: routine.author_crew_id,
+  }
+
   const submitRename = () =>
-    save(
-      { ...definition, display_name: displayName.trim(), description: description.trim() },
-      "Renamed",
-    )
+    post(renamePayload(source, { name: displayName, description }), "Renamed")
 
   const submitDuplicate = () => {
-    const name = copyName.trim()
-    if (!name) return
-    // `name` is the routine's identity — the slug is derived from it —
-    // so a copy needs a new one. display_name follows so the list shows
-    // what the user typed rather than the slugified form.
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-    return save({ ...definition, name: slug, display_name: name }, "Duplicated")
+    if (!copyName.trim()) return
+    return post(duplicatePayload(source, { name: copyName }), "Duplicated")
   }
 
   const exportBundle = async () => {

@@ -175,7 +175,20 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
         toast.error(msg)
         return
       }
-      toast.success("Routine saved")
+      // Save re-classifies risk, and a routine it judges risky lands as
+      // `proposed` — it stops being runnable until a manager approves
+      // it. That is the gate working, but a bare "Routine saved" while
+      // an approval banner silently appears above reads as the page
+      // breaking. Say which happened.
+      const saved = (await res.json().catch(() => null)) as { status?: string } | null
+      if (saved?.status === "proposed") {
+        toast.warning("Saved — sent for approval", {
+          description:
+            "The change was classified risky, so the routine can't run until a manager approves it.",
+        })
+      } else {
+        toast.success("Routine saved")
+      }
       setDirty(false)
       onSaved()
     } catch (err) {
