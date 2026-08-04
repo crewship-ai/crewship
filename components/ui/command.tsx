@@ -42,6 +42,9 @@ function CommandDialog({
   // needs a different ladder than the model/slash pickers, which keep this
   // default — hence a swap rather than an append.
   commandClassName,
+  // cmdk's ranking, overridable per dialog. The default is a subsequence
+  // matcher; the top-bar search replaces it (see lib/palette-filter.ts).
+  filter,
   showCloseButton = true,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
@@ -49,6 +52,7 @@ function CommandDialog({
   description?: string
   className?: string
   commandClassName?: string
+  filter?: (value: string, search: string, keywords?: string[]) => number
   showCloseButton?: boolean
 }) {
   return (
@@ -61,7 +65,7 @@ function CommandDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Command className={commandClassName ?? DEFAULT_COMMAND_CLASS}>
+        <Command className={commandClassName ?? DEFAULT_COMMAND_CLASS} filter={filter}>
           {children}
         </Command>
       </DialogContent>

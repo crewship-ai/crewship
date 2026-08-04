@@ -11,6 +11,7 @@ import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { visibleSettingsSections } from "@/components/features/settings/settings-nav"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { paletteFilter } from "@/lib/palette-filter"
 import { routineHref } from "@/lib/routine-href"
 import { useAbilities } from "@/hooks/use-abilities"
 import { UserAvatar } from "@/components/ui/user-avatar"
@@ -397,6 +398,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       // field in the bar, and the bar is where the eye already is.
       className="top-[12vh] translate-y-0 gap-0 rounded-lg border-white/[0.1] bg-card p-0 shadow-xl sm:max-w-[600px]"
       commandClassName={PALETTE_COMMAND_CLASS}
+      filter={paletteFilter}
       showCloseButton={false}
     >
       <CommandInput placeholder="Search issues, projects, agents..." />
