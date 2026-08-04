@@ -122,6 +122,24 @@ function StatusPip({ status }: { status: StepStatus }) {
   }
 }
 
+/**
+ * Which model an agent step will use, as far as the definition says.
+ *
+ * A pinned `model_override` is exact. Otherwise the `complexity` tag is
+ * what the workspace tier map resolves against, so it is the honest
+ * answer available without a server round-trip — and it is labelled as
+ * a tier, not dressed up as a model name it might not become.
+ */
+function modelLabel(step: TraceStep): string | null {
+  if (step.model_override) {
+    // Strip the vendor prefix: "claude:claude-haiku-4-5" reads as
+    // haiku-4-5 on a node that has ~120px for it.
+    const raw = step.model_override.split(":").pop() ?? step.model_override
+    return raw.replace(/^claude-/, "")
+  }
+  return step.complexity ?? null
+}
+
 function subtitleFor(step: TraceStep): ReactNode {
   switch (step.type) {
     case "http": {
@@ -135,12 +153,26 @@ function subtitleFor(step: TraceStep): ReactNode {
         </>
       )
     }
-    case "agent_run":
-      return step.agent_slug ? (
-        <span className="truncate font-mono text-foreground/80">{step.agent_slug}</span>
-      ) : (
-        <span className="text-muted-foreground/60">prompt</span>
+    case "agent_run": {
+      // The model matters more than the agent slug for an agent step:
+      // it is what the step will cost and how well it will reason, and
+      // it was previously only visible by asking for a dry run.
+      const model = modelLabel(step)
+      return (
+        <>
+          {step.agent_slug ? (
+            <span className="truncate font-mono text-foreground/80">{step.agent_slug}</span>
+          ) : (
+            <span className="text-muted-foreground/60">prompt</span>
+          )}
+          {model && (
+            <span className="ml-1.5 shrink-0 rounded border border-border/60 px-1 py-0 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+              {model}
+            </span>
+          )}
+        </>
       )
+    }
     case "transform":
       return (
         <span className="truncate font-mono text-foreground/80">

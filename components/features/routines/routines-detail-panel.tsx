@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Play, Eye, Square, Check, Ban } from "lucide-react"
+import { Play, Square, Check, Ban } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -28,13 +28,12 @@ import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { RoutineApprovalBanner } from "@/components/features/routines/routine-approval-banner"
 import { RoutineActionsMenu } from "./routine-actions-menu"
 import { RoutineCardDetail } from "./routine-card-detail"
-import { RoutineDryRunReport, type DryRunResult } from "./routine-dry-run-report"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
 // Schedules, Webhooks, Waitpoints) plus the action toolbar
-// (Run / DryRun / Cancel). Subscribes to the same routine state the
+// (Run / Cancel). Subscribes to the same routine state the
 // list view reads, so refresh after a successful Run is already
 // covered by usePipelines' WS subscription in the layout.
 
@@ -101,9 +100,6 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // Tracks the in-flight governance action (approve/reject/disable/enable)
   // so its button shows a spinner and the others stay disabled meanwhile.
   const [busyGov, setBusyGov] = useState<string | null>(null)
-  // dryRunResult holds the `would_execute` report from the most recent
-  // dry_run invocation so we can render it inline. Cleared on close.
-  const [dryRunResult, setDryRunResult] = useState<DryRunResult | null>(null)
   // lastRunId holds the run_id of the most recent Run so we can show its
   // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
@@ -173,7 +169,6 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // rendering the prior routine's would_execute list until the user
     // manually dismisses it — a confusing "this report doesn't match
     // what I'm looking at" surface bug.
-    setDryRunResult(null)
     setLastRunId(null)
     fetchRoutine()
     return () => {
@@ -182,12 +177,14 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, slug])
 
-  const triggerAction = async (action: "run" | "dry_run") => {
+  const triggerAction = async (action: "run") => {
     if (!routine) return
     setBusyAction(action)
     try {
-      // Run / Dry run both address the saved pipeline by slug — `run` executes
-      // for real, `dry_run` is a static preview. See lib/pipeline-actions.
+      // Addresses the saved pipeline by slug. Dry run used to share this
+      // path; its panel is gone — two thirds of it repeated the graph
+      // and the Access card, and its one unique fact, the model each
+      // step resolves to, now sits on the node it describes.
       const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
       const res = await apiFetch(url, {
         method: "POST",
@@ -250,35 +247,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         throw new Error(`${res.status}: ${rawBody || res.statusText}`)
       }
       const data = await res.json().catch(() => ({}))
-      if (action === "dry_run") {
-        // Surface the would_execute report inline. Pre-fix this
-        // payload was dropped — the toast pointed at the Runs tab
-        // but dry runs don't emit step events. Now the user gets
-        // per-step tier resolution + estimated cost up top.
-        //
-        // cost_usd / duration_ms are intentionally LEFT UNDEFINED
-        // when the server doesn't return a number — coercing to 0
-        // would render "$0.0000" indistinguishably from a real
-        // zero-cost run. The report component falls back to summing
-        // per-step estimates when the top-level total is missing.
-        setDryRunResult({
-          run_id: typeof data.run_id === "string" ? data.run_id : "",
-          status: typeof data.status === "string" ? data.status : "DRY_RUN_OK",
-          cost_usd: typeof data.cost_usd === "number" ? data.cost_usd : undefined,
-          duration_ms: typeof data.duration_ms === "number" ? data.duration_ms : undefined,
-          would_execute: Array.isArray(data.would_execute) ? data.would_execute : [],
-          // manifest is the declared blast radius the redefined dry_run returns
-          // alongside the step plan. Pass it through untyped-guarded; the report
-          // tolerates its absence (older server builds) via isManifestEmpty.
-          manifest:
-            data.manifest && typeof data.manifest === "object"
-              ? (data.manifest as RoutineDetail["manifest"])
-              : undefined,
-        })
-        toast.success("Plan preview ready", {
-          description: "Step plan + declared resources shown above the tabs.",
-        })
-      } else {
+      {
+
         // Surface the just-started run's live activity rail inline.
         if (typeof data.run_id === "string" && data.run_id) setLastRunId(data.run_id)
         toast.success(`${actionLabel(action)} started`, {
@@ -472,11 +442,6 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         </div>
       )}
 
-      {/* Dry-run report — surfaces would_execute when the user clicks
-          "Dry run". Pre-fix this payload was silently dropped. */}
-      {dryRunResult && (
-        <RoutineDryRunReport result={dryRunResult} onClose={() => setDryRunResult(null)} />
-      )}
 
       {/* Run activity — instant readable status for the just-triggered
           Run, so the user isn't left wondering what's happening
@@ -572,20 +537,6 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                       {busyAction === "run" ? "Running…" : "Run"}
                     </Button>
                   </span>
-                  <span
-                    title={runGuard ?? "Static plan preview — walks the DSL + shows declared resources; no agents invoked"}
-                    className="inline-flex"
-                  >
-                    <Button
-                      variant="outline"
-                      onClick={() => triggerAction("dry_run")}
-                      disabled={!!busyAction || !!runGuard}
-                      className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      {busyAction === "dry_run" ? "Computing…" : "Dry run"}
-                    </Button>
-                  </span>
                   {/* Cancel stays a visible button, not a menu item. An
                       active run is precisely when you need it, and one
                       click deeper is the wrong direction for the action
@@ -634,8 +585,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   )
 }
 
-function actionLabel(a: "run" | "dry_run"): string {
-  return a === "run" ? "Run" : "Dry run"
+function actionLabel(_a: "run"): string {
+  return "Run"
 }
 
 function governanceLabel(a: "approve" | "reject" | "disable" | "enable"): string {

@@ -673,20 +673,37 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// or code steps, declared credentials, or an integrations_required the
 	// author crew can't satisfy) land as 'proposed' and need MANAGER+ approval
 	// before they can run; safe ones go live as 'active'.
-	risky, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
+	_, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
+
+	// What was already accepted. Classifying the STORED definition costs
+	// one parse and turns the question from "is this risky" — which a
+	// routine declaring credentials answers yes to forever — into "is
+	// there anything new to review", which is the question a reviewer is
+	// actually being asked.
+	current, priorReasons := h.currentRiskProfile(r.Context(), workspaceID, body.Slug)
+
+	decision := gateDecision(gateInput{
+		currentStatus: current,
+		priorReasons:  priorReasons,
+		newReasons:    riskReasons,
+	})
+	saveStatus := decision.status
+	if decision.why != "" && len(riskReasons) > 0 {
+		h.logger.Info("pipeline save: review not required",
+			"user_id", user.ID, "role", role, "slug", body.Slug,
+			"risk_reasons", riskReasons, "reason", decision.why)
+	}
 
 	// skip_governance_gate (OWNER/ADMIN, checked above) forces the save live
-	// even when risky — the trusted-operator / seeder escape hatch. We still
-	// classify (for the audit trail below) but persist 'active' and raise no
-	// review item.
-	saveStatus := statusForRisk(risky)
+	// even when risky — the trusted-operator / seeder escape hatch.
 	if body.SkipGovernanceGate {
 		saveStatus = "active"
-		if risky {
+		if len(riskReasons) > 0 {
 			h.logger.Info("pipeline save: governance gate skipped",
 				"user_id", user.ID, "role", role, "slug", body.Slug, "risk_reasons", riskReasons)
 		}
 	}
+	risky := saveStatus == "proposed"
 
 	in := pipeline.SaveInput{
 		WorkspaceID:    workspaceID,

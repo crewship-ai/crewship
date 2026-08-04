@@ -189,6 +189,11 @@ export function RoutineCardDetail({
   }, [routine.definition])
 
   const stats = React.useMemo(() => summarise(records), [records])
+  const estimatedCost = React.useMemo(() => {
+    const raw = (routine.definition as { estimated_cost_usd?: unknown })?.estimated_cost_usd
+    return typeof raw === "number" && raw > 0 ? raw : null
+  }, [routine.definition])
+
   const agentPct = React.useMemo(() => {
     if (steps.length === 0) return 0
     const opaque = steps.filter((st) => st.type === "agent_run").length
@@ -293,6 +298,14 @@ export function RoutineCardDetail({
             {
               label: "Avg duration",
               value: stats.avgMs > 0 ? formatDurationDecimal(stats.avgMs) : "—",
+              mono: true,
+            },
+            // The author's own estimate, straight from the definition.
+            // The dry-run panel computed the same number and charged a
+            // round-trip and a full-width report for it.
+            {
+              label: "Est. cost",
+              value: estimatedCost !== null ? `$${estimatedCost.toFixed(4)}` : "—",
               mono: true,
             },
           ]}

@@ -54,6 +54,12 @@ export interface TraceStep {
   // without exhaustive switches.
   agent_slug?: string
   prompt?: string
+  // The reasoning tier and any pinned model. These are what the dry-run
+  // panel uniquely showed — everything else in it duplicated the graph
+  // and the Access card — so they belong on the node they describe,
+  // where they are visible without asking for a report.
+  complexity?: string
+  model_override?: string
   http?: {
     method?: string
     url?: string

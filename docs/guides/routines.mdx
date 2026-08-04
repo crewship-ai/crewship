@@ -41,6 +41,8 @@ A routine also carries an **icon and colour**, picked from the header and stored
 
 Wait points are not here: they belong to a *run*, and [Activity](/guides/activity) is where the run is.
 
+There is no **Dry run** button. Two thirds of what its report showed — the step plan and the declared resources — is the Definition graph and the Access card, permanently on the page. Its one unique fact, the model each agent step resolves to, is now a chip on the node it describes, and the author's cost estimate is in the figures strip. The `/dry_run` endpoint and [`crewship routine dry-run`](/cli/routine) are unchanged and still the right thing in CI, where nobody is looking at a page.
+
 The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility.
 
 <Note>
