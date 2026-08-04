@@ -123,3 +123,289 @@ may have status `proposed` until approved; only `active` pipelines run.
 Budget and state writes require `manage`; state keys are limited to 128
 characters. The budget response reports `month`, `spent_usd`, `has_budget`,
 `pct_used`, and `over_budget` where applicable.
+
+## Audited operation reference
+
+The following details are the wire contract for the remaining pipeline
+operations. Every endpoint is prefixed with `/api/v1`. `member` means an
+authenticated session with membership in `{workspaceId}`. A request from an
+unauthenticated caller returns `401`; a caller without workspace membership
+returns `403`. Problem responses use the API error shape with an `error`
+message. Unless an endpoint says otherwise, an unexpected database/store
+failure is `500`.
+
+### Run changes
+
+#### `GET /workspaces/{workspaceId}/pipeline-runs/{runId}/changes`
+
+**Auth:** `member` plus the `read` role capability (normally any workspace
+member). The run must belong to the workspace; a missing or foreign run is
+`404` (`Run not found`). The handler resolves the run's
+`invoking_crew_id`, falling back to the pipeline's `author_crew_id`, and
+re-checks that crew's workspace before contacting the crew container.
+
+**Response:** `200 OK`. If no crew/repository can be resolved, the response is
+`{ "is_repo": false }`. Otherwise the response is the decoded crew git-diff
+object (the proxy forwards that object without reshaping it). Failure to reach
+the crew proxy is `502`; an internal run/crew lookup failure is `500`. A
+malformed proxy response degrades to `{ "is_repo": false }` with `200`.
+
+### Run logs
+
+#### `GET /workspaces/{workspaceId}/pipeline-runs/{runId}/logs?limit=N`
+
+**Auth:** `member` plus `read`. `runId` is required (`400`). The run is
+workspace-scoped and a missing/foreign run returns `404`. `limit` defaults to
+`200`; a positive value from `1` through `1000` is honored, while an absent,
+non-numeric, zero, negative, or larger value leaves the default in place.
+
+**Response:** `200 OK` with an oldest-first JSON array. Each entry is
+`{ "ts": "RFC3339", "level": "info", "message": "...", "type": "..." }`;
+`type` is omitted when empty and an empty severity is returned as `info`.
+Journal lookup, row scan, or iteration failures return `500`.
+
+### Run metadata
+
+#### `PATCH /workspaces/{workspaceId}/pipeline-runs/{runId}/metadata`
+
+**Auth:** `member` plus the `update` capability (MANAGER+). `runId` is
+required (`400`). The JSON body must contain at least one non-empty operation
+map:
+
+```json
+{
+  "set": {"customer_id": "cus_123"},
+  "increment": {"attempts": 1},
+  "append": {"events": {"kind": "retry"}}
+}
+```
+
+`set` replaces a key; `increment` adds numerically (missing keys start at
+zero); `append` pushes onto an array (missing arrays start empty). Invalid JSON
+or no operation maps is `400`. A missing/foreign run is `404`; an unavailable
+run store is `503`; an update failure is `500`.
+
+**Response:** `200 OK` — `{ "metadata": { ...merged metadata... } }`.
+
+#### `POST /workspaces/{workspaceId}/pipeline-runs/{runId}/signal`
+
+**Auth:** `member` plus `update` (MANAGER+). The body is
+`{ "event_type": "approval", "payload": "..." }`; `event_type` is required.
+Invalid JSON, a missing `event_type`, or a missing `runId` is `400`. A missing
+run store or signal registry is `503`; a missing/foreign run is `404`. If the
+run is not waiting for that event, the response is `404`. Durable delivery
+records the signal before best-effort in-memory delivery and resumes a parked
+run.
+
+**Response:** `200 OK` — `{ "ok": true, "delivered": true }`. A durable
+delivery write failure is `500`.
+
+#### `GET /workspaces/{workspaceId}/pipeline-runs/{runId}/tree`
+
+**Auth:** `member`. `runId` is required (`400`); a missing/foreign run is
+`404`; an unavailable run store is `503`; tree loading failure is `500`.
+
+**Response:** `200 OK` — `{ "nodes": [...] }`, where each node contains
+`id`, optional `parent_id`, `pipeline_slug`, `status`, `triggered_via`, and
+`cost_usd`. Nodes are a flat parent-linked run plus descendant list, including
+`call_pipeline`, deferred, and replay descendants.
+
+### Pipeline budgets
+
+#### `GET /workspaces/{workspaceId}/pipelines/{slug}/budget`
+
+**Auth:** `member`. A missing/soft-deleted pipeline is `404`; an unavailable
+run-history store is `503`; pipeline lookup or monthly-spend calculation
+failure is `500`.
+
+**Response:** `200 OK` —
+`{ "slug", "has_budget", "monthly_budget_usd", "month": "YYYY-MM", "spent_usd", "pct_used"?, "over_budget"? }`.
+`pct_used` and `over_budget` are omitted when no positive budget is set.
+Spend is for the current calendar month.
+
+#### `PATCH /workspaces/{workspaceId}/pipelines/{slug}/budget`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). Body:
+`{ "monthly_budget_usd": 25 }`. `0` clears the cap; negative values are
+`400`. Invalid JSON/body read failures are `400`. A missing pipeline is `404`,
+an unavailable run-history store is `503`, and persistence or spend
+calculation failures are `500`.
+
+**Response:** `200 OK` with the same budget object as `GET`.
+
+#### `GET /workspaces/{workspaceId}/pipelines/budget-summary`
+
+**Auth:** `member`. The response is `200 OK` with
+`{ "month": "YYYY-MM", "routines": [...], "total_budget_usd", "total_spent_usd" }`.
+Each routine row has `slug`, `monthly_budget_usd`, `spent_usd`, and optional
+`pct_used`/`over_budget`. Routines with neither a positive budget nor current
+month spend are omitted. An unavailable run-history store or list/spend
+calculation failure is `503`/`500`, respectively.
+
+### Deferred and replay operations
+
+#### `GET /workspaces/{workspaceId}/pipelines/pending`
+
+**Auth:** `member`. `200 OK` returns an array (never `null`) of at most 100
+pending deferred triggers. Each item contains `id`, `pipeline_slug`, optional
+`debounce_key`, `priority`, and RFC3339Nano `fire_at`. An unavailable database
+is `503`; listing failure is `500`.
+
+#### `POST /workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel`
+
+**Auth:** `member` plus `update` (MANAGER+). `pendingId` is required (`400`).
+An unavailable database is `503`; a missing, already-fired, expired, or
+already-cancelled item is `404`; cancellation failure is `500`.
+
+**Response:** `200 OK` — `{ "ok": true, "cancelled": "<pendingId>" }`.
+
+#### `POST /workspaces/{workspaceId}/pipelines/runs/{runId}/replay`
+
+**Auth:** `member` plus `create` (MANAGER+). Body is optional; when present it
+is `{ "pinned_version": 3 }`. The replay uses the source run's original
+inputs, metadata, and tags, marks the new run as a replay, and uses HEAD unless
+`pinned_version` is supplied. Invalid JSON or a missing `runId` is `400`.
+
+**Response:** `200 OK` with the newly-created run result. A missing/foreign
+source run is `404`; a deleted source pipeline is `404`; an unavailable run
+store is `503`; an execution concurrency limit is `429`; a pinned version that
+does not exist is `409`; other lookup/execution failures are `500`.
+
+#### `POST /workspaces/{workspaceId}/pipelines/runs/bulk_replay`
+
+**Auth:** `member` plus `create` (MANAGER+). Body must select runs by
+`run_ids` or `fingerprint`; optional `limit` defaults to `50` and is clamped
+to `50` when absent, non-positive, or greater than `100`:
+
+```json
+{ "run_ids": ["run_1", "run_2"], "fingerprint": "fp_...", "limit": 25 }
+```
+
+When both selectors are supplied, IDs are retained and fingerprint IDs are
+appended. No selected IDs is `400`; invalid JSON is `400`; an unavailable run
+store or failure loading fingerprint groups is `503`/`500`. Individual replay
+failures are reported per item rather than failing the whole request.
+
+**Response:** `200 OK` —
+`{ "requested": N, "replayed": N, "results": [{ "source_run_id", "new_run_id"?, "status"?, "error"? }] }`.
+
+### Version diff
+
+#### `GET /workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M`
+
+**Auth:** `member`. Both positive integer query parameters are required
+(`400`). A missing pipeline, `from` version, or `to` version is `404`;
+pipeline/version lookup failures or diff generation failure are `500`.
+
+**Response:** `200 OK` —
+`{ "slug", "from_version", "to_version", "from_hash", "to_hash", "identical", "unified_diff" }`.
+Definitions are pretty-printed before diffing. `unified_diff` is empty when
+the hashes are identical.
+
+### Step overrides
+
+#### `GET /workspaces/{workspaceId}/pipelines/{slug}/overrides`
+
+**Auth:** `member`. A missing pipeline is `404`; pipeline or override lookup
+failure is `500`.
+
+**Response:** `200 OK` — `{ "overrides": [...] }`, with each row containing
+`step_id` and optional `prompt` and `model_override`.
+
+#### `PUT /workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override`
+
+**Auth:** `member` plus `update` (MANAGER+). `stepId` is required (`400`).
+Body is `{ "prompt": "...", "model_override": "..." }`; at least one of the
+two non-empty fields is required (`400`). Invalid JSON is `400`. A missing
+pipeline or step in the current definition is `404`; an invalid stored
+definition is `500`; save failure is `500`.
+
+**Response:** `200 OK` — `{ "ok": true, "step_id": "<stepId>" }`.
+
+#### `DELETE /workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override`
+
+**Auth:** `member` plus `update` (MANAGER+). The response is `200 OK` with
+`{ "ok": true, "step_id": "<stepId>" }`. A missing pipeline is `404`; delete
+failure is `500`. The endpoint is idempotent for an absent override.
+
+### Pipeline state
+
+#### `GET /workspaces/{workspaceId}/pipelines/{slug}/state?schedule_id=S`
+
+**Auth:** `member`. Without `schedule_id`, all schedule buckets are returned;
+with it, only that bucket is returned. An empty value selects the shared
+manual/webhook bucket. `200 OK` returns
+`{ "slug": "...", "buckets": [{ "schedule_id", "entries": [{ "key", "value", "updated_at" }] }] }`.
+A missing pipeline is `404`; an unavailable state store is `503`; lookup
+failure is `500`.
+
+#### `PUT /workspaces/{workspaceId}/pipelines/{slug}/state/{key}`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). Body is
+`{ "value": "...", "schedule_id": "..." }`; omitted `schedule_id` means the
+manual/webhook bucket. Empty keys or keys longer than 128 characters are
+`400`; invalid JSON is `400`. A missing pipeline is `404`; an unavailable
+state store is `503`; write failure is `500`.
+
+**Response:** `200 OK` —
+`{ "slug", "schedule_id", "key", "value" }`.
+
+#### `DELETE /workspaces/{workspaceId}/pipelines/{slug}/state/{key}?schedule_id=S`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). Empty `key` is `400`. The
+response is `200 OK` — `{ "slug", "schedule_id", "key", "deleted": true }`.
+An absent key in the selected bucket is `404`; a missing pipeline is `404`;
+an unavailable state store is `503`; delete failure is `500`.
+
+#### `DELETE /workspaces/{workspaceId}/pipelines/{slug}/state?schedule_id=S`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). The operation clears only the
+selected bucket (empty `schedule_id` selects manual/webhook state). `200 OK`
+returns `{ "slug", "schedule_id", "removed": N }`. A missing pipeline is
+`404`; an unavailable state store is `503`; clear failure is `500`.
+
+### Single-step execution
+
+#### `POST /workspaces/{workspaceId}/pipelines/{slug}/step_run`
+
+**Auth:** `member` plus `create` (MANAGER+). This executes one `agent_run`,
+`http`, `script`, or `transform` step against a fixture; it does not traverse
+the DAG or create a pipeline run record. The JSON body is:
+
+```json
+{
+  "step_id": "extract",
+  "inputs": {"document": "..."},
+  "step_outputs": {"download": "fixture output"},
+  "tier_override": "fast"
+}
+```
+
+`step_id` is required (`400`); invalid JSON is `400`; a missing pipeline or
+step is `404`; a non-supported step type is `400`; a non-active pipeline is
+`409`; an unwired runner is `503`; model resolution failure is `500`; step
+execution failure is `502`.
+
+**Response:** `200 OK` with `step_id`, `step_type`, `output`, `valid`, optional
+`validation_reason`, `cost_usd`, `tokens_in`, `tokens_out`, `duration_ms`,
+`simulated: true`, and optional `warnings`. Agent steps additionally include
+`adapter`, `model`, and `rendered_prompt`. Unseeded upstream output references
+are reported in `warnings`.
+
+### Pipeline tags
+
+#### `PUT /workspaces/{workspaceId}/pipelines/{slug}/tags`
+
+**Auth:** `member` plus `create` at the route and `update` in the handler
+(MANAGER+). Body is `{ "tags": ["tag-a", "tag-b"] }`; an empty list or
+invalid JSON is `400`. A missing pipeline is `404`; exceeding the tag-store
+limit is `400`; other lookup/store failures are `500`.
+
+**Response:** `200 OK` — `{ "tags": ["..."] }` with the routine's complete
+tag set after the add.
+
+#### `DELETE /workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}`
+
+**Auth:** `member` plus `create` at the route (MANAGER+). `200 OK` returns
+`{ "ok": true }`. A missing pipeline is `404`; tag removal failure is `500`.
+Removing an absent tag is otherwise successful.
