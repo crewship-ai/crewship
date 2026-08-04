@@ -126,13 +126,3 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 	}
 	return map[string]map[string]DomainSchema{"credentials": credentialRoutes, "connectors-integrations": integrationRoutes, "auth-profile": authProfileRoutes}, components
 }
-
-func credentialsConnectorsAuthProfileSchemaCatalogRoutes() map[string]map[string]DomainSchema {
-	routes, _ := credentialsConnectorsAuthProfileSchemaCatalog()
-	return routes
-}
-
-func credentialsConnectorsAuthProfileSchemaCatalogComponents() map[string]any {
-	_, components := credentialsConnectorsAuthProfileSchemaCatalog()
-	return components
-}
