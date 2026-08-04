@@ -8,9 +8,9 @@ import {
   catalogBuckets,
   upcomingSchedules,
   recentRuns,
-  spendByDay,
   pendingApprovals,
   runOutcomesByDay,
+  recentFailures,
 } from "@/lib/routines-overview"
 
 // The overview replaces a 38-row table in which 37 rows said "never
@@ -241,30 +241,6 @@ describe("recentRuns", () => {
   })
 })
 
-describe("spendByDay", () => {
-  it("returns one bucket per day in the window, oldest first", () => {
-    const series = spendByDay([], NOW, 7)
-    expect(series).toHaveLength(7)
-    expect(series[series.length - 1].isToday).toBe(true)
-  })
-
-  it("sums cost into the day the run started", () => {
-    const runs = [
-      run({ started_at: at(4, 9), cost_usd: 0.002 }),
-      run({ started_at: at(4, 10), cost_usd: 0.001 }),
-      run({ started_at: at(3, 10), cost_usd: 0.5 }),
-    ]
-    const series = spendByDay(runs, NOW, 7)
-    expect(series[series.length - 1].usd).toBeCloseTo(0.003, 6)
-    expect(series[series.length - 2].usd).toBeCloseTo(0.5, 6)
-  })
-
-  it("ignores a negative or non-finite cost rather than subtracting it", () => {
-    const runs = [run({ cost_usd: -5 }), run({ cost_usd: Number.NaN })]
-    expect(spendByDay(runs, NOW, 7).every((d) => d.usd === 0)).toBe(true)
-  })
-})
-
 // "Waiting on you" is one queue with two sources: a run parked on a
 // `wait: approval` gate, and a routine whose definition needs a
 // reviewer. From the operator's side they are the same job — something
@@ -410,8 +386,52 @@ describe("runOutcomesByDay", () => {
     expect(runOutcomesByDay(runs, NOW, 7).every((d) => d.passed + d.failed + d.pending + d.other === 0)).toBe(true)
   })
 
-  it("carries the day's spend so one chart can show both", () => {
-    const runs = [run({ started_at: at(4, 9), cost_usd: 0.25 })]
-    expect(runOutcomesByDay(runs, NOW, 7)[6].usd).toBeCloseTo(0.25, 6)
+})
+
+// "Recently failing" listed routine names off last_invocation_status.
+// A name tells a reader WHICH routine broke and nothing about what
+// broke — so the next click was always the same: open it, find the
+// run, find the step. The run carries the step and the message; the
+// card just was not reading them.
+
+describe("recentFailures", () => {
+  it("names the step that failed, not just the routine", () => {
+    const runs = [
+      run({ id: "f1", status: "failed", failed_at_step: "fetch_invoice", error_message: "502 from vendor" }),
+    ]
+    expect(recentFailures(runs, 5)).toEqual([
+      expect.objectContaining({ runId: "f1", stepId: "fetch_invoice", message: "502 from vendor" }),
+    ])
+  })
+
+  it("takes the freshest failures and caps the list", () => {
+    const runs = [
+      run({ id: "old", status: "failed", started_at: at(2, 9) }),
+      run({ id: "new", status: "failed", started_at: at(4, 9) }),
+      run({ id: "mid", status: "failed", started_at: at(3, 9) }),
+    ]
+    expect(recentFailures(runs, 2).map((f) => f.runId)).toEqual(["new", "mid"])
+  })
+
+  it("lists each failed RUN, so one routine breaking twice shows twice", () => {
+    // Keyed on the routine it would collapse to one row and hide that
+    // it is failing repeatedly — which is the signal, not noise.
+    const runs = [
+      run({ id: "a", status: "failed", started_at: at(4, 9) }),
+      run({ id: "b", status: "failed", started_at: at(4, 10) }),
+    ]
+    expect(recentFailures(runs, 5)).toHaveLength(2)
+  })
+
+  it("leaves out runs that did not fail", () => {
+    const runs = [run({ id: "ok" }), run({ id: "cancelled", status: "cancelled" })]
+    expect(recentFailures(runs, 5)).toEqual([])
+  })
+
+  it("falls back to the run id when there is no step to name", () => {
+    // A run that failed before any step started has no failed_at_step.
+    // "—" beats an empty column that reads as missing data.
+    const runs = [run({ id: "r", status: "failed", failed_at_step: "" })]
+    expect(recentFailures(runs, 5)[0].stepId).toBe("")
   })
 })

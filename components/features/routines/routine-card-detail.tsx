@@ -405,7 +405,6 @@ export function RoutineCardDetail({
               at={routine.last_invoked_at}
               runId={lastRun?.id}
               durationMs={lastRun?.duration_ms}
-              costUsd={lastRun?.cost_usd}
               slug={routine.slug}
             />
           </Appear>
@@ -597,14 +596,12 @@ function LastRunCard({
   at,
   runId,
   durationMs,
-  costUsd,
   slug,
 }: {
   status?: string
   at?: string
   runId?: string
   durationMs?: number
-  costUsd?: number
   slug: string
 }) {
   const tone = toneOf(status)
@@ -657,7 +654,6 @@ function LastRunCard({
             label="duration"
             value={durationMs && durationMs > 0 ? formatDurationDecimal(durationMs) : "—"}
           />
-          <Fact label="cost" value={costUsd ? `$${costUsd.toFixed(4)}` : "—"} />
         </dl>
         <Link
           href={activityHref(slug, runId)}

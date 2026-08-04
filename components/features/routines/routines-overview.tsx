@@ -36,7 +36,7 @@ import {
   XCircle,
 } from "lucide-react"
 
-import { Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { cn } from "@/lib/utils"
 import {
@@ -53,7 +53,6 @@ import { StatusDonut } from "@/components/features/dashboard/status-donut"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { describeCron } from "@/lib/cron-describe"
-import { formatUsd } from "@/lib/routines-insights"
 import { formatDurationDecimal, relTime } from "@/lib/time"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "sonner"
@@ -71,6 +70,7 @@ import {
   recentRuns,
   runsToday,
   runOutcomesByDay,
+  recentFailures,
   successRate,
   upcomingSchedules,
   pendingApprovals,
@@ -143,22 +143,11 @@ export function RoutinesOverview({
     [waitpoints, routines, slugByRunId],
   )
   const outcomes = React.useMemo(() => runOutcomesByDay(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
-  const spendTotal = React.useMemo(() => outcomes.reduce((s, d) => s + d.usd, 0), [outcomes])
   const weekTotal = React.useMemo(
     () => outcomes.reduce((s, d) => s + d.passed + d.failed + d.pending + d.other, 0),
     [outcomes],
   )
-  const failing = React.useMemo(
-    () =>
-      routines
-        .filter((r) => {
-          const s = r.last_invocation_status?.toLowerCase()
-          return s === "failed" || s === "error"
-        })
-        .sort((a, b) => Date.parse(b.last_invoked_at ?? "") - Date.parse(a.last_invoked_at ?? ""))
-        .slice(0, FAILING_LIMIT),
-    [routines],
-  )
+  const failures = React.useMemo(() => recentFailures(runs, FAILING_LIMIT), [runs])
 
   const nextRoutine = next?.target_pipeline_slug
     ? routineBySlug.get(next.target_pipeline_slug)
@@ -340,7 +329,7 @@ export function RoutinesOverview({
                     <Link
                       key={run.id}
                       href={`/activity?run=${encodeURIComponent(run.id)}`}
-                      className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto_auto]"
+                      className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
                     >
                       <span className="relative shrink-0">
                         {r ? (
@@ -373,9 +362,6 @@ export function RoutinesOverview({
                       </span>
                       <span className="hidden w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
                         {live ? "—" : formatDurationDecimal(run.duration_ms ?? 0)}
-                      </span>
-                      <span className="hidden w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
-                        {formatUsd(run.cost_usd ?? 0)}
                       </span>
                       <span className="shrink-0 text-right text-[10px] text-muted-foreground-soft">
                         {relTime(run.started_at)}
@@ -445,21 +431,19 @@ export function RoutinesOverview({
             <DashboardCard
               title={`Runs · ${SUCCESS_WINDOW_DAYS} days`}
               icon={Activity}
-              hint={`${weekTotal} ${weekTotal === 1 ? "run" : "runs"} · ${formatUsd(spendTotal)}`}
+              hint={`${weekTotal} ${weekTotal === 1 ? "run" : "runs"}`}
               className="lg:col-span-2"
             >
-              {/* One chart, not two cards about money. Spend and
-                  Budgets answered the same question twice, and neither
-                  answered the one an operator opens this page with:
-                  did it work. Bars by verdict do — green passed, red
-                  failed, amber not yet judged — and cost rides along
-                  as a line, on its own axis, because dollars and run
-                  counts are not the same quantity and stacking them
-                  would invent a number that means nothing.
-
-                  Budgets moved to the routine that owns the cap. A
-                  workspace-wide roll-up of money was the third card
-                  about money on one row. */}
+              {/* What ran, by verdict. No money on it.
+                  
+                  Crewship bills by subscription and is driven from the
+                  CLI, so a per-run dollar figure is an internal
+                  estimate dressed as an invoice — four decimal places
+                  about a number nobody is charged. The estimate still
+                  belongs on the routine, where "roughly what will this
+                  cost me to run" is a real question an author has;
+                  summing it into a workspace ledger answered one
+                  nobody asked. */}
               {weekTotal === 0 ? (
                 <Empty icon={Activity}>Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.</Empty>
               ) : (
@@ -470,33 +454,50 @@ export function RoutinesOverview({
             <DashboardCard
               title="Recently failing"
               icon={AlertTriangle}
-              hint={failing.length > 0 ? `${failing.length}` : "all clean"}
+              hint={failures.length > 0 ? `last ${failures.length}` : "all clean"}
             >
-              {failing.length === 0 ? (
+              {/* Runs and the step that broke, not routine names.
+                  A name says WHICH routine failed and nothing about
+                  what failed, so the next click was always the same:
+                  open it, find the run, find the step. One routine
+                  failing three times is three rows — that repetition
+                  is the signal, and collapsing it would hide the thing
+                  worth acting on. */}
+              {failures.length === 0 ? (
                 <Empty icon={CheckCircle2}>Nothing has failed. Nice.</Empty>
               ) : (
                 <div className="flex flex-col">
-                  {failing.map((r) => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => onSelect(r.slug)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                  {failures.map((f) => (
+                    <Link
+                      key={f.runId}
+                      href={`/activity?run=${encodeURIComponent(f.runId)}`}
+                      className="group flex items-start gap-2.5 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03]"
                     >
-                      <CrewIcon
-                        icon={resolveRoutineIcon(r)}
-                        color={resolveRoutineColor(r)}
-                        size="sm"
-                        className="!h-5 !w-5 !rounded-md shrink-0"
+                      <span
+                        aria-hidden
+                        className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-destructive"
                       />
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/85">
-                        {r.name || r.slug}
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="truncate text-[12px] text-foreground/90">
+                            {f.routineName || routineBySlug.get(f.routineSlug)?.name || f.routineSlug}
+                          </span>
+                          {f.stepId && (
+                            <span className="shrink-0 font-mono text-[10px] text-destructive">
+                              {f.stepId}
+                            </span>
+                          )}
+                        </span>
+                        {f.message && (
+                          <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+                            {f.message}
+                          </span>
+                        )}
                       </span>
-                      <span className="shrink-0 text-[10px] text-destructive">failed</span>
                       <span className="shrink-0 text-[10px] text-muted-foreground-soft">
-                        {relTime(r.last_invoked_at)}
+                        {relTime(f.startedAt)}
                       </span>
-                    </button>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -646,12 +647,12 @@ function WaitpointRow({
 }
 
 /**
- * The week: what happened, and what it cost.
+ * The week: what happened.
  *
- * Stacked bars by verdict, cost as a line on its own axis. Two
- * quantities in one frame is a judgement call — the alternative was
- * two cards, which is what this replaced, and the story ("we ran 12,
- * two failed, it cost twenty cents") is one story.
+ * Stacked bars by verdict. There was a cost line on a second axis and
+ * it went with the rest of the money: Crewship bills by subscription
+ * and runs from the CLI, so a per-run dollar figure is an internal
+ * estimate dressed as an invoice.
  *
  * The bars are drawn passed → failed → pending → other so the green
  * base is stable and a red segment always sits at the same place in
@@ -676,13 +677,12 @@ function OutcomeChart({ data }: { data: OutcomeDay[] }) {
       failed: { label: "Failed", color: "rgb(248, 113, 113)" },
       pending: { label: "Waiting", color: "rgb(251, 191, 36)" },
       other: { label: "Cancelled", color: "rgb(148, 163, 184)" },
-      usd: { label: "Spend", color: "var(--primary)" },
     }),
     [],
   )
   return (
     <ChartContainer config={config} className="aspect-auto h-[190px] w-full">
-      <ComposedChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeOpacity={0.08} />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} className="text-[10px]" />
         <YAxis
@@ -693,39 +693,15 @@ function OutcomeChart({ data }: { data: OutcomeDay[] }) {
           width={28}
           className="text-[10px]"
         />
-        <YAxis
-          yAxisId="cost"
-          orientation="right"
-          tickLine={false}
-          axisLine={false}
-          width={54}
-          tickFormatter={(v: number) => formatUsd(v)}
-          className="text-[10px]"
-        />
         <ChartTooltip
           cursor={false}
-          content={
-            <ChartTooltipContent
-              formatter={(value, name) =>
-                name === "usd" ? formatUsd(Number(value)) : String(value)
-              }
-            />
-          }
+          content={<ChartTooltipContent />}
         />
         <Bar yAxisId="runs" dataKey="passed" stackId="runs" fill="var(--color-passed)" radius={[0, 0, 0, 0]} />
         <Bar yAxisId="runs" dataKey="failed" stackId="runs" fill="var(--color-failed)" radius={[0, 0, 0, 0]} />
         <Bar yAxisId="runs" dataKey="pending" stackId="runs" fill="var(--color-pending)" radius={[0, 0, 0, 0]} />
         <Bar yAxisId="runs" dataKey="other" stackId="runs" fill="var(--color-other)" radius={[3, 3, 0, 0]} />
-        <Line
-          yAxisId="cost"
-          type="monotone"
-          dataKey="usd"
-          stroke="var(--color-usd)"
-          strokeWidth={1.5}
-          dot={false}
-          strokeDasharray="3 3"
-        />
-      </ComposedChart>
+      </BarChart>
     </ChartContainer>
   )
 }

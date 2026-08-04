@@ -41,8 +41,10 @@ The overview answers, in the order you ask on arrival — did anything run today
 There is no **Refresh** button, because a dashboard with one is a dashboard admitting it is not live. Run events already pushed themselves; the catalog now broadcasts [`pipeline.saved`](/api-reference/websocket) on every save, approval, rejection, disable and delete, and the schedule list listens to run events too — `next_run_at` moves the moment a schedule fires.
 
 On a phone the routine sidebar opens **over** the overview rather than beside it: 280px of a 390px screen is not a column, it is a replacement. Picking a routine closes it.
-| **Runs · 7 days** | The week by verdict — green passed, red failed, amber not yet judged, grey cancelled — with the day's spend as a line on its own axis. The bars sum to the runs that day: a cancelled run is stacked rather than dropped, because a bar shorter than its own day is a chart lying by omission. |
-| **Recently failing** | What broke most recently, freshest first. |
+| **Runs · 7 days** | The week by verdict — green passed, red failed, amber not yet judged, grey cancelled. The bars sum to the runs that day: a cancelled run is stacked rather than dropped, because a bar shorter than its own day is a chart lying by omission. |
+| **Recently failing** | The last failed **runs**, each naming the step it died on and the error. One routine failing three times is three rows — that repetition is the signal. Each opens the run in [Activity](/guides/activity). |
+
+**No money on this page.** Crewship bills by subscription and is driven from the CLI, so a per-run dollar figure is an internal estimate dressed as an invoice — four decimal places about a number nobody is charged. The **author's** estimate (`estimated_cost_usd`) stays on the routine, where "roughly what will this cost me to run" is a real question; summing it into a workspace ledger answered one nobody asked.
 
 This replaced a **List / Schedules / Insights** tab bar. List rendered a table of every routine beside a sidebar that was already the catalog — the same list twice, and the copy in the main pane was the one you could not search. Schedules was a read-only table; every action on a schedule (create, pause, delete) lives on the routine's own **Triggers** card, so the tab held no capability. Insights was four derived numbers and a "top routines by usage" leaderboard. What was load-bearing in those two — what fires next, what runs cost, which routines are over budget, what is failing — is a card on the overview now.
 
@@ -59,7 +61,7 @@ Opening a routine gives you one scrolling surface of cards, not a tab bar:
 | **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
 | **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
 
-A routine's **monthly budget** is on its own card here, next to what it costs. It used to be a workspace-wide roll-up on the overview, which put a third card about money on one row — and before that a tab nobody opened.
+A routine's **monthly budget** is on its own card here. It used to be a workspace-wide roll-up on the overview, which put a third card about money on one row — and before that a tab nobody opened. It is kept as a per-routine guardrail; it is not a bill, and nothing on the overview sums it.
 
 A routine also carries an **icon and colour**, picked from the header and stored in columns of their own — so recolouring never touches the definition, never mints a version, and never invalidates a save token. Unset routines derive a stable icon from their slug, so a list of thirty is legible before anyone chooses anything. CLI: [`crewship routine appearance`](/cli/routine#crewship-routine-appearance).
 

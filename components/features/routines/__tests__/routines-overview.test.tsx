@@ -280,13 +280,31 @@ describe("<RoutinesOverview>", () => {
   // the week was empty — the stacking and the axes are the chart
   // library's job, the arithmetic is pinned in lib/routines-overview.
 
-  it("heads the week with its run count and its spend", () => {
+  it("heads the week with its run count and no money", () => {
+    // Crewship bills by subscription and runs from the CLI, so a
+    // per-run dollar figure is an internal estimate dressed as an
+    // invoice. It went from every card on this page.
     h.runs = [
       run({ id: "a", started_at: at(4, 9), cost_usd: 0.02 }),
       run({ id: "b", started_at: at(3, 9), status: "failed", cost_usd: 0.01 }),
     ]
     render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 2 })]} />)
-    expect(screen.getByText(/2 runs · \$0\.0300/)).toBeInTheDocument()
+    expect(screen.getByText("2 runs")).toBeInTheDocument()
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument()
+  })
+
+  it("names the step a failed run died on", () => {
+    h.runs = [
+      run({
+        id: "f1",
+        status: "failed",
+        failed_at_step: "fetch_invoice",
+        error_message: "502 from vendor",
+      }),
+    ]
+    render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />)
+    expect(screen.getByText("fetch_invoice")).toBeInTheDocument()
+    expect(screen.getByText("502 from vendor")).toBeInTheDocument()
   })
 
   it("says the week was empty rather than drawing an empty frame", () => {

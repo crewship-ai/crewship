@@ -27,6 +27,8 @@ export interface OverviewRun {
   duration_ms?: number | null
   triggered_via?: string
   current_step_id?: string
+  failed_at_step?: string
+  error_message?: string
 }
 
 export interface OverviewRoutine {
@@ -258,41 +260,26 @@ export function recentRuns(runs: OverviewRun[], limit: number): OverviewRun[] {
   return [...live, ...done].slice(0, limit)
 }
 
-export interface SpendDay {
+export interface Day {
   /** Short weekday label for the axis. */
   label: string
-  usd: number
   isToday: boolean
 }
 
 /**
- * Daily spend across the window, oldest first.
+ * One bucket per day in the window, oldest first.
  *
- * Always returns one bucket per day, including empty ones: a chart
- * that omits quiet days compresses the gap and implies activity that
- * did not happen. Negative and non-finite costs are dropped rather
- * than summed — one malformed row must not be able to make the total
- * go backwards.
+ * Always every day, including quiet ones: a chart that omits empty
+ * days compresses the gap and implies activity that did not happen.
  */
-export function spendByDay(runs: OverviewRun[], now: Date, days: number): SpendDay[] {
-  const out: SpendDay[] = []
+export function dayBuckets(now: Date, days: number): Day[] {
+  const out: Day[] = []
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)
     out.push({
       label: d.toLocaleDateString(undefined, { weekday: "short" }),
-      usd: 0,
       isToday: i === 0,
     })
-  }
-  for (const r of runs) {
-    const started = parsed(r.started_at)
-    if (!started) continue
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const diff = Math.floor((dayStart.getTime() - new Date(started.getFullYear(), started.getMonth(), started.getDate()).getTime()) / 86_400_000)
-    if (diff < 0 || diff >= days) continue
-    const c = r.cost_usd
-    if (typeof c !== "number" || !Number.isFinite(c) || c <= 0) continue
-    out[days - 1 - diff].usd += c
   }
   return out
 }
@@ -379,7 +366,7 @@ function expiryRank(iso: string | undefined): number {
   return d ? d.getTime() : Number.POSITIVE_INFINITY
 }
 
-export interface OutcomeDay extends SpendDay {
+export interface OutcomeDay extends Day {
   passed: number
   failed: number
   /** Started but not yet judged: running, queued, waiting, paused. */
@@ -389,12 +376,14 @@ export interface OutcomeDay extends SpendDay {
 }
 
 /**
- * The week by outcome, with the day's spend alongside.
+ * The week by outcome.
  *
- * Two cards about money — Spend and Budgets — answered the same
- * question twice and neither answered the one an operator opens this
- * page with: did it work. Bars by verdict do, and cost rides along as
- * a line, so the week reads as one story instead of two.
+ * No money. Crewship bills by subscription and is driven from the
+ * CLI, so a per-run dollar figure is an internal estimate dressed as
+ * an invoice — precise to four decimal places about a number nobody
+ * is charged. The arithmetic exists on the routine, where an author
+ * asking "roughly what will this cost me to run" has a real question;
+ * summing it into a workspace ledger answers one nobody asked.
  *
  * Every run lands in exactly one bucket, including the ones that are
  * neither a pass nor a failure: a cancelled run dropped on the floor
@@ -403,7 +392,7 @@ export interface OutcomeDay extends SpendDay {
  * it exists so the bars can be trusted to sum.
  */
 export function runOutcomesByDay(runs: OverviewRun[], now: Date, days: number): OutcomeDay[] {
-  const out: OutcomeDay[] = spendByDay(runs, now, days).map((d) => ({
+  const out: OutcomeDay[] = dayBuckets(now, days).map((d) => ({
     ...d,
     passed: 0,
     failed: 0,
@@ -425,4 +414,42 @@ export function runOutcomesByDay(runs: OverviewRun[], now: Date, days: number): 
     else bucket.other++
   }
   return out
+}
+
+export interface RecentFailure {
+  runId: string
+  routineSlug: string
+  routineName?: string
+  /** The step that failed, or "" when the run died before one started. */
+  stepId: string
+  message: string
+  startedAt: string
+}
+
+/**
+ * The last failures, freshest first.
+ *
+ * The card this feeds used to list routine NAMES read off
+ * `last_invocation_status`. A name says which routine broke and
+ * nothing about what broke, so the next click was always the same:
+ * open the routine, find the run, find the step. The run carries the
+ * step and the error; the card simply was not reading them.
+ *
+ * Keyed on the RUN, not the routine: one routine failing three times
+ * is three rows, because that repetition is the signal. Collapsing it
+ * would hide the thing worth acting on.
+ */
+export function recentFailures(runs: OverviewRun[], limit: number): RecentFailure[] {
+  return runs
+    .filter((r) => FAILED.has((r.status ?? "").toLowerCase()))
+    .sort((a, b) => (parsed(b.started_at)?.getTime() ?? 0) - (parsed(a.started_at)?.getTime() ?? 0))
+    .slice(0, limit)
+    .map((r) => ({
+      runId: r.id,
+      routineSlug: r.pipeline_slug,
+      routineName: r.pipeline_name,
+      stepId: r.failed_at_step ?? "",
+      message: r.error_message ?? "",
+      startedAt: r.started_at,
+    }))
 }
