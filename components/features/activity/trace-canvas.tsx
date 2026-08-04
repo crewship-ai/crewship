@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ReactFlow,
   Background,
@@ -31,6 +31,7 @@ import {
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
 import { TraceRoutedEdge } from "./trace-routed-edge"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
+import { minZoomForGraph } from "@/lib/trace/zoom-floor"
 
 // TraceCanvas — ReactFlow surface for the /activity trace view.
 //
@@ -111,6 +112,24 @@ const PAN_SLACK = 600
  * screen entirely. Returns undefined for an empty graph so React Flow
  * keeps its default rather than being handed an inverted box.
  */
+function graphBounds(nodes: Node[]): { minX: number; minY: number; maxX: number; maxY: number } | undefined {
+  if (nodes.length === 0) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of nodes) {
+    const w = n.measured?.width ?? n.width ?? NODE_W_FALLBACK
+    const h = n.measured?.height ?? n.height ?? NODE_H_FALLBACK
+    minX = Math.min(minX, n.position.x)
+    minY = Math.min(minY, n.position.y)
+    maxX = Math.max(maxX, n.position.x + w)
+    maxY = Math.max(maxY, n.position.y + h)
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return undefined
+  return { minX, minY, maxX, maxY }
+}
+
 function panExtent(nodes: Node[]): [[number, number], [number, number]] | undefined {
   if (nodes.length === 0) return undefined
   let minX = Infinity
@@ -402,6 +421,10 @@ function CanvasInner({
 
     const onSize = () => {
       const width = el.clientWidth
+      const height = el.clientHeight
+      setPaneSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      )
       if (width > 0 && pendingFitRef.current) {
         pendingFitRef.current = false
         last = width
@@ -521,6 +544,18 @@ function CanvasInner({
   // React Flow re-clamp the viewport mid-drag.
   const extent = useMemo(() => panExtent(graphData.nodes), [graphData.nodes])
 
+  // The zoom floor tracks the graph rather than a constant. A fixed 0.3
+  // is sane for a fourteen-step routine and lets a four-step one be
+  // shrunk to a smudge; the rule is "you cannot zoom out past seeing
+  // all of it, plus a little". Recomputed when the graph or the pane
+  // changes, which is why the pane size is state rather than a ref.
+  const [paneSize, setPaneSize] = useState({ width: 0, height: 0 })
+  const zoomFloor = useMemo(() => {
+    const b = graphBounds(graphData.nodes)
+    if (!b) return ZOOM_FLOOR
+    return minZoomForGraph({ width: b.maxX - b.minX, height: b.maxY - b.minY }, paneSize)
+  }, [graphData.nodes, paneSize])
+
   // Empty trace — DSL has no steps and no outputs were captured.
   // Surface a friendly message rather than an empty canvas.
   if (graphData.nodes.length <= 1) {
@@ -559,7 +594,7 @@ function CanvasInner({
         }}
         fitView
         fitViewOptions={FIT_VIEW}
-        minZoom={ZOOM_FLOOR}
+        minZoom={zoomFloor}
         maxZoom={ZOOM_CEILING}
         translateExtent={extent}
         proOptions={{ hideAttribution: true }}
