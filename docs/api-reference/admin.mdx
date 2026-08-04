@@ -21,6 +21,10 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/users/\{userId\}/data](#get-api-v1-admin-users-userid-data) | GDPR Art. 15 — export every row referencing a user |
 | `DELETE` | [/api/v1/admin/users/\{userId\}/data](#delete-api-v1-admin-users-userid-data) | GDPR Art. 17 — cascade purge a user's data |
 | `GET` | [/api/v1/admin/workspaces](#get-api-v1-admin-workspaces) | Workspace details with member/agent/crew counts |
+| `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
+| `POST` | [/api/v1/admin/reap-orphan-containers](#post-api-v1-admin-reap-orphan-containers) | Detect, and optionally remove, stale-token crew containers |
+| `POST` | [/api/v1/admin/reencrypt](#post-api-v1-admin-reencrypt) | Re-encrypt stored envelopes to the current key version |
+| `GET` | [/api/v1/admin/security-posture](#get-api-v1-admin-security-posture) | Read instance security posture and warnings |
 | `GET` | [/api/v1/audit](#get-api-v1-audit) | Paginated, filterable workspace audit log |
 | `GET` | [/api/v1/admin/memory/stats](#get-api-v1-admin-memory-stats) | Memory subsystem totals + per-tier/per-agent rollups |
 | `GET` | [/api/v1/admin/memory/versions](#get-api-v1-admin-memory-versions) | Row-level drill-down into `memory_versions` |
@@ -106,6 +110,121 @@ Lists all users in the current workspace with their roles.
 | `created_at` | `string` | ISO 8601 creation timestamp |
 | `workspace` | `object?` | Workspace details (id, name, slug) |
 | `role` | `string?` | Role in this workspace (OWNER, ADMIN, MEMBER, VIEWER) |
+
+## Instance administration
+
+These routes require **ADMIN or OWNER** (`manage` permission). The mutation
+routes operate on instance or Docker state, although the caller must still
+have an authenticated workspace context.
+
+## POST /api/v1/admin/prune-legacy-resources
+
+Removes orphaned pre-C1, slug-only Docker containers and volumes across the
+instance. Live id-scoped resources are protected. The request has no body and
+the response lists the resource names removed.
+
+### Response
+
+```json
+{
+  "removed": ["crewship-tools-engineering", "crewship-home-engineering"],
+  "count": 2
+}
+```
+
+`200 OK` is returned on success. A Docker-unavailable deployment returns
+`503`; a mid-operation failure returns `500` with the partial `removed` list
+and `count`.
+
+## POST /api/v1/admin/reap-orphan-containers
+
+Scans the current workspace's running crew containers for a sidecar token
+fingerprint that definitively disagrees with the token derived from the
+current internal-token master. The default is a dry run. Add `?apply=true` to
+stop and remove each detected orphan; the next dispatch recreates it.
+
+### Response
+
+```json
+{
+  "orphans": [
+    { "crew_id": "crew-uuid", "slug": "engineering", "container_id": "container-id", "reaped": false }
+  ],
+  "count": 1,
+  "applied": false,
+  "inspected": 3,
+  "identified": 2,
+  "detector_inert": false
+}
+```
+
+`reaped` is true only when `apply=true` and stop/remove succeeded. A running
+container with no advertised fingerprint is not classified or removed;
+`inspected` counts running containers reached and `identified` counts those
+that advertised a fingerprint. `detector_inert` is true when at least one
+container was inspected but none advertised a fingerprint. The endpoint
+returns `200 OK` even when an individual reap fails; that entry remains
+`reaped: false`. Docker-unavailable deployments return `503`.
+
+## POST /api/v1/admin/reencrypt
+
+Re-encrypts every inventoried stored AES-256-GCM envelope to the current
+master-key version. The request has no body. It is instance-wide and
+idempotent: envelopes already at the current version are counted as skipped.
+Rows that cannot be decrypted are counted as failed and left untouched.
+
+### Response
+
+```json
+{
+  "key_version": "v2",
+  "reencrypted": 12,
+  "skipped": 8,
+  "failed": 0,
+  "columns": [
+    { "table": "credentials", "column": "encrypted_value", "reencrypted": 10, "skipped": 2, "failed": 0 }
+  ]
+}
+```
+
+Each `columns` entry has the same three integer counters as the top-level
+response. A valid run returns `200 OK`. Invalid current-key configuration
+fails before any row is written with `500`; an infrastructure failure during
+the walk also returns `500` with partial counts and `columns`.
+
+## GET /api/v1/admin/security-posture
+
+Returns read-only, instance-level security state. It reports configuration
+presence and derived state only; it never returns a key, secret, or client
+secret.
+
+### Response
+
+```json
+{
+  "environment": "prod",
+  "encryption_key_configured": true,
+  "plaintext_secrets_allowed": false,
+  "private_endpoints_ceiling": false,
+  "signup_open": false,
+  "oauth_configured": true,
+  "email_configured": true,
+  "rate_limit_disabled": false,
+  "rate_limit_effectively_disabled": false,
+  "warnings": [
+    { "key": "no_backup_recorded", "severity": "medium", "message": "..." }
+  ]
+}
+```
+
+`rate_limit_disabled` is configured intent; in `prod`, the limiter still runs
+and `rate_limit_effectively_disabled` is false. Warning keys are stable
+machine-readable identifiers and may include
+`plaintext_secrets_allowed`, `encryption_key_missing`, `rate_limit_disabled`,
+`rate_limit_disabled_ignored_in_prod`, `signup_open`,
+`private_endpoints_ceiling_open`, `encryption_key_generated`,
+`privileged_credentials_enabled`, `private_endpoints_in_use`,
+`seed_account_default_password`, and `no_backup_recorded`.
 
 ## GDPR
 
