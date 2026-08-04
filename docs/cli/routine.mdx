@@ -1185,6 +1185,19 @@ Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --catc
 
 Toggle without altering the cron expression.
 
+## `crewship routine schedules enable <schedule_id>`
+
+Enable a schedule. The next scheduler tick can fire it; the cron expression
+and other schedule settings are unchanged.
+
+```bash
+crewship routine schedules enable psched_abc123
+```
+
+The command takes exactly one schedule ID and has no command-specific flags.
+Human output is `Schedule <schedule-id> enabled.` With `--format json`, the
+acknowledgement contains the schedule `id` and `enabled: true`.
+
 ### `schedules now <id>`
 
 Force-fire ad-hoc (out-of-cycle invocation for testing). Honours the schedule's version pin — it executes exactly what the next cron tick would, and answers `409` if the pinned version no longer exists.
@@ -1261,9 +1274,24 @@ crewship routine webhooks create \
 
 Print the public URL without re-revealing the signing secret.
 
+## `crewship routine webhooks url <webhook_id>`
+
+Print the public URL for an existing webhook without revealing its signing
+secret. The command lists webhooks in the active workspace and matches the
+exact ID.
+
+```bash
+crewship routine webhooks url wh_abc123
+crewship routine webhooks url wh_abc123 --base-url https://crewship.example.com
+```
+
 | Flag | Type | Description |
 |------|------|-------------|
 | `--base-url` | `string` | Override the public base URL. |
+
+The default base URL comes from the configured server (or
+`CREWSHIP_SERVER`); the printed value is `<base-url>/api/v1/webhooks/<escaped-token>`.
+If the ID is not found, the command exits with `webhook <id> not found`.
 
 ### `webhooks delete <id>`
 

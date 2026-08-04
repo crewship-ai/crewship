@@ -39,6 +39,21 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace invite create <email>` | Create an invitation. |
 | `workspace invite list` | List pending invitations. |
 
+## `crewship workspace get [slug-or-id]`
+
+Show details for the specified workspace, or for the active workspace when no
+argument is supplied.
+
+```bash
+crewship workspace get
+crewship workspace get acme-platform
+```
+
+The command takes no command-specific flags. It prints `Name`, `Slug`,
+`Language`, `Allow privileged credentials`, `ID`, and `Created`; machine
+formats use the corresponding API fields `id`, `name`, `slug`, `created_at`,
+`preferred_language`, and `allow_privileged_credentials`.
+
 ## Flags
 
 ### `workspace create`
@@ -101,6 +116,24 @@ above you, and cannot demote the last `OWNER`.
 | `--role <ROLE>` | `MEMBER` | Role to grant. `MEMBER` or `ADMIN`. This records an invitation row; no email is sent. |
 
 The role flag is mirrored on the parent `invite` command so the shortcut form (`workspace invite alice@example.com --role ADMIN`) works without an explicit `create`. No mailer is wired for this command.
+
+## `crewship workspace invite create <email>`
+
+Record a workspace invitation for an email address. No email is sent; use
+`workspace member invite` when account provisioning and a setup link are
+needed.
+
+```bash
+crewship workspace invite create alice@acme.com
+crewship workspace invite create alice@acme.com --role ADMIN
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--role <ROLE>` | `MEMBER` | Role recorded on the invitation: `MEMBER` or `ADMIN`. |
+
+On success the CLI prints `Invitation recorded for <email> (<role> role).`
+followed by a warning that no email was sent.
 
 ### `workspace member invite`
 
@@ -183,6 +216,44 @@ Valid capability strings: `chat`, `routine.create`, `skill.create`, `credential.
 | `capabilities grant <user-id> <cap> [<cap>...]` | 2+ | Grant one or more capabilities incrementally (existing grants preserved). |
 | `capabilities revoke <user-id> <cap> [<cap>...]` | 2+ | Revoke one or more capabilities incrementally (other grants preserved). |
 | `capabilities preset <user-id> <chat\|power\|admin>` | exactly 2 | Replace the member's capability set with a named bundle (overwrites existing grants). |
+
+## `crewship workspace member capabilities grant <user-id> <capability> [<capability>...]`
+
+Grant one or more capabilities incrementally; existing grants are preserved.
+
+```bash
+crewship workspace member capabilities grant ludmila routine.create issue.create memory.write
+```
+
+The command requires at least one capability and has no command-specific
+flags. Valid values are `chat`, `routine.create`, `skill.create`,
+`credential.create`, `credential.rotate`, `issue.create`, and `memory.write`.
+On success it prints `<user-id> (<role>): <capabilities>`.
+
+## `crewship workspace member capabilities revoke <user-id> <capability> [<capability>...]`
+
+Revoke one or more capabilities incrementally; other grants are preserved.
+
+```bash
+crewship workspace member capabilities revoke ludmila memory.write
+```
+
+The command requires at least one capability and has no command-specific
+flags. Revoking `chat` is rejected because chat is always implied; remove the
+member instead. On success it prints `<user-id> (<role>): <capabilities>`.
+
+## `crewship workspace member capabilities preset <user-id> <chat|power|admin>`
+
+Replace the member's capability set with the named bundle, overwriting
+existing grants.
+
+```bash
+crewship workspace member capabilities preset ludmila power
+```
+
+The command takes exactly the user ID and one of `chat`, `power`, or `admin`,
+with no command-specific flags. On success it prints
+`<user-id> (<role>): <capabilities>`.
 
 Bundles map to common combinations:
 
