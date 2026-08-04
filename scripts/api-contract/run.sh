@@ -62,7 +62,7 @@ fi
 command -v schemathesis >/dev/null 2>&1 \
   || die "schemathesis is required; install requirements.txt or use uv run --with-requirements requirements.txt"
 
-phase_args=(--phases=examples)
+phase_args=(--phases=coverage)
 [[ "$PHASE" == stateful ]] && phase_args=(--phases=stateful)
 
 # The generated route catalog includes mutating operations. Keep this list

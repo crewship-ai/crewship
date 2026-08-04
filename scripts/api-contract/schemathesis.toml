@@ -13,19 +13,6 @@ deterministic = true
 [phases]
 stateful.enabled = false
 
-# Disable mutation-capable operations in every phase, including stateful.
-[[operations]]
-exclude-method = "POST"
-enabled = false
-
-[[operations]]
-exclude-method = "PUT"
-enabled = false
-
-[[operations]]
-exclude-method = "PATCH"
-enabled = false
-
-[[operations]]
-exclude-method = "DELETE"
-enabled = false
+# Mutation-capable operations are excluded explicitly by run.sh at invocation
+# time. Keeping the filters out of this config avoids Schemathesis interpreting
+# `enabled = false` as disabling the entire operation set.

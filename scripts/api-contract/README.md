@@ -45,13 +45,15 @@ the settings are explicit and do not affect any repository-wide test command.
 ## Phases
 
 ```bash
-./run.sh positive   # authenticated examples against safe, read-only methods
+./run.sh positive   # authenticated coverage checks against safe, read-only methods
 ./run.sh auth       # unauthenticated and invalid-token GET checks
 ./run.sh stateful   # Schemathesis stateful/link phase, still read-only
 ```
 
-- **Positive** runs Schemathesis' `examples` phase with the configured bearer
-  token and workspace header. It excludes POST, PUT, PATCH, and DELETE.
+- **Positive** runs Schemathesis' `coverage` phase with the configured bearer
+  token and workspace header. This generates requests even when the current
+  route catalog has no explicit examples. It excludes POST, PUT, PATCH, and
+  DELETE.
 - **Negative/auth** uses only harmless GET requests to assert that the public
   OpenAPI document is reachable without auth, protected API access rejects no
   auth and a garbage bearer token, and a supplied valid token can list
