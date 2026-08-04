@@ -1245,6 +1245,8 @@ GET /api/v1/mcp-registry
 
 **Auth:** Session or CLI token (no workspace context needed)
 
+**Request:** no body. **Response:** `{servers, total, limit, offset}`.
+
 **Query Parameters:** `limit` (default `50`, max `200`), `offset` (default `0`),
 `trust_tier` (`anthropic`, `crewship`, or `community`), and `featured`
 (`true`/`false`/`1`/`0`).
@@ -1255,6 +1257,13 @@ GET /api/v1/mcp-registry
 { "servers": [], "total": 0, "limit": 50, "offset": 0 }
 ```
 
+| Status | Condition |
+|---|---|
+| `200` | Registry page returned. |
+| `400` | Invalid `limit`, `offset`, `trust_tier`, or `featured` filter. |
+| `401` | Missing or invalid authentication. |
+| `500` | Registry database query failed. |
+
 ### Search Registry
 
 ```
@@ -1263,11 +1272,20 @@ GET /api/v1/mcp-registry/search?q={query}
 
 **Auth:** Session or CLI token
 
+**Request:** no body. **Response:** `{servers, total, limit, offset, query}`.
+
 **Query Parameters:** `q`, plus the same `limit`, `offset`, `trust_tier`, and
 `featured` filters as List. An empty `q` behaves like List.
 
 **Response:** `200 OK` — `{ "servers": [], "total": 0, "limit": 50,
 "offset": 0, "query": "github" }`.
+
+| Status | Condition |
+|---|---|
+| `200` | Search results returned; an empty `q` delegates to List. |
+| `400` | Invalid pagination or registry filter. |
+| `401` | Missing or invalid authentication. |
+| `500` | Registry database query failed. |
 
 ### Sync Registry
 
@@ -1279,6 +1297,15 @@ Triggers a manual sync of the MCP registry.
 
 **Auth:** `OWNER` or `ADMIN` role on the workspace.
 
+**Request:** no body. **Response:** JSON status envelope below.
+
 **Response:** `202 Accepted` — `{ "status": "sync_started", "message": "..." }`.
 Manual sync is limited to once per hour; a request during the cooldown returns
 `429`.
+
+| Status | Condition |
+|---|---|
+| `202` | Sync started in the background. |
+| `401` | Missing or invalid authentication. |
+| `403` | Caller lacks `manage` permission. |
+| `429` | A sync was triggered within the last hour. |

@@ -6,7 +6,10 @@ icon: "messages-square"
 
 # Conversations
 
-Endpoints for the chat surface beyond the basic message list: emoji reactions on assistant messages and file attachments uploaded for an agent. See the [Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
+Endpoints for the chat surface beyond the basic message list: conversation
+search, emoji reactions on assistant messages, and file attachments uploaded
+for an agent. See the [Chat & Sessions guide](/guides/chat-sessions) for the
+user-facing model.
 
 Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
 
@@ -22,8 +25,48 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
 | DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
 | POST | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](#upload-attachment) | Upload a chat attachment |
+| POST | [`/api/v1/conversations/search`](#search-conversations) | Search one agent's conversation history |
 
 Peer-to-peer crew messaging lives on the [internal IPC plane](#crew-messaging-sidecar-ipc), not the public API.
+
+## Conversation search
+
+### Search conversations
+
+```text
+POST /api/v1/conversations/search
+Content-Type: application/json
+```
+
+Searches one agent's indexed chat messages using BM25 relevance. The handler
+first verifies that `agent_id` belongs to the caller's workspace; the search
+backend itself is not an authorization boundary.
+
+**Auth:** authenticated session or CLI token with workspace context.
+
+### Request
+
+```json
+{"agent_id":"agent_123","query":"deploy pipeline","limit":20}
+```
+
+`agent_id` and `query` are required. `limit` is optional; the search store
+defaults or clamps it to its supported range (the CLI default is 20 and its
+maximum is 100).
+
+### Response
+
+```json
+{"count":1,"query":"deploy pipeline","hits":[{"id":"msg_abc","session_id":"sess-42","agent_id":"agent_123","role":"user","content":"deploy the staging pipeline","ts":"2026-06-01T10:00:00Z"}]}
+```
+
+| Status | Condition |
+|---|---|
+| `200` | Search completed; `hits` is an array and may be empty. |
+| `400` | Malformed JSON, missing `agent_id`/`query`, or invalid search query. |
+| `401` | Workspace context is missing. |
+| `404` | Agent is absent from the caller's workspace. |
+| `503` | Conversation search is not configured. |
 
 ---
 

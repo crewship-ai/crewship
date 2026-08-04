@@ -320,7 +320,7 @@ state or completion JSON. **Statuses:** `200` success; `400` invalid step;
 | `POST /api/v1/onboarding/complete` | Mark onboarding as complete |
 | `POST /api/v1/onboarding/setup` | Run guided setup |
 
-### Admin (OWNER only)
+### Admin (ADMIN / OWNER)
 
 **Request:** no body for these `GET` routes. **Response:** the resource JSON
 described in each row. **Statuses:** `200` success; `403` insufficient admin
@@ -332,6 +332,20 @@ role; `500` server failure.
 | `GET /api/v1/admin/users` | List members of the current workspace |
 | `GET /api/v1/admin/workspaces` | Return the current workspace with member/agent/crew counts |
 | `GET /api/v1/admin/keeper/requests` | Keeper access request log |
+| `GET /api/v1/admin/health` | Process, database, disk, encryption-key, and log-level health snapshot (ADMIN/OWNER) |
+| `GET /api/v1/admin/log-level` | Read live and baseline log levels (ADMIN/OWNER) |
+| `PUT /api/v1/admin/log-level` | Set a live log level with optional TTL (ADMIN/OWNER) |
+| `GET /api/v1/admin/legacy-resources` | Detect orphaned pre-C1 Docker resources (ADMIN/OWNER) |
+| `GET /api/v1/admin/rate-limits` | List instance-wide limiter states (ADMIN/OWNER) |
+| `PUT /api/v1/admin/rate-limits/{key}` | Override one limiter (ADMIN/OWNER) |
+| `DELETE /api/v1/admin/rate-limits/{key}` | Reset one limiter to its default (ADMIN/OWNER) |
+
+All rows above take no request body and return JSON. The health, legacy, and
+rate-limit reads return `200` on success; admin authorization failures return
+`403` (and `401` when workspace authentication is absent). The rate-limit
+mutation returns `400` for invalid values, `404` for an unknown key, and
+`503` when its configuration store is unavailable. See the [Admin API](/api-reference/admin)
+for complete response shapes.
 
 ### Audit
 

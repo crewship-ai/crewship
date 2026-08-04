@@ -22,6 +22,13 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `DELETE` | [/api/v1/admin/users/\{userId\}/data](#delete-api-v1-admin-users-userid-data) | GDPR Art. 17 — cascade purge a user's data |
 | `GET` | [/api/v1/admin/workspaces](#get-api-v1-admin-workspaces) | Workspace details with member/agent/crew counts |
 | `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
+| `GET` | [/api/v1/admin/legacy-resources](#get-api-v1-admin-legacy-resources) | Detect orphaned pre-C1 Docker resources |
+| `GET` | [/api/v1/admin/health](#get-api-v1-admin-health) | Read uptime, database, disk, and logging health |
+| `GET` | [/api/v1/admin/log-level](#get-api-v1-admin-log-level) | Read live and baseline log levels |
+| `PUT` | [/api/v1/admin/log-level](#put-api-v1-admin-log-level) | Change the live log level temporarily or persistently |
+| `GET` | [/api/v1/admin/rate-limits](#get-api-v1-admin-rate-limits) | List runtime rate-limit settings |
+| `PUT` | [/api/v1/admin/rate-limits/{key}](#put-api-v1-admin-rate-limits-key) | Override one rate limit |
+| `DELETE` | [/api/v1/admin/rate-limits/{key}](#delete-api-v1-admin-rate-limits-key) | Reset one rate limit to its default |
 | `POST` | [/api/v1/admin/reap-orphan-containers](#post-api-v1-admin-reap-orphan-containers) | Detect, and optionally remove, stale-token crew containers |
 | `POST` | [/api/v1/admin/reencrypt](#post-api-v1-admin-reencrypt) | Re-encrypt stored envelopes to the current key version |
 | `GET` | [/api/v1/admin/security-posture](#get-api-v1-admin-security-posture) | Read instance security posture and warnings |
@@ -130,6 +137,158 @@ Lists all users in the current workspace with their roles.
 These routes require **ADMIN or OWNER** (`manage` permission). The mutation
 routes operate on instance or Docker state, although the caller must still
 have an authenticated workspace context.
+
+## GET /api/v1/admin/health
+
+Returns process uptime, the current log-level state, encryption-key source,
+database liveness, and data-directory disk usage. The database and disk
+sections report their own errors while the endpoint remains a health snapshot.
+
+**Auth:** ADMIN or OWNER (`manage` permission). **Request:** no body.
+
+### Response
+
+```json
+{
+  "uptime_seconds": 86400,
+  "log_level": {"level": "info", "baseline": "info"},
+  "encryption_key_source": "external",
+  "db": {"connected": true},
+  "disk": {"path": "/var/lib/crewship", "total_bytes": 1000000, "free_bytes": 400000, "used_bytes": 600000, "used_pct": 60}
+}
+```
+
+| Status | Condition |
+|---|---|
+| `200` | Snapshot returned; individual probes may contain an `error` field. |
+| `401` | Missing authenticated workspace context. |
+| `403` | Caller lacks `manage`. |
+
+## GET /api/v1/admin/log-level
+
+Reads the live process level, configured baseline, and optional expiry of a
+temporary override.
+
+**Auth:** ADMIN or OWNER (`manage` permission). **Request:** no body.
+
+### Response
+
+```json
+{"level":"debug","baseline":"info","expires_at":"2026-08-04T12:00:00Z"}
+```
+
+`expires_at` is omitted when no timed override is active.
+
+| Status | Condition |
+|---|---|
+| `200` | Log-level state returned. |
+| `403` | Caller lacks `manage`. |
+
+## PUT /api/v1/admin/log-level
+
+Changes the live process log level. A positive TTL automatically restores the
+baseline; `ttl_seconds: 0` leaves the override active until changed, and the
+server caps TTL at 24 hours.
+
+**Auth:** ADMIN or OWNER (`manage` permission).
+
+### Request
+
+```json
+{"level":"debug","ttl_seconds":900}
+```
+
+`level` must be a supported logging level (`debug`, `info`, `warn`, or
+`error`).
+
+### Response
+
+`200 OK` returns the same `{level, baseline, expires_at}` object as the GET
+endpoint.
+
+| Status | Condition |
+|---|---|
+| `200` | Level changed. |
+| `400` | Invalid JSON or unsupported level. |
+| `403` | Caller lacks `manage`. |
+
+## GET /api/v1/admin/legacy-resources
+
+Read-only, instance-wide detection of orphaned pre-C1 slug-only Docker
+containers or volumes. It does not remove anything.
+
+**Auth:** ADMIN or OWNER (`manage` permission). **Request:** no body.
+
+### Response
+
+```json
+{"present":true}
+```
+
+| Status | Condition |
+|---|---|
+| `200` | Detection completed. |
+| `401` | Missing authenticated workspace context. |
+| `403` | Caller lacks `manage`. |
+| `500` | Crew enumeration or provider scan failed. |
+| `503` | Docker detection is unavailable. |
+
+## Rate limits
+
+Rate-limit settings are instance-wide even though the request still requires
+an authenticated workspace context. Reads and writes require ADMIN or OWNER
+(`manage` permission). Overrides apply immediately and persist until reset.
+
+## GET /api/v1/admin/rate-limits
+
+**Request:** no body. **Response:** `200 OK` with every tunable limiter.
+
+```json
+{"limiters":[{"key":"http.api_per_min","value":120,"default":120,"min":1,"max":10000,"overridden":false}]}
+```
+
+| Status | Condition |
+|---|---|
+| `200` | Limiter states returned. |
+| `403` | Caller lacks `manage`. |
+| `503` | Rate-limit configuration is unavailable. |
+
+## PUT /api/v1/admin/rate-limits/{key}
+
+Overrides one registered limiter. **Auth:** ADMIN or OWNER (`manage`).
+
+### Request
+
+```json
+{"value":40}
+```
+
+### Response
+
+`200 OK` returns the updated limiter state in the same shape as the list
+response. Unknown keys are rejected; values must be within the limiter's
+published bounds.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON or value outside the allowed range. |
+| `403` | Caller lacks `manage`. |
+| `404` | Unknown limiter key. |
+| `500` | Override could not be persisted. |
+| `503` | Rate-limit configuration is unavailable. |
+
+## DELETE /api/v1/admin/rate-limits/{key}
+
+Resets the named limiter to its shipped default. **Auth:** ADMIN or OWNER
+(`manage`). **Request:** no body. **Response:** `200 OK` with the reset
+limiter state.
+
+| Status | Condition |
+|---|---|
+| `403` | Caller lacks `manage`. |
+| `404` | Unknown limiter key. |
+| `500` | Reset could not be persisted. |
+| `503` | Rate-limit configuration is unavailable. |
 
 ## POST /api/v1/admin/prune-legacy-resources
 
