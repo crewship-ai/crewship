@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 import { IssueCardDetail } from "../issue-card-detail"
 import { ProjectCardDetail } from "../project-card-detail"
-import type { Mission, Project, ProjectStats } from "@/lib/types/mission"
+import type { IssueActivity, IssueComment, Mission, Project, ProjectStats } from "@/lib/types/mission"
+import type { MentionAgent } from "@/lib/mentions"
 
 // next/link renders an <a> in jsdom without a router; stub it so these stay
 // pure render tests.
@@ -204,6 +205,179 @@ describe("IssueCardDetail", () => {
       />,
     )
     expect(screen.getAllByText("Nightly export").length).toBeGreaterThan(0)
+  })
+})
+
+describe("IssueCardDetail — mentions", () => {
+  const ROBIN: MentionAgent = { id: "a_robin", name: "Robin", slug: "robin" }
+
+  function comment(over: Partial<IssueComment> = {}): IssueComment {
+    return {
+      id: "c1",
+      mission_id: "m1",
+      author_type: "user",
+      author_id: "u1",
+      author_name: "Pavel",
+      body: "over to you [@robin](crewship:agent/a_robin)",
+      created_at: "2026-08-04T09:00:00Z",
+      updated_at: "2026-08-04T09:00:00Z",
+      ...over,
+    }
+  }
+
+  function activity(over: Partial<IssueActivity> = {}): IssueActivity {
+    return {
+      id: "act1",
+      mission_id: "m1",
+      actor_type: "user",
+      actor_id: "u1",
+      actor_name: "Pavel",
+      action: "mentioned",
+      details: "a_robin",
+      created_at: "2026-08-04T09:00:00Z",
+      ...over,
+    }
+  }
+
+  it("renders a mention in a comment as a chip", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[comment()]}
+        activities={[]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    expect(screen.getByTestId("mention-chip")).toHaveTextContent("@Robin")
+  })
+
+  it("reads a mention chip from the roster even when the body says otherwise", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[comment({ body: "[@release-manager](crewship:agent/a_robin) ship it" })]}
+        activities={[]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    expect(screen.getByTestId("mention-chip")).toHaveTextContent("@Robin")
+    expect(screen.queryByText(/release-manager/)).toBeNull()
+  })
+
+  it("says who mentioned whom in the history", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[activity()]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    expect(screen.getByText("mentioned")).toBeInTheDocument()
+    expect(screen.getByTestId("mention-chip")).toHaveTextContent("@Robin")
+  })
+
+  it("reads the mention target out of whichever shape the backend sends", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[
+          activity({ id: "a1", details: '{"agent_id":"a_robin"}' }),
+          activity({ id: "a2", details: "[@robin](crewship:agent/a_robin)" }),
+        ]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    expect(screen.getAllByTestId("mention-chip")).toHaveLength(2)
+  })
+
+  it("does not lose a mention activity it cannot resolve", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[activity({ details: "a_someone_else" })]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    expect(screen.queryByTestId("mention-chip")).toBeNull()
+    expect(screen.getByText(/mentioned/)).toBeInTheDocument()
+    expect(screen.getByText(/a_someone_else/)).toBeInTheDocument()
+  })
+
+  it("still renders activity kinds it has never seen", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[activity({ action: "some_future_kind", details: "whatever" })]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "history" }))
+    expect(screen.getByText(/some future kind/)).toBeInTheDocument()
+  })
+
+  it("offers a composer only when the host can actually post", () => {
+    const { rerender } = render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+      />,
+    )
+    expect(screen.queryByRole("combobox")).toBeNull()
+
+    rerender(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+        onSubmitComment={vi.fn(async () => true)}
+      />,
+    )
+    expect(screen.getByRole("combobox")).toBeInTheDocument()
+  })
+
+  it("hands the composer's body straight to the host", async () => {
+    const onSubmitComment = vi.fn(async () => true)
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+        agents={[ROBIN]}
+        onSubmitComment={onSubmitComment}
+      />,
+    )
+    const box = screen.getByRole("combobox") as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: "[@robin](crewship:agent/a_robin) please" } })
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true })
+    expect(onSubmitComment).toHaveBeenCalledWith("[@robin](crewship:agent/a_robin) please")
   })
 })
 
