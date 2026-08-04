@@ -38,14 +38,27 @@ import {
   GitBranch,
   Globe,
   KeyRound,
+  Copy,
+  Download,
   MoreHorizontal,
+  Pencil,
   Play,
   Puzzle,
+  Trash2,
+  Type,
   Webhook,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { DEPENDENCY_SUMMARY, RUN_HISTORY, opacityOf, type Fidelity } from "@/lib/routines-preview/fixtures"
 import { CodePane, DefinitionCanvas, RunHistoryCard, type Workbench } from "./shared"
 
@@ -87,12 +100,22 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
                   <h1 className="truncate text-lg font-semibold tracking-tight">
                     Monthly accounting pack
                   </h1>
-                  <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-mono text-[11px] text-muted-foreground">
-                    <span>mesicni-ucetni-podklady</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <span className="font-mono">mesicni-ucetni-podklady</span>
                     <span aria-hidden>·</span>
-                    <span>v7</span>
+                    <span className="font-mono">v7</span>
                     <span aria-hidden>·</span>
-                    <span>@kontrolor</span>
+                    {/* The owning AGENT, not the human who typed it.
+                        Routines are run by agents, and the agent page
+                        already answers the follow-up question — what
+                        else does it own, what is it working on. */}
+                    <Link
+                      href="/crews"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2 transition-colors hover:border-border hover:text-foreground"
+                    >
+                      <AgentAvatar seed="auditor" className="h-4 w-4" alt="" />
+                      <span className="font-medium">auditor</span>
+                    </Link>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
@@ -110,13 +133,45 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
                     <Eye className="h-3.5 w-3.5" />
                     Dry run
                   </button>
-                  <button
-                    type="button"
-                    aria-label="More actions"
-                    className="rounded-lg border border-border/60 p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    <MoreHorizontal className="h-3.5 w-3.5" />
-                  </button>
+                  {/* The kebab is where the verbs live. Empty, it is a
+                      button that promises actions and delivers a menu of
+                      nothing — same shape as the account menu, so the
+                      two read as one product. */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="More actions"
+                        className="rounded-lg border border-border/60 p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem>
+                        <Pencil className="h-3.5 w-3.5" />
+                        Edit definition
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <Type className="h-3.5 w-3.5" />
+                        Rename &amp; description
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem>
+                        <Copy className="h-3.5 w-3.5" />
+                        Duplicate
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <Download className="h-3.5 w-3.5" />
+                        Export bundle
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete routine
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
 
@@ -146,8 +201,6 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
               { label: "Last run", value: "3 days ago", tone: "success" },
               { label: "Pass rate", value: "75%" },
               { label: "Avg duration", value: "12 min", mono: true },
-              { label: "Cost / run", value: "$1.28", mono: true },
-              { label: "Budget", value: "$5.00", mono: true },
             ]}
           />
         </Appear>
@@ -203,16 +256,53 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
             </DetailCard>
           </Appear>
 
+          {/* The rail runs newest-fact-first: what just happened, what
+              happens next, what it can reach, and the flat facts last.
+              The first pass left it half empty because everything of
+              substance sat in the wide column. */}
           <div className="flex flex-col gap-4">
-            {/* Last run keeps the tinted header from today's detail —
-                it is the one place on the page where colour carries
-                meaning rather than decoration. */}
             <Appear order={3}>
               <LastRunCard summary={lastRun.summary} />
             </Appear>
 
             <Appear order={4}>
-              <DetailCard title="Access" subtitle="what this can reach">
+              <DetailCard
+                title={sideTab === "triggers" ? "Triggers" : "Versions"}
+                subtitle={sideTab === "triggers" ? "2" : "7"}
+                icon={sideTab === "triggers" ? CalendarClock : GitBranch}
+                tone="purple"
+                action={
+                  <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+                    {(["triggers", "versions"] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setSideTab(t)}
+                        aria-pressed={sideTab === t}
+                        className={cn(
+                          "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
+                          sideTab === t
+                            ? "bg-primary/15 text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                }
+              >
+                {sideTab === "triggers" ? <Triggers /> : <Versions />}
+              </DetailCard>
+            </Appear>
+
+            <Appear order={5}>
+              <DetailCard
+                title="Access"
+                subtitle="what this can reach"
+                tone="warn"
+                footer="Amber marks reach a reviewer should look at twice."
+              >
                 <div className="flex flex-wrap gap-1.5">
                   {reach.map((item) => (
                     <EntityChip
@@ -225,48 +315,51 @@ export function VariantCard({ fidelity, wb }: { fidelity: Fidelity; wb: Workbenc
                 </div>
               </DetailCard>
             </Appear>
+
+            <Appear order={6}>
+              <Metadata steps={steps.length} />
+            </Appear>
           </div>
         </div>
 
-        {/* ── Runs, and one card carrying two settings behind a switch.
-            A card with an internal toggle beats two half-empty cards
-            or a tab that hides one of them. ──────────────────────── */}
-        <div className="grid gap-4 grid-cols-1 xl:grid-cols-3 2xl:grid-cols-4">
-          <Appear order={5} className="xl:col-span-2 2xl:col-span-3">
-            <RunHistoryCard />
-          </Appear>
-          <Appear order={6}>
-            <DetailCard
-              title={sideTab === "triggers" ? "Triggers" : "Versions"}
-              subtitle={sideTab === "triggers" ? "2" : "7"}
-              icon={sideTab === "triggers" ? CalendarClock : GitBranch}
-              action={
-                <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                  {(["triggers", "versions"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setSideTab(t)}
-                      aria-pressed={sideTab === t}
-                      className={cn(
-                        "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
-                        sideTab === t
-                          ? "bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              {sideTab === "triggers" ? <Triggers /> : <Versions />}
-            </DetailCard>
-          </Appear>
-        </div>
+        {/* ── Runs. Full width: the rail already carries triggers,
+            versions, access and metadata, and a run row reads better
+            long than boxed. ─────────────────────────────────────── */}
+        <Appear order={7}>
+          <RunHistoryCard pipelineSlug="mesicni-ucetni-podklady" />
+        </Appear>
       </div>
     </div>
+  )
+}
+
+/**
+ * The flat facts.
+ *
+ * Low weight individually, which is why they sit last — but the review
+ * asked for them by name, and the reason is sound: paired with the
+ * version list they are how you answer "what changed since the run that
+ * worked", which is the question you have when something breaks.
+ */
+function Metadata({ steps }: { steps: number }) {
+  return (
+    <DetailCard title="Metadata">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[11px]">
+        {[
+          ["DSL version", "1.0"],
+          ["Visibility", "workspace"],
+          ["Hash", "34d7eb485f…"],
+          ["Steps", String(steps)],
+          ["Created", "23 Jul 2026"],
+          ["Updated", "30 Jul 2026"],
+        ].map(([k, v]) => (
+          <div key={k}>
+            <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">{k}</dt>
+            <dd className="mt-0.5 truncate font-mono text-foreground/85">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </DetailCard>
   )
 }
 

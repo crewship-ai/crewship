@@ -119,7 +119,7 @@ export function DefinitionCanvas({
         viewportRef={viewportRef}
       />
       <div className="pointer-events-none absolute left-3 top-3 rounded-md border border-border/60 bg-card/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
-        Definice · nikoli běh
+        Definition · not a run
       </div>
     </div>
   )
@@ -229,7 +229,7 @@ export function CodePane({
     (content: string) => {
       const result = parseDsl(content, format)
       if (!result.ok) {
-        setError(result.line ? `${result.message} (řádek ${result.line})` : result.message)
+        setError(result.line ? `${result.message} (line ${result.line})` : result.message)
         setSaved(false)
         return
       }
@@ -240,7 +240,7 @@ export function CodePane({
       // than an error.
       const obj = parsed as { steps?: unknown } | null
       if (!obj || typeof obj !== "object" || !Array.isArray(obj.steps)) {
-        setError("definice musí být objekt s polem `steps`")
+        setError("definition must be an object with a `steps` array")
         setSaved(false)
         return
       }
@@ -274,7 +274,7 @@ export function CodePane({
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Definice
+            Definition
           </span>
           <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
             {(["yaml", "json"] as const).map((f) => (
@@ -312,7 +312,7 @@ export function CodePane({
               type="button"
               onClick={() => onFollowChange(!follow)}
               aria-pressed={follow}
-              title="Kurzor v kódu vybírá a vystředí odpovídající krok v grafu"
+              title="The caret in the code selects and centres the matching step in the graph"
               className={cn(
                 "inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] font-medium transition-colors",
                 follow
@@ -321,7 +321,7 @@ export function CodePane({
               )}
             >
               <Crosshair className="h-3 w-3" />
-              Sledovat pohyb
+              Follow caret
             </button>
           )}
           <button
@@ -334,7 +334,7 @@ export function CodePane({
                 : "border border-border/60 text-muted-foreground hover:text-foreground",
             )}
           >
-            {saved ? "Uloženo · graf překreslen" : "Uložit"}
+            {saved ? "Saved · graph redrawn" : "Save"}
           </button>
         </div>
       </div>
@@ -353,13 +353,13 @@ export function CodePane({
       <p className="shrink-0 border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
         {footnote ??
           (onApply
-            ? "Editace jen kódem. Graf je odvozený pohled — po uložení se překreslí z uloženého DSL."
-            : "Editace jen kódem. Tento panel je jen ke čtení — uložení se nikam nepropíše.")}
+            ? "Code is the only editor. The graph is a derived view — it redraws from the saved DSL."
+            : "Code is the only editor. This pane is read-only — a save goes nowhere.")}
         {format === "yaml" && (
           <>
             {" "}
             <span className="text-warn">
-              Ukládá se kanonický JSON, takže komentáře v YAMLu uložení nepřežijí.
+              Canonical JSON is what gets stored, so YAML comments do not survive a save.
             </span>
           </>
         )}
@@ -381,7 +381,7 @@ const DEP_ICON: Record<DependencyKind, LucideIcon> = {
 }
 
 /**
- * "Na čem to visí" — the reviewer's checklist, one group per question.
+ * "Dependencies" — the reviewer's checklist, one group per question.
  *
  * `columns` lets a variant lay this out as a row under a wide canvas or
  * as a stack in a narrow rail without forking the component.
@@ -446,9 +446,9 @@ export function DependencySummary({ columns = 2 }: { columns?: 1 | 2 | 3 }) {
  * ------------------------------------------------------------------ */
 
 const RUN_STATUS: Record<PreviewRun["status"], { Icon: LucideIcon; tint: string; label: string }> = {
-  completed: { Icon: CheckCircle2, tint: "text-success", label: "hotovo" },
-  failed: { Icon: XCircle, tint: "text-destructive", label: "spadlo" },
-  waiting: { Icon: PauseCircle, tint: "text-warn", label: "čeká na schválení" },
+  completed: { Icon: CheckCircle2, tint: "text-success", label: "completed" },
+  failed: { Icon: XCircle, tint: "text-destructive", label: "failed" },
+  waiting: { Icon: PauseCircle, tint: "text-warn", label: "waiting for approval" },
 }
 
 function formatDuration(ms: number): string {
@@ -477,20 +477,40 @@ function formatWhen(iso: string): string {
 /**
  * Historical runs, each row a link into /activity for that run.
  *
- * The row carries a human summary ("18 dokladů nahráno · čeká na
- * schválení") next to the id, because a column of run ids and green
+ * The row carries a human summary ("18 documents filed · waiting for
+ * approval") next to the id, because a column of run ids and green
  * ticks tells an operator nothing about what the month actually did.
  */
-export function RunHistoryCard({ compact = false }: { compact?: boolean }) {
+export function RunHistoryCard({
+  compact = false,
+  pipelineSlug,
+}: {
+  compact?: boolean
+  /**
+   * Scopes the Activity links to this routine.
+   *
+   * Without it a row lands on an unfiltered rail of every run in the
+   * workspace, which is barely better than landing nowhere — the reader
+   * has to re-establish the context they arrived with.
+   */
+  pipelineSlug?: string
+}) {
   const rows = compact ? RUN_HISTORY.slice(0, 3) : RUN_HISTORY
+  const activityHref = (runId?: string) => {
+    const params = new URLSearchParams()
+    if (pipelineSlug) params.set("pipeline", pipelineSlug)
+    if (runId) params.set("run", runId)
+    const qs = params.toString()
+    return qs ? `/activity?${qs}` : "/activity"
+  }
   return (
     <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
       <header className="flex items-center justify-between border-b border-border/60 px-3 py-2">
         <div className="flex items-center gap-2">
           <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-          <h4 className="text-[12px] font-semibold">Historie běhů</h4>
+          <h4 className="text-[12px] font-semibold">Run history</h4>
         </div>
-        <span className="text-[11px] text-muted-foreground">{RUN_HISTORY.length} celkem</span>
+        <span className="text-[11px] text-muted-foreground">{RUN_HISTORY.length} total</span>
       </header>
       <ul className="divide-y divide-border/40">
         {rows.map((run) => {
@@ -498,7 +518,7 @@ export function RunHistoryCard({ compact = false }: { compact?: boolean }) {
           return (
             <li key={run.id}>
               <Link
-                href={`/activity?run=${encodeURIComponent(run.id)}`}
+                href={activityHref(run.id)}
                 className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-white/[0.025]"
               >
                 <s.Icon className={cn("h-4 w-4 shrink-0", s.tint)} />
@@ -506,7 +526,7 @@ export function RunHistoryCard({ compact = false }: { compact?: boolean }) {
                   <div className="flex items-baseline gap-2">
                     <span className="truncate text-[12px] font-medium">{run.summary}</span>
                     <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-                      {run.trigger === "schedule" ? "plán" : "ručně"}
+                      {run.trigger === "schedule" ? "schedule" : "manual"}
                     </span>
                   </div>
                   <div className="truncate font-mono text-[10px] text-muted-foreground">
@@ -528,10 +548,10 @@ export function RunHistoryCard({ compact = false }: { compact?: boolean }) {
       </ul>
       <footer className="border-t border-border/60 px-3 py-2">
         <Link
-          href="/activity"
+          href={activityHref()}
           className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
         >
-          Otevřít celou stopu v Activity
+          All runs in Activity
           <ArrowUpRight className="h-3 w-3" />
         </Link>
       </footer>
@@ -565,18 +585,18 @@ export function OpacityMeter({ dsl }: { dsl: PipelineDSL }) {
           <ShieldAlert className={cn("h-3.5 w-3.5", tone)} />
         )}
         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Neprůhlednost
+          Opacity
         </span>
       </div>
       <div className="flex items-baseline gap-1.5">
         <span className={cn("text-lg font-semibold tabular-nums leading-none", tone)}>{pct}%</span>
         <span className="text-[11px] text-muted-foreground">
-          {opaque} z {steps.length} kroků je agent
+          {opaque} of {steps.length} steps is an agent
         </span>
       </div>
       <Progress
         value={pct}
-        aria-label={`Neprůhlednost ${pct} procent — ${opaque} z ${steps.length} kroků je agent`}
+        aria-label={`Opacity ${pct} percent — ${opaque} of ${steps.length} steps is an agent`}
         className="h-1.5 min-w-[60px] flex-1 bg-muted"
         indicatorClassName={cn(
           pct >= 60 ? "bg-warn" : pct >= 30 ? "bg-notice" : "bg-success",

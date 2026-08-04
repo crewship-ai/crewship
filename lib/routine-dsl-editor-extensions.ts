@@ -96,7 +96,7 @@ export function dslCompletion(): Extension {
           options: items.map((k) => ({
             label: k.key,
             type: "property",
-            detail: k.required ? `${k.detail} (povinné)`.trim() : k.detail,
+            detail: k.required ? `${k.detail} (required)`.trim() : k.detail,
             // Required fields first, then alphabetical — the fields you
             // cannot omit should not be buried under optional ones.
             boost: k.required ? 1 : 0,

@@ -66,7 +66,7 @@ export function VariantCanvasFirst({ fidelity, wb }: { fidelity: Fidelity; wb: W
             )}
           >
             {editing ? <X className="h-3.5 w-3.5" /> : <Code2 className="h-3.5 w-3.5" />}
-            {editing ? "Zavřít kód" : "Upravit kód"}
+            {editing ? "Close code" : "Edit code"}
           </button>
         </div>
 
@@ -76,7 +76,7 @@ export function VariantCanvasFirst({ fidelity, wb }: { fidelity: Fidelity; wb: W
           <aside className="h-[45%] w-full shrink-0 border-t border-border/60 md:h-auto md:w-[46%] md:border-l md:border-t-0 lg:w-[38%]">
             <CodePane
               fidelity={fidelity}
-              footnote="Zavři panel a graf se překreslí z uloženého DSL."
+              footnote="Close the panel and the graph redraws from the saved DSL."
               onStepAtCaret={wb.onCaret}
               follow={wb.follow}
               onFollowChange={wb.setFollow}
@@ -91,7 +91,7 @@ export function VariantCanvasFirst({ fidelity, wb }: { fidelity: Fidelity; wb: W
         <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
           <div>
             <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Na čem to visí
+              Dependencies
             </h3>
             <DependencySummary columns={2} />
           </div>

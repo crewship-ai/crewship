@@ -42,16 +42,16 @@ const doc = schema as unknown as {
 
 /** What each step kind is for, in one line. Authored, not derived. */
 const KIND_DETAIL: Record<string, string> = {
-  agent_run: "Agent rozhodne — nepředvídatelné z definice, jen auditovatelné zpětně",
-  call_pipeline: "Zavolá jiný recept jako podproces",
-  http: "Jedno HTTP volání na známý endpoint — deterministické",
-  code: "Spustí inline kód v sandboxu",
-  wait: "Zaparkuje běh, dokud člověk nebo událost nerozhodne",
-  transform: "Čistá funkce nad výstupem předchozího kroku — deterministické",
-  notify: "Zapíše kartu do inboxu a rozešle ji kanály dle kategorie",
-  script: "Spustí soubor ze sdíleného adresáře posádky — deterministické",
-  query: "Read-only agregace nad daty běhů — deterministické",
-  foreach: "Smyčka — tělo se spustí jednou za položku",
+  agent_run: "An agent decides — unpredictable from the definition, auditable only after the fact",
+  call_pipeline: "Calls another routine as a sub-process",
+  http: "One HTTP call to a known endpoint — deterministic",
+  code: "Runs inline code in a sandbox",
+  wait: "Parks the run until a human or an event decides",
+  transform: "A pure function over the previous step's output — deterministic",
+  notify: "Writes an inbox card and routes it to channels by category",
+  script: "Runs a file from the crew shared dir — deterministic",
+  query: "Read-only aggregate over run data — deterministic",
+  foreach: "A loop — the body runs once per item",
 }
 
 /** Sub-object each kind carries its body in, when it has one. */

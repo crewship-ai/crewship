@@ -58,7 +58,7 @@ export function VariantSplit({ fidelity, wb }: { fidelity: Fidelity; wb: Workben
         <OpacityMeter dsl={wb.dsl} />
         <div>
           <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Na čem to visí
+            Dependencies
           </h3>
           <DependencySummary columns={3} />
         </div>

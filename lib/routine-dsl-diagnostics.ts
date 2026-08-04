@@ -58,7 +58,7 @@ export function diagnose(text: string, _format: DslFormat): DslDiagnostic[] {
 
   const contents = doc.contents
   if (!isMap(contents)) {
-    return [{ line: 1, message: "Definice musí být objekt s poli `name` a `steps`.", severity: "error" }]
+    return [{ line: 1, message: "A routine must be an object with `name` and `steps`.", severity: "error" }]
   }
 
   const steps = contents.get("steps", true)
@@ -66,7 +66,7 @@ export function diagnose(text: string, _format: DslFormat): DslDiagnostic[] {
     return [
       {
         line: lineAt(nodeOffset(contents.get("steps", true) as Node | undefined)) ?? 1,
-        message: "Chybí pole `steps` — recept bez kroků nemá co spustit.",
+        message: "Missing `steps` — a routine with no steps has nothing to run.",
         severity: "error",
       },
     ]
@@ -87,7 +87,7 @@ export function diagnose(text: string, _format: DslFormat): DslDiagnostic[] {
     if (!isMap(item)) {
       out.push({
         line: lineAt(nodeOffset(item as Node)) ?? 1,
-        message: "Krok musí být objekt.",
+        message: "A step must be an object.",
         severity: "error",
       })
       continue
@@ -98,11 +98,11 @@ export function diagnose(text: string, _format: DslFormat): DslDiagnostic[] {
     const itemLine = lineAt(nodeOffset(item as Node)) ?? 1
 
     if (typeof id !== "string" || id === "") {
-      out.push({ line: itemLine, message: "Krok nemá `id`.", severity: "error" })
+      out.push({ line: itemLine, message: "Step is missing `id`.", severity: "error" })
     } else if (seen.has(id)) {
       out.push({
         line: lineAt(nodeOffset(idNode as Node)) ?? itemLine,
-        message: `Krok s id \`${id}\` už existuje — id musí být v receptu jedinečné.`,
+        message: `Step id \`${id}\` is already used — ids must be unique within a routine.`,
         severity: "error",
       })
     } else {
@@ -112,11 +112,11 @@ export function diagnose(text: string, _format: DslFormat): DslDiagnostic[] {
     const typeNode = item.get("type", true)
     const type = isScalar(typeNode) ? typeNode.value : undefined
     if (typeof type !== "string" || type === "") {
-      out.push({ line: itemLine, message: "Krok nemá `type`.", severity: "error" })
+      out.push({ line: itemLine, message: "Step is missing `type`.", severity: "error" })
     } else if (!KNOWN_KINDS.has(type)) {
       out.push({
         line: lineAt(nodeOffset(typeNode as Node)) ?? itemLine,
-        message: `Neznámý typ kroku \`${type}\`. Povolené: ${[...KNOWN_KINDS].join(", ")}.`,
+        message: `Unknown step type \`${type}\`. Allowed: ${[...KNOWN_KINDS].join(", ")}.`,
         severity: "error",
       })
     }
@@ -129,7 +129,7 @@ export function diagnose(text: string, _format: DslFormat): DslDiagnostic[] {
         if (declared.has(value)) continue
         out.push({
           line: lineAt(nodeOffset(need as Node)) ?? itemLine,
-          message: `\`needs\` odkazuje na krok \`${value}\`, který v receptu není.`,
+          message: `\`needs\` references step \`${value}\`, which this routine does not define.`,
           severity: "error",
         })
       }
@@ -171,5 +171,5 @@ function lineResolver(text: string): (offset?: number) => number | undefined {
 }
 
 function messageOf(e: unknown): string {
-  return e instanceof Error ? e.message.split("\n")[0] : "nečitelný dokument"
+  return e instanceof Error ? e.message.split("\n")[0] : "unreadable document"
 }

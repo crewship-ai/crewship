@@ -40,30 +40,30 @@ import { VariantSplit } from "./variant-split"
 const VARIANTS = [
   {
     id: "canvas" as const,
-    label: "Plátno napřed",
+    label: "Canvas first",
     icon: Maximize2,
-    pitch: "Graf přes celou šířku; kód si vezme část plochy, až o něj řekneš.",
+    pitch: "Graph across the full width; the code takes a share only when you ask.",
   },
   {
     id: "split" as const,
     label: "Split",
     icon: Columns2,
-    pitch: "Graf a kód vedle sebe, oba pořád vidět.",
+    pitch: "Graph and code side by side, both always visible.",
   },
   {
     id: "card" as const,
-    label: "Karta",
+    label: "Card",
     icon: LayoutList,
     pitch:
-      "Návrh CELÉ karty routiny — bez tabů, kartami jako Inbox. Preview i Advanced pryč.",
+      "The WHOLE routine card — no tabs, cards like the Inbox. Preview and Advanced gone.",
   },
 ] as const
 
 type VariantId = (typeof VARIANTS)[number]["id"]
 
 const FIDELITIES: { id: Fidelity; label: string; hint: string }[] = [
-  { id: "today", label: "Dnes", hint: "7 kroků, tak jak recept běžel v produkci" },
-  { id: "granular", label: "Granulárně", hint: "14 kroků, stejná práce rozsekaná na buňky" },
+  { id: "today", label: "Today", hint: "7 steps, exactly as the routine ran in production" },
+  { id: "granular", label: "Granular", hint: "14 steps, the same work broken into cells" },
 ]
 
 export function RoutinesNewPreview() {
@@ -81,13 +81,13 @@ export function RoutinesNewPreview() {
       <SubBar<VariantId>
         icon={Workflow}
         title="Routines"
-        section="Návrh detailu"
+        section="Detail proposal"
         description={
           <>
-            náhled · {stepCount} kroků · {opacityOf(wb.dsl)}% agentních
+            preview · {stepCount} steps · {opacityOf(wb.dsl)}% agent
           </>
         }
-        ariaLabel="Náhled návrhu detailu routiny"
+        ariaLabel="Routine detail design preview"
         tabs={VARIANTS.map((v) => ({ id: v.id, label: v.label, icon: v.icon }))}
         activeTab={variant}
         onTabChange={setVariant}
@@ -117,12 +117,12 @@ export function RoutinesNewPreview() {
           content, so saying what THIS one argues saves comparing by eye. */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/60 bg-card/40 px-4 py-2">
         <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
-          Náhled
+          Preview
         </span>
         <span className="text-[12px] text-foreground/85">{active.pitch}</span>
         <span className="text-[11px] text-muted-foreground">
-          Recept: Měsíční účetní podklady — skutečná šablona, která běžela v produkci. Nic se
-          neukládá.
+          Routine: Monthly accounting pack — a real template that ran in production. Nothing is
+          saved.
         </span>
       </div>
 

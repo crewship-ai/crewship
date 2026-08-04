@@ -31,57 +31,57 @@ import type { PipelineDSL, TraceStep } from "@/lib/trace/types"
 
 const TODAY_STEPS: TraceStep[] = [
   {
-    id: "mesic",
+    id: "period",
     type: "agent_run",
-    agent_slug: "kontrolor",
+    agent_slug: "auditor",
     prompt:
-      "Urči účetní OBDOBÍ. Pokud je '{{ inputs.obdobi }}' neprázdné, vrať tuto hodnotu. " +
-      "Jinak spusť v containeru: date -d \"$(date +%Y-%m-01) -1 day\" +%Y-%m",
+      "Determine the accounting PERIOD. If '{{ inputs.period }}' is non-empty, return it. " +
+      "Otherwise run in the container: date -d \"$(date +%Y-%m-01) -1 day\" +%Y-%m",
   },
   {
     id: "parse",
     type: "agent_run",
-    agent_slug: "kontrolor",
-    needs: ["mesic"],
+    agent_slug: "auditor",
+    needs: ["period"],
     prompt:
-      "Zdroj výpisu = Gmail. Najdi výpis od '{{ inputs.vypis_odesilatel }}' za období " +
-      "{{ steps.mesic.output }}, stáhni přílohu a rozparsuj pohyby.",
+      "Statement source = Gmail. Find the statement from '{{ inputs.statement_sender }}' for " +
+      "{{ steps.period.output }}, download the attachment and parse the transactions.",
   },
   {
     id: "plan",
     type: "agent_run",
-    agent_slug: "kontrolor",
+    agent_slug: "auditor",
     needs: ["parse"],
     prompt:
-      "Skillem 'doklad-nazvy' urči u každého výdajového pohybu dodavatel_slug a typ. " +
-      "Sestav worklist všech pohybů, které potřebují doklad.",
+      "Using the 'invoice-naming' skill, derive supplier_slug and type for every outgoing " +
+      "transaction. Build a worklist of everything still missing its document.",
   },
   {
     id: "collect",
     type: "agent_run",
-    agent_slug: "sberac",
-    needs: ["plan", "mesic"],
+    agent_slug: "collector",
+    needs: ["plan", "period"],
     prompt:
-      "Pro KAŽDOU položku worklistu: skillem 'dohledat-doklad' najdi doklad a nahraj " +
-      "do {rok}/{Měsíc}/Přijaté/ na sdíleném disku.",
+      "For EVERY worklist item: use the 'find-invoice' skill to locate the document and " +
+      "upload it to {year}/{Month}/Received/ on the shared drive.",
   },
   {
     id: "verify",
     type: "agent_run",
-    agent_slug: "kontrolor",
+    agent_slug: "auditor",
     needs: ["collect", "parse"],
     prompt:
-      "Jsi crew lead. DETERMINISTICKY ověř pomocí skriptu (ne odhadem): zapiš parse " +
-      "výstup do /tmp/parsed.json a spusť verify.py.",
+      "You are the crew lead. Verify DETERMINISTICALLY with a script, not by judgement: " +
+      "write the parse output to /tmp/parsed.json and run verify.py.",
   },
   {
     id: "reconcile",
     type: "agent_run",
-    agent_slug: "kontrolor",
-    needs: ["parse", "verify", "mesic"],
+    agent_slug: "auditor",
+    needs: ["parse", "verify", "period"],
     prompt:
-      "Skillem 'rekonciliace' ověř kontrolní součet výdajů proti souhrn.vydaje_celkem " +
-      "a uzavři měsíc.",
+      "Using the 'reconcile' skill, check the outgoing total against summary.total_out " +
+      "and close the month.",
   },
   {
     id: "notify",
@@ -89,7 +89,7 @@ const TODAY_STEPS: TraceStep[] = [
     needs: ["reconcile"],
     wait: {
       kind: "approval",
-      approval_prompt: "Účetní podklady — zkontroluj a schval",
+      approval_prompt: "Accounting pack — review and approve",
     },
   },
 ]
@@ -103,28 +103,28 @@ export const TODAY_DSL: PipelineDSL = { steps: TODAY_STEPS }
 const GRANULAR_STEPS: TraceStep[] = [
   {
     // Was an agent turn that shelled out to `date`. It is arithmetic.
-    id: "obdobi",
+    id: "period",
     type: "transform",
     transform: {
-      input: "{{ inputs.obdobi }}",
+      input: "{{ inputs.period }}",
       expression: "default(previous_month())",
     },
   },
   {
     // The MCP gateway call the prompt described in prose.
-    id: "gmail_hledat",
+    id: "gmail_search",
     type: "http",
-    needs: ["obdobi"],
+    needs: ["period"],
     http: {
       method: "POST",
       url: "https://mcp.crewship.local/gmail/messages.search",
-      body: '{"from":"{{ inputs.vypis_odesilatel }}","after":"{{ steps.obdobi.output }}"}',
+      body: '{"from":"{{ inputs.statement_sender }}","after":"{{ steps.obdobi.output }}"}',
     },
   },
   {
-    id: "stahnout_vypis",
+    id: "download_statement",
     type: "http",
-    needs: ["gmail_hledat"],
+    needs: ["gmail_search"],
     http: {
       method: "GET",
       url: "https://mcp.crewship.local/gmail/attachment",
@@ -132,49 +132,49 @@ const GRANULAR_STEPS: TraceStep[] = [
   },
   {
     // scripts/parse_vypis.py — it already exists in the project.
-    id: "parse_vypis",
+    id: "parse_statement",
     type: "script",
-    needs: ["stahnout_vypis"],
+    needs: ["download_statement"],
     script: { path: "scripts/parse_vypis.py" },
   },
   {
     // Genuinely a judgement call: naming conventions, supplier matching.
-    id: "pojmenovat",
+    id: "name_documents",
     type: "agent_run",
-    agent_slug: "kontrolor",
-    needs: ["parse_vypis"],
-    prompt: "Skillem 'doklad-nazvy' urči dodavatel_slug a typ u každého výdaje.",
+    agent_slug: "auditor",
+    needs: ["parse_statement"],
+    prompt: "Using the 'invoice-naming' skill, derive supplier_slug and type for each expense.",
   },
   {
     id: "worklist",
     type: "transform",
-    needs: ["pojmenovat"],
+    needs: ["name_documents"],
     transform: {
-      input: "{{ steps.pojmenovat.output }}",
+      input: "{{ steps.name_documents.output }}",
       expression: "filter(.potrebuje_doklad)",
     },
   },
   {
     // The loop that is invisible today. This is the step the operator
     // most wants to watch: it is where the run spends its time.
-    id: "sbirat",
+    id: "collect",
     type: "foreach",
-    needs: ["worklist", "obdobi"],
-    foreach: { items: "{{ steps.worklist.output }}", as: "polozka" },
+    needs: ["worklist", "period"],
+    foreach: { items: "{{ steps.worklist.output }}", as: "item" },
   },
   {
     // Body of the loop — still an agent, because finding the right PDF
     // in a mailbox is exactly what an agent is good at.
-    id: "dohledat_doklad",
+    id: "find_document",
     type: "agent_run",
-    agent_slug: "sberac",
-    needs: ["sbirat"],
-    prompt: "Skillem 'dohledat-doklad' najdi doklad k položce {{ polozka }}.",
+    agent_slug: "collector",
+    needs: ["collect"],
+    prompt: "Using the 'find-invoice' skill, locate the document for {{ item }}.",
   },
   {
-    id: "drive_nahrat",
+    id: "drive_upload",
     type: "http",
-    needs: ["dohledat_doklad"],
+    needs: ["find_document"],
     http: {
       method: "POST",
       url: "https://mcp.crewship.local/googledrive/files.upload",
@@ -184,11 +184,11 @@ const GRANULAR_STEPS: TraceStep[] = [
     // scripts/verify.py — also already exists.
     id: "verify",
     type: "script",
-    needs: ["drive_nahrat", "parse_vypis"],
+    needs: ["drive_upload", "parse_statement"],
     script: { path: "scripts/verify.py" },
   },
   {
-    id: "kontrolni_soucet",
+    id: "checksum",
     type: "transform",
     needs: ["verify"],
     transform: {
@@ -199,25 +199,25 @@ const GRANULAR_STEPS: TraceStep[] = [
   {
     // The one place an LLM still earns its turn on the closing path:
     // explaining WHY the numbers disagree, when they disagree.
-    id: "vysvetlit_rozdil",
+    id: "explain_gap",
     type: "agent_run",
-    agent_slug: "kontrolor",
-    needs: ["kontrolni_soucet"],
-    prompt: "Pokud součet nesedí, vysvětli které doklady chybí a proč.",
+    agent_slug: "auditor",
+    needs: ["checksum"],
+    prompt: "If the totals disagree, explain which documents are missing and why.",
   },
   {
-    id: "oznamit",
+    id: "notify_owner",
     type: "notify",
-    needs: ["vysvetlit_rozdil"],
-    notify: { to: "trigger", title: "Účetní podklady jsou připravené", category: "routines.completed" },
+    needs: ["explain_gap"],
+    notify: { to: "trigger", title: "Accounting pack is ready", category: "routines.completed" },
   },
   {
-    id: "schvaleni",
+    id: "approval",
     type: "wait",
-    needs: ["oznamit"],
+    needs: ["notify_owner"],
     wait: {
       kind: "approval",
-      approval_prompt: "Účetní podklady — zkontroluj a schval",
+      approval_prompt: "Accounting pack — review and approve",
     },
   },
 ]
@@ -269,7 +269,7 @@ export function definitionRun(): PipelineRun {
     id: "definition",
     pipeline_id: "preview",
     pipeline_slug: "mesicni-ucetni-podklady",
-    pipeline_name: "Měsíční účetní podklady",
+    pipeline_name: "Monthly accounting pack",
     status: "queued",
     mode: "definition",
     started_at: "",
@@ -319,50 +319,50 @@ export interface DependencyGroup {
 export const DEPENDENCY_SUMMARY: DependencyGroup[] = [
   {
     kind: "integrations",
-    title: "Integrace (MCP)",
-    question: "Ke kterým cizím službám se dostane?",
+    title: "Integrations (MCP)",
+    question: "Which third-party services can it reach?",
     items: [
-      { name: "Gmail", detail: "hledá výpis, stahuje přílohy", risk: true },
-      { name: "Google Drive", detail: "zakládá složky, nahrává doklady", risk: true },
+      { name: "Gmail", detail: "searches for the statement, downloads attachments", risk: true },
+      { name: "Google Drive", detail: "creates folders, uploads documents", risk: true },
     ],
   },
   {
     kind: "notifications",
-    title: "Notifikace",
-    question: "Komu se ozve a pod jakou kategorií?",
+    title: "Notifications",
+    question: "Who does it tell, and under which category?",
     items: [
-      { name: "routines.completed", detail: "inbox karta → spouštěč běhu" },
-      { name: "wait: approval", detail: "čeká na člověka, běh je zaparkovaný" },
+      { name: "routines.completed", detail: "inbox card → whoever triggered the run" },
+      { name: "wait: approval", detail: "parks the run until a human decides" },
     ],
   },
   {
     kind: "credentials",
     title: "Credentials",
-    question: "Jaké tajemství drží?",
+    question: "Which secrets does it hold?",
     items: [
-      { name: "anthropic", detail: "klíč pro agentní kroky" },
+      { name: "anthropic", detail: "key for the agent steps" },
       {
-        name: "žádné přímé v DSL",
-        detail: "Gmail i Drive jdou přes MCP bránu, ne přes {{ secrets.* }}",
+        name: "none referenced in the DSL",
+        detail: "Gmail and Drive go through the MCP gateway, not {{ secrets.* }}",
       },
     ],
   },
   {
     kind: "agents",
-    title: "Agenti",
-    question: "Kdo za ni rozhoduje?",
+    title: "Agents",
+    question: "Who makes the judgement calls?",
     items: [
-      { name: "kontrolor", detail: "období, pojmenování, rekonciliace" },
-      { name: "sberac", detail: "dohledávání dokladů v loopu" },
+      { name: "auditor", detail: "period, naming, reconciliation" },
+      { name: "collector", detail: "finding documents inside the loop" },
     ],
   },
   {
     kind: "egress",
     title: "Egress",
-    question: "Kam ven posílá data?",
+    question: "Where does data leave to?",
     items: [
-      { name: "gmail.googleapis.com", detail: "čtení schránky", risk: true },
-      { name: "www.googleapis.com", detail: "zápis na Drive", risk: true },
+      { name: "gmail.googleapis.com", detail: "reading the mailbox", risk: true },
+      { name: "www.googleapis.com", detail: "writing to Drive", risk: true },
     ],
   },
 ]
@@ -391,7 +391,7 @@ export const RUN_HISTORY: PreviewRun[] = [
     duration_ms: 812_000,
     cost_usd: 1.42,
     trigger: "schedule",
-    summary: "18 dokladů nahráno · čeká na schválení",
+    summary: "18 documents filed · waiting for approval",
   },
   {
     id: "run_cms6jklmn0002ab31de90",
@@ -400,7 +400,7 @@ export const RUN_HISTORY: PreviewRun[] = [
     duration_ms: 744_000,
     cost_usd: 1.28,
     trigger: "schedule",
-    summary: "22 dokladů · součet sedí",
+    summary: "22 documents · totals reconcile",
   },
   {
     id: "run_cms5abcde0003ff77aa21",
@@ -409,7 +409,7 @@ export const RUN_HISTORY: PreviewRun[] = [
     duration_ms: 96_000,
     cost_usd: 0.11,
     trigger: "manual",
-    summary: "výpis za období nenalezen ve schránce",
+    summary: "no statement for that period in the mailbox",
   },
   {
     id: "run_cms4zzxxy0004bb12cc33",
@@ -418,7 +418,7 @@ export const RUN_HISTORY: PreviewRun[] = [
     duration_ms: 690_000,
     cost_usd: 1.19,
     trigger: "schedule",
-    summary: "19 dokladů · 2 chybějící dohledány ručně",
+    summary: "19 documents · 2 gaps closed by hand",
   },
 ]
 
@@ -439,14 +439,14 @@ export function dslSource(fidelity: Fidelity): string {
     {
       dsl_version: "1.0",
       name: "mesicni-ucetni-podklady",
-      display_name: "Měsíční účetní podklady",
+      display_name: "Monthly accounting pack",
       description:
-        "Stáhne bankovní výpis z Gmailu, dohledá doklady, založí je na Drive, " +
-        "zrekonciluje součty a nechá člověka schválit.",
+        "Pulls the bank statement out of Gmail, finds every matching invoice, files them " +
+        "on Drive, reconciles the totals and parks on a human approval.",
       inputs: [
-        { name: "obdobi", type: "string", required: false },
-        { name: "ucetnictvi_root", type: "string", required: true },
-        { name: "vypis_odesilatel", type: "string", required: true },
+        { name: "period", type: "string", required: false },
+        { name: "accounting_root", type: "string", required: true },
+        { name: "statement_sender", type: "string", required: true },
       ],
       integrations_required: ["gmail", "googledrive"],
       max_cost_usd: 5,

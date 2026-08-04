@@ -76,9 +76,9 @@ describe("<CodePane> caret → step", () => {
     const onStepAtCaret = vi.fn()
     render(<CodePane fidelity="granular" onStepAtCaret={onStepAtCaret} />)
     act(() => emitCursorLine!(lineInside("worklist")))
-    act(() => emitCursorLine!(lineInside("sbirat")))
+    act(() => emitCursorLine!(lineInside("collect")))
     expect(onStepAtCaret).toHaveBeenCalledTimes(2)
-    expect(onStepAtCaret).toHaveBeenLastCalledWith("sbirat")
+    expect(onStepAtCaret).toHaveBeenLastCalledWith("collect")
   })
 
   it("reports null when the caret leaves the steps array", () => {
@@ -98,13 +98,13 @@ describe("<CodePane> caret → step", () => {
 describe("<CodePane> follow toggle", () => {
   it("is hidden when the pane has nothing to follow", () => {
     render(<CodePane fidelity="granular" />)
-    expect(screen.queryByRole("button", { name: /sledovat pohyb/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /follow caret/i })).not.toBeInTheDocument()
   })
 
   it("reports its state and flips on click", () => {
     const onFollowChange = vi.fn()
     render(<CodePane fidelity="granular" follow onFollowChange={onFollowChange} />)
-    const btn = screen.getByRole("button", { name: /sledovat pohyb/i })
+    const btn = screen.getByRole("button", { name: /follow caret/i })
     expect(btn).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(btn)
     expect(onFollowChange).toHaveBeenCalledWith(false)
@@ -145,7 +145,7 @@ describe("<CodePane> caret after an edit", () => {
   it("resolves the OLD position to something else once the buffer moved", async () => {
     const onStepAtCaret = vi.fn()
     render(<CodePane fidelity="granular" onStepAtCaret={onStepAtCaret} />)
-    const before = ranges.find((r) => r.id === "sbirat")!
+    const before = ranges.find((r) => r.id === "collect")!
 
     await act(async () => {
       emitDocChange!("\n\n\n\n\n\n" + yamlSource)
@@ -157,6 +157,6 @@ describe("<CodePane> caret after an edit", () => {
     // point is that the mapper moved with the buffer rather than
     // confidently reporting a stale answer.
     const last = onStepAtCaret.mock.calls.at(-1)?.[0]
-    expect(last).not.toBe("sbirat")
+    expect(last).not.toBe("collect")
   })
 })

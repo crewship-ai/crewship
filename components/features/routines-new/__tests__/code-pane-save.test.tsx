@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 
 import { CodePane } from "../shared"
 
-// A prior review caught the pane reporting "Uloženo · graf překreslen" while
+// A prior review caught the pane reporting "Saved · graph redrawn" while
 // doing nothing of the kind: handleSave flipped local state, ignored
 // the editor content, and could not reach the DSL the canvas draws. On
 // a page whose entire thesis is "edit the code, the graph follows",
@@ -43,7 +43,7 @@ const VALID = JSON.stringify(
   2,
 )
 
-const saveButton = () => screen.getByRole("button", { name: /uložit|uloženo/i })
+const saveButton = () => screen.getByRole("button", { name: /save|saved/i })
 
 describe("<CodePane> save", () => {
   beforeEach(() => {
@@ -63,9 +63,9 @@ describe("<CodePane> save", () => {
 
   it("confirms the redraw only after one actually happened", () => {
     render(<CodePane fidelity="granular" onApply={vi.fn()} />)
-    expect(screen.queryByText(/graf překreslen/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/graph redrawn/i)).not.toBeInTheDocument()
     fireEvent.click(saveButton())
-    expect(screen.getByText(/graf překreslen/i)).toBeInTheDocument()
+    expect(screen.getByText(/graph redrawn/i)).toBeInTheDocument()
   })
 
   it("refuses a buffer that does not parse, and says so", () => {
@@ -74,7 +74,7 @@ describe("<CodePane> save", () => {
     render(<CodePane fidelity="granular" onApply={onApply} />)
     fireEvent.click(saveButton())
     expect(onApply).not.toHaveBeenCalled()
-    expect(screen.queryByText(/graf překreslen/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/graph redrawn/i)).not.toBeInTheDocument()
     expect(screen.getByText(/syntax/i)).toBeInTheDocument()
   })
 
@@ -84,7 +84,7 @@ describe("<CodePane> save", () => {
     render(<CodePane fidelity="granular" onApply={onApply} />)
     fireEvent.click(saveButton())
     expect(onApply).not.toHaveBeenCalled()
-    expect(screen.queryByText(/graf překreslen/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/graph redrawn/i)).not.toBeInTheDocument()
   })
 
   it("recovers once the buffer parses again", () => {
@@ -97,7 +97,7 @@ describe("<CodePane> save", () => {
     CURRENT_DOC = VALID
     fireEvent.click(saveButton())
     expect(onApply).toHaveBeenCalledTimes(1)
-    expect(screen.getByText(/graf překreslen/i)).toBeInTheDocument()
+    expect(screen.getByText(/graph redrawn/i)).toBeInTheDocument()
   })
 
   it("does not claim anything when nothing is listening", () => {
@@ -130,7 +130,7 @@ steps:
     render(<CodePane fidelity="granular" onApply={onApply} />)
     fireEvent.click(saveButton())
     expect(onApply).not.toHaveBeenCalled()
-    expect(screen.getByText(/řádek 3/)).toBeInTheDocument()
+    expect(screen.getByText(/line 3/)).toBeInTheDocument()
   })
 
   it("keeps Cmd+S and the button on the same path", () => {

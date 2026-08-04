@@ -61,7 +61,7 @@ function parseYamlDoc(text: string): ParseResult {
     // line number, so the marker lands nowhere and nobody notices.
     const err = e as { message?: string; linePos?: { line: number }[] }
     const line = err?.linePos?.[0]?.line
-    const message = err?.message ? err.message.split("\n")[0] : "neplatný YAML"
+    const message = err?.message ? err.message.split("\n")[0] : "invalid YAML"
     return { ok: false, message, line }
   }
   return asMapping(value, "YAML")
@@ -72,7 +72,7 @@ function parseJsonDoc(text: string): ParseResult {
   try {
     value = JSON.parse(text)
   } catch (e) {
-    const message = e instanceof Error ? e.message : "neplatný JSON"
+    const message = e instanceof Error ? e.message : "invalid JSON"
     return { ok: false, message, line: locateSyntaxError(text) }
   }
   return asMapping(value, "JSON")
@@ -103,7 +103,7 @@ function locateSyntaxError(text: string): number | undefined {
 
 function asMapping(value: unknown, label: string): ParseResult {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return { ok: false, message: `${label}: definice musí být objekt` }
+    return { ok: false, message: `${label}: a routine must be an object` }
   }
   return { ok: true, value: value as Record<string, unknown> }
 }
