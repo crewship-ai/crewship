@@ -108,6 +108,19 @@ export function RoutineCardDetail({
     if (editRequest > 0) setEditing(true)
   }, [editRequest])
   const [selected, setSelected] = React.useState<string | null>(null)
+  // Separate from `selected`: selection is a persistent choice, focus a
+  // one-shot "bring this into view". Merged, a re-render could yank the
+  // viewport back after the reader had panned away from it.
+  const [focus, setFocus] = React.useState<string | null>(null)
+  const handleCaret = React.useCallback((stepId: string | null) => {
+    if (!stepId) return
+    setSelected(stepId)
+    setFocus(stepId)
+  }, [])
+  const handleSelect = React.useCallback((id: string | null) => {
+    setSelected(id)
+    setFocus(null)
+  }, [])
   const [sideTab, setSideTab] = React.useState<SideTab>("triggers")
   const [showWebhooks, setShowWebhooks] = React.useState(false)
   const [manageTriggers, setManageTriggers] = React.useState(false)
@@ -310,7 +323,8 @@ export function RoutineCardDetail({
                   slug={routine.slug}
                   name={routine.name}
                   selectedStepId={selected}
-                  onStepSelect={setSelected}
+                  onStepSelect={handleSelect}
+                  focusStepId={focus}
                 />
                 {/* On the canvas, not in the card header: the button that
                     opens an editor for this graph belongs next to the
@@ -335,6 +349,7 @@ export function RoutineCardDetail({
                     routine={routine}
                     workspaceId={workspaceId}
                     onSaved={onChanged}
+                    onStepAtCaret={handleCaret}
                   />
                 </aside>
               )}

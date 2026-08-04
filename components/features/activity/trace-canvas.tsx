@@ -357,6 +357,20 @@ function CanvasInner({
   // what is still visible.
   const paneRef = useRef<HTMLDivElement | null>(null)
   const pendingFitRef = useRef(true)
+  // Has the reader taken control of the viewport?
+  //
+  // Until they have, the canvas keeps itself framed on every resize.
+  // Fitting exactly once was wrong twice over: the first measurement can
+  // land mid-entrance-animation, when the pane is a fraction of its
+  // final size — and that fit then stuck, leaving the graph a smudge in
+  // a large empty box. And opening the code panel shrinks the pane
+  // without re-framing, so the graph stayed at the size it was fitted
+  // for. Both are the same bug: a one-shot fit against a size that was
+  // never final.
+  //
+  // Once someone pans or zooms, that is a decision and resizes stop
+  // overriding it — they only shift, so the view they chose stays put.
+  const userMovedRef = useRef(false)
 
   const applyInitialFit = useCallback(() => {
     if (initialFocus === "start") {
@@ -401,6 +415,10 @@ function CanvasInner({
       const delta = width - last
       if (delta === 0) return
       last = width
+      if (!userMovedRef.current) {
+        applyInitialFit()
+        return
+      }
       if (!recenterOnResize) return
       const vp = getViewport()
       setViewport({ ...vp, x: vp.x + delta / 2 })
@@ -529,6 +547,13 @@ function CanvasInner({
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
+        onMoveStart={(event) => {
+          // A non-null event means a human dragged or wheeled. React
+          // Flow passes null for programmatic moves, which is what lets
+          // fitView and setCenter run without being mistaken for the
+          // reader taking control.
+          if (event) userMovedRef.current = true
+        }}
         onMoveEnd={(_, vp) => {
           if (viewportRef) viewportRef.current = vp
         }}

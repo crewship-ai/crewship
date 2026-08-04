@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, RotateCcw, Save, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 import { parseRoutineBuffer } from "@/lib/routine-buffer"
+import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { RoutineDetail } from "./routines-detail-panel"
 
@@ -31,9 +32,19 @@ interface Props {
   routine: RoutineDetail
   workspaceId: string
   onSaved: () => void
+  /**
+   * Fires with the step the caret sits in, or null between steps.
+   *
+   * Already deduped — only a change of STEP is reported, not every
+   * caret move — so the caller can drive a viewport with it directly.
+   * The caret fires on every arrow key; forwarding each one would have
+   * the graph re-centre on the node it is already centred on dozens of
+   * times a second while someone types.
+   */
+  onStepAtCaret?: (stepId: string | null) => void
 }
 
-export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
+export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret }: Props) {
   const [format, setFormat] = useState<DslFormat>("yaml")
   const initial = useMemo(() => {
     try {
@@ -81,6 +92,24 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   // changes — an unmemoized array would blow the buffer away on every
   // render.
   const extraExtensions = useMemo(() => routineDslExtensions(format), [format])
+
+  // Line spans come from the LIVE buffer, not the definition as first
+  // rendered: inserting one line shifts every step below it, and spans
+  // computed once resolve the caret against positions that no longer
+  // exist. Deferred so a parse does not run on the keystroke itself —
+  // a frame of lag is invisible, parsing per character is not.
+  const deferredText = useDeferredValue(text)
+  const stepRanges = useMemo(() => stepLineRanges(deferredText), [deferredText])
+  const lastStepRef = useRef<string | null>(null)
+  const handleCursorLine = useCallback(
+    (line: number) => {
+      const id = stepIdAtLine(stepRanges, line)
+      if (id === lastStepRef.current) return
+      lastStepRef.current = id
+      onStepAtCaret?.(id)
+    },
+    [stepRanges, onStepAtCaret],
+  )
 
   // Switching format converts the BUFFER, not the stored definition, so
   // an in-progress edit survives the toggle instead of being discarded.
@@ -282,6 +311,8 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
           onSave={handleEditorSave}
           onDirtyChange={setDirty}
           saveRef={saveRef}
+          onCursorLine={handleCursorLine}
+          onDocChange={setText}
           extraExtensions={extraExtensions}
         />
       </div>
