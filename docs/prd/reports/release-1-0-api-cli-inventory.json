@@ -8,7 +8,7 @@
     "cli_exact_docs": 723,
     "cli_root_docs_present": 723,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 390,
+    "api_with_test_signals": 394,
     "api_with_concrete_response_schemas": 517,
     "api_generic_response_schemas": 0,
     "cli_with_test_signals": 709
@@ -2687,8 +2687,8 @@
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
-        "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -2711,8 +2711,8 @@
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
-            "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
             "…"
           ]
         }
@@ -2751,8 +2751,8 @@
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
-        "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -2775,8 +2775,8 @@
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
-            "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
             "…"
           ]
         }
@@ -2815,8 +2815,8 @@
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
-        "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -2839,8 +2839,8 @@
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
-            "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
             "…"
           ]
         }
@@ -4596,7 +4596,7 @@
         "cmd/crewship/cmd_seed_cov_test.go",
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
-        "internal/api/cli_token_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -4620,7 +4620,7 @@
             "cmd/crewship/cmd_seed_cov_test.go",
             "cmd/crewship/cmd_token_cov_test.go",
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
-            "internal/api/cli_token_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "…"
           ]
         }
@@ -6513,6 +6513,7 @@
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
@@ -6535,6 +6536,7 @@
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6560,6 +6562,7 @@
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
@@ -6582,6 +6585,7 @@
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6607,6 +6611,7 @@
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
@@ -6629,6 +6634,7 @@
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -6654,6 +6660,7 @@
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
         "internal/api/credential_fields_test.go",
         "internal/api/credentials_reveal_route_test.go",
         "internal/api/credentials_test_stored_test.go",
@@ -6676,6 +6683,7 @@
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
             "internal/api/credential_fields_test.go",
             "internal/api/credentials_reveal_route_test.go",
             "internal/api/credentials_test_stored_test.go",
@@ -7547,8 +7555,8 @@
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-        "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7571,8 +7579,8 @@
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-            "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
             "…"
           ]
         }
@@ -7626,8 +7634,8 @@
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-        "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7650,8 +7658,8 @@
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-            "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
             "…"
           ]
         }
@@ -7705,8 +7713,8 @@
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-        "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7729,8 +7737,8 @@
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-            "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
             "…"
           ]
         }
@@ -7784,8 +7792,8 @@
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-        "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -7808,8 +7816,8 @@
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_remaining_crew_agent_test.go",
-            "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
             "…"
           ]
         }
@@ -8220,6 +8228,9 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "contract": {
@@ -8232,7 +8243,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_crews.go"
+          "source_file": "internal/api/router_crews.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
+          ]
         }
       }
     },
@@ -8250,6 +8264,9 @@
         "docs/api-reference/crews.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "contract": {
@@ -8262,7 +8279,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_crews.go"
+          "source_file": "internal/api/router_crews.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
+          ]
         }
       }
     },
@@ -8455,6 +8475,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
@@ -8473,6 +8494,7 @@
           "source_file": "internal/api/cross_workspace_reference_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go"
           ]
@@ -9032,6 +9054,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go",
         "internal/api/route_scope_invariant_test.go"
@@ -9051,6 +9074,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/missions_test.go",
             "internal/api/route_scope_invariant_test.go"
@@ -9075,6 +9099,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go",
         "internal/api/route_scope_invariant_test.go"
@@ -9094,6 +9119,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/missions_test.go",
             "internal/api/route_scope_invariant_test.go"
@@ -9118,6 +9144,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
@@ -9136,6 +9163,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/missions_test.go"
           ]
@@ -9159,6 +9187,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
@@ -9177,6 +9206,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/missions_test.go"
           ]
@@ -9200,6 +9230,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/missions_test.go"
       ],
@@ -9218,6 +9249,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/missions_test.go"
           ]
@@ -9368,7 +9400,8 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/gen-openapi/schemas_remaining_execution_domains_test.go"
+        "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -9384,7 +9417,8 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
-            "cmd/gen-openapi/schemas_remaining_execution_domains_test.go"
+            "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go"
           ]
         }
       }
@@ -9987,6 +10021,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
       "concrete_response_schema": true,
@@ -10003,6 +10038,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -11396,7 +11432,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-        "cmd/gen-openapi/schemas_final_integrations_connectors_test.go"
+        "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -11413,7 +11450,8 @@
           "source_file": "internal/api/router_crews.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-            "cmd/gen-openapi/schemas_final_integrations_connectors_test.go"
+            "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
           ]
         }
       }
@@ -11433,7 +11471,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-        "cmd/gen-openapi/schemas_final_integrations_connectors_test.go"
+        "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -11450,7 +11489,8 @@
           "source_file": "internal/api/router_crews.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-            "cmd/gen-openapi/schemas_final_integrations_connectors_test.go"
+            "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
           ]
         }
       }
@@ -11470,7 +11510,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-        "cmd/gen-openapi/schemas_final_integrations_connectors_test.go"
+        "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -11487,7 +11528,8 @@
           "source_file": "internal/api/router_crews.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-            "cmd/gen-openapi/schemas_final_integrations_connectors_test.go"
+            "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go"
           ]
         }
       }
@@ -11506,6 +11548,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/composio_handler_test.go"
       ],
       "concrete_response_schema": true,
@@ -11522,6 +11565,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/composio_handler_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/composio_handler_test.go"
           ]
         }
@@ -11658,6 +11702,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/composio_handler_test.go"
       ],
       "concrete_response_schema": true,
@@ -11675,6 +11720,7 @@
           "source_file": "internal/api/composio_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/composio_handler_test.go"
           ]
         }
@@ -11695,6 +11741,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/composio_handler_test.go"
       ],
       "concrete_response_schema": true,
@@ -11712,6 +11759,7 @@
           "source_file": "internal/api/composio_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/composio_handler_test.go"
           ]
         }
@@ -11732,6 +11780,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/composio_handler_test.go"
       ],
       "concrete_response_schema": true,
@@ -11749,6 +11798,7 @@
           "source_file": "internal/api/composio_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/composio_handler_test.go"
           ]
         }
@@ -11843,6 +11893,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/composio_handler_test.go"
       ],
       "concrete_response_schema": true,
@@ -11860,6 +11911,7 @@
           "source_file": "internal/api/composio_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/composio_handler_test.go"
           ]
         }
@@ -11880,6 +11932,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/composio_handler_test.go"
       ],
       "concrete_response_schema": true,
@@ -11897,6 +11950,7 @@
           "source_file": "internal/api/composio_handler_test.go",
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch6_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/composio_handler_test.go"
           ]
         }
@@ -12889,6 +12943,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_prefs_test.go"
       ],
       "concrete_response_schema": true,
@@ -12906,6 +12961,7 @@
           "source_file": "internal/api/notification_prefs_test.go",
           "test_signals": [
             "cmd/crewship/cmd_notify_prefs_cov_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_prefs_test.go"
           ]
         }
@@ -12923,6 +12979,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_prefs_test.go"
       ],
       "concrete_response_schema": true,
@@ -12940,6 +12997,7 @@
           "source_file": "internal/api/notification_prefs_test.go",
           "test_signals": [
             "cmd/crewship/cmd_notify_prefs_cov_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_prefs_test.go"
           ]
         }
@@ -13561,6 +13619,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
       "concrete_response_schema": true,
@@ -13578,6 +13637,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -13600,6 +13660,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
       "concrete_response_schema": true,
@@ -13617,6 +13678,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_admin_approvals_checkpoints_cache_memory_projects_resources_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -13693,9 +13755,9 @@
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/agent_notification_channels_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13717,9 +13779,9 @@
             "cmd/crewship/cmd_notifychannel_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/agent_notification_channels_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -13745,9 +13807,9 @@
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/agent_notification_channels_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -13769,9 +13831,9 @@
             "cmd/crewship/cmd_notifychannel_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/agent_notification_channels_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -14150,6 +14212,7 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_outbound_handlers_test.go"
       ],
       "concrete_response_schema": false,
@@ -14168,6 +14231,7 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_outbound_handlers_test.go"
           ]
         }
@@ -14187,6 +14251,7 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_outbound_handlers_test.go"
       ],
       "concrete_response_schema": true,
@@ -14205,6 +14270,7 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_outbound_handlers_test.go"
           ]
         }
@@ -14224,6 +14290,7 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/notification_outbound_handlers_test.go"
       ],
       "concrete_response_schema": true,
@@ -14242,6 +14309,7 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_outbound_handlers_test.go"
           ]
         }
@@ -14468,6 +14536,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/oauth_creds_cov2_test.go",
         "internal/api/oauth_creds_cov_test.go",
         "internal/api/oauth_test.go"
@@ -14486,6 +14555,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/oauth_creds_cov2_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/oauth_creds_cov2_test.go",
             "internal/api/oauth_creds_cov_test.go",
             "internal/api/oauth_test.go"
@@ -14550,6 +14620,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/oauth_creds_cov2_test.go",
         "internal/api/oauth_test.go"
       ],
@@ -14567,6 +14638,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/oauth_creds_cov2_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/oauth_creds_cov2_test.go",
             "internal/api/oauth_test.go"
           ]
@@ -14584,6 +14656,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
         "internal/api/oauth_test.go",
@@ -14603,6 +14676,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/oauth_flow_cov2_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
             "internal/api/oauth_test.go",
@@ -14622,6 +14696,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
         "internal/api/oauth_test.go",
@@ -14641,6 +14716,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/oauth_flow_cov2_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
             "internal/api/oauth_test.go",
@@ -15264,6 +15340,7 @@
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
@@ -15284,6 +15361,7 @@
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go"
           ]
@@ -15310,6 +15388,7 @@
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
@@ -15330,6 +15409,7 @@
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go"
           ]
@@ -15356,6 +15436,7 @@
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go"
       ],
@@ -15376,6 +15457,7 @@
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go"
           ]
@@ -15399,6 +15481,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
       "concrete_response_schema": true,
@@ -15416,6 +15499,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -15438,6 +15522,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go"
       ],
       "concrete_response_schema": true,
@@ -15455,6 +15540,7 @@
           "source_file": "internal/api/cross_workspace_fence_matrix_test.go",
           "test_signals": [
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go"
           ]
         }
@@ -15677,10 +15763,10 @@
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/dberr_issues_cov_test.go",
-        "internal/api/recurring_issue_handler_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -15701,10 +15787,10 @@
             "cmd/crewship/cmd_admin_extras_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
             "internal/api/dberr_issues_cov_test.go",
-            "internal/api/recurring_issue_handler_cov_test.go",
             "…"
           ]
         }
@@ -15730,10 +15816,10 @@
         "cmd/crewship/cmd_admin_extras_cov_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
         "internal/api/dberr_issues_cov_test.go",
-        "internal/api/recurring_issue_handler_cov_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -15754,10 +15840,10 @@
             "cmd/crewship/cmd_admin_extras_cov_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
             "internal/api/dberr_issues_cov_test.go",
-            "internal/api/recurring_issue_handler_cov_test.go",
             "…"
           ]
         }
@@ -17050,9 +17136,9 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
-        "internal/api/recurring_triage_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17074,9 +17160,9 @@
             "cmd/crewship/cmd_admin_extras_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
-            "internal/api/recurring_triage_test.go",
             "…"
           ]
         }
@@ -17100,9 +17186,9 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
         "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/cross_workspace_reference_test.go",
-        "internal/api/recurring_triage_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17124,9 +17210,9 @@
             "cmd/crewship/cmd_admin_extras_test.go",
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
             "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/cross_workspace_reference_test.go",
-            "internal/api/recurring_triage_test.go",
             "…"
           ]
         }
@@ -18192,10 +18278,12 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
-        "internal/api/cross_workspace_path_query_test.go",
-        "internal/api/route_scope_invariant_test.go"
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
+        "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -18214,10 +18302,12 @@
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
-            "internal/api/cross_workspace_path_query_test.go",
-            "internal/api/route_scope_invariant_test.go"
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
+            "…"
           ]
         }
       }
@@ -18248,10 +18338,12 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
-        "internal/api/cross_workspace_path_query_test.go",
-        "internal/api/route_scope_invariant_test.go"
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
+        "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -18270,10 +18362,12 @@
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
-            "internal/api/cross_workspace_path_query_test.go",
-            "internal/api/route_scope_invariant_test.go"
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
+            "…"
           ]
         }
       }
@@ -18304,10 +18398,12 @@
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schema_contract_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
-        "internal/api/cross_workspace_path_query_test.go",
-        "internal/api/route_scope_invariant_test.go"
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
+        "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -18326,10 +18422,12 @@
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schema_contract_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "cmd/gen-openapi/schemas_remaining_execution_domains_test.go",
-            "internal/api/cross_workspace_path_query_test.go",
-            "internal/api/route_scope_invariant_test.go"
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
+            "…"
           ]
         }
       }
@@ -19050,6 +19148,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
@@ -19067,6 +19166,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/route_scope_invariant_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
@@ -19090,6 +19190,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
@@ -19107,6 +19208,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/route_scope_invariant_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
@@ -19164,6 +19266,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -19181,6 +19284,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -19462,6 +19566,9 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "contract": {
@@ -19474,7 +19581,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_pipelines.go"
+          "source_file": "internal/api/router_pipelines.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go"
+          ]
         }
       }
     },
@@ -19592,6 +19702,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -19610,6 +19721,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -19633,6 +19745,7 @@
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
         "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -19651,6 +19764,7 @@
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
             "cmd/gen-openapi/schemas_crews_workspaces_v1_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -20004,6 +20118,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/domain_schemas_test.go",
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -20021,6 +20136,7 @@
           "source_file": "internal/api/route_scope_invariant_test.go",
           "test_signals": [
             "cmd/gen-openapi/domain_schemas_test.go",
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }
@@ -20067,6 +20183,9 @@
         "docs/api-reference/workspaces.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_workflow_request_audit_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "contract": {
@@ -20079,7 +20198,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_pipelines.go"
+          "source_file": "internal/api/router_pipelines.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_workflow_request_audit_test.go"
+          ]
         }
       }
     },
@@ -20540,6 +20662,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
         "internal/api/route_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -20556,6 +20679,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/route_scope_invariant_test.go",
           "test_signals": [
+            "cmd/gen-openapi/schemas_request_core_resources_v2_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
         }

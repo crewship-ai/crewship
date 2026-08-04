@@ -450,7 +450,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = merged
 	}
 	for key, schema := range finalWorkflowIssueSchemaCatalog() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, name := range executionResponseSchemas() {
 		result[key] = DomainSchema{Response: ref(name)}
@@ -461,35 +461,40 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = schema
 	}
 	for key, schema := range finalSpecialDomainSchemaCatalog() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range final21GenericResponseSchemaCatalog() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
 	for key, schema := range coreResourceRequestsV2 {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	workflowRoutes, _ := workflowRequestSchemaCatalog()
 	for key, schema := range workflowRoutes {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	adminSpecialRoutes, _ := adminSpecialRequestSchemaCatalog()
 	for key, schema := range adminSpecialRoutes {
-		if existing, ok := result[key]; ok {
-			if schema.Response == nil {
-				schema.Response = existing.Response
-			}
-			if len(schema.ResponseMedia) == 0 {
-				schema.ResponseMedia = existing.ResponseMedia
-			}
-			if schema.SuccessStatuses == nil {
-				schema.SuccessStatuses = existing.SuccessStatuses
-			}
-		}
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result
+}
+
+func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	if incoming.Request != nil {
+		existing.Request = incoming.Request
+	}
+	if incoming.Response != nil {
+		existing.Response = incoming.Response
+	}
+	if incoming.ResponseMedia != nil {
+		existing.ResponseMedia = incoming.ResponseMedia
+	}
+	if incoming.SuccessStatuses != nil {
+		existing.SuccessStatuses = incoming.SuccessStatuses
+	}
+	return existing
 }
 
 func remainingAuthIntegrationsSchemaCatalogRoutes() map[string]DomainSchema {
