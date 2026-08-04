@@ -28,9 +28,6 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 		"FinalAuthResetRequest": object(map[string]any{
 			"token": str(), "new_password": str(),
 		}, "token", "new_password"),
-		"FinalAuthBootstrapRequest": object(map[string]any{
-			"full_name": str(), "email": str(), "password": str(),
-		}, "full_name", "email", "password"),
 		"FinalAuthRefreshToolsRequest": object(map[string]any{
 			"tools": array(object(map[string]any{"name": str(), "description": nullableString()})),
 		}),
@@ -65,7 +62,6 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 		"POST /api/v1/auth/signup":                                               {Request: ref("FinalAuthSignupRequest")},
 		"POST /api/v1/auth/forgot":                                               {Request: ref("FinalAuthForgotRequest")},
 		"POST /api/v1/auth/reset":                                                {Request: ref("FinalAuthResetRequest")},
-		"POST /api/v1/bootstrap":                                                 {Request: ref("FinalAuthBootstrapRequest")},
 		"POST /api/v1/onboarding/complete":                                       {Request: empty},
 		"POST /api/v1/auth/sessions/{id}/revoke":                                 {Request: empty},
 		"POST /api/v1/integrations/{integrationId}/test":                         {Request: empty},

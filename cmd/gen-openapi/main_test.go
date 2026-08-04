@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,34 @@ func TestBuildDocumentUsesAuditedReadSchemas(t *testing.T) {
 	request := post["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"]
 	if request.(map[string]any)["$ref"] != "#/components/schemas/CoreAgentCreateRequestV2" {
 		t.Fatalf("request schema = %#v, want CoreAgentCreateRequestV2", request)
+	}
+}
+
+func TestBuildDocumentUsesAccurateUploadRequestMedia(t *testing.T) {
+	doc := buildDocument([]route{
+		{method: "POST", path: "/api/v1/agents/{agentId}/chats/{chatId}/attachments"},
+		{method: "PUT", path: "/api/v1/agents/{agentId}/files/save"},
+		{method: "PUT", path: "/api/v1/crews/{crewId}/files/save"},
+	})
+	paths := doc["paths"].(map[string]any)
+	want := map[string]string{
+		"/api/v1/agents/{agentId}/chats/{chatId}/attachments": "multipart/form-data",
+		"/api/v1/agents/{agentId}/files/save":                 "application/octet-stream",
+		"/api/v1/crews/{crewId}/files/save":                   "application/octet-stream",
+	}
+	for path, mediaType := range want {
+		method := "put"
+		if strings.HasSuffix(path, "attachments") {
+			method = "post"
+		}
+		op := paths[path].(map[string]any)[method].(map[string]any)
+		content := op["requestBody"].(map[string]any)["content"].(map[string]any)
+		if _, ok := content[mediaType]; !ok {
+			t.Fatalf("%s request media = %#v, want %s", path, content, mediaType)
+		}
+		if _, genericJSON := content["application/json"]; genericJSON {
+			t.Fatalf("%s incorrectly advertises application/json", path)
+		}
 	}
 }
 

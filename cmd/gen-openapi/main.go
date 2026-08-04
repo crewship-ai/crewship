@@ -356,12 +356,7 @@ func buildDocument(routes []route) map[string]any {
 		}
 		switch rt.method {
 		case "POST", "PUT", "PATCH":
-			request := requestSchema(rt)
-			op["requestBody"] = map[string]any{
-				"content": map[string]any{
-					"application/json": map[string]any{"schema": request},
-				},
-			}
+			op["requestBody"] = requestBodyForRoute(rt)
 		}
 
 		opsForPath[strings.ToLower(rt.method)] = op
@@ -385,52 +380,52 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
 	for _, domain := range operationalDomainSchemaCatalog() {
 		for key, schema := range domain {
-			result[key] = schema
+			result[key] = mergeDomainSchema(result[key], schema)
 		}
 	}
 	for key, schema := range schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range remainingExecutionDomainSchemaCatalog() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range remainingAdminSystemSchemaCatalogV2() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for _, domain := range publicActivitySchemaCatalog() {
 		for key, schema := range domain {
-			result[key] = schema
+			result[key] = mergeDomainSchema(result[key], schema)
 		}
 	}
 	for key, schema := range observabilityPaymentsSchemaCatalog() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	credentialCatalog, _ := credentialsConnectorsAuthProfileSchemaCatalog()
 	for _, domain := range credentialCatalog {
 		for key, schema := range domain {
-			result[key] = schema
+			result[key] = mergeDomainSchema(result[key], schema)
 		}
 	}
 	for key, schema := range remainingAuthIntegrationsSchemaCatalogRoutes() {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	crewWorkspaceCatalogV1, _ := crewWorkspaceGETSchemaCatalogV1()
 	for _, domain := range crewWorkspaceCatalogV1 {
 		for key, schema := range domain {
-			result[key] = schema
+			result[key] = mergeDomainSchema(result[key], schema)
 		}
 	}
 	remainingCrewAgentCatalogV1, _ := remainingCrewAgentSchemaCatalogV1()
 	for key, schema := range remainingCrewAgentCatalogV1 {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	finalAdminPlatformRoutes, _ := finalAdminPlatformSchemaCatalog()
 	for key, schema := range finalAdminPlatformRoutes {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	finalCatalog, _ := finalIntegrationsConnectorsSchemaCatalog()
 	for key, schema := range finalCatalog {
-		result[key] = schema
+		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	integrationAuthRequests, _ := integrationsAuthRequestBodySchemaCatalog()
 	for key, schema := range integrationAuthRequests {
@@ -439,6 +434,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		merged := result[key]
 		if schema.Request != nil {
 			merged.Request = schema.Request
+		}
+		if schema.RequestMedia != nil {
+			merged.RequestMedia = schema.RequestMedia
 		}
 		if schema.Response != nil {
 			merged.Response = schema.Response
@@ -455,7 +453,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, name := range executionResponseSchemas() {
-		result[key] = DomainSchema{Response: ref(name)}
+		result[key] = mergeDomainSchema(result[key], DomainSchema{Response: ref(name)})
 	}
 	for key, name := range executionRequestSchemas() {
 		schema := result[key]
@@ -495,6 +493,9 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 	if incoming.Request != nil {
 		existing.Request = incoming.Request
 	}
+	if incoming.RequestMedia != nil {
+		existing.RequestMedia = incoming.RequestMedia
+	}
 	if incoming.Response != nil {
 		existing.Response = incoming.Response
 	}
@@ -505,6 +506,19 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 		existing.SuccessStatuses = incoming.SuccessStatuses
 	}
 	return existing
+}
+
+func requestBodyForRoute(rt route) map[string]any {
+	request := requestSchema(rt)
+	media := []string{"application/json"}
+	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.RequestMedia != nil {
+		media = schema.RequestMedia
+	}
+	content := make(map[string]any, len(media))
+	for _, mediaType := range media {
+		content[mediaType] = map[string]any{"schema": request}
+	}
+	return map[string]any{"content": content}
 }
 
 func remainingAuthIntegrationsSchemaCatalogRoutes() map[string]DomainSchema {

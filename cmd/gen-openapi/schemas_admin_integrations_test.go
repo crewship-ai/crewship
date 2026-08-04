@@ -33,6 +33,22 @@ func TestDomainSchemaMapUsesAccurateMediaAndPayloadShapes(t *testing.T) {
 	if signup.Request["type"] != "object" {
 		t.Fatalf("signup request = %#v", signup.Request)
 	}
+	attachment := catalog["files-media"]["POST /api/v1/agents/{agentId}/chats/{chatId}/attachments"]
+	if len(attachment.RequestMedia) != 1 || attachment.RequestMedia[0] != "multipart/form-data" {
+		t.Fatalf("attachment request media = %#v", attachment.RequestMedia)
+	}
+	if attachment.Request["properties"].(map[string]any)["file"].(map[string]any)["format"] != "binary" {
+		t.Fatalf("attachment request = %#v", attachment.Request)
+	}
+	for _, key := range []string{
+		"PUT /api/v1/agents/{agentId}/files/save",
+		"PUT /api/v1/crews/{crewId}/files/save",
+	} {
+		fileSave := catalog["files-media"][key]
+		if len(fileSave.RequestMedia) != 1 || fileSave.RequestMedia[0] != "application/octet-stream" || fileSave.Request["format"] != "binary" {
+			t.Fatalf("file save %s = %#v", key, fileSave)
+		}
+	}
 }
 
 func TestDomainSchemaMapReturnsIndependentCatalogs(t *testing.T) {

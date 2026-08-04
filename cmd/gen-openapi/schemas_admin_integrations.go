@@ -5,7 +5,11 @@ package main
 // evolve their wire types without making the route scanner grow a second,
 // domain-specific parser.
 type DomainSchema struct {
-	Request       map[string]any
+	Request map[string]any
+	// RequestMedia lists the media types accepted by the request body. When
+	// omitted, the generator uses application/json for backwards-compatible
+	// JSON endpoints.
+	RequestMedia  []string
 	Response      map[string]any
 	ResponseMedia []string
 	// SuccessStatuses replaces inferred success statuses for handlers whose
@@ -34,6 +38,14 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 	list := func(item map[string]any) map[string]any { return arraySchema(item) }
 	jsonRequest := func(properties map[string]any) map[string]any {
 		return objectSchema(properties)
+	}
+	binaryRequest := func() map[string]any {
+		return map[string]any{"type": "string", "format": "binary"}
+	}
+	multipartRequest := func(properties map[string]any, required []string) map[string]any {
+		schema := objectSchema(properties)
+		schema["required"] = required
+		return schema
 	}
 	text := func() map[string]any { return map[string]any{"type": "string"} }
 	binary := func() map[string]any { return map[string]any{"type": "string", "format": "binary"} }
@@ -122,11 +134,11 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 	filesMedia := map[string]DomainSchema{
 		"GET /api/v1/agents/{agentId}/files":                       {Response: list(anyObject())},
 		"GET /api/v1/agents/{agentId}/files/download":              {Response: binary(), ResponseMedia: []string{"application/octet-stream"}},
-		"PUT /api/v1/agents/{agentId}/files/save":                  {Request: jsonRequest(map[string]any{"path": stringSchema(), "content": stringSchema()}), Response: anyObject()},
-		"POST /api/v1/agents/{agentId}/chats/{chatId}/attachments": {Request: binary(), Response: anyObject()},
+		"PUT /api/v1/agents/{agentId}/files/save":                  {Request: binaryRequest(), RequestMedia: []string{"application/octet-stream"}, Response: anyObject()},
+		"POST /api/v1/agents/{agentId}/chats/{chatId}/attachments": {Request: multipartRequest(map[string]any{"file": binaryRequest()}, []string{"file"}), RequestMedia: []string{"multipart/form-data"}, Response: anyObject()},
 		"GET /api/v1/crews/{crewId}/files":                         {Response: list(anyObject())},
 		"GET /api/v1/crews/{crewId}/files/download":                {Response: binary(), ResponseMedia: []string{"application/octet-stream"}},
-		"PUT /api/v1/crews/{crewId}/files/save":                    {Request: jsonRequest(map[string]any{"path": stringSchema(), "content": stringSchema()}), Response: anyObject()},
+		"PUT /api/v1/crews/{crewId}/files/save":                    {Request: binaryRequest(), RequestMedia: []string{"application/octet-stream"}, Response: anyObject()},
 		"GET /api/v1/agents/{agentId}/container-files":             {Response: list(anyObject())},
 		"GET /api/v1/users/{id}/avatar":                            {Response: binary(), ResponseMedia: []string{"image/svg+xml"}},
 		"POST /api/v1/users/me/avatar":                             {Request: binary(), Response: anyObject()},

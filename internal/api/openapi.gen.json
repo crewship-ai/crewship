@@ -4698,6 +4698,173 @@
         },
         "type": "object"
       },
+      "FinalAuthAvatarUploadRequest": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
+      "FinalAuthCredentialTestRequest": {
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      },
+      "FinalAuthEmptyRequest": {
+        "properties": {},
+        "type": "object"
+      },
+      "FinalAuthForgotRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAuthPeerConsentRequest": {
+        "properties": {
+          "opted_out": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "opted_out"
+        ],
+        "type": "object"
+      },
+      "FinalAuthRefreshToolsRequest": {
+        "properties": {
+          "tools": {
+            "items": {
+              "properties": {
+                "description": {
+                  "nullable": true,
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "FinalAuthResetRequest": {
+        "properties": {
+          "new_password": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "type": "object"
+      },
+      "FinalAuthRevealRequest": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "FinalAuthSignupRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name",
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "FinalAuthUserPreferenceValue": {
+        "description": "Arbitrary JSON value stored for the authenticated user and preference key.",
+        "oneOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "items": {},
+            "type": "array"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "FinalAuthWebhookPayload": {
+        "description": "Arbitrary JSON payload forwarded to the webhook pipeline.",
+        "oneOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "items": {},
+            "type": "array"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "FinalChatList": {
         "items": {
           "properties": {
@@ -28268,8 +28435,17 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
                 "type": "object"
               }
             }
@@ -30156,9 +30332,10 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "type": "object"
+                "format": "binary",
+                "type": "string"
               }
             }
           }
@@ -37004,7 +37181,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthForgotRequest"
               }
             }
           }
@@ -38688,7 +38865,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthResetRequest"
               }
             }
           }
@@ -38857,7 +39034,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -39022,7 +39199,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthSignupRequest"
               }
             }
           }
@@ -48459,7 +48636,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthRevealRequest"
               }
             }
           }
@@ -49273,7 +49450,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthCredentialTestRequest"
               }
             }
           }
@@ -53872,9 +54049,10 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "type": "object"
+                "format": "binary",
+                "type": "string"
               }
             }
           }
@@ -55043,7 +55221,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -55339,7 +55517,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FinalCoreRefreshToolsRequest"
+                "$ref": "#/components/schemas/FinalAuthRefreshToolsRequest"
               }
             }
           }
@@ -69617,7 +69795,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -69750,7 +69928,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -72692,7 +72870,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -76852,7 +77030,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthUserPreferenceValue"
               }
             }
           }
@@ -77030,7 +77208,7 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/zip": {
                 "schema": {
                   "properties": {
                     "documents": {
@@ -77087,12 +77265,6 @@
                     }
                   },
                   "type": "object"
-                }
-              },
-              "application/zip": {
-                "schema": {
-                  "format": "binary",
-                  "type": "string"
                 }
               }
             },
@@ -83554,7 +83726,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -83804,7 +83976,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -85137,7 +85309,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
+                "$ref": "#/components/schemas/FinalAuthEmptyRequest"
               }
             }
           }
@@ -97079,7 +97251,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthAvatarUploadRequest"
               }
             }
           }
@@ -97821,7 +97993,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthPeerConsentRequest"
               }
             }
           }
@@ -98831,7 +99003,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthWebhookPayload"
               }
             }
           }
@@ -98887,7 +99059,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/FinalAuthWebhookPayload"
               }
             }
           }
