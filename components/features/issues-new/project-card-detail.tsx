@@ -21,11 +21,20 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CalendarClock, CircleDot, FolderKanban, Tag, UserCircle2, Users } from "lucide-react"
+import {
+  Activity,
+  CalendarClock,
+  CircleDot,
+  FolderKanban,
+  Tag,
+  UserCircle2,
+  Users,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { formatDate, formatShortDate, relTime } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { TintedCard, type TintTone } from "./tinted-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
@@ -51,11 +60,27 @@ interface Props {
 
 type BreakdownTab = "assignees" | "labels"
 
+/**
+ * Health, as the one verdict on this page. `DetailCard`'s tone scale has no
+ * destructive border, so off-track routes to the tinted card instead — which
+ * is the louder treatment anyway, and off-track is the loud case.
+ */
+const HEALTH_TINT: Record<Project["health"], TintTone> = {
+  on_track: "success",
+  at_risk: "warn",
+  off_track: "destructive",
+}
+
+function clamp(n: number): number {
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
 export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
   const [breakdown, setBreakdown] = React.useState<BreakdownTab>("assignees")
 
   const facts = React.useMemo(() => projectFacts(project, stats), [project, stats])
   const scope = stats?.total_issues ?? project.issue_count
+  const done = stats?.completed_issues ?? project.done_count
   const Icon = getCrewIconDef(project.icon || "folder").icon
   const segments = React.useMemo(() => donutSegments(stats), [stats])
 
@@ -266,7 +291,12 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
 
         <div className="flex flex-col gap-4">
           <Appear order={4}>
-            <DetailCard title="Progress">
+            <TintedCard
+              tone={HEALTH_TINT[project.health]}
+              icon={Activity}
+              title={`${projectHealthLabel(project.health)} · ${clamp(project.progress)}% done`}
+              subtitle={`${done} of ${scope} closed`}
+            >
               {segments.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground">
                   No issues to measure yet.
@@ -305,7 +335,7 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
                   </ul>
                 </div>
               )}
-            </DetailCard>
+            </TintedCard>
           </Appear>
 
           <Appear order={5}>
@@ -345,57 +375,63 @@ export function ProjectCardDetail({ project, stats, issues, actions }: Props) {
             </DetailCard>
           </Appear>
 
-          <Appear order={6}>
-            <DetailCard title="Teams" icon={Users}>
-              {(stats?.crews?.length ?? 0) === 0 ? (
-                <p className="text-[12px] text-muted-foreground">
-                  No crew has picked up work here yet.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {stats!.crews.map((c) => (
-                    <EntityChip key={c} icon={Users} label={c} />
-                  ))}
-                </div>
-              )}
-            </DetailCard>
-          </Appear>
-
-          <Appear order={7}>
-            <DetailCard title="Labels" icon={Tag}>
-              {(stats?.by_label?.length ?? 0) === 0 ? (
-                <p className="text-[12px] text-muted-foreground">No labels.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {stats!.by_label.map((l) => (
-                    <span
-                      key={l.label_name}
-                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
-                      style={{ backgroundColor: `${l.color}1f`, color: l.color }}
-                    >
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: l.color }}
-                      />
-                      {l.label_name}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </DetailCard>
-          </Appear>
-
-          <Appear order={8}>
-            <DetailCard title="Metadata">
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
-                <Fact label="created" value={formatDate(project.created_at)} />
-                <Fact label="updated" value={relTime(project.updated_at)} />
-                <Fact label="slug" value={project.slug} mono />
-                <Fact label="id" value={project.id} mono />
-              </dl>
-            </DetailCard>
-          </Appear>
         </div>
+      </div>
+
+      {/* Short, glanceable, and none of it worth a rail slot. Spanning the
+          full width is also what keeps the page from ending in a column of
+          dead space beside a rail that outgrew the main column. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Appear order={6}>
+          <DetailCard title="Teams" icon={Users}>
+            {(stats?.crews?.length ?? 0) === 0 ? (
+              <p className="text-[12px] text-muted-foreground">
+                No crew has picked up work here yet.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {stats!.crews.map((c) => (
+                  <EntityChip key={c} icon={Users} label={c} />
+                ))}
+              </div>
+            )}
+          </DetailCard>
+        </Appear>
+
+        <Appear order={7}>
+          <DetailCard title="Labels" icon={Tag}>
+            {(stats?.by_label?.length ?? 0) === 0 ? (
+              <p className="text-[12px] text-muted-foreground">No labels.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {stats!.by_label.map((l) => (
+                  <span
+                    key={l.label_name}
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"
+                    style={{ backgroundColor: `${l.color}1f`, color: l.color }}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: l.color }}
+                    />
+                    {l.label_name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </DetailCard>
+        </Appear>
+
+        <Appear order={8}>
+          <DetailCard title="Metadata">
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
+              <Fact label="created" value={formatDate(project.created_at)} />
+              <Fact label="updated" value={relTime(project.updated_at)} />
+              <Fact label="slug" value={project.slug} mono />
+              <Fact label="id" value={project.id} mono />
+            </dl>
+          </DetailCard>
+        </Appear>
       </div>
     </div>
   )

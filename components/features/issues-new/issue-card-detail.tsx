@@ -28,7 +28,10 @@
 import * as React from "react"
 import Link from "next/link"
 import {
+  ArrowUpRight,
+  CheckCircle2,
   CircleDot,
+  Clock,
   Flag,
   FolderKanban,
   GitBranch,
@@ -37,11 +40,13 @@ import {
   Tag,
   UserCircle2,
   Users,
+  XCircle,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { formatDate, relTime, timeAgo } from "@/lib/time"
+import { formatDate, formatDurationDecimal, relTime, timeAgo } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { TintedCard, TintedFacts, type TintTone } from "./tinted-card"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
@@ -57,11 +62,26 @@ import type {
   Project,
 } from "@/lib/types/mission"
 
+/** `GET /api/v1/crews/{crewId}/issues/{identifier}/runs` (issue_handler_runs.go). */
+export interface IssueRun {
+  id: string
+  status: string
+  agent_name?: string
+  task?: string
+  started_at?: string
+  ended_at?: string
+  duration_ms: number
+  result_summary?: string
+  error_message?: string
+}
+
 interface Props {
   issue: Mission
   comments: IssueComment[]
   activities: IssueActivity[]
   relations: IssueRelation[]
+  /** Newest first, as the endpoint returns them. */
+  runs?: IssueRun[]
   /** The issue's project, already resolved by the caller. */
   project?: Project | null
   /**
@@ -80,6 +100,7 @@ export function IssueCardDetail({
   comments,
   activities,
   relations,
+  runs = [],
   project,
   actions,
 }: Props) {
@@ -235,9 +256,16 @@ export function IssueCardDetail({
         </div>
 
         <div className="flex flex-col gap-4">
+          {/* The one tinted card on the page. An issue that has run is
+              first of all a thing that either worked or did not, and the
+              wash says which before a word of it is read. */}
+          <Appear order={4}>
+            <LatestRun run={runs[0] ?? null} issue={issue} />
+          </Appear>
+
           {/* One header, not two. The old rail wrapped a panel that drew its
               own PROPERTIES header inside a card titled PROPERTIES. */}
-          <Appear order={4}>
+          <Appear order={5}>
             {/* Only what the figures band above does not already carry.
                 Due and Estimate live there; repeating them here is the
                 duplication this redesign is supposed to remove. */}
@@ -276,7 +304,7 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
-          <Appear order={5}>
+          <Appear order={6}>
             <DetailCard title="Routine" icon={GitBranch} tone="purple">
               {issue.routine_name ? (
                 <div className="space-y-2">
@@ -300,7 +328,7 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
-          <Appear order={6}>
+          <Appear order={7}>
             <DetailCard title="Project" icon={FolderKanban}>
               {project ? (
                 <div className="space-y-2.5">
@@ -327,7 +355,7 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
-          <Appear order={7}>
+          <Appear order={8}>
             <DetailCard title="Labels" icon={Tag} subtitle={labels.length > 0 ? String(labels.length) : undefined}>
               {labels.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
@@ -341,21 +369,6 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
-          <Appear order={8}>
-            <DetailCard title="Metadata">
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px]">
-                <Fact label="created" value={formatDate(issue.created_at)} />
-                <Fact label="updated" value={relTime(issue.updated_at)} />
-                <Fact
-                  label="author"
-                  value={issue.created_by?.name ?? issue.created_by?.id ?? "—"}
-                />
-                <Fact label="via" value={issue.authored_via ?? "ui"} />
-                <Fact label="crew" value={issue.crew_slug ?? issue.crew_name ?? "—"} />
-                <Fact label="id" value={issue.id} mono />
-              </dl>
-            </DetailCard>
-          </Appear>
         </div>
       </div>
 
@@ -452,8 +465,89 @@ export function IssueCardDetail({
         </DetailCard>
       </Appear>
 
+      {/* Metadata spans the width rather than sitting at the bottom of the
+          rail: a rail taller than the main column leaves dead space beside it
+          that a two-column grid has nothing to put in. */}
+      <Appear order={10}>
+        <DetailCard title="Metadata">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-3 xl:grid-cols-6">
+            <Fact label="created" value={formatDate(issue.created_at)} />
+            <Fact label="updated" value={relTime(issue.updated_at)} />
+            <Fact label="author" value={issue.created_by?.name ?? issue.created_by?.id ?? "—"} />
+            <Fact label="via" value={issue.authored_via ?? "ui"} />
+            <Fact label="crew" value={issue.crew_slug ?? issue.crew_name ?? "—"} />
+            <Fact label="id" value={issue.id} mono />
+          </dl>
+        </DetailCard>
+      </Appear>
     </div>
   )
+}
+
+/**
+ * How the last attempt ended.
+ *
+ * The one tinted card on the page. An issue that has run is first of all a
+ * thing that either worked or did not, and the wash says which before a word
+ * of it is read — the treatment the routine detail uses for its Last run, and
+ * the reason it is worth copying.
+ *
+ * Reads `assignments` through the issue's tasks, so "nothing has run" is the
+ * honest answer for an issue nobody started, not a card full of dashes.
+ */
+function LatestRun({ run, issue }: { run: IssueRun | null; issue: Mission }) {
+  if (!run) {
+    return (
+      <DetailCard title="Runs">
+        <p className="text-[12px] text-muted-foreground">
+          {issue.status === "BACKLOG" || issue.status === "TODO"
+            ? "Not started yet — nothing has run."
+            : "No agent run recorded against this issue."}
+        </p>
+      </DetailCard>
+    )
+  }
+
+  const tone = runTint(run.status)
+  const Icon = tone === "success" ? CheckCircle2 : tone === "destructive" ? XCircle : Clock
+
+  return (
+    <TintedCard
+      tone={tone}
+      icon={Icon}
+      title={`Last run · ${run.status.toLowerCase()}`}
+      subtitle={run.id}
+    >
+      <TintedFacts
+        items={[
+          { label: "started", value: run.started_at ? relTime(run.started_at) : "—" },
+          {
+            label: "duration",
+            value: run.duration_ms > 0 ? formatDurationDecimal(run.duration_ms) : "—",
+          },
+          { label: "agent", value: run.agent_name || "—" },
+        ]}
+      />
+      {run.error_message && (
+        <p className="line-clamp-2 text-[11px] text-destructive/90">{run.error_message}</p>
+      )}
+      <Link
+        href={`/activity?mission=${encodeURIComponent(issue.id)}`}
+        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+      >
+        Open full trace
+        <ArrowUpRight className="h-3 w-3" />
+      </Link>
+    </TintedCard>
+  )
+}
+
+function runTint(status: string): TintTone {
+  const s = status.toLowerCase()
+  if (s === "completed" || s === "succeeded" || s === "success") return "success"
+  if (s === "failed" || s === "error" || s === "cancelled") return "destructive"
+  if (s === "in_progress" || s === "running") return "info"
+  return "neutral"
 }
 
 /* ------------------------------------------------------------------ *

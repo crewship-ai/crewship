@@ -149,6 +149,50 @@ describe("IssueCardDetail", () => {
     expect(screen.getByText(/No routine bound/)).toBeInTheDocument()
   })
 
+  it("says nothing has run rather than showing a card of dashes", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+      />,
+    )
+    expect(screen.getByText(/Not started yet/)).toBeInTheDocument()
+  })
+
+  it("tints the last run by how it ended", () => {
+    const { container, rerender } = render(
+      <IssueCardDetail
+        issue={issue({ status: "COMPLETED" })}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        runs={[{ id: "run_1", status: "COMPLETED", duration_ms: 23700, agent_name: "Robin" }]}
+        project={null}
+      />,
+    )
+    expect(screen.getByText("Last run · completed")).toBeInTheDocument()
+    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).not.toBeNull()
+
+    rerender(
+      <IssueCardDetail
+        issue={issue({ status: "FAILED" })}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        runs={[{ id: "run_2", status: "FAILED", duration_ms: 900, error_message: "exit 1" }]}
+        project={null}
+      />,
+    )
+    // The wash is the whole point: it says how this ended before a word of
+    // it is read, so a failed run must not keep the success gradient.
+    expect(container.querySelector(".from-destructive\\/\\[0\\.06\\]")).not.toBeNull()
+    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).toBeNull()
+    expect(screen.getByText("exit 1")).toBeInTheDocument()
+  })
+
   it("names the bound routine when there is one", () => {
     render(
       <IssueCardDetail
@@ -195,6 +239,35 @@ describe("ProjectCardDetail", () => {
     )
     expect(screen.getAllByText("At risk").length).toBeGreaterThan(0)
     expect(screen.queryByText("at_risk")).toBeNull()
+  })
+
+  it("keeps the short cards out of the rail so it cannot outgrow the main column", () => {
+    // The void in the first screenshot was structural: a rail taller than the
+    // main column leaves dead space beside it that a two-column grid has
+    // nothing to fill. Teams / Labels / Metadata span the full width instead.
+    const { container } = render(
+      <ProjectCardDetail project={project()} stats={NO_STATS} issues={[issue()]} />,
+    )
+    const body = container.querySelector(".xl\\:grid-cols-3.2xl\\:grid-cols-4")
+    expect(body).not.toBeNull()
+    for (const heading of ["Teams", "Labels", "Metadata"]) {
+      expect(body!.contains(screen.getByText(heading))).toBe(false)
+    }
+    // Progress and Properties are what the rail keeps.
+    expect(body!.contains(screen.getByText("Properties"))).toBe(true)
+  })
+
+  it("tints the progress card by health", () => {
+    const { container, rerender } = render(
+      <ProjectCardDetail project={project({ health: "on_track" })} stats={NO_STATS} issues={[]} />,
+    )
+    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).not.toBeNull()
+
+    rerender(
+      <ProjectCardDetail project={project({ health: "off_track" })} stats={NO_STATS} issues={[]} />,
+    )
+    expect(container.querySelector(".from-destructive\\/\\[0\\.06\\]")).not.toBeNull()
+    expect(container.querySelector(".from-success\\/\\[0\\.06\\]")).toBeNull()
   })
 
   it("tells the reader the project is empty instead of rendering nothing", () => {

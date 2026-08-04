@@ -18,7 +18,7 @@ import { SubBar } from "@/components/layout/sub-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiFetch } from "@/lib/api-fetch"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { IssueCardDetail } from "./issue-card-detail"
+import { IssueCardDetail, type IssueRun } from "./issue-card-detail"
 import { ProjectCardDetail } from "./project-card-detail"
 import type {
   IssueActivity,
@@ -55,6 +55,7 @@ export function IssuesNewPreview() {
   const [comments, setComments] = React.useState<IssueComment[]>([])
   const [activities, setActivities] = React.useState<IssueActivity[]>([])
   const [relations, setRelations] = React.useState<IssueRelation[]>([])
+  const [runs, setRuns] = React.useState<IssueRun[]>([])
   const [stats, setStats] = React.useState<ProjectStats | null>(null)
 
   React.useEffect(() => {
@@ -69,6 +70,7 @@ export function IssuesNewPreview() {
     setComments([])
     setActivities([])
     setRelations([])
+    setRuns([])
     setStats(null)
     setIssueId(null)
     setProjectId(null)
@@ -109,6 +111,7 @@ export function IssuesNewPreview() {
       setComments([])
       setActivities([])
       setRelations([])
+      setRuns([])
       return
     }
     let cancelled = false
@@ -121,13 +124,15 @@ export function IssuesNewPreview() {
       apiFetch(`${base}/comments?${qs}`).then((r) => (r.ok ? r.json() : [])),
       apiFetch(`${base}/activity?${qs}`).then((r) => (r.ok ? r.json() : [])),
       apiFetch(`${base}/relations?${qs}`).then((r) => (r.ok ? r.json() : [])),
+      apiFetch(`${base}/runs?${qs}`).then((r) => (r.ok ? r.json() : [])),
     ])
-      .then(([full, cs, as, rs]) => {
+      .then(([full, cs, as, rs, rn]) => {
         if (cancelled) return
         setIssue(full ?? listRow)
         setComments(Array.isArray(cs) ? cs : [])
         setActivities(Array.isArray(as) ? as : [])
         setRelations(Array.isArray(rs) ? rs : [])
+        setRuns(Array.isArray(rn) ? rn : [])
       })
       .catch(() => {})
     return () => {
@@ -230,6 +235,7 @@ export function IssuesNewPreview() {
               comments={comments}
               activities={activities}
               relations={relations}
+              runs={runs}
               project={issueProject}
               actions={<DisabledActions labels={["Start work", "⋯"]} />}
             />
