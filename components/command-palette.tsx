@@ -707,7 +707,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       {/* The kit's footer strip. The palette is the one surface here whose
           whole interaction is the keyboard, and it was the one that never
           said so. */}
-      <div className="flex items-center gap-3 border-t border-white/[0.06] px-3 py-1.5">
+      <div
+        data-testid="palette-hints"
+        className="flex items-center gap-3 border-t border-white/[0.06] px-3 py-1.5"
+      >
         <PaletteHint keys={["↑", "↓"]}>navigate</PaletteHint>
         <PaletteHint keys={["↵"]}>open</PaletteHint>
         <PaletteHint keys={["esc"]}>close</PaletteHint>
