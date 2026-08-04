@@ -1,0 +1,21 @@
+---
+title: "self-update"
+description: "Upgrade the Crewship binary from a released installation."
+icon: "download"
+---
+
+## `crewship self-update`
+
+Checks for and installs the latest release. Homebrew installations use
+Homebrew; installer/tarball installations download and verify the matching
+asset. Development builds cannot self-update.
+
+```bash
+crewship self-update --check
+crewship self-update
+crewship self-update --systemd --service crewship --health-timeout 60s
+```
+
+`--check` makes no changes. `--systemd` orchestrates stop → replace → start →
+health-check and automatically rolls back when startup or health checks fail.
+Additional options include `--service`, `--health-url`, and `--port`.

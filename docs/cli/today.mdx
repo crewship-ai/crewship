@@ -1,0 +1,17 @@
+---
+title: "today"
+description: "Show today's runs and workspace spend."
+icon: "calendar"
+---
+
+## `crewship today`
+
+Loads today's UTC runs and the last 24 hours of top spenders.
+
+```bash
+crewship today
+crewship today --format json
+```
+
+Requires authentication and a workspace. The command continues with partial
+results when one of its read-only data sources fails.

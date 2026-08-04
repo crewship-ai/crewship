@@ -1,15 +1,15 @@
 {
-  "generated_at": "2026-08-04T09:21:08Z",
-  "git_ref": "0786f4bd",
+  "generated_at": "2026-08-04T09:25:15Z",
+  "git_ref": "b79938fb",
   "summary": {
     "api_operations": 539,
     "api_exact_docs": 501,
     "api_resource_docs": 38,
     "api_missing_docs": 0,
     "cli_operations": 723,
-    "cli_exact_docs": 637,
-    "cli_root_docs_present": 715,
-    "cli_root_docs_missing": 8,
+    "cli_exact_docs": 640,
+    "cli_root_docs_present": 723,
+    "cli_root_docs_missing": 0,
     "api_with_test_signals": 357,
     "cli_with_test_signals": 709
   },
@@ -18558,9 +18558,13 @@
       "root": "logout",
       "exact_docs": [
         "docs/cli/login.mdx",
+        "docs/cli/logout.mdx",
         "docs/cli/overview.mdx"
       ],
-      "status": "documented_exact_no_root"
+      "root_docs": [
+        "docs/cli/logout.mdx"
+      ],
+      "status": "documented_exact"
     },
     {
       "path": "logs",
@@ -19369,7 +19373,13 @@
       "use": "model",
       "short": "Discover the models a provider can serve",
       "root": "model",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/model.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/model.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_cost_forecast_cov_test.go",
         "cmd/crewship/cmd_export_cov_test.go",
@@ -19387,7 +19397,13 @@
       "use": "list",
       "short": "List models for a provider (live when a credential exists, else curated)",
       "root": "model",
-      "status": "missing_root_docs",
+      "exact_docs": [
+        "docs/cli/model.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/model.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
@@ -20118,9 +20134,13 @@
       "exact_docs": [
         "docs/cli/capacity.mdx",
         "docs/cli/crew.mdx",
-        "docs/cli/me.mdx"
+        "docs/cli/me.mdx",
+        "docs/cli/now.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/now.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_routine_schedules_cov_test.go",
         "cmd/crewship/cmd_routine_watch_progress_test.go",
@@ -21559,9 +21579,13 @@
       "short": "Resurrect a ghosted ephemeral agent for another TTL window",
       "root": "rehire",
       "exact_docs": [
-        "docs/cli/hire.mdx"
+        "docs/cli/hire.mdx",
+        "docs/cli/rehire.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/rehire.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_hire_test.go"
       ]
@@ -23695,7 +23719,13 @@
       "use": "self-update",
       "short": "Upgrade the crewship binary to the latest release",
       "root": "self-update",
-      "status": "missing_root_docs"
+      "exact_docs": [
+        "docs/cli/self-update.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/self-update.mdx"
+      ],
+      "status": "documented_exact"
     },
     {
       "path": "server",
@@ -24820,9 +24850,13 @@
       "short": "Today's runs and spend across the workspace",
       "root": "today",
       "exact_docs": [
-        "docs/cli/me.mdx"
+        "docs/cli/me.mdx",
+        "docs/cli/today.mdx"
       ],
-      "status": "documented_exact_no_root"
+      "root_docs": [
+        "docs/cli/today.mdx"
+      ],
+      "status": "documented_exact"
     },
     {
       "path": "token",
@@ -25181,9 +25215,13 @@
         "docs/cli/login.mdx",
         "docs/cli/overview.mdx",
         "docs/cli/session.mdx",
-        "docs/cli/token.mdx"
+        "docs/cli/token.mdx",
+        "docs/cli/whoami.mdx"
       ],
-      "status": "documented_exact_no_root",
+      "root_docs": [
+        "docs/cli/whoami.mdx"
+      ],
+      "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_whoami_json_test.go"
       ]

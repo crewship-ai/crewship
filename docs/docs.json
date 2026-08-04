@@ -233,7 +233,9 @@
               "cli/session",
               "cli/token",
               "cli/me",
-              "cli/admin"
+              "cli/admin",
+              "cli/logout",
+              "cli/whoami"
             ]
           },
           {
@@ -255,6 +257,8 @@
               "cli/recall",
               "cli/recap",
               "cli/inspect"
+              ,"cli/model",
+              "cli/rehire"
             ]
           },
           {
@@ -378,6 +382,7 @@
               "cli/runtimes",
               "cli/eval",
               "cli/consolidate",
+              "cli/self-update",
               "cli/credential",
               "cli/seed",
               "cli/nuke"
@@ -390,6 +395,8 @@
             "expanded": false,
             "pages": [
               "cli/diff",
+              "cli/now",
+              "cli/today",
               "cli/explain",
               "cli/expose",
               "cli/lint",
