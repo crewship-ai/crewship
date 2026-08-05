@@ -26,7 +26,7 @@ const issues = [
   issue({ id: "i3", title: "Probe the network", identifier: "CRE-103", status: "backlog" as MissionStatus, priority: undefined, assignee_name: undefined, crew_name: undefined }),
 ]
 
-function run(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
+function render(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
   const { result } = renderHook(() =>
     useFilteredIssues({
       issues,
@@ -40,7 +40,15 @@ function run(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
       ...overrides,
     }),
   )
-  return result.current.map((i) => i.id)
+  return result.current
+}
+
+function run(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
+  return render(overrides).visible.map((i) => i.id)
+}
+
+function facet(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
+  return render(overrides).statusFacet.map((i) => i.id)
 }
 
 describe("useFilteredIssues — status filter", () => {
@@ -50,6 +58,30 @@ describe("useFilteredIssues — status filter", () => {
 
   it("multiple statuses OR-compose", () => {
     expect(run({ filterStatuses: ["done", "backlog"] as MissionStatus[] })).toEqual(["i2", "i3"])
+  })
+})
+
+// `statusFacet` is what the status chips count. Deriving the counts from
+// `visible` (which has the status filter applied) makes every unselected chip
+// read 0 — and a zero-count chip is not rendered, so multi-select is
+// unreachable from the UI.
+describe("useFilteredIssues — statusFacet", () => {
+  it("ignores the status filter", () => {
+    expect(facet({ filterStatuses: ["done"] as MissionStatus[] })).toEqual(["i1", "i2", "i3"])
+  })
+
+  it("is the same list as `visible` when no status is selected", () => {
+    const { visible, statusFacet } = render({})
+    expect(statusFacet).toEqual(visible)
+  })
+
+  it("still applies every other filter", () => {
+    expect(
+      facet({ search: "probe", filterStatuses: ["done"] as MissionStatus[] }),
+    ).toEqual(["i3"])
+    expect(
+      facet({ filterPriority: "high" as IssuePriority, filterStatuses: ["done"] as MissionStatus[] }),
+    ).toEqual(["i1"])
   })
 })
 

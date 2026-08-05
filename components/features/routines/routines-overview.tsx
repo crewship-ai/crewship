@@ -1,0 +1,707 @@
+"use client"
+
+// The routines landing pane.
+//
+// What was here: a table of every routine in the workspace. On the
+// instance this was designed against it was 38 rows, 37 of which read
+// "never invoked · 0 · — · 8d ago", under four tiles of which one
+// repeated the page header and another reported "PASS RATE 100%" off a
+// single run.
+//
+// The sidebar to the left is already the catalog — iconed, searchable,
+// filtered by status. So the main pane was the same list a second
+// time, and the second copy was the one that could not be searched.
+//
+// It answers, in the order someone asks on arrival: did anything run
+// today, is the catalog healthy, what fires next, what ran, what did
+// it cost, what is broken. Selecting a routine in the sidebar replaces
+// this with that routine's card.
+//
+// Shares its shell components with /dashboard rather than imitating
+// them, so a green arc means the same thing on both pages and neither
+// drifts from the other.
+
+import * as React from "react"
+import Link from "next/link"
+import {
+  Activity,
+  AlarmClock,
+  AlertTriangle,
+  Banknote,
+  CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  PieChart,
+  UserCheck,
+  XCircle,
+} from "lucide-react"
+
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+
+import { cn } from "@/lib/utils"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
+import { Appear } from "@/components/ui/detail"
+import { Skeleton } from "@/components/ui/skeleton"
+import { KpiCard } from "@/components/features/dashboard/kpi-card"
+import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { StatusDonut } from "@/components/features/dashboard/status-donut"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
+import { describeCron } from "@/lib/cron-describe"
+import { formatDurationDecimal, relTime } from "@/lib/time"
+import { Spinner } from "@/components/ui/spinner"
+import { toast } from "sonner"
+import { waitpointDecide } from "@/lib/api/waitpoints"
+import { useWorkspaceWaitpoints } from "@/hooks/use-run-waitpoints"
+import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
+import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
+import type { Pipeline } from "@/hooks/use-pipelines"
+import {
+  catalogBuckets,
+  isLiveStatus,
+  needsAttention,
+  nextScheduled,
+  recentRuns,
+  runsToday,
+  runOutcomesByDay,
+  recentFailures,
+  successRate,
+  upcomingSchedules,
+  pendingApprovals,
+  type PendingApproval,
+  type OutcomeDay,
+} from "@/lib/routines-overview"
+
+const SUCCESS_WINDOW_DAYS = 7
+const RECENT_RUN_LIMIT = 10
+const UPCOMING_LIMIT = 6
+const FAILING_LIMIT = 5
+
+interface Props {
+  workspaceId: string
+  routines: Pipeline[]
+  loading: boolean
+  error: string | null
+  onSelect: (slug: string) => void
+  /** Sets the sidebar's status filter — the donut's click-through. */
+  onFilter?: (filter: string) => void
+}
+
+export function RoutinesOverview({
+  workspaceId,
+  routines,
+  loading,
+  error,
+  onSelect,
+  onFilter,
+}: Props) {
+  const { runs } = usePipelineRuns(workspaceId, "all")
+  const { schedules } = usePipelineSchedules(workspaceId)
+  const { bySlug: liveBySlug } = useActiveRoutineRuns()
+  const { waitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
+
+  // One clock for the whole render. Deriving `new Date()` inside each
+  // helper would let two tiles disagree about what "today" is across a
+  // midnight boundary, and the bug would appear once a day for one
+  // second.
+  const [now, setNow] = React.useState(() => new Date())
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const routineBySlug = React.useMemo(
+    () => new Map(routines.map((r) => [r.slug, r])),
+    [routines],
+  )
+  const liveSlugs = React.useMemo(() => new Set(liveBySlug.keys()), [liveBySlug])
+
+  const today = React.useMemo(() => runsToday(runs, now), [runs, now])
+  const success = React.useMemo(() => successRate(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
+  const next = React.useMemo(() => nextScheduled(schedules, now), [schedules, now])
+  const attention = React.useMemo(() => needsAttention(routines), [routines])
+  const buckets = React.useMemo(() => catalogBuckets(routines, liveSlugs), [routines, liveSlugs])
+  const upcoming = React.useMemo(
+    () => upcomingSchedules(schedules, now, UPCOMING_LIMIT),
+    [schedules, now],
+  )
+  const recent = React.useMemo(() => recentRuns(runs, RECENT_RUN_LIMIT), [runs])
+  // A waitpoint carries a run id, not a slug — this is how the queue
+  // learns which routine stopped.
+  const slugByRunId = React.useMemo(
+    () => new Map(runs.map((r) => [r.id, r.pipeline_slug])),
+    [runs],
+  )
+  const waiting = React.useMemo(
+    () => pendingApprovals(waitpoints, routines, slugByRunId),
+    [waitpoints, routines, slugByRunId],
+  )
+  const outcomes = React.useMemo(() => runOutcomesByDay(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
+  const weekTotal = React.useMemo(
+    () => outcomes.reduce((s, d) => s + d.passed + d.failed + d.pending + d.other, 0),
+    [outcomes],
+  )
+  const failures = React.useMemo(() => recentFailures(runs, FAILING_LIMIT), [runs])
+
+  const nextRoutine = next?.target_pipeline_slug
+    ? routineBySlug.get(next.target_pipeline_slug)
+    : undefined
+
+  if (loading && routines.length === 0) return <OverviewSkeleton />
+
+  return (
+    <div className="h-full overflow-auto">
+      <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
+        {/* No Refresh button. A dashboard with one is a dashboard
+            admitting it is not live, and this one is: run events
+            already pushed themselves, and the catalog now broadcasts
+            `pipeline.saved` on every save, approval, rejection,
+            disable and delete — which is the gap the button was
+            really covering. Schedules listen to run events too, since
+            next_run_at moves the moment one fires. */}
+        <Appear order={0}>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
+            <p className="text-xs text-muted-foreground">
+              {routines.length} {routines.length === 1 ? "routine" : "routines"} in this workspace
+            </p>
+          </div>
+        </Appear>
+
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        {/* ── What happened today, and what happens next ───────────── */}
+        <Appear order={1}>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiCard
+              label="Runs today"
+              value={today.total}
+              subtitle={today.total === 0 ? "nothing yet" : `${today.failed} failed`}
+              valueColor={today.failed > 0 ? "rgb(248, 113, 113)" : undefined}
+            />
+            {/* The rate carries its denominator. "100%" off one run is
+                not a health signal, and a reader shown "1 of 1" can
+                discount it without being told to. */}
+            <KpiCard
+              label={`Success · ${SUCCESS_WINDOW_DAYS}d`}
+              value={success.pct === null ? "—" : `${success.pct}%`}
+              subtitle={success.total === 0 ? "no finished runs" : `${success.ok} of ${success.total}`}
+            />
+            <KpiCard
+              label="Next run"
+              value={next?.next_run_at ? relTime(next.next_run_at) : "—"}
+              subtitle={
+                next
+                  ? nextRoutine?.name || next.target_pipeline_slug || next.name
+                  : "nothing scheduled"
+              }
+            />
+            <KpiCard
+              label="Needs attention"
+              value={attention.total}
+              valueColor={attention.total > 0 ? "rgb(251, 191, 36)" : undefined}
+              subtitle={
+                attention.total === 0
+                  ? "all clear"
+                  : [
+                      attention.failing > 0 ? `${attention.failing} failing` : null,
+                      attention.awaitingApproval > 0 ? `${attention.awaitingApproval} to approve` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+              }
+            />
+          </div>
+        </Appear>
+
+        {/* ── The catalog as a shape, and the week ahead ───────────── */}
+        <Appear order={2}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <DashboardCard
+              title="Catalog health"
+              icon={PieChart}
+              hint={`${routines.length} total`}
+            >
+              {/* The arcs sum to the catalog, so the number in the
+                  centre is the number in the header. A donut whose
+                  slices do not add up is worse than no donut. */}
+              <StatusDonut
+                data={buckets}
+                centerLabel="routines"
+                onSelect={
+                  onFilter
+                    ? (key) => {
+                        const b = buckets.find((x) => x.key === key)
+                        if (b) onFilter(b.filter)
+                      }
+                    : undefined
+                }
+              />
+            </DashboardCard>
+
+            <DashboardCard
+              title="Firing next"
+              icon={CalendarClock}
+              hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : "none scheduled"}
+            >
+              {upcoming.length === 0 ? (
+                <Empty icon={AlarmClock}>
+                  No schedule is due. Open a routine and add one under Triggers.
+                </Empty>
+              ) : (
+                <div className="flex flex-col">
+                  {upcoming.map((s) => {
+                    const r = s.target_pipeline_slug
+                      ? routineBySlug.get(s.target_pipeline_slug)
+                      : undefined
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => s.target_pipeline_slug && onSelect(s.target_pipeline_slug)}
+                        className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      >
+                        <span className="w-[62px] shrink-0 font-mono text-[11px] tabular-nums text-primary">
+                          {relTime(s.next_run_at)}
+                        </span>
+                        {r ? (
+                          <CrewIcon
+                            icon={resolveRoutineIcon(r)}
+                            color={resolveRoutineColor(r)}
+                            size="sm"
+                            className="!h-5 !w-5 !rounded-md shrink-0"
+                          />
+                        ) : (
+                          <span className="h-5 w-5 shrink-0 rounded-md bg-muted" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/85">
+                          {r?.name || s.target_pipeline_slug || s.name}
+                        </span>
+                        <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:block">
+                          {describeCron(s.cron_expr)}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft opacity-0 transition-opacity group-hover:opacity-100" />
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </DashboardCard>
+          </div>
+        </Appear>
+
+        {/* ── What ran, and what is stuck ────────────────────────── */}
+        <Appear order={3}>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <DashboardCard
+            title="Recent runs"
+            icon={Activity}
+            hint={recent.length > 0 ? `last ${recent.length}` : "no runs yet"}
+            action={
+              recent.length > 0 ? (
+                <Link href="/activity" className="text-primary hover:underline">
+                  Activity →
+                </Link>
+              ) : undefined
+            }
+          >
+            {recent.length === 0 ? (
+              <Empty icon={Activity}>
+                Nothing has run yet. Pick a routine on the left and press Run, or give it a
+                schedule.
+              </Empty>
+            ) : (
+              <div className="flex flex-col">
+                {recent.map((run) => {
+                  const r = routineBySlug.get(run.pipeline_slug)
+                  const live = isLiveStatus(run.status)
+                  return (
+                    <Link
+                      key={run.id}
+                      href={`/activity?run=${encodeURIComponent(run.id)}`}
+                      className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
+                    >
+                      <span className="relative shrink-0">
+                        {r ? (
+                          <CrewIcon
+                            icon={resolveRoutineIcon(r)}
+                            color={resolveRoutineColor(r)}
+                            size="sm"
+                            className="!h-6 !w-6 !rounded-md"
+                          />
+                        ) : (
+                          <span className="h-6 w-6 rounded-md bg-muted" />
+                        )}
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                            statusDot(run.status),
+                          )}
+                        />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[12px] text-foreground/90">
+                          {run.pipeline_name || r?.name || run.pipeline_slug}
+                        </span>
+                        {live && (
+                          <span className="block truncate text-[10px] text-primary">
+                            ▶ {run.current_step_id || "starting…"}
+                          </span>
+                        )}
+                      </span>
+                      <span className="hidden w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
+                        {live ? "—" : formatDurationDecimal(run.duration_ms ?? 0)}
+                      </span>
+                      <span className="shrink-0 text-right text-[10px] text-muted-foreground-soft">
+                        {relTime(run.started_at)}
+                      </span>
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </DashboardCard>
+
+          {/* Beside the runs, not below them: the two answer the same
+              question a second apart — what happened, and what stopped
+              halfway and is waiting for you. A parked run holds real
+              state and expires, so burying it under ten finished runs
+              is how an approval times out unread. */}
+          <DashboardCard
+            title="Waiting on you"
+            icon={UserCheck}
+            hint={waiting.length > 0 ? `${waiting.length}` : "nothing pending"}
+          >
+            {waiting.length === 0 ? (
+              <Empty icon={CheckCircle2}>Nothing is waiting on a decision.</Empty>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {waiting.map((item) =>
+                  item.kind === "run" ? (
+                    <WaitpointRow
+                      key={item.token}
+                      workspaceId={workspaceId}
+                      item={item}
+                      routine={item.routineSlug ? routineBySlug.get(item.routineSlug) : undefined}
+                      onDecided={refreshWaitpoints}
+                    />
+                  ) : (
+                    <button
+                      key={`prop-${item.slug}`}
+                      type="button"
+                      onClick={() => onSelect(item.slug)}
+                      className="group flex items-center gap-2.5 rounded-md border border-warn/25 bg-warn/[0.06] px-2 py-2 text-left transition-colors hover:bg-warn/[0.1]"
+                    >
+                      <CrewIcon
+                        icon={resolveRoutineIcon(routineBySlug.get(item.slug) ?? { slug: item.slug })}
+                        color={resolveRoutineColor(routineBySlug.get(item.slug) ?? { slug: item.slug })}
+                        size="sm"
+                        className="!h-5 !w-5 !rounded-md shrink-0"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] text-foreground/90">
+                          {item.name}
+                        </span>
+                        <span className="block text-[10px] text-warn">definition needs review</span>
+                      </span>
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                    </button>
+                  ),
+                )}
+              </div>
+            )}
+          </DashboardCard>
+          </div>
+        </Appear>
+
+        {/* ── Money, and breakage ─────────────────────────────────── */}
+        <Appear order={4}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <DashboardCard
+              title={`Runs · ${SUCCESS_WINDOW_DAYS} days`}
+              icon={Activity}
+              hint={`${weekTotal} ${weekTotal === 1 ? "run" : "runs"}`}
+              className="lg:col-span-2"
+            >
+              {/* What ran, by verdict. No money on it.
+                  
+                  Crewship bills by subscription and is driven from the
+                  CLI, so a per-run dollar figure is an internal
+                  estimate dressed as an invoice — four decimal places
+                  about a number nobody is charged. The estimate still
+                  belongs on the routine, where "roughly what will this
+                  cost me to run" is a real question an author has;
+                  summing it into a workspace ledger answered one
+                  nobody asked. */}
+              {weekTotal === 0 ? (
+                <Empty icon={Activity}>Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.</Empty>
+              ) : (
+                <OutcomeChart data={outcomes} />
+              )}
+            </DashboardCard>
+
+            <DashboardCard
+              title="Recently failing"
+              icon={AlertTriangle}
+              hint={failures.length > 0 ? `last ${failures.length}` : "all clean"}
+            >
+              {/* Runs and the step that broke, not routine names.
+                  A name says WHICH routine failed and nothing about
+                  what failed, so the next click was always the same:
+                  open it, find the run, find the step. One routine
+                  failing three times is three rows — that repetition
+                  is the signal, and collapsing it would hide the thing
+                  worth acting on. */}
+              {failures.length === 0 ? (
+                <Empty icon={CheckCircle2}>Nothing has failed. Nice.</Empty>
+              ) : (
+                <div className="flex flex-col">
+                  {failures.map((f) => (
+                    <Link
+                      key={f.runId}
+                      href={`/activity?run=${encodeURIComponent(f.runId)}`}
+                      className="group flex items-start gap-2.5 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03]"
+                    >
+                      <span
+                        aria-hidden
+                        className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-destructive"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline gap-1.5">
+                          <span className="truncate text-[12px] text-foreground/90">
+                            {f.routineName || routineBySlug.get(f.routineSlug)?.name || f.routineSlug}
+                          </span>
+                          {f.stepId && (
+                            <span className="shrink-0 font-mono text-[10px] text-destructive">
+                              {f.stepId}
+                            </span>
+                          )}
+                        </span>
+                        {f.message && (
+                          <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+                            {f.message}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground-soft">
+                        {relTime(f.startedAt)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </DashboardCard>
+          </div>
+        </Appear>
+      </div>
+    </div>
+  )
+}
+
+function Empty({ icon: Icon, children }: { icon: typeof Activity; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1.5 py-7 text-center">
+      <Icon className="h-4 w-4 text-muted-foreground-soft" />
+      <p className="max-w-[280px] text-[11px] text-muted-foreground-soft">{children}</p>
+    </div>
+  )
+}
+
+function statusDot(status: string): string {
+  const s = status.toLowerCase()
+  if (s === "running" || s === "queued") return "bg-primary animate-pulse"
+  if (s === "waiting" || s === "paused") return "bg-warn animate-pulse"
+  if (s === "completed" || s === "succeeded") return "bg-success"
+  if (s === "failed" || s === "error") return "bg-destructive"
+  return "bg-muted-foreground/40"
+}
+
+/**
+ * Skeleton in the final geometry.
+ *
+ * Placeholders that do not match what replaces them make the page
+ * reflow on load, which reads as a second, unexplained render.
+ */
+function OverviewSkeleton() {
+  return (
+    <div className="h-full overflow-auto">
+      <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
+        <Skeleton className="h-9 w-48" />
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-[104px] rounded-xl" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Skeleton className="h-[228px] rounded-xl" />
+          <Skeleton className="h-[228px] rounded-xl" />
+        </div>
+        <Skeleton className="h-[300px] rounded-xl" />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One parked run, with the decision on it.
+ *
+ * Approve and Deny are here rather than a click away because the
+ * thing this row reports is a process that has stopped and is
+ * costing time. The prompt is shown as authored: the author wrote it
+ * to be the question, and paraphrasing it in the UI would put a
+ * second, unreviewed wording in front of the person deciding.
+ */
+function WaitpointRow({
+  workspaceId,
+  item,
+  routine,
+  onDecided,
+}: {
+  workspaceId: string
+  item: Extract<PendingApproval, { kind: "run" }>
+  routine?: Pipeline
+  onDecided: () => void
+}) {
+  const [deciding, setDeciding] = React.useState(false)
+
+  const decide = async (approved: boolean) => {
+    setDeciding(true)
+    const res = await waitpointDecide(workspaceId, item.token, approved)
+    setDeciding(false)
+    if (res.ok) {
+      toast.success(approved ? "Approved" : "Denied")
+      onDecided()
+      return
+    }
+    // A token decided in another tab or timed out comes back as a
+    // conflict. Refresh either way — the row is stale, and leaving it
+    // on screen invites a second click that fails the same way.
+    toast.error(res.error)
+    onDecided()
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-warn/25 bg-warn/[0.06] px-2 py-2">
+      <div className="flex items-center gap-2.5">
+        {routine ? (
+          <CrewIcon
+            icon={resolveRoutineIcon(routine)}
+            color={resolveRoutineColor(routine)}
+            size="sm"
+            className="!h-5 !w-5 !rounded-md shrink-0"
+          />
+        ) : (
+          <span className="h-5 w-5 shrink-0 rounded-md bg-muted" />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] text-foreground/90">
+            {routine?.name || item.routineSlug || "Run " + item.runId.slice(0, 8)}
+          </span>
+          <span className="block truncate text-[10px] text-muted-foreground">
+            {item.prompt || `parked at ${item.stepId}`}
+          </span>
+        </span>
+        {item.expiresAt && (
+          <span className="shrink-0 text-[10px] text-warn">{relTime(item.expiresAt)}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={deciding}
+          onClick={() => decide(true)}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md bg-warn px-3 text-[11px] font-semibold text-background transition-colors hover:bg-warn/90 disabled:opacity-60"
+        >
+          {deciding ? <Spinner className="h-3 w-3" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={deciding}
+          onClick={() => decide(false)}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-3 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Deny
+        </button>
+        <Link
+          href={`/activity?run=${encodeURIComponent(item.runId)}`}
+          className="ml-auto text-[10px] text-primary hover:underline"
+        >
+          Open run
+        </Link>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The week: what happened.
+ *
+ * Stacked bars by verdict. There was a cost line on a second axis and
+ * it went with the rest of the money: Crewship bills by subscription
+ * and runs from the CLI, so a per-run dollar figure is an internal
+ * estimate dressed as an invoice.
+ *
+ * The bars are drawn passed → failed → pending → other so the green
+ * base is stable and a red segment always sits at the same place in
+ * the stack; a stack whose order shifts with the data cannot be read
+ * across days.
+ *
+ * `other` — cancelled and interrupted — is stacked last and usually
+ * zero. It is here so the bars sum to the runs that day: a bar
+ * shorter than its own day would be a chart lying by omission.
+ *
+ * An earlier version of this card hand-rolled its bars with a
+ * percentage height on a flex item whose own height came from flex-1.
+ * A percentage against an indefinite parent resolves to auto, so every
+ * bar computed to zero and a card reporting $0.19 drew seven weekday
+ * labels under an empty box — a bug that looked exactly like "no
+ * data", which is why reading the code did not catch it.
+ */
+function OutcomeChart({ data }: { data: OutcomeDay[] }) {
+  const config = React.useMemo<ChartConfig>(
+    () => ({
+      passed: { label: "Passed", color: "rgb(52, 211, 153)" },
+      failed: { label: "Failed", color: "rgb(248, 113, 113)" },
+      pending: { label: "Waiting", color: "rgb(251, 191, 36)" },
+      other: { label: "Cancelled", color: "rgb(148, 163, 184)" },
+    }),
+    [],
+  )
+  return (
+    <ChartContainer config={config} className="aspect-auto h-[190px] w-full">
+      <BarChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+        <CartesianGrid vertical={false} strokeOpacity={0.08} />
+        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} className="text-[10px]" />
+        <YAxis
+          yAxisId="runs"
+          allowDecimals={false}
+          tickLine={false}
+          axisLine={false}
+          width={28}
+          className="text-[10px]"
+        />
+        <ChartTooltip
+          cursor={false}
+          content={<ChartTooltipContent />}
+        />
+        <Bar yAxisId="runs" dataKey="passed" stackId="runs" fill="var(--color-passed)" radius={[0, 0, 0, 0]} />
+        <Bar yAxisId="runs" dataKey="failed" stackId="runs" fill="var(--color-failed)" radius={[0, 0, 0, 0]} />
+        <Bar yAxisId="runs" dataKey="pending" stackId="runs" fill="var(--color-pending)" radius={[0, 0, 0, 0]} />
+        <Bar yAxisId="runs" dataKey="other" stackId="runs" fill="var(--color-other)" radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ChartContainer>
+  )
+}

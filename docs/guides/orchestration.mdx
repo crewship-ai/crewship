@@ -451,13 +451,57 @@ right crew container.
   Crew-to-crew handoff with critique exchange (e.g. backend crew hands a draft to a testing crew for review) is on the v0.2 roadmap.
 </Note>
 
+## Delegation limits
+
+Any agent in a crew can hand work to a crew member with `/assign` — leads and
+crew members alike. What bounds it is not who you are, it is **how deep the
+chain already is and how much that run already has out**.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `delegation.max_depth` | `2` | Delegation hops from the originating run. A lead's own dispatch is depth 1; what that sub-agent dispatches is depth 2. `0` switches delegation off entirely. |
+| `delegation.max_fanout` | `8` | Sub-tasks one run may have out. For a delegated run that is every task it dispatched; for a lead working a chat it is the ones still in flight, so a long conversation is not capped on lifetime output. |
+
+Both are instance settings, read live — a change applies to the next dispatch,
+not the next restart:
+
+```bash
+crewship instance settings set delegation.max_depth 3
+crewship instance settings get delegation.max_fanout
+```
+
+Past either limit, `/assign` answers **403** with a message that names the
+limit and the setting, and no assignment row is written. The agent sees it and
+is told (in its system prompt) to do the work itself or report back rather than
+retry.
+
+<Note>
+  The numbers multiply. One originating run at the defaults bounds a tree at
+  8 + 64 dispatches, not 16. Raise `max_depth` with that in mind — and note
+  that actual concurrency stays far lower, because each crew's slot budget
+  (`max_concurrent_agents`, or memory ÷ `runtime.agent_min_memory_mb`) queues
+  everything past it.
+</Note>
+
+**How the depth is known.** It is not sent by the agent, and it cannot be. The
+sidecar resolves who is calling from that agent's own bearer token, and
+crewshipd reads the depth off the assignment row that agent is currently
+executing (`assignments.depth`, with `parent_assignment_id` recording the
+chain). A `depth` field in the request body is read by nothing.
+
+<Warning>
+  `/query`'s own `depth >= 2` check is a different, weaker thing: it reads the
+  depth from the request body. Do not model new controls on it.
+</Warning>
+
 ## Sidecar API for Orchestration
 
-Lead agents interact with the orchestration system through the sidecar proxy at `localhost:9119`:
+Any crew agent can reach the sidecar proxy at `localhost:9119`; the orchestration
+routes are:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/assign` | POST | Assign a task to a crew member |
+| `/assign` | POST | Assign a task to a crew member (subject to the delegation limits above) |
 | `/results/{id}` | GET | Poll for assignment result |
 | `/query` | POST | Ask a crew member a quick question |
 | `/standup` | GET | Get crew standup summary |
@@ -466,6 +510,79 @@ Lead agents interact with the orchestration system through the sidecar proxy at 
 | `/mission/{id}` | GET | Check mission status |
 | `/mission/{id}/start` | POST | Start a mission |
 | `/mission/templates` | GET | List available workflow templates |
+
+## Sidecar API for the issue board
+
+Agents are participants on the issue board, not just reporters. Every verb below
+runs on the same sidecar proxy and is authenticated the same way (bearer token on
+file descriptor 3 — never on a command line), the `GET`s included.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/issue/create` | POST | Open a new issue, authored by the calling agent |
+| `/issues` | GET | Search / list the board (`q`, `status`, `assignee_id`, `limit`, `offset`) |
+| `/issue/{identifier}` | GET | Read one issue |
+| `/issue/{identifier}` | PATCH | Update status, priority, assignee, labels, estimate, due date |
+| `/issue/{identifier}/comment` | POST | Comment on the issue, recorded as the calling agent |
+| `/issue/{identifier}/link` | POST | Relate two issues, or make one a sub-issue of another |
+
+Identifiers are the human-readable ones (`ENG-42`), not row ids.
+
+### Updating an issue
+
+Send only the fields you are changing — a `PATCH` carrying just a status does not
+blank the assignee. Status changes must follow the board's workflow; an illegal
+jump comes back `400` naming the transition it refused.
+
+```bash
+curl -s -X PATCH http://localhost:9119/issue/ENG-42 \
+  -H "Content-Type: application/json" \
+  -K /dev/fd/3 --data @- 3<<AUTH <<'JSON'
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+{"status":"IN_PROGRESS","estimate":3,"due_date":"2026-09-01"}
+JSON
+```
+
+### Splitting an issue into sub-issues
+
+Decomposition is the reason the link verb exists: a large issue is broken into
+pieces, each piece becomes a child issue, and each child can then be assigned its
+own agent.
+
+1. `POST /issue/create` once per piece.
+2. `POST /issue/{child}/link` with `{"target_identifier":"<parent>","relation_type":"sub_issue_of"}`.
+3. `PATCH /issue/{child}` with the assignee for that piece.
+
+`relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of` or
+`sub_issue_of`. `blocked_by` is stored as the inverse `blocks` link, so the board
+never holds two shapes of the same relationship.
+
+### What an agent cannot do here
+
+These are enforced on the server, not by convention — an agent that tries gets a
+`403` or a `400`, and retrying will not help:
+
+- **Author as someone else.** A crew shares one container and one sidecar, so an
+  `agent_id` in the request body is ignored; the author is always the agent whose
+  bearer token made the call.
+- **Change another crew's issues.** The workspace and crew come from the sidecar's own
+  token binding, not from the request, and every verb is gated on the issue named in the
+  path. The single exception is the link *target*: a relation may point at another crew's
+  issue in the same workspace, because it does not modify that issue. `sub_issue_of`
+  writes `parent_issue_id` on the path issue, so it is gated like any other mutation.
+- **Rewrite the issue itself.** `title` and `description` are not updatable through
+  these verbs, and neither are `project_id`, `milestone_id`, `routine_id` or
+  `sort_order`. Agents report progress; they do not rewrite the brief a human wrote.
+- **Delete anything.** There is no delete verb on this surface.
+
+<Note>
+  Issue titles, descriptions and comments an agent reads back arrive wrapped in an
+  `<untrusted …>` block. Anyone who can file an issue chooses those bytes, so they
+  are handed to the model as data rather than as instructions — the same fence the
+  orchestrator uses for webhook payloads and mission comments. See
+  [Lookout](/guides/lookout).
+</Note>
 
 ## What's Next
 

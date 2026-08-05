@@ -255,6 +255,81 @@ export function KindActions({
           </div>
         )
       }
+      // Routine proposals ride the escalation kind too, and resolve
+      // through the routine's own lifecycle endpoints — approve flips it
+      // to active, reject soft-deletes the proposal. Both are MANAGER+,
+      // the same tier that saved it.
+      //
+      // Without this branch the row fell through to the "no decision to
+      // make here" note at the bottom: the inbox told a reviewer there
+      // was nothing to do while the routine sat at `proposed`, unable to
+      // run, with both endpoints waiting on the server. The queue said
+      // "your move" and the item said "not here".
+      if (item.payload?.kind === "routine_proposal") {
+        const slug = typeof item.payload?.slug === "string" ? (item.payload.slug as string) : ""
+        // No slug, no endpoint. A button that cannot work is worse than
+        // none — it turns a data problem into a mystery failure.
+        if (slug === "") {
+          return (
+            <span className="text-[11px] text-muted-foreground">
+              This proposal carries no routine to act on. Open the routine to decide.
+            </span>
+          )
+        }
+        const resolveRoutine = (action: "approve" | "reject") =>
+          wrap(action, async () => {
+            let res: Response
+            try {
+              res = await apiFetch(
+                `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/${action}`,
+                { method: "POST" },
+              )
+            } catch (e) {
+              toast.error(e instanceof Error ? `${action} failed: ${e.message}` : `${action} failed`)
+              return
+            }
+            if (!res.ok) {
+              const b = await res.json().catch(() => null)
+              // 409 is the other reviewer having got there first. That is
+              // the queue working, not a failure, so it must not read as
+              // one.
+              toast.error(
+                res.status === 409
+                  ? `Already decided — this routine is ${b?.status ?? "no longer awaiting approval"}.`
+                  : (b?.error ?? `${action} failed (${res.status})`),
+              )
+              await onRefresh()
+              return
+            }
+            toast.success(action === "approve" ? "Routine approved" : "Routine rejected")
+            await onRefresh()
+          })
+
+        return (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveRoutine("approve")}
+              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {busy === "approve" ? "Approving…" : "Approve"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled || busy !== null}
+              onClick={() => resolveRoutine("reject")}
+              className="gap-1.5"
+            >
+              <XCircle className="h-3 w-3" />
+              {busy === "reject" ? "Rejecting…" : "Reject"}
+            </Button>
+          </div>
+        )
+      }
+
       // An escalation is an agent decision request — resolving it must go
       // through the escalation lifecycle (/escalations/{id}/resolve), NOT
       // a blind inbox flip (that 409s, since escalation is source-managed).

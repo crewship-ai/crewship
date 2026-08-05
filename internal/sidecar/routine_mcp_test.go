@@ -281,11 +281,19 @@ func TestRoutinesMCP_SaveRoutine_MissingDefinition_IsError(t *testing.T) {
 }
 
 // TestRoutinesMCP_ListRoutines_ForwardsToWorkspace verifies list_routines
-// hits the workspace pipelines endpoint and returns the list payload.
+// hits the INTERNAL pipelines endpoint and returns the list payload.
+//
+// The mock upstream returns 200 for anything, so this proves which route
+// is called and nothing about whether the server accepts it — which is
+// exactly how #1763 stayed invisible: the tool aimed at the public,
+// JWT-authed route while the sidecar carries only X-Internal-Token, so
+// every real call answered 401 while this stayed green. The real-
+// middleware counterpart is in internal/api/internal_pipelines_read_test.go.
 func TestRoutinesMCP_ListRoutines_ForwardsToWorkspace(t *testing.T) {
-	var gotPath string
+	var gotPath, gotWorkspace string
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotWorkspace = r.URL.Query().Get("workspace_id")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"items":[{"slug":"daily-report"}]}`))
 	}))
@@ -298,8 +306,15 @@ func TestRoutinesMCP_ListRoutines_ForwardsToWorkspace(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.handleRoutinesMCP(w, req)
 
-	if gotPath != "/api/v1/workspaces/ws-9/pipelines" {
-		t.Errorf("path = %q, want workspace pipelines list", gotPath)
+	if gotPath != "/api/v1/internal/pipelines" {
+		t.Errorf("path = %q, want the internal pipelines list", gotPath)
+	}
+	// The internal route takes the workspace from the query and answers
+	// 400 without it. Omitting it would turn every list into a failure —
+	// and the workspace no longer travels in the path, so nothing else
+	// carries it.
+	if gotWorkspace != "ws-9" {
+		t.Errorf("workspace_id = %q, want ws-9", gotWorkspace)
 	}
 	var resp struct {
 		Result struct {

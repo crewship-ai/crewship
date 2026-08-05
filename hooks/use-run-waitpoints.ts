@@ -70,3 +70,43 @@ export function useRunWaitpoints(
 
   return { waitpoints, refresh }
 }
+
+/**
+ * useWorkspaceWaitpoints — every pending approval in the workspace.
+ *
+ * Same endpoint, no run filter. The routines overview asks the
+ * question the per-run hook cannot: not "is THIS run waiting" but
+ * "is anything waiting on me". A parked run holds a real process and
+ * can time out, so it belongs on the landing page rather than behind
+ * a click into the run that happens to be parked.
+ *
+ * Refreshes on the same events, unfiltered — any waitpoint created,
+ * any run finishing, any step starting can change this list, and
+ * there is no run id to compare against.
+ */
+export function useWorkspaceWaitpoints(workspaceId: string | null | undefined) {
+  const [waitpoints, setWaitpoints] = useState<PendingWaitpoint[]>([])
+  const reqIdRef = useRef(0)
+
+  const refresh = useCallback(async () => {
+    if (!workspaceId) {
+      setWaitpoints([])
+      return
+    }
+    const myReq = ++reqIdRef.current
+    const all = await listPendingWaitpoints(workspaceId)
+    if (myReq !== reqIdRef.current) return
+    setWaitpoints(all)
+  }, [workspaceId])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  useRealtimeEvent("pipeline.waitpoint.created", refresh)
+  useRealtimeEvent("pipeline.run.completed", refresh)
+  useRealtimeEvent("pipeline.run.failed", refresh)
+  useRealtimeEvent("pipeline.step.started", refresh)
+
+  return { waitpoints, refresh }
+}

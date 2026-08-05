@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ReactFlow,
   Background,
@@ -29,7 +29,9 @@ import {
   OverviewRunNode,
 } from "./overview-nodes"
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
+import { TraceRoutedEdge } from "./trace-routed-edge"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
+import { minZoomForGraph } from "@/lib/trace/zoom-floor"
 
 // TraceCanvas — ReactFlow surface for the /activity trace view.
 //
@@ -51,6 +53,121 @@ const nodeTypes: NodeTypes = {
 
 const edgeTypes: EdgeTypes = {
   traceDataFlow: TraceDataFlowEdge,
+  traceRouted: TraceRoutedEdge,
+}
+
+// fitView's job is "show everything", which for a long routine means
+// "show everything at 3 pixels tall". A 15-step graph is ~1900px deep;
+// fit into a ~700px pane that is zoom 0.35, and the labels — the whole
+// reason the node has a label — stop being readable.
+//
+// minZoom stops it shrinking past legibility: past that point the graph
+// overflows and the user pans, which is the right trade. A step you can
+// read and must scroll to beats a whole routine you cannot read.
+// maxZoom keeps a two-step routine from filling the pane with two
+// enormous cards.
+//
+// ReactFlow centres the bounds it fits, so the clamp lands the middle of
+// the routine in view rather than a corner.
+//
+// Trace canvas only. The overview graph is built by build-overview-graph
+// (still LR, its own node components) and keeps its own fit behaviour —
+// this is a fix for the step tree, and widening it to a surface with a
+// different topology would be guessing.
+const FIT_VIEW = { padding: 0.18, minZoom: 0.62, maxZoom: 1.15 } as const
+
+// Opening view, when initialFocus="start". Tighter padding and a higher
+// ceiling than FIT_VIEW because it is fitting two ranks, not a whole
+// routine: the first thing a reader sees should be legible at a glance,
+// not a correct-but-tiny overview they have to zoom into before they
+// can read a single node.
+const START_FIT = { padding: 0.12, minZoom: 0.62, maxZoom: 1.6 } as const
+
+// Fallbacks for centring a node before React Flow has measured it —
+// the first click can land before measurement, and half of an
+// unmeasured node is better than centring on its top-left corner.
+// Same numbers buildTraceGraph hands dagre.
+const NODE_W_FALLBACK = 200
+const NODE_H_FALLBACK = 70
+
+// How far the canvas will let you go.
+//
+// React Flow's default floor is 0.1 — a 14-step routine at 10% is a
+// smudge, and once you have panned away from it there is nothing on
+// screen to pan back towards. Neither is a state anyone chose; they are
+// states you fall into with one scroll wheel overshoot.
+//
+// The floor is set where a node label stops being readable, and panning
+// is bounded to the graph plus a screen of slack in each direction, so
+// the graph is always reachable by dragging back.
+const ZOOM_FLOOR = 0.3
+const ZOOM_CEILING = 2
+const PAN_SLACK = 600
+
+/**
+ * Bounds for translateExtent: the graph's own box, plus slack.
+ *
+ * Without slack the graph would be pinned against the viewport edges
+ * and could never be centred; with unbounded extent it can be lost off
+ * screen entirely. Returns undefined for an empty graph so React Flow
+ * keeps its default rather than being handed an inverted box.
+ */
+function graphBounds(nodes: Node[]): { minX: number; minY: number; maxX: number; maxY: number } | undefined {
+  if (nodes.length === 0) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of nodes) {
+    const w = n.measured?.width ?? n.width ?? NODE_W_FALLBACK
+    const h = n.measured?.height ?? n.height ?? NODE_H_FALLBACK
+    minX = Math.min(minX, n.position.x)
+    minY = Math.min(minY, n.position.y)
+    maxX = Math.max(maxX, n.position.x + w)
+    maxY = Math.max(maxY, n.position.y + h)
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return undefined
+  return { minX, minY, maxX, maxY }
+}
+
+function panExtent(nodes: Node[]): [[number, number], [number, number]] | undefined {
+  if (nodes.length === 0) return undefined
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of nodes) {
+    const w = n.measured?.width ?? n.width ?? NODE_W_FALLBACK
+    const h = n.measured?.height ?? n.height ?? NODE_H_FALLBACK
+    minX = Math.min(minX, n.position.x)
+    minY = Math.min(minY, n.position.y)
+    maxX = Math.max(maxX, n.position.x + w)
+    maxY = Math.max(maxY, n.position.y + h)
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return undefined
+  return [
+    [minX - PAN_SLACK, minY - PAN_SLACK],
+    [maxX + PAN_SLACK, maxY + PAN_SLACK],
+  ]
+}
+
+/**
+ * The trigger plus the first rank or two, for initialFocus="start".
+ *
+ * Two ranks, not three: each extra rank fitted is a step further zoomed
+ * out, and the opening view is judged on whether one node is readable,
+ * not on how much of the routine is on screen.
+ *
+ * Ranks are read off the dagre-assigned y, not the step order: a fan-out
+ * puts several nodes on one rank, and showing one of three siblings
+ * would misrepresent the shape at the very moment the reader is forming
+ * their first impression of it.
+ */
+function headNodeIds(nodes: Node[], ranks = 2): string[] {
+  if (nodes.length === 0) return []
+  const ys = Array.from(new Set(nodes.map((n) => Math.round(n.position.y)))).sort((a, b) => a - b)
+  const cutoff = ys[Math.min(ranks, ys.length) - 1]
+  return nodes.filter((n) => Math.round(n.position.y) <= cutoff).map((n) => n.id)
 }
 
 interface TraceCanvasProps {
@@ -73,6 +190,34 @@ interface TraceCanvasProps {
   // + runs and memoizes; passing in keeps the canvas dumb.
   overview?: { nodes: Node[]; edges: Edge[] } | null
   onSelectRun?: (runId: string) => void
+  // ── Reading aids, all opt-in ────────────────────────────────────
+  // Activity keeps its existing behaviour by default; the routine
+  // detail turns these on, where the graph is a document you read from
+  // the top rather than a run you are watching.
+  //
+  // "start" opens on the trigger and the first ranks instead of fitting
+  // the whole routine — a 14-step graph fitted whole is a graph you
+  // start reading in the middle.
+  initialFocus?: "all" | "start"
+  // Centre a clicked node instead of leaving it wherever it was. Makes
+  // the click say "show me this and its neighbours".
+  centerOnSelect?: boolean
+  // Centre this node when the id changes, without a click. Driven by
+  // the editor caret: edit a step's lines, that step comes into view.
+  focusStepId?: string | null
+  // Survive a remount with the view intact. Switching between two
+  // layouts that both host a canvas unmounts one and mounts the other,
+  // and a fresh mount would re-run the opening fit — yanking the reader
+  // back to the top of the routine and re-zooming, every single time
+  // they change layout. Handing in a ref lets the new instance pick up
+  // where the old one left off.
+  viewportRef?: React.MutableRefObject<{ x: number; y: number; zoom: number } | null>
+  // Keep what is on screen centred when the PANE resizes — opening a
+  // side panel next to the canvas shrinks it, and without this the
+  // graph stays where it was and half of it ends up under the panel.
+  // Shifts by half the width delta, preserving zoom and position in the
+  // graph: the reader keeps their place, the picture just slides over.
+  recenterOnResize?: boolean
 }
 
 export function TraceCanvas(props: TraceCanvasProps) {
@@ -180,6 +325,11 @@ function CanvasInner({
   waitpointTokensByStepId,
   heatmapBuckets,
   stepMetrics,
+  initialFocus = "all",
+  centerOnSelect = false,
+  focusStepId = null,
+  recenterOnResize = false,
+  viewportRef,
 }: TraceCanvasProps & { run: PipelineRun }) {
   const graphData = useMemo(
     () =>
@@ -192,6 +342,12 @@ function CanvasInner({
       }),
     [run, dsl, selectedStepId, workspaceId, waitpointTokensByStepId, heatmapBuckets, stepMetrics],
   )
+
+  // Read by the deferred initial fit. Keeping it in a ref rather than a
+  // dependency means a status repaint — which rebuilds graphData every
+  // realtime tick — does not tear down and re-arm the size observer.
+  const graphDataRef = useRef(graphData)
+  graphDataRef.current = graphData
 
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(graphData.edges)
@@ -211,6 +367,112 @@ function CanvasInner({
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
+  const { setCenter, getZoom, getViewport, setViewport } = useReactFlow()
+
+  // Hold the view steady across a pane resize. ReactFlow keeps its
+  // transform when the container changes size, so shrinking the pane
+  // from the right leaves the graph sitting under whatever took the
+  // space. Shifting by half the delta puts it back in the middle of
+  // what is still visible.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const pendingFitRef = useRef(true)
+  // Has the reader taken control of the viewport?
+  //
+  // Until they have, the canvas keeps itself framed on every resize.
+  // Fitting exactly once was wrong twice over: the first measurement can
+  // land mid-entrance-animation, when the pane is a fraction of its
+  // final size — and that fit then stuck, leaving the graph a smudge in
+  // a large empty box. And opening the code panel shrinks the pane
+  // without re-framing, so the graph stayed at the size it was fitted
+  // for. Both are the same bug: a one-shot fit against a size that was
+  // never final.
+  //
+  // Once someone pans or zooms, that is a decision and resizes stop
+  // overriding it — they only shift, so the view they chose stays put.
+  const userMovedRef = useRef(false)
+
+  const applyInitialFit = useCallback(() => {
+    if (initialFocus === "start") {
+      // fitView centres what it is given, so handing it the head of the
+      // graph lands the reader at the beginning at a readable zoom
+      // rather than in the middle of the routine at a tiny one.
+      const head = headNodeIds(graphDataRef.current.nodes)
+      if (head.length > 0) {
+        fitView({ ...START_FIT, nodes: head.map((id) => ({ id })), duration: 300 })
+        return
+      }
+    }
+    fitView({ ...FIT_VIEW, duration: 300 })
+  }, [initialFocus, fitView])
+
+  // One observer owns both size concerns.
+  //
+  // The opening fit waits for the pane to have real dimensions instead
+  // of guessing with a timeout — a fit computed before layout settles
+  // is computed against a zero-width box.
+  //
+  // The recentre keeps what is on screen in the middle when the pane
+  // shrinks, so opening a side panel slides the graph over rather than
+  // hiding it underneath.
+  useEffect(() => {
+    const el = paneRef.current
+    if (!el) return
+    let last = el.clientWidth
+
+    const onSize = () => {
+      const width = el.clientWidth
+      const height = el.clientHeight
+      setPaneSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      )
+      if (width > 0 && pendingFitRef.current) {
+        pendingFitRef.current = false
+        last = width
+        // A remembered viewport wins over the opening fit: the reader
+        // chose it, and re-fitting would silently discard that choice.
+        const saved = viewportRef?.current
+        if (saved) setViewport(saved)
+        else applyInitialFit()
+        return
+      }
+      const delta = width - last
+      if (delta === 0) return
+      last = width
+      if (!userMovedRef.current) {
+        applyInitialFit()
+        return
+      }
+      if (!recenterOnResize) return
+      const vp = getViewport()
+      setViewport({ ...vp, x: vp.x + delta / 2 })
+    }
+
+    if (typeof ResizeObserver === "undefined") {
+      onSize()
+      return
+    }
+    const ro = new ResizeObserver(onSize)
+    ro.observe(el)
+    onSize()
+    return () => ro.disconnect()
+  }, [applyInitialFit, recenterOnResize, getViewport, setViewport, viewportRef])
+
+  // Centre a node without changing zoom. Used by both the click handler
+  // and the caret follower, so they cannot drift apart.
+  const centerNode = useCallback(
+    (id: string, duration = 320) => {
+      const node = graphData.nodes.find((n) => n.id === id)
+      if (!node) return
+      const w = (node.measured?.width ?? node.width ?? NODE_W_FALLBACK) / 2
+      const h = (node.measured?.height ?? node.height ?? NODE_H_FALLBACK) / 2
+      setCenter(node.position.x + w, node.position.y + h, {
+        zoom: Math.max(getZoom(), FIT_VIEW.minZoom),
+        duration,
+      })
+    },
+    [graphData.nodes, setCenter, getZoom],
+  )
+
   // Detect "different run" vs "same run, status changed". When the
   // run changes we reset positions + fitView. When the same run gets
   // re-rendered (status update), we preserve user-dragged positions.
@@ -223,10 +485,13 @@ function CanvasInner({
       userPositions.current.clear()
       setNodes(graphData.nodes)
       setEdges(graphData.edges)
-      // Slight delay so React Flow has the new graph in state
-      // before we ask it to fit view.
-      const t = setTimeout(() => fitView({ duration: 400, padding: 0.25 }), 50)
-      return () => clearTimeout(t)
+      // Ask for a fit; the size observer performs it once the pane
+      // actually has dimensions. A fixed delay was a guess, and a fit
+      // computed against a pane that has not laid out yet lands at the
+      // wrong zoom — which is why the graph sometimes opened tiny and
+      // sometimes right.
+      pendingFitRef.current = true
+      return
     }
 
     // Same run — merge positions through, but pick up new status /
@@ -242,7 +507,7 @@ function CanvasInner({
       })
     })
     setEdges(graphData.edges)
-  }, [graphData, run.id, setNodes, setEdges, fitView])
+  }, [graphData, run.id, setNodes, setEdges, fitView, initialFocus])
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -251,13 +516,45 @@ function CanvasInner({
         return
       }
       onStepSelect(node.id)
+      if (centerOnSelect) centerNode(node.id)
     },
-    [onStepSelect],
+    [onStepSelect, centerOnSelect, centerNode],
   )
+
+  // Caret follower. Centres whenever the requested id CHANGES, not on
+  // every render: the caret moves constantly while typing, and
+  // re-centring on the node already centred would fight the user for
+  // control of the viewport.
+  const lastFocusRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!focusStepId || focusStepId === lastFocusRef.current) {
+      lastFocusRef.current = focusStepId
+      return
+    }
+    lastFocusRef.current = focusStepId
+    centerNode(focusStepId)
+  }, [focusStepId, centerNode])
 
   const onPaneClick = useCallback(() => {
     onStepSelect(null)
   }, [onStepSelect])
+
+  // Recomputed only when the graph itself changes, not on every status
+  // repaint — an extent that changed identity each tick would make
+  // React Flow re-clamp the viewport mid-drag.
+  const extent = useMemo(() => panExtent(graphData.nodes), [graphData.nodes])
+
+  // The zoom floor tracks the graph rather than a constant. A fixed 0.3
+  // is sane for a fourteen-step routine and lets a four-step one be
+  // shrunk to a smudge; the rule is "you cannot zoom out past seeing
+  // all of it, plus a little". Recomputed when the graph or the pane
+  // changes, which is why the pane size is state rather than a ref.
+  const [paneSize, setPaneSize] = useState({ width: 0, height: 0 })
+  const zoomFloor = useMemo(() => {
+    const b = graphBounds(graphData.nodes)
+    if (!b) return ZOOM_FLOOR
+    return minZoomForGraph({ width: b.maxX - b.minX, height: b.maxY - b.minY }, paneSize)
+  }, [graphData.nodes, paneSize])
 
   // Empty trace — DSL has no steps and no outputs were captured.
   // Surface a friendly message rather than an empty canvas.
@@ -274,7 +571,7 @@ function CanvasInner({
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-background">
+    <div ref={paneRef} className="h-full w-full overflow-hidden bg-background">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -285,10 +582,21 @@ function CanvasInner({
         onNodeClick={onNodeClick}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
+        onMoveStart={(event) => {
+          // A non-null event means a human dragged or wheeled. React
+          // Flow passes null for programmatic moves, which is what lets
+          // fitView and setCenter run without being mistaken for the
+          // reader taking control.
+          if (event) userMovedRef.current = true
+        }}
+        onMoveEnd={(_, vp) => {
+          if (viewportRef) viewportRef.current = vp
+        }}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
-        minZoom={0.1}
-        maxZoom={2.5}
+        fitViewOptions={FIT_VIEW}
+        minZoom={zoomFloor}
+        maxZoom={ZOOM_CEILING}
+        translateExtent={extent}
         proOptions={{ hideAttribution: true }}
         className="!bg-transparent"
       >

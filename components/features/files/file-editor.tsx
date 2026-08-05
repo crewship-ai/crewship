@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useCallback } from "react"
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view"
-import { EditorState } from "@codemirror/state"
+import { EditorState, type Extension } from "@codemirror/state"
 import { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands"
 import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 import { oneDark } from "@codemirror/theme-one-dark"
@@ -34,17 +34,59 @@ interface FileEditorProps {
   onSave: (content: string) => void
   onDirtyChange?: (dirty: boolean) => void
   saveRef?: React.MutableRefObject<(() => void) | null>
+  /**
+   * Fires with the 1-indexed line the caret sits on, whenever it moves.
+   *
+   * Lets a caller tie the caret to something outside the editor — the
+   * routine split view uses it to select the graph node the edited
+   * lines define. Fires often (every arrow key), so consumers should
+   * dedupe on whatever they actually derive from the line.
+   */
+  onCursorLine?: (line: number) => void
+  /**
+   * Fires with the full document whenever it changes.
+   *
+   * For callers that derive something from the text itself — the
+   * routine editor maps caret lines onto steps, and those spans move
+   * the moment anyone types. Fires per keystroke; debounce or defer
+   * downstream if the derivation is expensive.
+   */
+  onDocChange?: (text: string) => void
+  /**
+   * Extra CodeMirror extensions appended to the base set.
+   *
+   * Lets a caller add language-specific intelligence — the routine DSL
+   * editor adds schema completion and inline diagnostics — without this
+   * shared component learning about every format that uses it.
+   *
+   * Identity matters: the editor rebuilds when this changes, so pass a
+   * memoized array or the buffer resets on every render.
+   */
+  extraExtensions?: Extension[]
 }
 
-export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: FileEditorProps) {
+export function FileEditor({
+  code,
+  language,
+  onSave,
+  onDirtyChange,
+  saveRef,
+  onCursorLine,
+  onDocChange,
+  extraExtensions,
+}: FileEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onSaveRef = useRef(onSave)
   const onDirtyChangeRef = useRef(onDirtyChange)
+  const onCursorLineRef = useRef(onCursorLine)
+  const onDocChangeRef = useRef(onDocChange)
   const initialCodeRef = useRef(code)
 
   onSaveRef.current = onSave
   onDirtyChangeRef.current = onDirtyChange
+  onCursorLineRef.current = onCursorLine
+  onDocChangeRef.current = onDocChange
   initialCodeRef.current = code
 
   const handleSave = useCallback(() => {
@@ -67,9 +109,16 @@ export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: F
     }])
 
     const updateListener = EditorView.updateListener.of((update) => {
-      if (update.docChanged && onDirtyChangeRef.current) {
+      if (update.docChanged) {
         const current = update.state.doc.toString()
-        onDirtyChangeRef.current(current !== initialCodeRef.current)
+        onDirtyChangeRef.current?.(current !== initialCodeRef.current)
+        onDocChangeRef.current?.(current)
+      }
+      // selectionSet covers clicks and arrow keys; docChanged covers
+      // typing, which moves the caret without setting the selection.
+      if ((update.selectionSet || update.docChanged) && onCursorLineRef.current) {
+        const head = update.state.selection.main.head
+        onCursorLineRef.current(update.state.doc.lineAt(head).number)
       }
     })
 
@@ -88,6 +137,7 @@ export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: F
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         saveKeymap,
         updateListener,
+        ...(extraExtensions ?? []),
         EditorView.theme({
           "&": { height: "100%", fontSize: "13px" },
           ".cm-scroller": { overflow: "auto", fontFamily: "var(--font-mono, monospace)" },
@@ -102,7 +152,7 @@ export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: F
 
     return () => { view.destroy(); viewRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, language])
+  }, [code, language, extraExtensions])
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden" />
 }

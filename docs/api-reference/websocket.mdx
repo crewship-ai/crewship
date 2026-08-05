@@ -260,6 +260,7 @@ and `run_id`.
 
 | Event Type | Description | Payload (plus the run/pipeline trio) |
 |---|---|---|
+| `pipeline.saved` | The routine catalog moved — a routine was saved, approved, rejected, disabled, enabled or deleted. Carries no routine identity: it is an invalidation, and every consumer refetches the list it holds. | `{ reason }` |
 | `pipeline.run.started` | Pipeline run kicked off | `{ mode, author_crew_id, invoking_crew_id, invoking_agent_id, step_count, inputs_preview }` |
 | `pipeline.run.completed` | Pipeline run finished successfully | `{ total_duration_ms, total_cost_usd }` |
 | `pipeline.run.failed` | Pipeline run failed | `{ failed_at_step, error_message }` |

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
@@ -9,6 +10,7 @@ import {
   ArrowUpDown, RefreshCw, Link2, PackageX, CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppearStack } from "@/components/ui/detail"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Card } from "@/components/ui/card"
@@ -182,6 +184,30 @@ export default function CredentialsPage() {
   const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
   const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
+
+  // /credentials?id=<id> — the ⌘K palette's Credentials rows, and any
+  // bookmark. Landing on the list and leaving the caller to find the secret
+  // they had just searched for is the same second-search-by-eye the members
+  // roster had.
+  //
+  // Keyed on the LAST id acted on, not a once-ever latch. A latch survives the
+  // gap before the list arrives (on the first render `credentials` is empty)
+  // but then swallows every later link: standing on /credentials?id=A, opening
+  // ⌘K and picking secret B changed the URL and nothing else, because this
+  // page never unmounts. Per id, each new one opens exactly once — a refresh
+  // of the vault is not a navigation, so it cannot reopen a sheet the user has
+  // closed, and an id no credential has is marked handled rather than retried.
+  const linkedCredentialId = useSearchParams().get("id")
+  const appliedCredentialId = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!linkedCredentialId || credentials.length === 0) return
+    if (appliedCredentialId.current === linkedCredentialId) return
+    appliedCredentialId.current = linkedCredentialId
+    const hit = credentials.find((c) => c.id === linkedCredentialId)
+    if (!hit) return
+    setDetailCredential(hit)
+    setDetailOpen(true)
+  }, [linkedCredentialId, credentials])
   const [rotateCredential, setRotateCredential] = React.useState<Credential | null>(null)
   const [rotateOpen, setRotateOpen] = React.useState(false)
   const [deleteCredential, setDeleteCredential] = React.useState<Credential | null>(null)
@@ -596,6 +622,7 @@ export default function CredentialsPage() {
         <div className="space-y-4">
           {/* KPI strip */}
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+            <AppearStack>
             <KpiCard label="Active" value={kpis.active}
               valueColor={kpis.active > 0 ? "rgb(52, 211, 153)" : undefined}
               subtitle={`of ${credentials.length} total`} />
@@ -613,6 +640,7 @@ export default function CredentialsPage() {
               subtitle="next 30 days" />
             <KpiCard label="Linked agents" value={kpis.linked}
               subtitle={`across ${credentials.length} credential${credentials.length === 1 ? "" : "s"}`} />
+            </AppearStack>
           </div>
 
           {/* Banner */}

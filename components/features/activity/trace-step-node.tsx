@@ -7,9 +7,11 @@ import {
   BellRing,
   Check,
   CircleDot,
+  Database,
   Globe,
   PauseCircle,
   FileCode2,
+  Repeat,
   ScrollText,
   Sparkles,
   Terminal,
@@ -57,6 +59,8 @@ const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: str
   call_pipeline: { Icon: ScrollText, label: "sub-routine", tint: "text-purple" },
   notify: { Icon: BellRing, label: "notify", tint: "text-pink-300" },
   script: { Icon: FileCode2, label: "script", tint: "text-lime-300" },
+  query: { Icon: Database, label: "query", tint: "text-cyan-300" },
+  foreach: { Icon: Repeat, label: "foreach", tint: "text-orange-300" },
 }
 
 // Trigger isn't a real step kind — it's a synthetic node for the
@@ -118,6 +122,24 @@ function StatusPip({ status }: { status: StepStatus }) {
   }
 }
 
+/**
+ * Which model an agent step will use, as far as the definition says.
+ *
+ * A pinned `model_override` is exact. Otherwise the `complexity` tag is
+ * what the workspace tier map resolves against, so it is the honest
+ * answer available without a server round-trip — and it is labelled as
+ * a tier, not dressed up as a model name it might not become.
+ */
+function modelLabel(step: TraceStep): string | null {
+  if (step.model_override) {
+    // Strip the vendor prefix: "claude:claude-haiku-4-5" reads as
+    // haiku-4-5 on a node that has ~120px for it.
+    const raw = step.model_override.split(":").pop() ?? step.model_override
+    return raw.replace(/^claude-/, "")
+  }
+  return step.complexity ?? null
+}
+
 function subtitleFor(step: TraceStep): ReactNode {
   switch (step.type) {
     case "http": {
@@ -131,12 +153,26 @@ function subtitleFor(step: TraceStep): ReactNode {
         </>
       )
     }
-    case "agent_run":
-      return step.agent_slug ? (
-        <span className="truncate font-mono text-foreground/80">{step.agent_slug}</span>
-      ) : (
-        <span className="text-muted-foreground/60">prompt</span>
+    case "agent_run": {
+      // The model matters more than the agent slug for an agent step:
+      // it is what the step will cost and how well it will reason, and
+      // it was previously only visible by asking for a dry run.
+      const model = modelLabel(step)
+      return (
+        <>
+          {step.agent_slug ? (
+            <span className="truncate font-mono text-foreground/80">{step.agent_slug}</span>
+          ) : (
+            <span className="text-muted-foreground/60">prompt</span>
+          )}
+          {model && (
+            <span className="ml-1.5 shrink-0 rounded border border-border/60 px-1 py-0 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+              {model}
+            </span>
+          )}
+        </>
       )
+    }
     case "transform":
       return (
         <span className="truncate font-mono text-foreground/80">
@@ -166,6 +202,26 @@ function subtitleFor(step: TraceStep): ReactNode {
       return (
         <span className="truncate font-mono text-foreground/80">
           {step.pipeline_slug ?? "(unknown)"}
+        </span>
+      )
+    case "script":
+      return step.script?.path ? (
+        <span className="truncate font-mono text-foreground/80">{step.script.path}</span>
+      ) : null
+    case "notify":
+      return step.notify?.to ? (
+        <span className="truncate font-mono text-foreground/80">→ {step.notify.to}</span>
+      ) : null
+    case "query":
+      return (
+        <span className="truncate font-mono text-foreground/80">
+          {step.query?.source ?? "datastore"}
+        </span>
+      )
+    case "foreach":
+      return (
+        <span className="truncate font-mono text-foreground/80">
+          {step.foreach?.items ? `over ${step.foreach.items}` : "loop"}
         </span>
       )
     default:
@@ -238,15 +294,19 @@ function TraceStepNodeBase({ data }: NodeProps) {
         heatmapClass,
       )}
     >
+      {/* Top/Bottom, matching the dagre TB rank direction. Handles
+          on Left/Right would make every edge leave a node sideways
+          and loop back down — the layout and the wiring have to agree
+          on which way the graph flows. */}
       <Handle
         type="target"
-        position={Position.Left}
+        position={Position.Top}
         className="!h-2 !w-2 !border-0 !bg-white/30"
         isConnectable={false}
       />
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className="!h-2 !w-2 !border-0 !bg-white/30"
         isConnectable={false}
       />
@@ -503,7 +563,7 @@ function TriggerNodeBase({ data }: NodeProps) {
     >
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className="!h-2 !w-2 !border-0 !bg-white/30"
         isConnectable={false}
       />

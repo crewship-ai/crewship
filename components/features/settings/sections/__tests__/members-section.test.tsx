@@ -207,3 +207,59 @@ describe("MembersSection — members without a name", () => {
     }
   })
 })
+
+// ── Deep link ──────────────────────────────────────────────────────────────
+//
+// The ⌘K palette can find a person by name or email, and used to drop the
+// caller on the roster with no indication of which row they had picked — on a
+// workspace of any size that is a second search by eye. `focusUserId` opens
+// that person's row on arrival.
+
+function renderFocused(focusUserId?: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(
+    <QueryClientProvider client={qc}>
+      <MembersSection
+        members={members}
+        workspaceId="ws1"
+        currentUserId="u-caller"
+        callerRole="ADMIN"
+        focusUserId={focusUserId}
+        onRefresh={vi.fn()}
+      />
+    </QueryClientProvider>,
+  )
+}
+
+describe("MembersSection — arriving at one person", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ members: [] }) })
+  })
+
+  it("opens the named person's row and leaves the others shut", () => {
+    renderFocused("u-manager")
+
+    const rows = screen.getAllByRole("button", { name: /permissions for/i })
+    const byName = (n: string) => rows.find((r) => r.textContent?.includes(n))!
+    expect(byName("Mo Manager")).toHaveAttribute("aria-expanded", "true")
+    expect(byName("Olive Owner")).toHaveAttribute("aria-expanded", "false")
+    expect(byName("Mel Member")).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("leaves every row shut when the link names nobody", () => {
+    renderFocused(undefined)
+    for (const row of screen.getAllByRole("button", { name: /permissions for/i })) {
+      expect(row).toHaveAttribute("aria-expanded", "false")
+    }
+  })
+
+  it("leaves every row shut when the link names someone who is not a member", () => {
+    // A stale link, or a person removed since — the roster still has to render.
+    renderFocused("u-ghost")
+    for (const row of screen.getAllByRole("button", { name: /permissions for/i })) {
+      expect(row).toHaveAttribute("aria-expanded", "false")
+    }
+  })
+})

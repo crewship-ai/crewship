@@ -261,7 +261,7 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 | `assignee_id` | string | Assignee ID |
 | `due_date` | string | Due date |
 | `project_id` | string | Project ID (empty string to unlink) |
-| `estimate` | integer | Effort/points estimate |
+| `estimate` | integer \| null | Effort/points estimate; **`null` clears it**, a non-number is a `400` |
 | `parent_issue_id` | string | Parent issue ID; empty string unlinks; cannot equal the issue itself |
 | `milestone_id` | string | Milestone ID; empty string unlinks |
 | `sort_order` | number | Manual sort order |

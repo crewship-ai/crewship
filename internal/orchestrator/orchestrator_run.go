@@ -1130,6 +1130,22 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.logger)
 	} else {
 		env = BuildEnvVars(*req, cred)
+		// #1754: a worker sub-agent skips STARTING a sidecar (the crew's is
+		// already listening on 127.0.0.1:9119 in this same container) and used
+		// to be given no per-agent token either — so every call it made to that
+		// sidecar arrived anonymous. /assign now resolves the acting agent from
+		// exactly this token, and an anonymous call is refused, which would
+		// leave sub-agent delegation unlocked in the prompt and shut in
+		// practice.
+		//
+		// It hands the run its OWN identity, not extra reach: the token is
+		// HMAC(master, workspace‖agent), the same value the sidecar's roster
+		// already holds for this agent, and every route that consumes it
+		// resolves the caller's own tier/attribution. Empty when internal auth
+		// is unconfigured, exactly as in the sidecar branch above.
+		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
+			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
+		}
 	}
 
 	return env, nil

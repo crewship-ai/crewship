@@ -39,6 +39,8 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/pipelines/test_run](#pipelines-routines-and-skills) | Test-run an agent-authored pipeline (step 1 of save) |
 | `POST` | [/api/v1/internal/pipelines/save](#pipelines-routines-and-skills) | Save an agent-authored pipeline definition |
 | `POST` | [/api/v1/internal/pipelines/run](#pipelines-routines-and-skills) | Run a saved routine (the `run_routine` MCP tool) |
+| `GET` | [/api/v1/internal/pipelines](#pipelines-routines-and-skills) | List the workspace's routines (the `list_routines` MCP tool) |
+| `GET` | [/api/v1/internal/crews/{crewId}/capabilities](#pipelines-routines-and-skills) | The crew's authoring surface (the `discover_capabilities` MCP tool) |
 | `POST` | [/api/v1/internal/routines/schedules](#pipelines-routines-and-skills) | Slash-action mirror — create a pipeline schedule |
 | `POST` | [/api/v1/internal/skills/generate](#pipelines-routines-and-skills) | Slash-action mirror — LLM-author a SKILL.md |
 | `POST` | [/api/v1/internal/skills/author](#pipelines-routines-and-skills) | Slash-action mirror — propose/author a skill |
@@ -61,8 +63,9 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `GET` | [/api/v1/internal/issues](#missions-and-issues) | List issues |
 | `GET` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Get a specific issue |
 | `POST` | [/api/v1/internal/issues](#missions-and-issues) | Create issue |
-| `PATCH` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Update issue status |
+| `PATCH` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Update an issue (status, priority, assignee, labels, estimate, due date) |
 | `POST` | [/api/v1/internal/issues/\{identifier\}/comments](#missions-and-issues) | Comment on issue |
+| `POST` | [/api/v1/internal/issues/\{identifier\}/relations](#missions-and-issues) | Relate or re-parent an issue |
 | `POST` | [/api/v1/internal/keeper/request](#keeper) | Sidecar forwards a credential read request |
 | `GET` | [/api/v1/internal/keeper/request/\{requestId\}](#keeper) | Fetch a previously submitted request's decision |
 | `POST` | [/api/v1/internal/keeper/execute](#keeper) | Sidecar forwards a sealed credential-use request |
@@ -201,11 +204,19 @@ These are the trusted forward-targets for agent-authored pipelines and the sidec
 | `POST` | `/api/v1/internal/pipelines/test_run` | Test-run an agent-authored pipeline before save (step 1 of the agent save flow). Same internal-token trust as save; the public `test_run` is JWT-authed. |
 | `POST` | `/api/v1/internal/pipelines/save` | Save an agent-authored pipeline definition. See [Pipeline save](#pipeline-save). |
 | `POST` | `/api/v1/internal/pipelines/run` | Run a saved routine — the sidecar→main forward for the `run_routine` MCP tool. The public run route rejects the internal token, so agents invoke saved routines through this surface (workspace + invoker identity injected from IPC). |
+| `GET` | `/api/v1/internal/pipelines?workspace_id=…` | List the workspace's routines — the sidecar→main forward for the `list_routines` MCP tool. Wrapped in `internalWsCtx`, so `workspace_id` is **required** (`400`) and must match the token's binding (`403`). |
+| `GET` | `/api/v1/internal/crews/{crewId}/capabilities?workspace_id=…` | The crew's authoring surface — the forward for `discover_capabilities`. Same `internalWsCtx` wrapping, **plus** `assertBoundCrewWorkspaceDB` on the path's `crewId`: a crew-bound (`crwv1`) sidecar may introspect only its own crew. Without that a sidecar could pull a **sibling crew's** integrations, agents and runtimes — same workspace, so the workspace check alone waves it through. |
 | `POST` | `/api/v1/internal/routines/schedules` | Slash-action mirror — create a pipeline schedule (routine). See [Slash-action mirrors](#slash-action-mirrors). |
 | `POST` | `/api/v1/internal/skills/generate` | Slash-action mirror — LLM-author a SKILL.md. See [Slash-action mirrors](#slash-action-mirrors). |
 | `POST` | `/api/v1/internal/skills/author` | Slash-action mirror — propose/author a skill via the skill-proposal handler. Registered only when the `SkillProposedHandler` is wired (`router_internal.go:95-98`). |
 
-`routines/schedules` is registered only when the `PipelineHandler` is wired (`router_internal.go:87-90`); `skills/generate` only when the `SkillGenerateHandler` is wired (`router_internal.go:91-94`). `pipelines/test_run` / `save` / `run` are always registered on the `PipelineHandler`.
+`routines/schedules` and the two read routes are registered only when the `PipelineHandler` is wired; `skills/generate` only when the `SkillGenerateHandler` is wired. `pipelines/test_run` / `save` / `run` are always registered on the `PipelineHandler`.
+
+<Warning>
+**Why the read tools need an internal route at all** (#1763). The sidecar authenticates with `X-Internal-Token`, and `extractToken` reads only `Authorization: Bearer` and the session cookies. `list_routines` and `discover_capabilities` forwarded to the **public**, JWT-authed routes, so both answered `401` — every in-container agent asked to author a routine could see neither what its crew can reach nor what routines already existed, and wrote from memory instead. `save_routine` and `run_routine` were never affected because they already targeted this surface.
+
+The fix is a second door onto the same handlers, **not** teaching `extractToken` about the internal header: that would hand every holder of the shared internal secret a user-equivalent session across the whole public API — a far larger decision than two tools being unreachable. `TestPublicPipelineRoutes_RejectTheInternalToken` pins the public routes' refusal so a future change cannot quietly widen it.
+</Warning>
 
 ### Runs
 
@@ -244,11 +255,12 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `POST` | `/api/v1/internal/missions` | Create a mission. |
 | `GET` | `/api/v1/internal/missions/{missionId}` | Get mission details. |
 | `POST` | `/api/v1/internal/missions/{missionId}/start` | Transition mission to running. |
-| `GET` | `/api/v1/internal/issues` | List issues. |
+| `GET` | `/api/v1/internal/issues` | List issues. Optional filters: `status` (comma-separated), `assignee_id`, `mission_type`, and `q` — a free-text search over title and description, with `%` and `_` escaped so they match literally. A crew-bound (`crwv1`) token constrains the listing to its own crew even when `crew_id` is omitted. |
 | `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
 | `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. If `assignee_id` is set, `assignee_type` must be `user` or `agent` and the assignee must belong to `workspace_id` — otherwise `400` (`assignee_type must be 'user' or 'agent' when assignee_id is set` / `assignee_id does not exist in this workspace`). |
-| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. |
+| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update an issue: `status`, `priority`, `assignee_type`/`assignee_id`, `labels`, `estimate`, `due_date`, plus an optional `comment`. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. `assignee_id` is validated against `workspace_id` (`400` when it names another tenant's user/agent); `labels` is a full replacement whose insert is workspace-scoped, so a foreign label id attaches nothing. An empty-string `assignee_id` / `due_date` clears the field. `title`, `description`, `project_id`, `milestone_id`, `routine_id`, `sort_order` and `parent_issue_id` are **not** accepted here. |
 | `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. Requires `agent_id` — unattributed comments are rejected with `400`. |
+| `POST` | `/api/v1/internal/issues/{identifier}/relations` | Relate two issues. Body: `target_identifier`, `relation_type` ∈ `blocks` \| `blocked_by` \| `relates_to` \| `duplicate_of` \| `sub_issue_of`. `blocked_by` is normalised to a swapped `blocks` row; `sub_issue_of` writes `parent_issue_id` on the issue named in the path instead of a `mission_relations` row. The path issue is crew-gated like every other mutation; the target only has to live in the bound workspace, and a foreign-tenant target is a `404` rather than a `403` so the endpoint is not an existence oracle. Duplicate relation → `409`. |
 
 ### Keeper
 

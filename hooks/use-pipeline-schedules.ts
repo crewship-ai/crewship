@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 // PipelineSchedule mirrors the wire shape returned by the
 // /pipeline-schedules endpoint family. We keep target_pipeline_slug
@@ -158,6 +159,14 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
     },
     [workspaceId, refresh],
   )
+
+  // next_run_at moves the moment a schedule fires, so a run starting is
+  // exactly when "Firing next" goes stale. Without this the upcoming
+  // list kept naming a time that had already passed until someone
+  // reloaded the page.
+  useRealtimeEvent("pipeline.run.started", refresh)
+  useRealtimeEvent("pipeline.run.completed", refresh)
+  useRealtimeEvent("pipeline.saved", refresh)
 
   return { schedules, loading, error, refresh, create, update, remove }
 }

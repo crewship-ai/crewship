@@ -46,7 +46,7 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         filterPriority: null,
       }),
     )
-    expect(result.current.map((i) => i.id)).toEqual(["i1", "i3"])
+    expect(result.current.visible.map((i) => i.id)).toEqual(["i1", "i3"])
   })
 
   it("selectedProjectId wins over a different filterProjectId", () => {
@@ -69,7 +69,7 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         filterPriority: null,
       }),
     )
-    expect(result.current.map((i) => i.id)).toEqual(["i2"])
+    expect(result.current.visible.map((i) => i.id)).toEqual(["i2"])
   })
 
   it("selectedProjectId without filterProjectId narrows to the selected project", () => {
@@ -88,7 +88,7 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         filterPriority: null,
       }),
     )
-    expect(result.current.map((i) => i.id)).toEqual(["i1", "i3"])
+    expect(result.current.visible.map((i) => i.id)).toEqual(["i1", "i3"])
   })
 
   it("both null returns the full list (with other filters still applying)", () => {
@@ -108,7 +108,7 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         filterPriority: null,
       }),
     )
-    expect(result.current.map((i) => i.id)).toEqual(["i1", "i2", "i3", "i4"])
+    expect(result.current.visible.map((i) => i.id)).toEqual(["i1", "i2", "i3", "i4"])
   })
 
   it("clearing filterProjectId leaves an explicit selectedProjectId intact", () => {
@@ -129,7 +129,7 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         filterPriority: null,
       }),
     )
-    expect(result.current.map((i) => i.id)).toEqual(["i2"])
+    expect(result.current.visible.map((i) => i.id)).toEqual(["i2"])
   })
 
   it("filterProjectId composes with crew + agent filters AND-style", () => {
@@ -154,6 +154,6 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
         filterPriority: null,
       }),
     )
-    expect(result.current.map((i) => i.id)).toEqual(["i3"])
+    expect(result.current.visible.map((i) => i.id)).toEqual(["i3"])
   })
 })

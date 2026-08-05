@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 // the same app.
 
 export interface RoutineFilters {
-  status: "all" | "completed" | "failed" | "never"
+  status: "all" | "awaiting" | "running" | "completed" | "failed" | "never"
   invocations: "all" | "popular" | "fresh"
   authorAgentId: string | null
   showEphemeral: boolean

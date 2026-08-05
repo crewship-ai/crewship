@@ -10,6 +10,11 @@
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { HeatmapBucket } from "./percentile-heatmap"
 
+// Mirrors the closed set in internal/pipeline/types.go (StepType).
+// Keep the two in sync: a kind the backend can execute but this list
+// omits still renders (KIND_VISUAL falls back to agent_run), but it
+// renders as the WRONG kind — a `foreach` loop drawn as an agent is
+// worse than an unknown-kind node, because it reads as truthful.
 export type StepKind =
   | "agent_run"
   | "call_pipeline"
@@ -19,6 +24,8 @@ export type StepKind =
   | "transform"
   | "notify"
   | "script"
+  | "query"
+  | "foreach"
 
 export type StepStatus =
   | "pending"
@@ -47,6 +54,12 @@ export interface TraceStep {
   // without exhaustive switches.
   agent_slug?: string
   prompt?: string
+  // The reasoning tier and any pinned model. These are what the dry-run
+  // panel uniquely showed — everything else in it duplicated the graph
+  // and the Access card — so they belong on the node they describe,
+  // where they are visible without asking for a report.
+  complexity?: string
+  model_override?: string
   http?: {
     method?: string
     url?: string
@@ -66,6 +79,36 @@ export interface TraceStep {
     kind?: string
     approval_prompt?: string
     until?: string
+  }
+  // Field names mirror the Go payloads exactly (QueryStep,
+  // ForeachStep in internal/pipeline/types.go). A name invented on
+  // this side renders a blank subtitle on every real run of that kind,
+  // which is how a renderer quietly stops describing the routine.
+  script?: {
+    path?: string
+    args?: string[]
+  }
+  notify?: {
+    to?: string
+    title?: string
+    category?: string
+  }
+  query?: {
+    source?: string
+    window_hours?: number
+  }
+  foreach?: {
+    // Template rendering to a JSON array — what the loop iterates
+    // over. Surfaced as the node subtitle so "this runs once per
+    // invoice" is readable off the canvas.
+    items?: string
+    as?: string
+    parallelism?: number
+    // The per-item body. buildTraceGraph walks dsl.steps flat and does
+    // NOT descend into this, so a foreach currently draws as one node
+    // with its body invisible. Typed here so the gap is legible rather
+    // than a surprise; drawing nested bodies is its own change.
+    steps?: TraceStep[]
   }
   pipeline_slug?: string
   inputs?: Record<string, unknown>

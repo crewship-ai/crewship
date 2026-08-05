@@ -37,7 +37,6 @@ vi.mock("@/lib/store", () => ({
 }))
 
 // Stub child widgets that pull their own data hooks — irrelevant to the menu.
-vi.mock("@/components/features/notifications/notification-bell", () => ({ NotificationBell: () => null }))
 vi.mock("@/components/features/inbox/inbox-bell", () => ({ InboxBell: () => null }))
 vi.mock("@/components/features/activity/activity-bell", () => ({ ActivityBell: () => null }))
 vi.mock("@/components/command-palette", () => ({ CommandPalette: () => null }))

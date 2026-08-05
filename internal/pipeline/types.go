@@ -793,6 +793,16 @@ type Pipeline struct {
 	// via UpdateBudget, never touched by Save.
 	MonthlyBudgetUSD float64
 
+	// Icon and Color are pure presentation — the crew-icon name and
+	// gradient-palette id a routine renders with. They live in columns
+	// rather than in the definition because definition_json is hashed
+	// into DefinitionHash, which pipeline_versions is keyed on and the
+	// HMAC save_token binds to: putting an icon in there would mint a
+	// new routine VERSION every time someone recoloured a row. Empty =
+	// unset; the UI derives a stable icon from the slug in that case.
+	Icon  string
+	Color string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time

@@ -191,8 +191,9 @@ var wantAuthenticatedRecipes = map[string]int{
 	"crewshipSystemPreamble": 5,
 	// /assign, /query, /mission/create, cross-crew /assign, /spawn.
 	"BuildLeadContext": 5,
-	// /query and /escalate.
-	"BuildPeerContext": 2,
+	// /query, /escalate and — since #1754 unlocked delegation for non-leads —
+	// /assign. The /results poll alongside it is an unauthenticated GET.
+	"BuildPeerContext": 3,
 }
 
 func TestPromptRecipes_EveryAuthenticatedRecipeIsStillThere(t *testing.T) {

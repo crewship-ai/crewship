@@ -12,7 +12,10 @@ import type { Mission, MissionStatus } from "@/lib/types/mission"
 // FAILED slots between REVIEW and DONE because failed runs are still
 // "after-review" decisions. DUPLICATE is rare; tucked at the end with
 // CANCELLED so it doesn't take real estate up top.
-const STATUS_CHIPS: MissionStatus[] = [
+// Exported so the explorer's filter dropdown offers the same statuses in the
+// same order. Two surfaces filtering one state must at least agree on what
+// the options are.
+export const STATUS_CHIPS: MissionStatus[] = [
   "BACKLOG",
   "TODO",
   "PLANNING",

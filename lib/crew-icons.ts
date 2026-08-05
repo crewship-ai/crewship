@@ -501,6 +501,34 @@ export function crewColorHex(color: string | null | undefined): string | null {
 }
 
 /**
+ * How to paint an entity's icon in its own colour.
+ *
+ * The colour is stored as EITHER a palette id ("blue") or a raw hex
+ * ("#22C55E") depending on which picker wrote it. `getGradientPalette` only
+ * knows ids and falls back to GRADIENT_PALETTES[0] — blue — so every caller
+ * that reached for `.text` directly painted every hex-coloured entity blue.
+ *
+ * `crewColorHex` has existed to solve this, and its comment prescribes the
+ * pattern: ask it first, use the classes only when it returns null. The bug
+ * kept coming back anyway, in three separate files, because that is a rule a
+ * caller has to remember. This returns the props instead, so getting it right
+ * is the shorter thing to write:
+ *
+ *     <Icon className={cn("h-5 w-5", c.className)} style={c.style} />
+ *
+ * Exactly one of `className` / `style` is set, never both — an inline colour
+ * and a text-colour class on the same element is a specificity coin toss.
+ */
+export function iconColorProps(color: string | null | undefined): {
+  className?: string
+  style?: { color: string }
+} {
+  const hex = crewColorHex(color)
+  if (hex) return { style: { color: hex } }
+  return { className: getGradientPalette(color).text }
+}
+
+/**
  * Resolve a crew dot color. Specialised wrapper — has hex passthrough /
  * prefix-on-bare-hex behaviour beyond a plain registry lookup, so it doesn't
  * fit the generic `resolveEntity` shape cleanly.

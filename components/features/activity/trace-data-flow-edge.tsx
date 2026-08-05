@@ -4,12 +4,13 @@ import { memo, useState } from "react"
 import {
   BaseEdge,
   EdgeLabelRenderer,
-  getBezierPath,
+  getSmoothStepPath,
   type EdgeProps,
 } from "@xyflow/react"
 import { cn } from "@/lib/utils"
 import { BRAND } from "@/lib/colors"
 import type { TraceDataFlowEdgeData } from "@/lib/trace/types"
+import { midpointOf, roundedPolylinePath, type Pt } from "@/lib/trace/edge-path"
 
 // TraceDataFlowEdge — labeled bezier edge for "data flowed from
 // step A to step B" relationships. Visually distinct from the gray
@@ -42,14 +43,36 @@ function TraceDataFlowEdgeBase(props: EdgeProps) {
   const d = data as unknown as TraceDataFlowEdgeData | undefined
   const [hovered, setHovered] = useState(false)
 
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  })
+  // Same routing as the sequencing edges — a data-flow edge crosses
+  // the same nodes and would tangle the same way. The label rides the
+  // route's own midpoint rather than the straight-line midpoint of the
+  // endpoints, which on a routed edge is a different place and can sit
+  // on top of an unrelated node.
+  const points = (data as { points?: Pt[] } | undefined)?.points
+  let edgePath: string
+  let labelX: number
+  let labelY: number
+  if (points && points.length >= 2) {
+    const route: Pt[] = [
+      { x: sourceX, y: sourceY },
+      ...(points.length > 2 ? points.slice(1, -1) : []),
+      { x: targetX, y: targetY },
+    ]
+    edgePath = roundedPolylinePath(route, 10)
+    const mid = midpointOf(route) ?? { x: (sourceX + targetX) / 2, y: (sourceY + targetY) / 2 }
+    labelX = mid.x
+    labelY = mid.y
+  } else {
+    ;[edgePath, labelX, labelY] = getSmoothStepPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
+      borderRadius: 10,
+    })
+  }
 
   const active = d?.active ?? false
   const stroke = BRAND.primary

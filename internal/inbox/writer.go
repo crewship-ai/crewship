@@ -231,19 +231,36 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	return nil
 }
 
-// UpsertMessage inserts a message-kind inbox row, or — when a row with
-// the same (kind, source_id) already exists — refreshes it in place:
-// title/body/payload are replaced, timestamps bumped, and the row is
-// resurrected to 'unread' with its read/resolved markers cleared. This
-// is the dedupe primitive behind per-(user, chat) notifications like
-// "your agent replied": repeated replies update ONE bell item instead
-// of piling up siblings, and a new reply after the user dismissed the
-// old item correctly re-notifies.
+// UpsertMessage inserts a message-kind inbox row, refreshing an
+// existing one in place. See Upsert — this name is kept for the
+// chat-notification path it was written for.
+func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
+	return Upsert(ctx, db, logger, in)
+}
+
+// Upsert inserts an inbox row, or — when a row with the same (kind,
+// source_id) already exists — refreshes it in place: title/body/payload
+// are replaced, timestamps bumped, and the row is resurrected to
+// 'unread' with its read/resolved markers cleared.
+//
+// This is the primitive for a source that can fire more than once about
+// the SAME subject: repeated chat replies update ONE bell item instead
+// of piling up siblings, and a routine proposed a second time asks for
+// a decision again instead of being swallowed by the first item.
+//
+// Insert is the other half of that choice, and the two are not
+// interchangeable. Insert's INSERT OR IGNORE says "this source_id
+// identifies one event, so a repeat is a retry" — right for a hook that
+// may be delivered twice. Upsert says "this source_id identifies a
+// subject, and it has news" — right when the row's content, and whether
+// anyone still needs to act on it, can change. Picking the wrong one is
+// invisible until the second occurrence: with Insert it is silently
+// dropped, and nobody is asked.
 //
 // Same envelope-validation contract as Insert: caller bugs (nil db,
 // missing workspace/kind/source) are a silent no-op returning nil; real
 // SQL failures are logged and returned.
-func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
+func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
 	if db == nil || in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
 		return nil
 	}
@@ -307,11 +324,11 @@ func UpsertMessage(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item
 		logger.Warn("inbox upsert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
 		return err
 	}
-	// Unlike Insert, UpsertMessage always fans out — by design, a repeated
-	// call here means a genuinely new event (another chat reply) refreshed
-	// an existing row rather than being ignored as a duplicate; the caller
-	// (chatnotify) already scopes SourceID per (chat, recipient) so this
-	// fires once per real reply per recipient, not once per row-write.
+	// Unlike Insert, Upsert always fans out — by design, a repeated call
+	// here means a genuinely new event (another chat reply, another
+	// proposal) refreshed an existing row rather than being ignored as a
+	// duplicate. Callers scope SourceID to the subject, so this fires
+	// once per real event, not once per row-write.
 	notifyExternal(ctx, in)
 	return nil
 }

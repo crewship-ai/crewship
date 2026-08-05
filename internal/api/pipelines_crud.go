@@ -94,7 +94,15 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "load pipeline")
 		return
 	}
-	writeJSON(w, http.StatusOK, toPipelineResponse(p, true))
+	out := toPipelineResponse(p, true)
+	// Only for a routine actually awaiting review — the lookup is a
+	// wasted query otherwise, and a stale reason on an active routine
+	// would be worse than none.
+	if p.Status == "proposed" {
+		out.RiskReasons = h.riskReasonsForRoutine(r.Context(), workspaceID, p.Slug)
+		out.InboxItemID = h.inboxItemForRoutine(r.Context(), workspaceID, p.Slug)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // Delete soft-deletes a pipeline by slug.
@@ -143,6 +151,7 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "dismissed", actorID)
 	inbox.ResolveByPipeline(r.Context(), h.db, h.logger, workspaceID, p.ID, "dismissed", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_deleted")
+	h.broadcastRoutinesChanged(workspaceID, "deleted")
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -666,20 +675,37 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// or code steps, declared credentials, or an integrations_required the
 	// author crew can't satisfy) land as 'proposed' and need MANAGER+ approval
 	// before they can run; safe ones go live as 'active'.
-	risky, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
+	_, riskReasons := h.classifyRoutineRisk(r.Context(), workspaceID, body.AuthorCrewID, dsl)
+
+	// What was already accepted. Classifying the STORED definition costs
+	// one parse and turns the question from "is this risky" — which a
+	// routine declaring credentials answers yes to forever — into "is
+	// there anything new to review", which is the question a reviewer is
+	// actually being asked.
+	current, priorReasons := h.currentRiskProfile(r.Context(), workspaceID, body.Slug)
+
+	decision := gateDecision(gateInput{
+		currentStatus: current,
+		priorReasons:  priorReasons,
+		newReasons:    riskReasons,
+	})
+	saveStatus := decision.status
+	if decision.why != "" && len(riskReasons) > 0 {
+		h.logger.Info("pipeline save: review not required",
+			"user_id", user.ID, "role", role, "slug", body.Slug,
+			"risk_reasons", riskReasons, "reason", decision.why)
+	}
 
 	// skip_governance_gate (OWNER/ADMIN, checked above) forces the save live
-	// even when risky — the trusted-operator / seeder escape hatch. We still
-	// classify (for the audit trail below) but persist 'active' and raise no
-	// review item.
-	saveStatus := statusForRisk(risky)
+	// even when risky — the trusted-operator / seeder escape hatch.
 	if body.SkipGovernanceGate {
 		saveStatus = "active"
-		if risky {
+		if len(riskReasons) > 0 {
 			h.logger.Info("pipeline save: governance gate skipped",
 				"user_id", user.ID, "role", role, "slug", body.Slug, "risk_reasons", riskReasons)
 		}
 	}
+	risky := saveStatus == "proposed"
 
 	in := pipeline.SaveInput{
 		WorkspaceID:    workspaceID,
@@ -762,6 +788,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 			inbox.KindEscalation, routineProposalInboxSource(workspaceID, saved.Slug), "approved", user.ID)
 		h.broadcastInboxUpdated(workspaceID, "routine_governance_skipped")
 	}
+	h.broadcastRoutinesChanged(workspaceID, "saved")
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }
 
@@ -906,5 +933,6 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if risky && saved.Status == "proposed" {
 		h.proposeRoutineInbox(r.Context(), body.WorkspaceID, saved, riskReasons, "Agent routine author")
 	}
+	h.broadcastRoutinesChanged(body.WorkspaceID, "saved")
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
 }

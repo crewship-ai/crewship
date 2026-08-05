@@ -16,6 +16,8 @@ import {
   SiDiscord,
   SiGithub,
   SiNotion,
+  SiGmail,
+  SiGoogledrive,
   SiGooglecalendar,
   SiZapier,
 } from "react-icons/si"
@@ -58,6 +60,8 @@ export const BRAND_ICONS: Record<BrandIconKey, BrandIcon> = {
   github: { Icon: SiGithub, color: "#E6EDF3" }, // brand black → light on dark UI
   notion: { Icon: SiNotion, color: "#D4D4D8" }, // brand black → light on dark UI
   googlecalendar: { Icon: SiGooglecalendar, color: "#4285F4" },
+  gmail: { Icon: SiGmail, color: "#EA4335" },
+  googledrive: { Icon: SiGoogledrive, color: "#4285F4" },
   zapier: { Icon: SiZapier, color: "#FF4F00" },
 }
 
