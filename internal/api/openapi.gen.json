@@ -56851,7 +56851,90 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "items": {
+                    "properties": {
+                      "author": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "credential_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "host": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "last_sync_error": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "last_synced_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "mission_id": {
+                        "type": "string"
+                      },
+                      "number": {
+                        "type": "integer"
+                      },
+                      "owner": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "remote_closed_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "remote_created_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "remote_merged_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "remote_updated_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "repo": {
+                        "type": "string"
+                      },
+                      "source_branch": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "state": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "target_branch": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "title": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "workspace_id": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
                 }
               }
             },
@@ -56987,6 +57070,11 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -56997,6 +57085,86 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "author": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "last_sync_error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_synced_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "remote_closed_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_created_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_merged_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "source_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "state": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "target_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "title": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -57007,6 +57175,86 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "author": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "last_sync_error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_synced_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "remote_closed_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_created_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_merged_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "source_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "state": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "target_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "title": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -57184,6 +57432,11 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -57330,6 +57583,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {},
                 "type": "object"
               }
             }
@@ -57340,6 +57594,86 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "author": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "last_sync_error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_synced_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "remote_closed_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_created_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_merged_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "source_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "state": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "target_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "title": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
