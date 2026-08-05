@@ -39,7 +39,7 @@ is the thing you are scanning for. The states line down the left edge:
 | **Draft** | Open, but not asking for anything yet |
 | **Merged** | It landed |
 | **Closed** | It did not |
-| **Unknown** | The row has no state — it has never been fetched successfully |
+| **Unknown** | The stored state is missing or is not one of the four. A link is only recorded after a successful fetch, so you should never see this |
 
 After the state come the title, `owner/repo#number`, the author, the branch
 pair and when the state was last confirmed. **The title, author and branch
