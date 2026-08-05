@@ -664,6 +664,14 @@ func writeFetchProblem(w http.ResponseWriter, r *http.Request, err error) {
 		writeCodeLinkProblem(w, r, http.StatusBadGateway, "credential-forbidden", err.Error(), 0)
 	case errors.Is(err, gitlink.ErrProviderUnavailable):
 		writeCodeLinkProblem(w, r, http.StatusBadGateway, "provider-unavailable", err.Error(), retry)
+	case errors.Is(err, gitlink.ErrHostMismatch):
+		// Not reachable from these handlers — the credential is resolved BY the
+		// ref's host, so the two are constructed equal. If it ever does fire it
+		// is our bug, not the provider's, and it must not land in the 502 bucket
+		// where the message would send someone to check a forge that was never
+		// contacted. Deliberately absent from the user-facing table in
+		// docs/guides/git-links.mdx: a code nobody can provoke is noise there.
+		writeCodeLinkProblem(w, r, http.StatusInternalServerError, "host-mismatch", err.Error(), 0)
 	default:
 		writeCodeLinkProblem(w, r, http.StatusBadGateway, "unexpected-response", err.Error(), 0)
 	}

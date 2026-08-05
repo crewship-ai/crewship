@@ -442,6 +442,25 @@ func TestResolveCodeLinkCredential_UnreadableWinnerStillErrors(t *testing.T) {
 	}
 }
 
+// ErrHostMismatch is a bug in US, not a bad answer from a forge, so it must not
+// land in the 502 bucket whose message sends someone to check a provider that
+// was never contacted. Driven through writeFetchProblem directly because the
+// handlers cannot produce it — they resolve the credential BY the ref's host.
+func TestWriteFetchProblem_HostMismatchIsOurFaultNotTheProvider(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/crews/c/issues/ENG-1/code-links", nil)
+	writeFetchProblem(rr, req, &gitlink.FetchError{
+		Err:      gitlink.ErrHostMismatch,
+		Provider: gitlink.ProviderGitHub,
+	})
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rr.Code)
+	}
+	if got := problemCode(t, rr); got != "host-mismatch" {
+		t.Errorf("problem code = %q, want host-mismatch", got)
+	}
+}
+
 // ── provider failure modes ───────────────────────────────────────────────
 
 func TestCodeLink_Attach_ProviderFailuresAreDistinguishable(t *testing.T) {
