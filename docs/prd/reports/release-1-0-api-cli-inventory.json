@@ -92,10 +92,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -147,10 +152,13 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
+          "auth": false,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -202,10 +210,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -256,10 +269,14 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
+          "auth": false,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -306,10 +323,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -351,9 +373,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -395,10 +420,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -443,10 +473,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -538,10 +573,14 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -585,10 +624,14 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -630,10 +673,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "auth": false,
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -2581,9 +2629,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -2786,9 +2837,14 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "request",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -2896,9 +2952,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3111,9 +3170,13 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3149,9 +3212,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3187,9 +3253,13 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3236,9 +3306,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3349,9 +3422,13 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3402,9 +3479,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3445,9 +3525,13 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3837,9 +3921,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -3936,9 +4023,14 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "request",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -4037,9 +4129,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -4141,9 +4236,13 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "request",
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -4171,9 +4270,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -4202,9 +4304,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -4234,9 +4339,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -4270,9 +4378,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -4310,9 +4421,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -4816,8 +4930,11 @@
           "canonical_method_path": true,
           "auth": true,
           "request": true,
-          "response": true,
-          "statuses": true
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -5760,9 +5877,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -5828,10 +5948,14 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
-          "request": true,
+          "auth": false,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth",
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6023,9 +6147,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6068,9 +6195,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6146,9 +6276,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6190,7 +6323,7 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
           "statuses": true
         },
@@ -6237,9 +6370,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6391,9 +6527,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6424,9 +6563,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -7690,9 +7832,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -7785,9 +7930,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -8172,9 +8320,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -8254,9 +8405,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -8501,9 +8655,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -8538,7 +8695,10 @@
           "auth": true,
           "request": true,
           "response": true,
-          "statuses": true
+          "statuses": false,
+          "missing": [
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -8574,9 +8734,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -8608,9 +8771,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -9225,9 +9391,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9264,9 +9433,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9368,9 +9540,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9435,9 +9610,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9539,9 +9717,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -9602,9 +9783,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9668,9 +9852,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9744,9 +9931,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -9912,9 +10102,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10045,9 +10238,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10080,9 +10276,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10112,9 +10311,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10255,9 +10457,14 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "request",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -10291,9 +10498,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10332,9 +10542,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10762,9 +10975,14 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "request",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -10827,9 +11045,14 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "request",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -10863,9 +11086,14 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
+          "request": false,
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "request",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11050,9 +11278,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11194,9 +11425,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11457,9 +11691,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11607,9 +11844,13 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": false,
+          "missing": [
+            "request",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11645,9 +11886,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11694,10 +11938,13 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
+          "auth": false,
           "request": true,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11751,10 +11998,13 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
+          "auth": false,
           "request": true,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11802,10 +12052,13 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
+          "auth": false,
           "request": true,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11848,10 +12101,15 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
+          "auth": false,
           "request": true,
-          "response": true,
-          "statuses": true
+          "response": false,
+          "statuses": false,
+          "missing": [
+            "auth",
+            "response",
+            "statuses"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11893,10 +12151,13 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": true,
+          "auth": false,
           "request": true,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "auth"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11938,8 +12199,11 @@
           "canonical_method_path": true,
           "auth": true,
           "request": true,
-          "response": true,
-          "statuses": true
+          "response": false,
+          "statuses": true,
+          "missing": [
+            "response"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -13291,9 +13555,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -13453,9 +13720,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -13588,9 +13858,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -13667,9 +13940,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -13724,9 +14000,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -13773,9 +14052,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -13815,9 +14097,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -14103,7 +14388,7 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
           "statuses": true
         },
@@ -14143,9 +14428,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -14560,9 +14848,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16199,9 +16490,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16241,9 +16535,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -16543,9 +16840,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16597,9 +16897,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16648,9 +16951,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16699,9 +17005,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16746,9 +17055,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -16831,9 +17143,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17004,9 +17319,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17157,9 +17475,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17236,9 +17557,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17518,9 +17842,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17619,9 +17946,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -18520,9 +18850,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -18619,9 +18952,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -18707,9 +19043,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -19352,9 +19691,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -19456,9 +19798,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -19496,9 +19841,12 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": true,
+          "request": false,
           "response": true,
-          "statuses": true
+          "statuses": true,
+          "missing": [
+            "request"
+          ]
         },
         "semantic_runtime": {
           "openapi_operation": true,

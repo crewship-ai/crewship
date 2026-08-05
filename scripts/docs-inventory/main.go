@@ -41,6 +41,7 @@ type openAPIDocument struct {
 type openAPIOperation struct {
 	OperationID string                     `json:"operationId"`
 	Tags        []string                   `json:"tags"`
+	Parameters  []json.RawMessage          `json:"parameters"`
 	RequestBody *openAPIRequestBody        `json:"requestBody,omitempty"`
 	Responses   map[string]openAPIResponse `json:"responses"`
 }
@@ -147,6 +148,7 @@ var endpointPattern = regexp.MustCompile(`(?i)\b(GET|POST|PUT|PATCH|DELETE|HEAD|
 var endpointHeadingPattern = regexp.MustCompile(`(?i)^#{1,6}\s+.*\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
 var pathPattern = regexp.MustCompile(`/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?`)
 var statusPattern = regexp.MustCompile(`(?i)\bstatus(?:es)?\s*:`)
+var httpStatusPattern = regexp.MustCompile(`(?i)(?:` + "`" + `)?[1-5][0-9]{2}(?:` + "`" + `)?(?:\s+[a-z][a-z -]+)?`)
 
 type endpointEvidence struct {
 	Path, Method string
@@ -162,6 +164,7 @@ func inventoryEndpointEvidence(docs []docFile) map[string][]endpointEvidence {
 	result := make(map[string][]endpointEvidence)
 	for _, doc := range docs {
 		lines := strings.Split(strings.ReplaceAll(doc.Text, "\r\n", "\n"), "\n")
+		shared := sharedContractSections(lines)
 		for i, line := range lines {
 			matches := endpointPattern.FindAllStringSubmatch(line, -1)
 			if tableMethod, tablePath, ok := endpointTableRow(line); ok {
@@ -170,7 +173,7 @@ func inventoryEndpointEvidence(docs []docFile) map[string][]endpointEvidence {
 			if len(matches) == 0 {
 				continue
 			}
-			section := endpointSection(lines, i)
+			section := endpointSection(lines, i) + "\n" + shared
 			for _, match := range matches {
 				method, path := strings.ToUpper(match[1]), canonicalDocPath(match[2])
 				if path == "" {
@@ -182,6 +185,41 @@ func inventoryEndpointEvidence(docs []docFile) map[string][]endpointEvidence {
 		}
 	}
 	return result
+}
+
+func sharedContractSections(lines []string) string {
+	var sections []string
+	// Frontmatter, Notes, and introductory paragraphs often define the
+	// authentication scope for every operation on a page. They are valid
+	// shared evidence, but only before the first Markdown heading so an
+	// unrelated later operation cannot satisfy this endpoint's contract.
+	for i, line := range lines {
+		if markdownHeadingLevel(line) > 0 {
+			if i > 0 {
+				sections = append(sections, strings.Join(lines[:i], "\n"))
+			}
+			break
+		}
+	}
+	for i, line := range lines {
+		level := markdownHeadingLevel(line)
+		if level == 0 {
+			continue
+		}
+		title := strings.ToLower(strings.TrimSpace(strings.TrimLeft(line, "#")))
+		if !strings.Contains(title, "contract") && !strings.Contains(title, "authentication") && title != "auth" {
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if next := markdownHeadingLevel(lines[j]); next > 0 && next <= level {
+				end = j
+				break
+			}
+		}
+		sections = append(sections, strings.Join(lines[i:end], "\n"))
+	}
+	return strings.Join(sections, "\n")
 }
 
 func endpointTableRow(line string) (string, string, bool) {
@@ -215,22 +253,39 @@ func isHTTPMethod(method string) bool {
 func endpointSection(lines []string, endpointLine int) string {
 	start, level := endpointLine, 0
 	if match := endpointHeadingPattern.FindStringSubmatch(lines[endpointLine]); match != nil {
-		level = len(lines[endpointLine]) - len(strings.TrimLeft(lines[endpointLine], "#"))
+		level = markdownHeadingLevel(lines[endpointLine])
 		start = endpointLine
+	} else {
+		// Table rows and fenced request lines usually sit below a resource or
+		// operation heading. Restrict their evidence to that heading's section;
+		// using the rest of the document would let an unrelated endpoint satisfy
+		// auth/request/response/status checks by accident.
+		for i := endpointLine - 1; i >= 0; i-- {
+			if heading := markdownHeadingLevel(lines[i]); heading > 0 {
+				start, level = i, heading
+				break
+			}
+		}
 	}
 	end := len(lines)
 	if level > 0 {
 		for i := endpointLine + 1; i < len(lines); i++ {
-			if strings.HasPrefix(lines[i], "#") {
-				hashLevel := len(lines[i]) - len(strings.TrimLeft(lines[i], "#"))
-				if hashLevel <= level && hashLevel > 0 && hashLevel < len(lines[i]) && lines[i][hashLevel] == ' ' {
-					end = i
-					break
-				}
+			if hashLevel := markdownHeadingLevel(lines[i]); hashLevel > 0 && hashLevel <= level {
+				end = i
+				break
 			}
 		}
 	}
 	return strings.Join(lines[start:end], "\n")
+}
+
+func markdownHeadingLevel(line string) int {
+	trimmed := strings.TrimLeft(line, "#")
+	level := len(line) - len(trimmed)
+	if level == 0 || level > 6 || len(trimmed) == 0 || trimmed[0] != ' ' {
+		return 0
+	}
+	return level
 }
 
 func canonicalDocPath(path string) string {
@@ -240,7 +295,7 @@ func canonicalDocPath(path string) string {
 	return strings.TrimRight(path, ".,;:")
 }
 
-func contractFor(method, path string, evidence map[string][]endpointEvidence, source string, tests []string) contractChecks {
+func contractFor(method, path string, evidence map[string][]endpointEvidence, source string, tests []string, requestRequired bool) contractChecks {
 	key := strings.ToUpper(method) + " " + path
 	checks := contractChecks{SemanticRuntime: semanticChecks{OpenAPIOperation: true, SourceFile: source, TestSignals: tests}}
 	for _, item := range evidence[key] {
@@ -257,7 +312,7 @@ func contractFor(method, path string, evidence map[string][]endpointEvidence, so
 	if !checks.Structural.Auth {
 		checks.Structural.Missing = append(checks.Structural.Missing, "auth")
 	}
-	if !checks.Structural.Request {
+	if requestRequired && !checks.Structural.Request {
 		checks.Structural.Missing = append(checks.Structural.Missing, "request")
 	}
 	if !checks.Structural.Response {
@@ -280,7 +335,7 @@ func markerPresent(text string, markers ...string) bool {
 
 func statusMarkerPresent(text string) bool {
 	lower := strings.ToLower(text)
-	return strings.Contains(lower, "| status |") || strings.Contains(lower, "**status") || statusPattern.MatchString(lower)
+	return strings.Contains(lower, "| status |") || strings.Contains(lower, "**status") || statusPattern.MatchString(lower) || httpStatusPattern.MatchString(lower)
 }
 
 type summary struct {
@@ -367,7 +422,7 @@ func run(openAPIFile, commandsFile string) error {
 				rec.Status = "missing_docs"
 			}
 			rec.TestSignals = testContaining(path, tests)
-			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals)
+			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals, op.RequestBody != nil || len(op.Parameters) > 0)
 			r.API = append(r.API, rec)
 			rec.ConcreteResponseSchema = hasConcreteSuccessSchema(op.Responses)
 			rec.GenericResponseSchema = !rec.ConcreteResponseSchema && hasSuccessSchema(op.Responses)

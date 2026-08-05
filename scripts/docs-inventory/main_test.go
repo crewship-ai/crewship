@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -45,5 +46,38 @@ func TestResponseSchemaQualityIgnoresErrors(t *testing.T) {
 	}
 	if hasSuccessSchema(responses) || hasConcreteSuccessSchema(responses) {
 		t.Fatal("error responses must not count as success response schemas")
+	}
+}
+
+func TestEndpointEvidenceStaysWithinOperationSection(t *testing.T) {
+	lines := []string{
+		"## Resource",
+		"All routes require authentication.",
+		"### List",
+		"GET /api/v1/items",
+		"**Response:** `200 OK`",
+		"### Create",
+		"POST /api/v1/items",
+		"**Request:** JSON body.",
+		"**Response:** `201 Created`",
+	}
+	list := endpointSection(lines, 3)
+	if !strings.Contains(list, "200 OK") || strings.Contains(list, "201 Created") {
+		t.Fatalf("list section escaped operation boundary: %q", list)
+	}
+	if !statusMarkerPresent(list) {
+		t.Fatal("HTTP response status should count as status evidence")
+	}
+}
+
+func TestContractDoesNotRequireBodyForBodylessOperation(t *testing.T) {
+	evidence := map[string][]endpointEvidence{
+		"GET /api/v1/items": {{Text: "**Response:** `200 OK`"}},
+	}
+	checks := contractFor("GET", "/api/v1/items", evidence, "router.go", nil, false)
+	for _, missing := range checks.Structural.Missing {
+		if missing == "request" {
+			t.Fatal("bodyless operation must not require a request-body marker")
+		}
 	}
 }
