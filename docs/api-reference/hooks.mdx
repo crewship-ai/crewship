@@ -99,6 +99,8 @@ Flip a hook on or off. Both transitions emit `system.hook_toggled` into the jour
 POST /api/v1/hooks/{id}/enable
 ```
 
+**Path parameters:** `id` is the hook ID. The request has no body.
+
 **Auth:** `OWNER` or `ADMIN` only (403 otherwise). Enabling a hook can invoke shell commands, hit third-party webhooks, or dispatch subagents -- the role bar matches that risk.
 
 **Response:** `200 OK`
@@ -127,7 +129,12 @@ Emits `system.hook_toggled` into the journal with the actor's user ID.
 POST /api/v1/hooks/{id}/disable
 ```
 
+**Path parameters:** `id` is the hook ID. The request has no body.
+
 Same auth rules, same response shape with `"enabled": false`.
+
+**Errors:** `401` when unauthenticated, `403` for a non-`OWNER`/`ADMIN`,
+`404` when the hook is outside the workspace, and `500` on a database error.
 
 ## Registration (Go only)
 

@@ -39,6 +39,9 @@ Every endpoint accepts the same window parameters:
 GET /api/v1/paymaster/spend/by-crew?range=7d
 ```
 
+**Request:** no body. `range`, `since`, and `until` are the query parameters
+described above; the workspace is taken from the authenticated session.
+
 **Response:** `200 OK`
 
 ```json
@@ -114,6 +117,10 @@ GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h
 ```
 GET /api/v1/paymaster/spend/by-mission/{missionId}
 ```
+
+**Path parameters:** `missionId` is required and must identify a mission in
+the caller's workspace. The request has no body. This endpoint does not accept
+a time-window query because it reports the mission's full ledger history.
 
 Mission-scoped spend. Window-less -- sums the full mission.
 

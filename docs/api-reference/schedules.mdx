@@ -1,0 +1,107 @@
+---
+title: "Schedules"
+description: "Cron triggers for saved pipelines."
+icon: "calendar-clock"
+---
+
+Schedules are workspace-scoped cron triggers for saved pipelines. The API path
+uses `pipeline-schedules`; the product UI may call these triggers routines.
+All routes require an authenticated workspace member. Error responses use the
+API Problem Details shape with an `error` message.
+
+## Endpoints
+
+| Method | Path | Authorization | Success |
+|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | `200` and a JSON array |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | `create` or `routine.create` capability | `201` and a schedule object |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` | `200` and a schedule object |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` | `204 No Content` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | `create` | `200` and a run result |
+
+Workspace membership failures are `401` or `403`. An unwired schedule store or
+runner is `503`; unexpected persistence failures are `500`.
+
+## Create and update
+
+`POST` requires `cron_expr` and one of `target_pipeline_slug` or
+`target_pipeline_id`. The target must be in the caller's workspace. `timezone`
+defaults to `UTC`; `enabled` defaults to `true`; `name` defaults to the target
+slug when omitted or blank. `target_pipeline_version` pins execution to an
+immutable version; omit it to follow the pipeline head.
+
+```json
+{
+  "name": "Every night",
+  "target_pipeline_slug": "nightly-report",
+  "target_pipeline_version": 4,
+  "cron_expr": "0 2 * * *",
+  "timezone": "Europe/Prague",
+  "inputs": {"region": "eu"},
+  "enabled": true,
+  "catchup_policy": "once",
+  "max_consecutive_failures": 5,
+  "wake_pipeline_slug": "is-ready",
+  "wake_inputs": {},
+  "wake_fail_closed": true
+}
+```
+
+The request fields are:
+
+| Field | Type | Contract |
+|---|---|---|
+| `name` | string | Display name; blank uses the target slug. |
+| `target_pipeline_slug` / `target_pipeline_id` | string | Supply at least one. The ID form is accepted for callers that already have the ID. |
+| `target_pipeline_version` | integer or `null` | Optional version pin. On PATCH, omission retains the existing pin; explicit `null` clears it. |
+| `cron_expr` | string | Five-field cron expression with minute, hour, day-of-month, month, and weekday fields. |
+| `timezone` | string | IANA timezone; defaults to `UTC`. |
+| `inputs` | object | JSON inputs passed to the pipeline; on PATCH, omission retains existing inputs. |
+| `enabled` | boolean | Defaults to `true` on create; omission retains the current value on PATCH. |
+| `catchup_policy` | string | `skip`, `once` (default), or `all`. Affects ungated schedules when multiple occurrences were missed. |
+| `max_consecutive_failures` | integer | Optional circuit-breaker threshold; non-positive create values use the default of `5`. |
+| `wake_pipeline_slug` / `wake_pipeline_id` | string or `null` | Optional wake gate. Supply a different pipeline that declares `agentless: true`; an explicit empty reference clears it on PATCH. |
+| `wake_inputs` | object | Inputs for the wake pipeline. |
+| `wake_fail_closed` | boolean | When true, a failed/non-affirmative wake check holds the scheduled run; the default is fail-open. |
+
+PATCH uses merge semantics for omitted fields: omitted name, target, cron,
+timezone, inputs, enabled, wake, catch-up, and breaker settings are retained.
+Invalid JSON, an invalid cron or timezone, a missing target, an invalid
+`catchup_policy`, or an invalid wake reference returns `400`. A missing or
+foreign schedule is `404`.
+
+## Schedule representation
+
+Each successful list/create/update response contains an object with these
+fields (nullable/empty telemetry fields are omitted when unset):
+
+`id`, `workspace_id`, `name`, `target_pipeline_id`, `target_pipeline_slug`,
+`target_pipeline_version`, `cron_expr`, `timezone`, `inputs`, `enabled`,
+`last_run_at`, `last_status`, `last_run_id`, `next_run_at`, `wake_pipeline_id`,
+`wake_pipeline_slug`, `wake_inputs`, `wake_fail_closed`, `wake_check_count`,
+`wake_fire_count`, `last_wake_at`, `last_wake_status`, `catchup_policy`,
+`last_missed_count`, `consecutive_failures`, `max_consecutive_failures`,
+`disabled_reason`, `created_at`, and `updated_at`.
+
+`last_status` can be `COMPLETED`, `FAILED`, `SKIPPED`, `WAITING`, or `DEDUPED`.
+Wake telemetry uses `WOKE`, `SKIPPED`, `ERROR`, or `HELD`. A circuit breaker
+disables the schedule after its threshold and sets `disabled_reason` to
+`circuit_breaker`; operator-disabled schedules have an empty reason.
+
+## Force-fire and delete
+
+`POST .../pipeline-schedules/{scheduleId}/run` takes an empty JSON body and
+executes the stored inputs immediately without advancing the cron cadence. It
+honors `target_pipeline_version` and returns the normal run result with `200`.
+It returns `404` for a missing/foreign schedule or target, `409` when a pinned
+version no longer exists, and `429` with `Retry-After: 5` when the pipeline's
+concurrency key is already running.
+
+`DELETE` is a soft delete: the row is retained, future cron ticks stop, and an
+already-running invocation is not cancelled. The successful response is empty
+(`204`). A missing or foreign schedule is `404`.
+
+## Related
+
+- [Pipelines](/api-reference/pipelines) — pipeline definitions and execution.
+- [Routines](/api-reference/routines) — governance and webhook controls.

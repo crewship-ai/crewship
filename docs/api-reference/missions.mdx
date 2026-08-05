@@ -247,6 +247,8 @@ DELETE /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
   Only missions in `PLANNING` or `CANCELLED` status can be deleted (hard delete).
 </Warning>
 
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `204 No Content`
@@ -298,6 +300,8 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/restart?workspace_id={workspace
 
 Restarts a `COMPLETED`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED tasks (PENDING if dependencies allow, BLOCKED otherwise), increments their `iteration`, clears errors, and moves the mission back to `PLANNING` (call `start` afterwards to dispatch). (`internal/api/task_state.go:14`)
 
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `200 OK`
@@ -319,6 +323,8 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/resume?workspace_id={workspaceI
 
 Resumes a `FAILED` mission from the point of failure. The handler atomically claims the mission into `RESUMING`, resets the FAILED/AWAITING_APPROVAL tasks plus their downstream dependents, validates the DAG, and re-engages the MissionEngine. COMPLETED tasks are preserved. (`internal/api/task_state.go:103`)
 
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `200 OK`
@@ -336,6 +342,8 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/clone?workspace_id={workspaceId
 ```
 
 Creates a copy of the mission with all its tasks, resetting statuses to `PLANNING`/`PENDING` (or `BLOCKED` if the cloned task carries dependencies).
+
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 

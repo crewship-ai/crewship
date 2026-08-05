@@ -36,7 +36,7 @@ requirements and the unauthenticated OAuth callback.
 | `POST` | [`/api/v1/agents/{agentId}/integrations`](#create-agent-binding) | Create an agent binding |
 | `PATCH` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#update-agent-binding) | Update an agent binding |
 | `DELETE` | [`/api/v1/agents/{agentId}/integrations/{integrationId}`](#delete-agent-binding) | Delete an agent binding |
-| `GET` | [`/api/v1/agents/{agentId}/resolved-integrations`](#resolve-agent-integrations) | Resolve effective integrations |
+| `GET` | [`/api/v1/agents/{agentId}/integrations/resolved`](#resolve-agent-integrations) | Resolve effective integrations |
 | `GET` | [`/api/v1/mcp-tool-calls`](#mcp-tool-call-audit) | Audit trail of MCP tool invocations |
 | `GET` | [`/api/v1/oauth/providers`](#list-oauth-providers) | List OAuth providers |
 | `POST` | [`/api/v1/oauth/initiate`](#initiate-oauth-flow) | Start an OAuth flow |
@@ -552,6 +552,10 @@ Workspace-level MCP server definitions available to all crews and agents.
 GET /api/v1/integrations?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member (`workspace_id` is required).
+
+**Request:** No body.
+
 **Response:** `200 OK`
 
 ```json
@@ -643,7 +647,16 @@ POST /api/v1/integrations?workspace_id={workspaceId}
 GET /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member (`workspace_id` is required).
+
+**Request:** No body.
+
 **Response:** `200 OK`
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `404` | Integration not found in the workspace |
 
 ### Update Workspace Integration
 
@@ -656,6 +669,11 @@ PATCH /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
 All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`.
 
 **Response:** `200 OK`
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON or invalid merged transport configuration |
+| `404` | Integration not found |
 
 ### Delete Workspace Integration
 
@@ -687,6 +705,11 @@ This cascades: every agent binding and crew-level override of the integration is
 POST /api/v1/integrations/{integrationId}/test?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated member with the `create` capability (the route's
+`roleCreate` gate); workspace context is required.
+
+**Request:** No body.
+
 Tests the MCP server connection. For `stdio` transport the server is not actually launched (that only happens inside a container at runtime) — instead the config is statically validated (the command must tokenize to a single executable — a full launch line that splits into more than one token is rejected, while a quoted path containing spaces is fine; `args_json` must be a valid JSON string array), returning `status: "ok"` when well-formed or `status: "error"` otherwise. Tokenizing is quote-aware, matching the CLI/UI split rules (see the [MCP guide](/guides/mcp-multi-cli#stdio-servers-local-subprocess)). For `streamable-http` (also `http`/`sse`) an MCP `initialize` handshake is attempted via an SSRF-safe HTTP client (private/loopback IPs blocked).
 
 **Response:** `200 OK`
@@ -708,6 +731,8 @@ Tests the MCP server connection. For `stdio` transport the server is not actuall
 | Status | Condition |
 |---|---|
 | `404` | Integration not found |
+| `401` | Missing or invalid authentication |
+| `403` | Caller lacks the required capability |
 
 ---
 
@@ -721,9 +746,18 @@ Crew-level MCP bindings — either standalone servers or overrides linked to a w
 GET /api/v1/integrations/crews?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member (`workspace_id` is required).
+
+**Request:** No body.
+
 Cross-crew overview of all crew-level integration bindings.
 
 **Response:** `200 OK` -- array of crew integration objects.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `500` | Database failure while loading the overview |
 
 ### List Crew Integrations
 
@@ -731,7 +765,16 @@ Cross-crew overview of all crew-level integration bindings.
 GET /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member (`workspace_id` is required).
+
+**Request:** No body.
+
 **Response:** `200 OK` -- array of crew MCP server bindings.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `404` | Crew not found in the workspace |
 
 ### Create Crew Integration
 
@@ -811,6 +854,9 @@ This cascades: agent bindings are removed, and OAuth credentials auto-created fo
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/test?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated member with the `create` capability; workspace context
+is required. **Request:** No body.
+
 Same probe semantics as the workspace test endpoint.
 
 **Response:** `200 OK` -- `{ status, message?, server_info? }` (see Test Workspace Integration).
@@ -818,6 +864,8 @@ Same probe semantics as the workspace test endpoint.
 | Status | Condition |
 |---|---|
 | `404` | Crew or integration not found |
+| `401` | Missing or invalid authentication |
+| `403` | Caller lacks the required capability |
 
 ### List Crew Integration Tools
 
@@ -939,7 +987,16 @@ Agent bindings link MCP servers (workspace or crew level) to specific agents, op
 GET /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member (`workspace_id` is required).
+
+**Request:** No body.
+
 **Response:** `200 OK` -- array of agent MCP binding objects.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `404` | Agent not found or outside the workspace |
 
 ### Create Agent Binding
 
@@ -1012,7 +1069,7 @@ DELETE /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={works
 ### Resolve Agent Integrations
 
 ```
-GET /api/v1/agents/{agentId}/resolved-integrations?workspace_id={workspaceId}
+GET /api/v1/agents/{agentId}/integrations/resolved?workspace_id={workspaceId}
 ```
 
 Returns the effective set of enabled MCP servers for an agent after cascading
@@ -1042,6 +1099,22 @@ is a JSON array; a missing agent returns `404`.
 ```
 
 **Auth:** authenticated workspace member.
+
+**Request:** No body. `workspace_id` is required; the agent must belong to that
+workspace.
+
+**Response:** `200 OK` — a JSON array. The array is empty when the agent has no
+effective enabled integrations. `endpoint`, `command`, `args_json`, `env_json`,
+`config_json`, `icon`, `credential_id`, and `credential_name` are nullable;
+credential values and other secret material are never returned.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context |
+| `401` | Missing or invalid authentication |
+| `403` | Caller is not an authorized workspace member |
+| `404` | Agent not found in the workspace |
+| `500` | Database failure while resolving integrations |
 
 ---
 
@@ -1119,6 +1192,13 @@ Returns available OAuth provider configurations.
 
 **Response:** `200 OK`
 
+**Request:** No body.
+
+| Status | Condition |
+|---|---|
+| `200` | Provider catalog returned |
+| `401` | Missing or invalid authentication |
+
 ### Initiate OAuth Flow
 
 ```
@@ -1154,6 +1234,19 @@ Handles the OAuth callback from the provider.
 <Note>
 No authentication required — this endpoint uses the state token for validation instead.
 </Note>
+
+**Request:** `code` and `state` query parameters are required; `error` may be
+returned by the provider.
+
+**Response:** `200 OK` is an HTML success page that closes the authorization
+window. It is not a JSON endpoint.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing/invalid/expired state, missing code, or provider error |
+| `404` | Credential referenced by a valid state no longer exists |
+| `500` | State, credential, or token-storage failure |
+| `502` | Provider token exchange failed |
 
 ### Exchange Token
 
@@ -1208,6 +1301,11 @@ Discovers OAuth endpoints from an OpenID Connect discovery document or well-know
 **Response:** `200 OK` -- `{ "auth_url", "token_url", "registration_endpoint?",
 "scopes?", "supports_pkce", "supports_dcr" }`.
 
+| Status | Condition |
+|---|---|
+| `400` | Missing/invalid `mcp_url` |
+| `404` | Discovery failed and the URL does not match a known provider |
+
 ### Auto-Connect Integration
 
 ```
@@ -1230,6 +1328,12 @@ Automatically creates an integration from an OAuth connection.
 When client registration is unavailable it returns `200` with
 `status: "needs_client_id"`, `auth_url`, `token_url`, `scopes`, and a message
 so the caller can collect a client ID.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `mcp_url`, or OAuth discovery/provider resolution failed |
+| `403` | Caller lacks workspace manage permission |
+| `500` | Credential/state creation failed |
 
 ---
 

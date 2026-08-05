@@ -122,15 +122,20 @@ Read a single checkpoint by ID, run an advisory restore that only reports drift,
 GET /api/v1/checkpoints/{id}
 ```
 
+**Path parameters:** `id` is the checkpoint ID. The request has no body.
+
 **Response:** `200 OK` -- full checkpoint object.
 
-**Errors:** `404` on missing or cross-tenant.
+**Errors:** `401` without an authenticated workspace; `404` on a missing or
+cross-tenant checkpoint; `500` on a database read failure.
 
 ### Restore (advisory)
 
 ```
 POST /api/v1/checkpoints/{id}/restore
 ```
+
+**Path parameters:** `id` is the checkpoint ID. The request has no body.
 
 Returns the checkpoint plus the list of journal entries that have diverged since it was made. **No mission state is mutated.**
 
@@ -149,7 +154,8 @@ Returns the checkpoint plus the list of journal entries that have diverged since
 
 `warn_divergence` is always an array (empty when no drift). Callers should treat a long list as a signal to fork, not restore.
 
-**Errors:** `404` on missing or cross-tenant.
+**Errors:** `401` without an authenticated workspace; `404` on a missing or
+cross-tenant checkpoint; `500` on a database read failure.
 
 ### Fork
 
@@ -186,9 +192,12 @@ Creates a new mission anchored at the checkpoint's cursor, plus a matching fresh
 DELETE /api/v1/checkpoints/{id}
 ```
 
+**Path parameters:** `id` is the checkpoint ID. The request has no body.
+
 **Response:** `204 No Content`.
 
-**Errors:** `404` on missing or cross-tenant.
+**Errors:** `401` without an authenticated workspace; `404` on a missing or
+cross-tenant checkpoint; `500` on a database delete failure.
 
 <Warning>
   Forks that referenced the deleted checkpoint via `fork_of` are orphaned (their reference is set to NULL) -- no cascade. The forked missions themselves are untouched.

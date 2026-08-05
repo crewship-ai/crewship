@@ -172,6 +172,8 @@ GET /api/v1/issues/{identifier}?workspace_id={workspaceId}
 
 Get an issue by its identifier (e.g., `ENG-42`) across the entire workspace. No crew ID needed.
 
+**Request:** `identifier` is required; `workspace_id` selects the workspace. No request body.
+
 **Response:** `200 OK` -- full issue object with labels and comment count.
 
 | Status | Condition |
@@ -234,6 +236,8 @@ GET /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 ```
 
 Get an issue by its identifier within a specific crew. Includes labels and comment count.
+
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 
 **Response:** `200 OK` -- full issue object.
 
@@ -301,6 +305,8 @@ DELETE /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
   Hard-deletes the issue. Only issues in `BACKLOG` or `CANCELLED` status can be deleted.
 </Warning>
 
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `204 No Content`
@@ -359,6 +365,8 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 <Warning>
   Stops a running issue. Cancels all running/pending tasks and sets status to `CANCELLED`. Only issues in `IN_PROGRESS` or `REVIEW` status can be stopped.
 </Warning>
+
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
@@ -550,6 +558,8 @@ GET /api/v1/crews/{crewId}/issues/{identifier}/runs?workspace_id={workspaceId}
 
 Lists the agent task-runs for an issue — each mission task joined to its `assignments` row (execution status, timing, result, error). Newest-first, capped at 100 rows.
 
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** any authenticated workspace member (`read`).
 
 **Response:** `200 OK` — a JSON **array** (never `null`).
@@ -599,6 +609,8 @@ GET /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspaceI
 ```
 
 Returns all comments on an issue, ordered by creation date ascending.
+
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 
 **Response:** `200 OK`
 
@@ -652,6 +664,8 @@ GET /api/v1/crews/{crewId}/issues/{identifier}/relations?workspace_id={workspace
 ```
 
 Returns all relations for an issue. Relation types are flipped when viewed from the target side (e.g., `blocks` becomes `blocked_by`).
+
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 
 **Response:** `200 OK`
 
@@ -710,6 +724,8 @@ DELETE /api/v1/relations/{relationId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
+**Request:** `relationId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 **Response:** `200 OK` with `{"status": "ok"}`
 
 | Status | Condition |
@@ -727,6 +743,8 @@ Labels are workspace-scoped and can be attached to any issue.
 ```
 GET /api/v1/labels?workspace_id={workspaceId}
 ```
+
+**Request:** `workspace_id` is the required workspace query parameter. No request body.
 
 **Response:** `200 OK`
 
@@ -749,6 +767,8 @@ POST /api/v1/labels?workspace_id={workspaceId}
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
+**Request:** `workspace_id` selects the workspace. The JSON body requires `name` and `color`; `label_group` is optional.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | Yes | Label name |
@@ -764,6 +784,8 @@ PATCH /api/v1/labels/{labelId}?workspace_id={workspaceId}
 ```
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request:** `labelId` is required, `workspace_id` selects the workspace, and the JSON body may contain `name`, `color`, and/or `label_group`.
 
 All fields optional: `name`, `color`, `label_group`.
 
@@ -781,6 +803,8 @@ DELETE /api/v1/labels/{labelId}?workspace_id={workspaceId}
 ```
 
 **Auth:** `OWNER` or `ADMIN` role
+
+**Request:** `labelId` is a required path parameter and `workspace_id` selects the workspace. No request body.
 
 **Response:** `204 No Content`
 
@@ -944,6 +968,8 @@ to them. All routes are workspace-scoped through the project or milestone.
 ```
 GET /api/v1/projects/{projectId}/milestones?workspace_id={workspaceId}
 ```
+
+**Request:** `projectId` is a required path parameter and `workspace_id` selects the workspace. No request body.
 
 Returns `200 OK` with an array ordered by `position`, then creation time. Each
 item contains `id`, `project_id`, `name`, nullable `description` and

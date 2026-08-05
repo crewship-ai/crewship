@@ -38,7 +38,7 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 | `agent_id` | string | Filter by agent. |
 | `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). |
 | `tag` | string | Match a single tag inside `payload.metadata.tags` array on the `run.started` entry. |
-| `page` | integer | 1-based page index, default `1`. Out-of-range values clamp to `1`. |
+| `page` | integer | 1-based page index, default `1`. Values below `1` become `1`; values above the server's maximum page are capped. |
 | `limit` | integer | Page size, 1-100, default `50`. Out-of-range values fall back to the default. |
 
 **Response:** `200 OK`
@@ -200,7 +200,8 @@ Returns a single run by trace id. The response shape is identical to one element
 }
 ```
 
-The handler does not have a direct `journal.GetRunByID` primitive yet -- it scans up to 10 pages of `journal.ListRuns` (1000 rows) looking for the trace id. The typical lookup is page 1 (recent runs); the deeper scan keeps older runs resolvable without a contract change.
+The handler uses the workspace-scoped indexed `journal.GetRunByID` lookup. A
+trace ID from another workspace is treated as not found.
 
 | Status | Condition |
 |---|---|

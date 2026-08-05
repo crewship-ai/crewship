@@ -58,9 +58,9 @@ Problem Details shape (`error` is the human-readable message).
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | manage | Set or clear the monthly spend cap |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/budget-summary` | member | Workspace monthly budget roll-up |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | List cron schedules (see [Routines](/api-reference/routines)) |
-| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | create | Create a cron schedule |
-| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | manage | Replace a schedule |
-| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | delete | Soft-delete a schedule |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | create | Create a cron schedule (see [Schedules](/api-reference/schedules)) |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | manage | Update a schedule (see [Schedules](/api-reference/schedules)) |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | manage | Soft-delete a schedule |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | create | Force-fire a schedule now |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook trigger (see [Routines](/api-reference/routines)) |
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook triggers |
@@ -104,7 +104,7 @@ inactive target returns `409`.
 
 ## Run payload
 
-`run`, `dry_run`, and the deferred-run options accept:
+`run` and `dry_run` accept:
 
 ```json
 {
@@ -135,12 +135,24 @@ run result (including `run_id`, `status`, `output`, `step_outputs`,
 "tags": [], "tier_override": "fast" }` and returns per-item `index`, `run_id`,
 `status`, or `error`.
 
+`inputs`, `tags`, and `metadata` are optional. `delay_seconds`, `ttl_seconds`,
+`debounce_window_seconds`, and `debounce_max_seconds` must be between `0` and
+`2,592,000` seconds when deferred dispatch is used; invalid values return
+`400`. `priority` is carried to the pending queue. The `Idempotency-Key` header
+deduplicates a run (the optional `idempotency_key_ttl_seconds` body field sets
+the deduplication window; `0` uses the server default). `run_batch` requires a
+non-empty `items` array and accepts at most 100 items; violations return `400`.
+
 ### Run statuses and responses
 
 `POST .../pipelines/{slug}/run` requires `member` plus `create` (normally
 MANAGER+), and returns `200 OK` with a run result for an immediate execution.
-The result includes `run_id`, `status`, `output`, `step_outputs`,
-`duration_ms`, and `cost_usd` (plus failure/wait fields when applicable).
+The immediate result includes `run_id`, `pipeline_id`, `pipeline_slug`,
+`status`, `output`, `step_outputs`, `duration_ms`, and `cost_usd` (plus
+failure/wait fields when applicable). A deferred request (`delay_seconds > 0`
+or a non-empty `debounce_key`) returns `202 Accepted` with `{ "status":
+"SCHEDULED", "pending_id", "fire_at", "coalesced", "priority" }` and does
+not yet have a run ID.
 The run status values are:
 
 | Status | Meaning |
@@ -150,8 +162,7 @@ The run status values are:
 | `CANCELLED` | The run was cancelled by an operator. |
 | `WAITING` | The run is parked at a human approval waitpoint; this is not a failure. |
 | `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
-| `SCHEDULED` | A delayed or debounced trigger was accepted; no run id exists until dispatch. |
-| `DRY_RUN_OK` | A dry-run preview completed; no agent was invoked and no run was persisted. |
+| `DRY_RUN_OK` | A `dry_run` or `test_run` preview completed; no agent was invoked. This is not returned by the normal `run` endpoint. |
 
 `SCHEDULED` responses use `202 Accepted` and contain `pending_id`, RFC3339Nano
 `fire_at`, `priority`, and `coalesced`. `WAITING` responses also contain the
@@ -438,13 +449,16 @@ pipeline cannot be run; the run endpoint reports `409` with its current status.
 Schedule administration is also available through the pipeline API. Create
 uses `POST .../pipeline-schedules` with a JSON body containing `cron_expr` and
 either `target_pipeline_slug` or `target_pipeline_id`; it returns `201` with
-the schedule object. `PATCH .../pipeline-schedules/{scheduleId}` replaces the
-schedule row and returns `200` with the schedule object. Both return `400` for
+the schedule object. `PATCH .../pipeline-schedules/{scheduleId}` merges the
+supplied fields into the existing schedule and returns `200` with the schedule
+object. Both return `400` for
 invalid JSON, missing targets, or invalid cron/timezone data; missing schedules
 or targets are `404`; backend failures are `500` and an unwired schedule store
-is `503`. Update requires `manage`; create requires `create`.
+is `503`. Update requires `manage`; create requires `create`. See
+[Schedules](/api-reference/schedules) for the request fields and complete
+schedule representation.
 
-`DELETE .../pipeline-schedules/{scheduleId}` requires `delete`, returns `204`
+`DELETE .../pipeline-schedules/{scheduleId}` requires `manage`, returns `204`
 on success, and soft-deletes the schedule. `POST .../pipeline-schedules/{scheduleId}/run`
 requires `create`, takes no body, and force-fires the stored schedule inputs
 without changing its cron cadence. It returns the normal run result (`200`),

@@ -53,6 +53,8 @@ Read routes require an authenticated workspace member.
 GET /api/v1/projects?status=backlog,in_progress&sort=updated_at
 ```
 
+**Request:** Optional `status` and `sort` query parameters; no request body.
+
 `status` optionally filters by a comma-separated list. `sort` accepts
 `created_at` or `updated_at`; any other value (including omission) sorts by
 `name ASC`. The response is a JSON array, never `null`.
@@ -62,6 +64,8 @@ GET /api/v1/projects?status=backlog,in_progress&sort=updated_at
 ```
 POST /api/v1/projects
 ```
+
+**Request:** JSON body with required `name`; optional fields are `description`, `icon`, `color`, `status`, `priority`, `lead_type`, `lead_id`, `start_date`, and `target_date`.
 
 Accepted fields are `name` (required), `description`, `icon`, `color`,
 `status`, `priority`, `lead_type`, `lead_id`, `start_date`, and `target_date`.
@@ -75,6 +79,8 @@ Created` with the full project shape. Missing `name` or malformed JSON returns
 GET /api/v1/projects/{projectId}
 ```
 
+**Request:** `projectId` is a required path parameter. No request body.
+
 Returns `200 OK` with the full project shape, or `404` when the project is not
 in the current workspace.
 
@@ -83,6 +89,8 @@ in the current workspace.
 ```
 PATCH /api/v1/projects/{projectId}
 ```
+
+**Request:** `projectId` is a required path parameter and the JSON body contains one or more accepted project fields. Computed fields and timestamps are not patchable.
 
 All project fields except `id`, `workspace_id`, computed fields, and timestamps
 are accepted as optional patch fields. Supplying no accepted field returns
@@ -95,6 +103,8 @@ workspace-local `user`/`agent` pair. Returns the updated project.
 DELETE /api/v1/projects/{projectId}
 ```
 
+**Request:** `projectId` is a required path parameter. No request body.
+
 Unlinks associated issues by setting `project_id` to `NULL`, then hard-deletes
 the project. Returns `204 No Content`; an unknown or cross-workspace project
 returns `404`.
@@ -104,6 +114,8 @@ returns `404`.
 ```
 GET /api/v1/projects/{projectId}/stats
 ```
+
+**Request:** `projectId` is a required path parameter. No request body.
 
 Returns `200 OK`:
 

@@ -65,6 +65,8 @@ Use `limit` (maximum 500) and `offset` for pagination.
 
 **Auth:** Session or CLI token + workspace membership
 
+**Request:** `crewId` is a required path parameter; `workspace_id` is the required workspace query parameter. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -232,6 +234,8 @@ GET /api/v1/crews/{crewId}?workspace_id={workspaceId}
 
 **Auth:** Session or CLI token + workspace membership
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 | Path Parameter | Description |
 |---|---|
 | `crewId` | Crew ID |
@@ -306,6 +310,8 @@ DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
 
 **Auth:** Session or CLI token + `OWNER` or `ADMIN` role
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -330,6 +336,8 @@ Manage the per-crew membership roster and optional per-crew role overrides that 
 ```
 GET /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 ```
+
+**Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
 **Response:** `200 OK` -- array of member objects.
 
@@ -410,6 +418,8 @@ DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER` or `ADMIN` role
 
+**Request:** `crewId` and `memberId` are required path parameters; `workspace_id` is the workspace query parameter. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -441,6 +451,8 @@ default).
 ```
 GET /api/v1/crews/{crewId}/persona
 ```
+
+**Request:** `crewId` is a required path parameter. No request body.
 
 **Response:** `200 OK`
 
@@ -485,6 +497,8 @@ to the crew-layer path so the history endpoint can replay the chain.
 ```
 DELETE /api/v1/crews/{crewId}/persona
 ```
+
+**Request:** `crewId` is a required path parameter. No request body.
 
 Removes the crew layer file. Subsequent reads return empty content
 and agents fall back to their per-role synthesised default.
@@ -625,6 +639,8 @@ recreated with the new policy on the next agent run).
 
 **Auth:** any workspace member
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -711,6 +727,8 @@ and never triggers a rebuild — adding a feature changes what runs inside the
 container, so it stays a separate, user-confirmed action
 ([Update Crew](#update-crew) or `crewship crew config`).
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 Credentials are matched using the same three-way grant rule as the rest of the
 credentials surface: workspace-scoped, crew-scoped via `credential_crews`, or
 assigned to one of this crew's agents (with any lease still live). Revoked and
@@ -787,6 +805,8 @@ Links to a soft-deleted crew are never listed and are removed when the crew is d
 GET /api/v1/crew-connections?workspace_id={workspaceId}
 ```
 
+**Request:** `workspace_id` is the required workspace query parameter. No request body.
+
 **Response:** `200 OK` -- array of connection objects:
 
 ```json
@@ -857,6 +877,8 @@ DELETE /api/v1/crew-connections/{connectionId}?workspace_id={workspaceId}
 ```
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request:** `connectionId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
 **Response:** `204 No Content`
 
@@ -967,6 +989,8 @@ crew not found in the workspace; `500` crew lookup or service-list failure.
 GET /api/v1/crews/{crewId}/assignments?workspace_id={workspaceId}
 ```
 
+**Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
+
 List task assignments for a crew.
 
 **Response:** `200 OK` -- array of assignment objects.
@@ -979,7 +1003,17 @@ List task assignments for a crew.
 GET /api/v1/crews/{crewId}/peer-conversations?workspace_id={workspaceId}
 ```
 
+**Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
+
 List peer-to-peer conversations between agents in a crew.
+
+**Response:** `200 OK` with an object containing `conversations` (array) and `count` (integer).
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid crew or workspace context |
+| `401` | Missing authentication |
+| `403` | Caller is not allowed to read the crew |
 
 ---
 
@@ -989,7 +1023,18 @@ List peer-to-peer conversations between agents in a crew.
 GET /api/v1/crews/{crewId}/standup?workspace_id={workspaceId}
 ```
 
+**Request:** `crewId` is a required path parameter; optional query parameters are `crew_id` and `since`. No request body.
+
 Get standup summary for a crew.
+
+**Response:** `200 OK` with `crew_id`, `date`, `summary`, and `items` fields.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid query or crew context |
+| `401` | Missing authentication |
+| `403` | Caller is not allowed to read the crew |
+| `404` | Crew not found |
 
 ---
 
@@ -1020,13 +1065,36 @@ required workspace ID. Returns the crew’s escalation records.
 PATCH /api/v1/escalations/{escalationId}/resolve?workspace_id={workspaceId}
 ```
 
+**Request:** `escalationId` is a required path parameter, `workspace_id` selects the workspace, and the JSON body is the escalation decision (`action` and optional resolution details).
+
+**Response:** `200 OK` with the resolved escalation `id`, `status`, and `action`.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid decision body |
+| `401` | Missing authentication |
+| `403` | Insufficient role |
+| `404` | Escalation not found |
+| `409` | Escalation cannot be resolved in its current state |
+
 ### Pending Escalation Count
 
 ```
 GET /api/v1/escalations/pending-count?workspace_id={workspaceId}
 ```
 
+**Request:** `workspace_id` is the workspace context. No request body.
+
 Returns count of pending escalations across the workspace.
+
+**Response:** `200 OK` with `{ "count": integer }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid workspace context |
+| `401` | Missing authentication |
+| `403` | Caller is not allowed to read escalations |
+| `500` | Count query failed |
 
 ### Purge Crew Escalations
 

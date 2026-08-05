@@ -668,3 +668,21 @@ See the [Agents](/api-reference/agents) page for per-agent skill management:
 | `GET /api/v1/agents/{agentId}/skills` | GET | List skills assigned to agent |
 | `POST /api/v1/agents/{agentId}/skills` | POST | Assign skill to agent |
 | `DELETE /api/v1/agents/{agentId}/skills/{skillId}` | DELETE | Remove skill from agent |
+
+### Remove a skill from an agent
+
+```
+DELETE /api/v1/agents/{agentId}/skills/{skillId}
+```
+
+**Auth:** Authenticated workspace member with the `OWNER`, `ADMIN`, or `MANAGER` role.
+
+**Request:** `agentId` and `skillId` are required path parameters. No request body.
+
+**Response:** `200 OK` with the removed skill assignment, or `204 No Content` when the handler has no response body.
+
+| Status | Condition |
+|---|---|
+| `401` | Missing authentication |
+| `403` | Insufficient permission |
+| `404` | Agent or skill assignment not found |
