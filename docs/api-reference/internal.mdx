@@ -61,8 +61,9 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `GET` | [/api/v1/internal/issues](#missions-and-issues) | List issues |
 | `GET` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Get a specific issue |
 | `POST` | [/api/v1/internal/issues](#missions-and-issues) | Create issue |
-| `PATCH` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Update issue status |
+| `PATCH` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Update an issue (status, priority, assignee, labels, estimate, due date) |
 | `POST` | [/api/v1/internal/issues/\{identifier\}/comments](#missions-and-issues) | Comment on issue |
+| `POST` | [/api/v1/internal/issues/\{identifier\}/relations](#missions-and-issues) | Relate or re-parent an issue |
 | `POST` | [/api/v1/internal/keeper/request](#keeper) | Sidecar forwards a credential read request |
 | `GET` | [/api/v1/internal/keeper/request/\{requestId\}](#keeper) | Fetch a previously submitted request's decision |
 | `POST` | [/api/v1/internal/keeper/execute](#keeper) | Sidecar forwards a sealed credential-use request |
@@ -244,11 +245,12 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `POST` | `/api/v1/internal/missions` | Create a mission. |
 | `GET` | `/api/v1/internal/missions/{missionId}` | Get mission details. |
 | `POST` | `/api/v1/internal/missions/{missionId}/start` | Transition mission to running. |
-| `GET` | `/api/v1/internal/issues` | List issues. |
+| `GET` | `/api/v1/internal/issues` | List issues. Optional filters: `status` (comma-separated), `assignee_id`, `mission_type`, and `q` — a free-text search over title and description, with `%` and `_` escaped so they match literally. A crew-bound (`crwv1`) token constrains the listing to its own crew even when `crew_id` is omitted. |
 | `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
 | `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. If `assignee_id` is set, `assignee_type` must be `user` or `agent` and the assignee must belong to `workspace_id` — otherwise `400` (`assignee_type must be 'user' or 'agent' when assignee_id is set` / `assignee_id does not exist in this workspace`). |
-| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. |
+| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update an issue: `status`, `priority`, `assignee_type`/`assignee_id`, `labels`, `estimate`, `due_date`, plus an optional `comment`. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. `assignee_id` is validated against `workspace_id` (`400` when it names another tenant's user/agent); `labels` is a full replacement whose insert is workspace-scoped, so a foreign label id attaches nothing. An empty-string `assignee_id` / `due_date` clears the field. `title`, `description`, `project_id`, `milestone_id`, `routine_id`, `sort_order` and `parent_issue_id` are **not** accepted here. |
 | `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. Requires `agent_id` — unattributed comments are rejected with `400`. |
+| `POST` | `/api/v1/internal/issues/{identifier}/relations` | Relate two issues. Body: `target_identifier`, `relation_type` ∈ `blocks` \| `blocked_by` \| `relates_to` \| `duplicate_of` \| `sub_issue_of`. `blocked_by` is normalised to a swapped `blocks` row; `sub_issue_of` writes `parent_issue_id` on the issue named in the path instead of a `mission_relations` row. The path issue is crew-gated like every other mutation; the target only has to live in the bound workspace, and a foreign-tenant target is a `404` rather than a `403` so the endpoint is not an existence oracle. Duplicate relation → `409`. |
 
 ### Keeper
 
