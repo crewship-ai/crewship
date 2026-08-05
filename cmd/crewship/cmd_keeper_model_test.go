@@ -8,6 +8,12 @@ import (
 // The `keeper model set` client-side validation runs BEFORE any auth/network
 // (requireAuthAndWorkspace), so these guards are testable with no server.
 func TestKeeperModelSet_Validation(t *testing.T) {
+	// The subtests assign the package-level vars pflag bound to --provider,
+	// --model and --credential, so the flags keep those values after this test
+	// returns. Nothing put them back, and under -shuffle=on TestCLIStateIsPristine
+	// reported them as a leak whenever it happened to run afterwards.
+	guardCLIState(t)
+
 	tests := []struct {
 		name     string
 		provider string
