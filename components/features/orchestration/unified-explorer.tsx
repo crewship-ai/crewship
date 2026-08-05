@@ -1,8 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { motion, AnimatePresence } from "motion/react"
-import { Check } from "lucide-react"
+import { motion } from "motion/react"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { STATUS_CHIPS } from "@/components/features/issues/issues-status-chips"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
@@ -16,7 +15,9 @@ import type { CrewSummary } from "@/lib/types/orchestration"
 import {
   SidebarToolbar,
   SidebarSearch,
-  SidebarFilterButton,
+  SidebarFilterPopover,
+  SidebarFacet,
+  SidebarFacetOption,
   SidebarSection,
   SidebarRow,
   SidebarCollapseButton,
@@ -53,83 +54,6 @@ interface UnifiedExplorerProps {
 }
 
 const EMPTY_STATUSES: MissionStatus[] = []
-
-/**
- * One facet of the filter: a header, an explicit reset, and its values.
- *
- * The reset row is what makes "drop the crew but keep the priority" a single
- * click. Before it, the only way back to "all crews" was a button that also
- * cleared the agent — which is how a filter panel teaches people not to trust
- * it.
- */
-function FacetSection({
-  label,
-  resetLabel,
-  resetActive,
-  onReset,
-  first = false,
-  children,
-}: {
-  label: string
-  resetLabel: string
-  resetActive: boolean
-  onReset: () => void
-  first?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <>
-      {!first && <div className="border-t border-white/[0.06] mt-1" />}
-      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">
-        {label}
-      </div>
-      <button
-        type="button"
-        onClick={onReset}
-        aria-pressed={resetActive}
-        className={cn(
-          "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06]",
-          resetActive ? "text-primary" : "text-muted-foreground/80",
-        )}
-      >
-        {resetLabel}
-      </button>
-      {children}
-    </>
-  )
-}
-
-/** One value inside a facet. Toggles itself; never touches its neighbours. */
-function FacetRow({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2",
-        active ? "text-primary" : "text-muted-foreground/80",
-      )}
-    >
-      {children}
-      {active && <Check className="h-3 w-3 shrink-0 ml-auto" />}
-    </button>
-  )
-}
-
-const dropdownAnim = {
-  initial: { opacity: 0, scale: 0.95, y: -4 },
-  animate: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.12 } },
-  exit: { opacity: 0, scale: 0.95, y: -4, transition: { duration: 0.1 } },
-}
 
 export function UnifiedExplorer({
   issues, projects, search, onSearchChange,
@@ -208,133 +132,104 @@ export function UnifiedExplorer({
             placeholder="Search issues, agents…"
           />
         </div>
-        {/* Filter dropdown — SidebarFilterButton is the trigger.
-            The facets AND together and the panel stays open after a pick:
-            combining two of them was impossible while each pick cleared the
-            others AND closed the panel. */}
-        <div className="relative shrink-0">
-          <SidebarFilterButton
-            activeCount={activeFilterCount}
-            aria-expanded={filterDropdownOpen}
-            onClick={() => setFilterDropdownOpen(!filterDropdownOpen)}
-          />
-          <AnimatePresence>
-            {filterDropdownOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setFilterDropdownOpen(false)} />
-                <motion.div
-                  {...dropdownAnim}
-                  role="group"
-                  aria-label="Filter issues"
-                  className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[200px] max-h-[360px] overflow-y-auto"
+        {/* Filter panel — the shared one. The facets AND together and the panel
+            stays open after a pick; both behaviours now live in the kit, so
+            every other sidebar inherits them instead of re-deriving them. */}
+        <SidebarFilterPopover
+          label="Filter issues"
+          activeCount={activeFilterCount}
+          onClear={clearAll}
+          open={filterDropdownOpen}
+          onOpenChange={setFilterDropdownOpen}
+        >
+          {/* Status first: it is the facet a reader looks for here before any
+              other, and it used to be the one facet this panel did not have.
+              The selection is the same state the chip row over the board owns —
+              picking Backlog here lights the Backlog chip, and the other way
+              round. */}
+          {onStatusFilter && (
+            <SidebarFacet
+              label="Status"
+              resetLabel="Any status"
+              resetActive={filterStatuses.length === 0}
+              onReset={() => onStatusFilter([])}
+              first
+            >
+              {STATUS_CHIPS.map((s) => (
+                <SidebarFacetOption
+                  key={s}
+                  active={filterStatuses.includes(s)}
+                  onToggle={() => toggleStatus(s)}
                 >
-                  <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06]">
-                    <span className="text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">
-                      Filters
-                    </span>
-                    {activeFilterCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={clearAll}
-                        className="ml-auto text-[10px] text-muted-foreground/80 hover:text-foreground"
-                      >
-                        Clear all
-                      </button>
-                    )}
-                  </div>
+                  <StatusIcon status={s} className="h-3.5 w-3.5 shrink-0" />
+                  {statusLabel[s] ?? s}
+                </SidebarFacetOption>
+              ))}
+            </SidebarFacet>
+          )}
 
-                  {/* Status first: it is the facet a reader looks for here
-                      before any other, and it used to be the one facet this
-                      panel did not have. The selection is the same state the
-                      chip row over the board owns — picking Backlog here
-                      lights the Backlog chip, and the other way round. */}
-                  {onStatusFilter && (
-                    <FacetSection
-                      label="Status"
-                      resetLabel="Any status"
-                      resetActive={filterStatuses.length === 0}
-                      onReset={() => onStatusFilter([])}
-                      first
-                    >
-                      {STATUS_CHIPS.map((s) => (
-                        <FacetRow
-                          key={s}
-                          active={filterStatuses.includes(s)}
-                          onClick={() => toggleStatus(s)}
-                        >
-                          <StatusIcon status={s} className="h-3.5 w-3.5 shrink-0" />
-                          {statusLabel[s] ?? s}
-                        </FacetRow>
-                      ))}
-                    </FacetSection>
-                  )}
+          <SidebarFacet
+            label="Crews"
+            resetLabel="All crews"
+            resetActive={!filterCrewId}
+            onReset={() => onCrewFilter(null)}
+            first={!onStatusFilter}
+          >
+            {crews.map((c) => {
+              const CrewIconComp = getCrewIconDef(c.icon || "users").icon
+              return (
+                <SidebarFacetOption
+                  key={c.id}
+                  active={filterCrewId === c.id}
+                  onToggle={() => toggleCrew(c.id)}
+                >
+                  <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", iconColorProps(c.color).className)} style={iconColorProps(c.color).style} />
+                  {c.name}
+                </SidebarFacetOption>
+              )
+            })}
+          </SidebarFacet>
 
-                  <FacetSection
-                    label="Crews"
-                    resetLabel="All crews"
-                    resetActive={!filterCrewId}
-                    onReset={() => onCrewFilter(null)}
-                    first={!onStatusFilter}
-                  >
-                    {crews.map((c) => {
-                      const CrewIconComp = getCrewIconDef(c.icon || "users").icon
-                      return (
-                        <FacetRow
-                          key={c.id}
-                          active={filterCrewId === c.id}
-                          onClick={() => toggleCrew(c.id)}
-                        >
-                          <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", iconColorProps(c.color).className)} style={iconColorProps(c.color).style} />
-                          {c.name}
-                        </FacetRow>
-                      )
-                    })}
-                  </FacetSection>
+          {agents.length > 0 && (
+            <SidebarFacet
+              label="Agents"
+              resetLabel="All agents"
+              resetActive={!filterAgentId}
+              onReset={() => onAgentFilter(null)}
+            >
+              {agents.map((a) => (
+                <SidebarFacetOption
+                  key={a.id}
+                  active={filterAgentId === a.id}
+                  onToggle={() => toggleAgent(a.id)}
+                >
+                  <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full shrink-0" />
+                  {a.name}
+                </SidebarFacetOption>
+              ))}
+            </SidebarFacet>
+          )}
 
-                  {agents.length > 0 && (
-                    <FacetSection
-                      label="Agents"
-                      resetLabel="All agents"
-                      resetActive={!filterAgentId}
-                      onReset={() => onAgentFilter(null)}
-                    >
-                      {agents.map((a) => (
-                        <FacetRow
-                          key={a.id}
-                          active={filterAgentId === a.id}
-                          onClick={() => toggleAgent(a.id)}
-                        >
-                          <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full shrink-0" />
-                          {a.name}
-                        </FacetRow>
-                      ))}
-                    </FacetSection>
-                  )}
-
-                  {onPriorityFilter && (
-                    <FacetSection
-                      label="Priority"
-                      resetLabel="Any priority"
-                      resetActive={!filterPriority}
-                      onReset={() => onPriorityFilter(null)}
-                    >
-                      {(["urgent", "high", "medium", "low", "none"] as IssuePriority[]).map((p) => (
-                        <FacetRow
-                          key={p}
-                          active={filterPriority === p}
-                          onClick={() => togglePriority(p)}
-                        >
-                          <PriorityIcon priority={p} className="h-3.5 w-3.5 shrink-0" />
-                          {priorityLabel[p]}
-                        </FacetRow>
-                      ))}
-                    </FacetSection>
-                  )}
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-        </div>
+          {onPriorityFilter && (
+            <SidebarFacet
+              label="Priority"
+              resetLabel="Any priority"
+              resetActive={!filterPriority}
+              onReset={() => onPriorityFilter(null)}
+            >
+              {(["urgent", "high", "medium", "low", "none"] as IssuePriority[]).map((p) => (
+                <SidebarFacetOption
+                  key={p}
+                  active={filterPriority === p}
+                  onToggle={() => togglePriority(p)}
+                >
+                  <PriorityIcon priority={p} className="h-3.5 w-3.5 shrink-0" />
+                  {priorityLabel[p]}
+                </SidebarFacetOption>
+              ))}
+            </SidebarFacet>
+          )}
+        </SidebarFilterPopover>
         {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
       </SidebarToolbar>
 
