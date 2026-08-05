@@ -34,9 +34,15 @@ import {
   type IssueCardEdit,
   type WorkflowAction,
 } from "@/components/features/issues/issue-card-editors"
+import type {
+  CodeLinkAttachResult,
+  CodeLinkEdit,
+} from "@/components/features/issues/issue-code-links-card"
+import { codeLinkProblemMessage } from "@/lib/code-links"
 import type { MentionAgent } from "@/lib/mentions"
 import type {
   IssueActivity,
+  IssueCodeLink,
   IssueComment,
   IssueLabel,
   IssueRelation,
@@ -89,6 +95,7 @@ export function IssueDetailSurface({
   const [relations, setRelations] = React.useState<IssueRelation[]>([])
   const [runs, setRuns] = React.useState<IssueRun[]>([])
   const [subIssues, setSubIssues] = React.useState<Mission[]>([])
+  const [codeLinks, setCodeLinks] = React.useState<IssueCodeLink[]>([])
 
   const [roster, setRoster] = React.useState<Roster>(EMPTY_ROSTER)
   const [milestones, setMilestones] = React.useState<Milestone[]>([])
@@ -155,12 +162,15 @@ export function IssueDetailSurface({
       apiFetch(`${base}/${path}?${qs}`)
         .then((r) => (r.ok ? r.json() : []))
         .catch(() => [])
-    const [cs, as, rs, rn, sub] = await Promise.all([
+    const [cs, as, rs, rn, sub, cl] = await Promise.all([
       get("comments"),
       get("activity"),
       get("relations"),
       get("runs"),
       get("subtasks"),
+      // The pull requests attached to this issue. Same crew + identifier as
+      // its siblings, and it goes stale on the same writes.
+      get("code-links"),
     ])
     if (mine !== subReq.current) return
     setComments(Array.isArray(cs) ? cs : [])
@@ -168,6 +178,7 @@ export function IssueDetailSurface({
     setRelations(Array.isArray(rs) ? rs : [])
     setRuns(Array.isArray(rn) ? rn : [])
     setSubIssues(Array.isArray(sub) ? sub : (sub?.subtasks ?? []))
+    setCodeLinks(Array.isArray(cl) ? cl : [])
   }, [base, qs])
 
   React.useEffect(() => {
@@ -183,6 +194,7 @@ export function IssueDetailSurface({
     setRelations([])
     setRuns([])
     setSubIssues([])
+    setCodeLinks([])
     setMilestones([])
     setLoading(true)
     setError(null)
@@ -379,6 +391,86 @@ export function IssueDetailSurface({
     [qs, fetchSubResources],
   )
 
+  /* ---- git links ------------------------------------------------- *
+   *
+   * The four routes in internal/api/issue_code_links.go. They answer RFC 7807
+   * with a `detail` written for the moment it is read — the 412 names the
+   * credential to add and the account label to put on it, which is the whole
+   * fix — so every branch below carries that sentence through rather than
+   * substituting one of ours. `codeLinkProblemMessage` is the one place that
+   * decides what to do when a response carries none.
+   */
+
+  const attachCodeLink = React.useCallback(
+    async (url: string): Promise<CodeLinkAttachResult> => {
+      if (!base) return { ok: false, message: "This issue has no crew to attach a link to." }
+      try {
+        const res = await apiFetch(`${base}/code-links?${qs}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        })
+        if (!res.ok) {
+          const b = await res.json().catch(() => null)
+          return {
+            ok: false,
+            message: codeLinkProblemMessage(b, "Could not attach that pull request."),
+          }
+        }
+        await fetchSubResources()
+        return { ok: true }
+      } catch {
+        return { ok: false, message: "Could not reach the server." }
+      }
+    },
+    [base, qs, fetchSubResources],
+  )
+
+  const removeCodeLink = React.useCallback(
+    async (linkId: string) => {
+      if (!base) return
+      try {
+        const res = await apiFetch(
+          `${base}/code-links/${encodeURIComponent(linkId)}?${qs}`,
+          { method: "DELETE" },
+        )
+        if (!res.ok) {
+          const b = await res.json().catch(() => null)
+          toast.error(codeLinkProblemMessage(b, "Could not remove that link."))
+          return
+        }
+        await fetchSubResources()
+      } catch {
+        toast.error("Could not remove that link.")
+      }
+    },
+    [base, qs, fetchSubResources],
+  )
+
+  const refreshCodeLink = React.useCallback(
+    async (linkId: string) => {
+      if (!base) return
+      try {
+        const res = await apiFetch(
+          `${base}/code-links/${encodeURIComponent(linkId)}/refresh?${qs}`,
+          { method: "POST" },
+        )
+        if (!res.ok) {
+          const b = await res.json().catch(() => null)
+          toast.error(codeLinkProblemMessage(b, "Could not refresh that link."))
+        }
+        // Re-read either way. A failed refresh keeps the state it had and
+        // records the reason on the row (last_sync_error), and re-reading is
+        // what puts that on the card — otherwise the only trace is a toast
+        // that is gone in five seconds.
+        await fetchSubResources()
+      } catch {
+        toast.error("Could not refresh that link.")
+      }
+    },
+    [base, qs, fetchSubResources],
+  )
+
   const runRoutine = React.useCallback(async () => {
     if (!issue?.routine_slug) return
     try {
@@ -488,6 +580,14 @@ export function IssueDetailSurface({
     busy,
   ])
 
+  const codeLinkEdit: CodeLinkEdit | undefined = React.useMemo(
+    () =>
+      editable
+        ? { attach: attachCodeLink, remove: removeCodeLink, refresh: refreshCodeLink }
+        : undefined,
+    [editable, attachCodeLink, removeCodeLink, refreshCodeLink],
+  )
+
   if (loading) return <DetailSkeleton />
 
   if (error || !issue) {
@@ -508,6 +608,8 @@ export function IssueDetailSurface({
       relations={relations}
       runs={runs}
       subIssues={subIssues}
+      codeLinks={codeLinks}
+      codeLinkEdit={codeLinkEdit}
       project={project}
       agents={roster.agents}
       onSubmitComment={editable ? postComment : undefined}

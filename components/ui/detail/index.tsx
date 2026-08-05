@@ -205,11 +205,14 @@ export interface PillProps {
   tone?: DetailTone
   children: React.ReactNode
   className?: string
+  /** Handle for tests that need the pill itself — its tone is the assertion. */
+  "data-testid"?: string
 }
 
-export function Pill({ tone = "default", children, className }: PillProps) {
+export function Pill({ tone = "default", children, className, "data-testid": testId }: PillProps) {
   return (
     <span
+      data-testid={testId}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-medium",
         "type-meta",

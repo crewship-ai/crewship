@@ -23,6 +23,51 @@ when its pull request merges, `Fixes ENG-123` magic words, and branch-name
 generation are deliberately not part of this release.
 </Note>
 
+## In the issue detail
+
+Open an issue — `/issues/<identifier>`, or the centre pane of `/issues`; they
+are the same screen — and its links are a **Pull requests** card under
+*Description* and *Links*. GitLab merge requests appear in the same card.
+
+Each row leads with the **state**, because a merged pull request, a closed one,
+an open draft and an open ready-to-review one are four different things and it
+is the thing you are scanning for. The states line down the left edge:
+
+| Badge | Means |
+| --- | --- |
+| **Open** | Ready for review |
+| **Draft** | Open, but not asking for anything yet |
+| **Merged** | It landed |
+| **Closed** | It did not |
+| **Unknown** | The row has no state — it has never been fetched successfully |
+
+After the state come the title, `owner/repo#number`, the author, the branch
+pair and when the state was last confirmed. **The title, author and branch
+names come from the forge and are shown as plain text** — they are never
+rendered as markdown or HTML, so a pull-request title cannot smuggle markup
+into your issue.
+
+The **pull-request icon in the card header** attaches a link: paste the URL,
+press Enter. When it fails, the reason appears under the box with your URL
+still in it — including the one you will hit most, *"no ACTIVE GITHUB
+credential in this workspace can reach `ghe.acme.internal`…"*, which names both
+halves of the fix. Add the credential, label it with the host, press Attach
+again.
+
+Hovering a row reveals two actions: **refresh** (the `relink` command — re-read
+the state now) and **remove**. Removing takes no confirmation; nothing is
+asserted by a link and nothing is left behind when it goes.
+
+A row whose last refresh failed keeps the state it had and says so in amber,
+with the reason and when the state was last true. Refreshing it again is one
+click; the row updates whether the refresh succeeds or fails, so the reason
+stays on the card rather than only in a toast.
+
+<Note>
+Attaching, refreshing and removing need **MANAGER or above**. A reader below
+that sees the same card with the same links and no write affordances at all.
+</Note>
+
 ## Attach a link
 
 <CodeGroup>

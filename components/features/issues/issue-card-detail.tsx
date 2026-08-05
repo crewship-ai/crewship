@@ -90,10 +90,15 @@ import {
   TitleEditor,
   type IssueCardEdit,
 } from "@/components/features/issues/issue-card-editors"
+import {
+  IssueCodeLinksCard,
+  type CodeLinkEdit,
+} from "@/components/features/issues/issue-code-links-card"
 import { getCrewIconDef } from "@/lib/entities"
 import { issueFacts, issuePriorityTone, issueStatusTone } from "@/lib/issue-facts"
 import type {
   IssueActivity,
+  IssueCodeLink,
   IssueComment,
   IssueRelation,
   Mission,
@@ -151,6 +156,17 @@ interface Props {
   /** Children of this issue, resolved by the host from `/subtasks`. */
   subIssues?: Mission[]
   /**
+   * Pull requests / merge requests attached to this issue, newest first as
+   * `/code-links` returns them. Their title, author and branch names are
+   * forge-supplied and untrusted — see issue-code-links-card.tsx.
+   */
+  codeLinks?: IssueCodeLink[]
+  /**
+   * Attach / remove / refresh. Honoured only alongside `edit`: a card that
+   * renders every property read-only must not carry a live delete.
+   */
+  codeLinkEdit?: CodeLinkEdit
+  /**
    * The live agent-work timeline. Passed in rather than rendered here: it
    * reads the journal, which needs the workspace and a poller, and the card
    * is not the thing that should own either.
@@ -173,6 +189,8 @@ export function IssueCardDetail({
   viewerInitial,
   edit,
   subIssues = [],
+  codeLinks = [],
+  codeLinkEdit,
   runActivity,
 }: Props) {
   const [footTab, setFootTab] = React.useState<FootTab>("comments")
@@ -371,9 +389,23 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
+          {/* What code resolves this. Below Links because a pull request is
+              the answer to the issue, not another issue — and in the main
+              column rather than the rail because a row is a state, a title,
+              a ref, an author and a branch pair, and the 280px rail turns
+              every one of those into an ellipsis. */}
+          <Appear order={4}>
+            <IssueCodeLinksCard
+              links={codeLinks}
+              // Gated on `edit` as well: a read-only card must not carry a
+              // live delete just because the host handed one over.
+              edit={edit ? codeLinkEdit : undefined}
+            />
+          </Appear>
+
           {/* Live agent work — exec, files, network, llm — while the issue is
               running. Rendered by the host; nothing here when it is quiet. */}
-          {runActivity && <Appear order={4}>{runActivity}</Appear>}
+          {runActivity && <Appear order={5}>{runActivity}</Appear>}
         </div>
 
         {/* The rail follows the reader. A description longer than the rail
