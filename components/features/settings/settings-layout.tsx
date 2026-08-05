@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import { Menu, Settings as SettingsIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -88,14 +88,56 @@ export function initialSettingsTab(search: string): string {
   return t && (t in sectionTitles || t in MOVED_SECTIONS) ? t : "profile"
 }
 
+/**
+ * The user whose row a `?member=` deep link names, or "".
+ *
+ * Read alongside the tab, and for the same reason: the ⌘K palette can find a
+ * person by name or email, and landing on the roster without saying which of
+ * them you picked makes the caller search a second time by eye.
+ */
+export function initialFocusedMember(search: string): string {
+  return new URLSearchParams(search).get("member") ?? ""
+}
+
 export function SettingsLayout() {
   const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
 
   const isMobile = useIsMobile()
-  const [requestedTab, _setActiveTab] = useState(() =>
-    typeof window === "undefined" ? "profile" : initialSettingsTab(window.location.search),
-  )
+
+  // Read from useSearchParams, NOT window.location.search.
+  //
+  // The two disagree during a client-side navigation: the App Router renders
+  // the new route before window.location has been updated, so an initializer
+  // reading window.location.search on arrival from /crews or the ⌘K palette
+  // saw the OLD url and fell through to "profile". Every settings deep link in
+  // the product landed on Profile — ?tab=audit, ?tab=members, all of them —
+  // while a full page load at the same URL worked, which is what made it look
+  // like the links were fine.
+  //
+  // And read on every CHANGE, not once on mount. A once-only initializer
+  // handled arrival but swallowed the next link: standing on
+  // /settings?tab=members and following another settings link changed the URL
+  // and nothing else, because this layout does not unmount between them.
+  //
+  // Guarded on the query string itself so it stays compatible with
+  // setActiveTab, which writes the URL through history.replaceState precisely
+  // so it does NOT navigate: an unchanged string re-applies nothing, and
+  // replaceState does not notify useSearchParams anyway. Local state stays
+  // authoritative for clicks; this only follows real navigations.
+  const searchParams = useSearchParams()
+  const search = searchParams.toString()
+  const [requestedTab, _setActiveTab] = useState(() => initialSettingsTab(search))
+  const [focusedMember, setFocusedMember] = useState(() => initialFocusedMember(search))
+  const appliedSearch = useRef(search)
+
+  useEffect(() => {
+    if (appliedSearch.current === search) return
+    appliedSearch.current = search
+    _setActiveTab(initialSettingsTab(search))
+    setFocusedMember(initialFocusedMember(search))
+  }, [search])
+
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // A deep link can name a section this role cannot see (/settings?tab=audit
@@ -247,6 +289,7 @@ export function SettingsLayout() {
         <MembersSection
           members={members}
           workspaceId={workspaceId}
+          focusUserId={focusedMember || undefined}
           currentUserId={session?.user?.id}
           callerRole={role ?? undefined}
           onRefresh={handleRefresh}

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Menu, Plus, Users } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { CreateCrewDialog } from "./create-crew-dialog"
@@ -37,9 +38,29 @@ export function CrewsSubbar({
   onOpenExplorer,
   crews,
 }: CrewsSubbarProps) {
+  const router = useRouter()
+  const params = useSearchParams()
   const [createCrewOpen, setCreateCrewOpen] = useState(false)
   const [createAgentOpen, setCreateAgentOpen] = useState(false)
   const [createAgentDefaultCrew, setCreateAgentDefaultCrew] = useState<string | null>(null)
+
+  // ?new=crew | ?new=agent opens the same dialog the buttons on the right do.
+  //
+  // Creating either is a dialog on this page and has no route of its own —
+  // /crews/new and /crews/agents/new were deleted with the redesign. Without
+  // a deep link there is no way to reach these from anywhere else, which is
+  // why the command palette's two "Create new ..." rows pointed at the dead
+  // routes for as long as they did. The param is consumed immediately so a
+  // reload, or a back-navigation, does not reopen the dialog.
+  const newParam = params.get("new")
+  useEffect(() => {
+    if (newParam !== "crew" && newParam !== "agent") return
+    if (newParam === "crew") setCreateCrewOpen(true)
+    else setCreateAgentOpen(true)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("new")
+    router.replace(`${url.pathname}${url.search}`, { scroll: false })
+  }, [newParam, router])
 
   // Live description: breadcrumb path when something is selected, otherwise a count.
   const description =

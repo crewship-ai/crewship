@@ -1,12 +1,20 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { AnimatePresence, motion } from "motion/react"
 import { Inbox as InboxIcon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import {
+  BarMenu,
+  BarMenuBody,
+  BarMenuEmpty,
+  BarMenuFooter,
+  BarMenuFooterAction,
+  BarMenuFooterLink,
+  BarMenuHeader,
+  BarMenuRow,
+  BarMenuSection,
+} from "@/components/layout/bar-menu"
 import { Pill } from "@/components/ui/detail"
-import { cn } from "@/lib/utils"
 
 import type { InboxItem } from "@/hooks/use-inbox"
 
@@ -38,6 +46,12 @@ import {
 // So: decisions in their own section that nothing can push below, ordered by
 // what expires first, blocking items included whether or not they were read,
 // the subject's own face, and a row that deep-links to the item.
+//
+// The chrome that came out of this — panel, header, section, row, footer —
+// now lives in components/layout/bar-menu.tsx, because Activity and
+// Notifications sit a centimetre away in the same strip and had each grown
+// their own. Adopting the kit here is a visual no-op by construction: the kit's
+// classes were lifted from this file unchanged.
 // =============================================================================
 
 export interface InboxBellViewProps {
@@ -93,152 +107,101 @@ export function InboxBellView({ items, role, onOpenItem, onOpenInbox, onMarkAllR
   const badge = decisions.length > 0 ? decisions.length : unread
   const urgent = decisions.length > 0
 
+  const closeAndOpenItem = (id: string) => {
+    setOpen(false)
+    onOpenItem(id)
+  }
+
   return (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="relative"
-        aria-label={`Inbox: ${decisions.length} awaiting a decision, ${unread} unread`}
-        aria-expanded={open}
-        data-testid="bell-trigger"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <InboxIcon className="h-4 w-4" />
-        {badge > 0 && (
-          <span
-            data-testid="bell-badge"
-            className={cn(
-              "absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-semibold",
-              // Severity, not decoration: one badge colour for "someone is
-              // waiting on you" and another for "there is unread mail" is the
-              // difference the shipped single blue dot throws away.
-              urgent ? "bg-warn text-background" : "bg-primary text-primary-foreground",
-            )}
+    <BarMenu
+      icon={InboxIcon}
+      ariaLabel={`Inbox: ${decisions.length} awaiting a decision, ${unread} unread`}
+      // Severity, not decoration: one badge colour for "someone is waiting on
+      // you" and another for "there is unread mail" is the difference the
+      // shipped single blue dot throws away.
+      badge={{ count: badge, tone: urgent ? "urgent" : "active" }}
+      open={open}
+      onOpenChange={setOpen}
+      testId="bell"
+    >
+      <BarMenuHeader
+        title="Inbox"
+        pill={
+          soonest != null ? (
+            <Pill tone="destructive">
+              {soonest > 0 ? `expires in ${remainingLabel(soonest)}` : "one has expired"}
+            </Pill>
+          ) : undefined
+        }
+        meta={
+          decisions.length > 0
+            ? `${decisions.length} awaiting you · ${unread} unread`
+            : `${unread} unread`
+        }
+      />
+
+      <BarMenuBody>
+        {decisions.length === 0 && recent.length === 0 && (
+          <BarMenuEmpty icon={InboxIcon} message="All caught up" />
+        )}
+
+        {decisions.length > 0 && (
+          <Section label="Needs a decision" tone="warn" items={decisions} role={role} onOpenItem={closeAndOpenItem} />
+        )}
+
+        {recent.length > 0 && (
+          <Section label="Recent" items={recent} role={role} onOpenItem={closeAndOpenItem} />
+        )}
+      </BarMenuBody>
+
+      <BarMenuFooter>
+        {onMarkAllRead && unread > 0 && (
+          <BarMenuFooterAction
+            disabled={marking}
+            onClick={async () => {
+              setMarking(true)
+              try {
+                await onMarkAllRead(items.filter((i) => i.state === "unread").map((i) => i.id))
+              } finally {
+                setMarking(false)
+              }
+            }}
           >
-            {badge > 99 ? "99+" : badge}
-          </span>
+            {marking ? "Marking…" : `Mark ${unread} read`}
+          </BarMenuFooterAction>
         )}
-      </Button>
-
-      <AnimatePresence>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: -4 }}
-              animate={{ opacity: 1, scale: 1, y: 0, transition: { duration: 0.12 } }}
-              exit={{ opacity: 0, scale: 0.96, y: -4, transition: { duration: 0.1 } }}
-              className="absolute right-0 top-9 z-50 w-[380px] overflow-hidden rounded-lg border border-white/[0.1] bg-card shadow-xl"
-              data-testid="bell-popover"
-            >
-              <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
-                <span className="type-row font-medium">Inbox</span>
-                {soonest != null && (
-                  <Pill tone="destructive">
-                    {soonest > 0 ? `expires in ${remainingLabel(soonest)}` : "one has expired"}
-                  </Pill>
-                )}
-                <span className="type-meta ml-auto text-muted-foreground">
-                  {decisions.length > 0
-                    ? `${decisions.length} awaiting you · ${unread} unread`
-                    : `${unread} unread`}
-                </span>
-              </div>
-
-              <div className="max-h-[420px] overflow-y-auto">
-                {decisions.length === 0 && recent.length === 0 && (
-                  <div className="flex flex-col items-center gap-2 p-6 text-center">
-                    <InboxIcon className="h-6 w-6 text-muted-foreground/30" />
-                    <span className="type-row text-muted-foreground">All caught up</span>
-                  </div>
-                )}
-
-                {decisions.length > 0 && (
-                  <Section
-                    label="Needs a decision"
-                    count={decisions.length}
-                    tone="warn"
-                    items={decisions}
-                    role={role}
-                    onOpenItem={(id) => { setOpen(false); onOpenItem(id) }}
-                  />
-                )}
-
-                {recent.length > 0 && (
-                  <Section
-                    label="Recent"
-                    count={recent.length}
-                    items={recent}
-                    role={role}
-                    onOpenItem={(id) => { setOpen(false); onOpenItem(id) }}
-                  />
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 border-t border-white/[0.06] px-2 py-1.5">
-                {onMarkAllRead && unread > 0 && (
-                  <button
-                    type="button"
-                    disabled={marking}
-                    onClick={async () => {
-                      setMarking(true)
-                      try {
-                        await onMarkAllRead(items.filter((i) => i.state === "unread").map((i) => i.id))
-                      } finally {
-                        setMarking(false)
-                      }
-                    }}
-                    className="type-meta rounded px-2 py-1 text-muted-foreground hover:text-foreground disabled:opacity-50"
-                  >
-                    {marking ? "Marking…" : `Mark ${unread} read`}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => { setOpen(false); onOpenInbox() }}
-                  className="type-meta ml-auto rounded px-2 py-1 text-primary hover:underline"
-                >
-                  Open inbox →
-                </button>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </div>
+        <BarMenuFooterLink onClick={() => { setOpen(false); onOpenInbox() }}>
+          Open inbox →
+        </BarMenuFooterLink>
+      </BarMenuFooter>
+    </BarMenu>
   )
 }
 
 function Section({
-  label, count, items, role, tone, onOpenItem,
+  label, items, role, tone, onOpenItem,
 }: {
   label: string
-  count: number
   items: InboxItem[]
   role: WorkspaceRole | null
   tone?: "warn"
   onOpenItem: (id: string) => void
 }) {
   return (
-    <div>
-      <div className="flex items-center gap-2 border-b border-white/[0.04] bg-surface-subtle/60 px-3 py-1">
-        <span className={cn("type-meta uppercase tracking-wider", tone === "warn" ? "text-warn" : "text-foreground/40")}>
-          {label}
-        </span>
-        <span className="type-meta ml-auto tabular-nums text-muted-foreground-soft">{count}</span>
-      </div>
-      <ul>
-        {items.slice(0, MAX_PER_SECTION).map((item) => (
-          <BellRow key={item.id} item={item} role={role} onOpen={() => onOpenItem(item.id)} />
-        ))}
-      </ul>
-      {items.length > MAX_PER_SECTION && (
-        <p className="type-meta px-3 py-1.5 text-muted-foreground-soft">
-          +{items.length - MAX_PER_SECTION} more in the inbox
-        </p>
-      )}
-    </div>
+    <BarMenuSection
+      label={label}
+      count={items.length}
+      tone={tone}
+      overflow={
+        items.length > MAX_PER_SECTION
+          ? `+${items.length - MAX_PER_SECTION} more in the inbox`
+          : undefined
+      }
+    >
+      {items.slice(0, MAX_PER_SECTION).map((item) => (
+        <BellRow key={item.id} item={item} role={role} onOpen={() => onOpenItem(item.id)} />
+      ))}
+    </BarMenuSection>
   )
 }
 
@@ -255,33 +218,28 @@ function BellRow({
   const subject = subjectOf(item)
 
   return (
-    <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        data-testid={`bell-row-${item.id}`}
-        className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.04]"
-      >
-        <ActorAvatar actor={subject} size={24} />
-        <span className="min-w-0 flex-1">
-          <span className="type-row block truncate text-foreground">{item.title}</span>
-          <span className="type-meta flex min-w-0 items-center gap-1.5 text-muted-foreground-soft">
-            <span className="truncate">{subject.label}</span>
-            <span>·</span>
-            <span className="truncate font-mono">{categoryOf(item)}</span>
-            {blocked && <span className="shrink-0">· admin decides</span>}
+    <BarMenuRow
+      testId={`bell-row-${item.id}`}
+      onClick={onOpen}
+      leading={<ActorAvatar actor={subject} size={24} />}
+      title={item.title}
+      meta={
+        <>
+          <span className="truncate">{subject.label}</span>
+          <span>·</span>
+          <span className="truncate font-mono">{categoryOf(item)}</span>
+          {blocked && <span className="shrink-0">· admin decides</span>}
+        </>
+      }
+      trailing={
+        mins != null ? (
+          <span className="type-meta font-medium text-destructive">
+            {mins > 0 ? `in ${remainingLabel(mins)}` : "expired"}
           </span>
-        </span>
-        <span className="shrink-0 text-right">
-          {mins != null ? (
-            <span className="type-meta font-medium text-destructive">
-              {mins > 0 ? `in ${remainingLabel(mins)}` : "expired"}
-            </span>
-          ) : (
-            <span className="type-meta text-muted-foreground-soft">{since(item.created_at)}</span>
-          )}
-        </span>
-      </button>
-    </li>
+        ) : (
+          <span className="type-meta text-muted-foreground-soft">{since(item.created_at)}</span>
+        )
+      }
+    />
   )
 }

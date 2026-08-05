@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronRight, HelpCircle, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -50,6 +50,16 @@ interface Member {
 interface MembersSectionProps {
   members: Member[]
   workspaceId: string
+  /**
+   * Open this person's row on arrival. Keyed on the USER id, not the
+   * membership id — a link is about a person, and the membership row is an
+   * implementation detail that changes if they are removed and re-added.
+   *
+   * The ⌘K palette can find someone by name or email; without this it dropped
+   * the caller on the roster with no sign of which row they had picked, which
+   * on any real workspace is a second search done by eye.
+   */
+  focusUserId?: string
   currentUserId?: string
   // There used to be a `canInvite` prop fed by CASL's
   // `abilities.can("create", "Member")`. It happened to equal the right
@@ -314,6 +324,7 @@ function MemberRow({
   onRemove,
   removing,
   isLast,
+  defaultOpen = false,
 }: {
   member: Member
   workspaceId: string
@@ -326,8 +337,19 @@ function MemberRow({
   onRemove: (memberId: string) => void
   removing: boolean
   isLast: boolean
+  /** Arrived here by a link naming this person — open on mount. */
+  defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  // Bring the named row into view. On a roster that fits the screen this is a
+  // no-op; on one that does not, an opened row below the fold is the same
+  // as no deep link at all.
+  useEffect(() => {
+    if (!defaultOpen) return
+    rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+  }, [defaultOpen])
   const isSelf = currentUserId === member.user.id
   const isOwner = member.role === "OWNER"
   const label = personLabel(member.user.full_name, member.user.email)
@@ -337,6 +359,7 @@ function MemberRow({
 
   return (
     <Collapsible
+      ref={rowRef}
       open={open}
       onOpenChange={setOpen}
       className={cn(!isLast && "border-b border-border/40")}
@@ -478,6 +501,7 @@ function MemberRow({
 export function MembersSection({
   members,
   workspaceId,
+  focusUserId,
   currentUserId,
   onRefresh,
   callerRole,
@@ -563,6 +587,7 @@ export function MembersSection({
             onRefresh={onRefresh}
             onRemove={handleRemove}
             removing={removingId === member.id}
+            defaultOpen={Boolean(focusUserId) && member.user.id === focusUserId}
             isLast={idx === members.length - 1}
           />
         ))}
