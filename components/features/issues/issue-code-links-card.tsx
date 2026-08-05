@@ -149,10 +149,15 @@ function CodeLinkRow({ link, edit }: { link: IssueCodeLink; edit?: CodeLinkEdit 
 
   return (
     <li className="group flex items-start gap-2.5" data-testid="code-link-row">
-      {/* Fixed width so the badges line down the left edge. The reader is
-          scanning this column, not reading it. */}
-      <span className="w-[76px] shrink-0 pt-px">
-        <Pill tone={badge.tone} data-testid="code-link-state">
+      {/* Fixed width so the badges line down the left edge — the reader is
+          scanning this column, not reading it.
+          92px is sized to the widest badge the kit can produce: a 12px icon,
+          a 6px gap, 20px of Pill padding and the longest label. `MAX_STATE_
+          LABEL` in lib/code-links.ts is what keeps that arithmetic true, and
+          a test holds it — a longer label would push the pill out of its
+          column and into the title. */}
+      <span className="w-[92px] shrink-0 pt-px">
+        <Pill tone={badge.tone} className="whitespace-nowrap" data-testid="code-link-state">
           <Icon className="h-3 w-3 shrink-0" />
           {badge.label}
         </Pill>

@@ -40,6 +40,17 @@ export interface CodeLinkStateBadge {
 }
 
 /**
+ * The longest badge label, in characters.
+ *
+ * The card draws these in a FIXED-WIDTH column so the states line down the
+ * left edge and the eye can run them — which means the column's width is
+ * sized to this number, and a longer label would push a pill out of its column
+ * and into the title beside it. A test pins it, so adding a fifth state that
+ * does not fit fails here rather than in a screenshot.
+ */
+export const MAX_STATE_LABEL = 7
+
+/**
  * The four states, four ways.
  *
  * A merged pull request, a closed one, an open draft and an open

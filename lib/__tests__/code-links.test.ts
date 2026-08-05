@@ -7,6 +7,7 @@ import {
   codeLinkRef,
   codeLinkStaleReason,
   codeLinkStateBadge,
+  MAX_STATE_LABEL,
   safeExternalHref,
 } from "@/lib/code-links"
 import type { IssueCodeLink } from "@/lib/types/mission"
@@ -54,6 +55,15 @@ describe("codeLinkStateBadge", () => {
       tone: "destructive",
       icon: "closed",
     })
+  })
+
+  // The card draws these in a fixed-width column so the states line down the
+  // left edge. That column is sized to MAX_STATE_LABEL; a longer label
+  // overflows it into the title.
+  it("never returns a label wider than the column can hold", () => {
+    for (const s of ["OPEN", "DRAFT", "MERGED", "CLOSED", null, "NONSENSE"]) {
+      expect(codeLinkStateBadge(s).label.length).toBeLessThanOrEqual(MAX_STATE_LABEL)
+    }
   })
 
   it("keeps the four tones distinct", () => {
